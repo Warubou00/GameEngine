@@ -1,0 +1,225 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="ソース ファイル">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="ヘッダー ファイル">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="リソース ファイル">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12">
+      <UniqueIdentifier>{47bb4643-f8c9-442d-af77-35047ba7c0f5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12\Object">
+      <UniqueIdentifier>{bd307f0a-f98c-41e8-a8d2-bfd8a988c5ba}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DirectX12">
+      <UniqueIdentifier>{5e9cd19f-555e-4c3f-a7ce-8da55dee69a2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DirectX12\Object">
+      <UniqueIdentifier>{5e2ad7c6-3180-4ffc-b83b-cf77c1d297a2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX11">
+      <UniqueIdentifier>{2abc400a-24f9-4a0e-a203-6bf42465aa92}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DirectX11">
+      <UniqueIdentifier>{4def9ed7-dbe6-43da-b174-46f9e55dc7a4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Interface">
+      <UniqueIdentifier>{e4e69ef1-d2d7-4032-b754-34cf33636130}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\Interface">
+      <UniqueIdentifier>{d248824e-5244-44e4-82dc-95e9eb47749b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DXGI">
+      <UniqueIdentifier>{6ce1f72d-5faa-4d54-a766-34c0d92427e4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DXGI">
+      <UniqueIdentifier>{c94bc2c6-0db8-4929-adec-3fa287a6356c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12\Manager">
+      <UniqueIdentifier>{5570199b-ef41-408f-87ab-890ab2b25029}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DirectX12\Manager">
+      <UniqueIdentifier>{e705735c-3bb0-4544-8252-8b0e6ff899fd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12\Handle">
+      <UniqueIdentifier>{7a12e3b7-a947-4dfb-ad5b-eff79340983c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12\Helper">
+      <UniqueIdentifier>{ce1f4103-d67b-4ab2-be8c-2c59ab5e1610}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="framework.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_device.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_header.h">
+      <Filter>ヘッダー ファイル\DirectX12</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\Texture.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\Buffer.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\CommandContext.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\Device.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RenderHardwareInterface.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\debugLayer.h">
+      <Filter>ヘッダー ファイル\DirectX12</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_commandAllocator.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_computeCommandList.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_commandList.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_commandQueue.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_graphicsCommandList.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_swapChain.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\adapter.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DXGI\dxgiFactory6.h">
+      <Filter>ヘッダー ファイル\DXGI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_fence.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_pipelineState.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_rootSignature.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\TextureHandle.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_textureManager.h">
+      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_pipelineStateManager.h">
+      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_resourceManager.h">
+      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_descriptorHeapManager.h">
+      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_resourceHandle.h">
+      <Filter>ヘッダー ファイル\DirectX12\Handle</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_descriptorHandle.h">
+      <Filter>ヘッダー ファイル\DirectX12\Handle</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_helperDescriptorRange.h">
+      <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_helperRootParameter.h">
+      <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\IObject.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_device.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RenderHardwareInterface.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\Device.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_graphicsCommandList.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_commandAllocator.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_commandList.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_commandQueue.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_computeCommandList.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_swapChain.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\adapter.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DXGI\dxgiFactory6.cpp">
+      <Filter>ソース ファイル\DXGI</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_fence.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_pipelineState.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_rootSignature.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\Texture.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\dx12_resourceManager.cpp">
+      <Filter>ソース ファイル\DirectX12\Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp">
+      <Filter>ソース ファイル\DirectX12\Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\dx12_descriptorHeapManager.cpp">
+      <Filter>ソース ファイル\DirectX12\Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\dx12_pipelineStateManager.cpp">
+      <Filter>ソース ファイル\DirectX12\Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\CommandContext.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\IObject.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\Buffer.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
