@@ -92,7 +92,14 @@ namespace RHI
             void FreeSrv(uint32_t index);
 
             // 指定インデックスのCPUハンドル（実際の書き込み先アドレス）を取得する
-            D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(uint32_t index);
+            D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index);
+
+            // 基本2つなので先頭を返す
+            D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();
+
+            // サイズ取得
+            UINT GetSrvDescriptorSize();
+            UINT GetRtvDescriptorSize();
 
         public:          /*---アクセッサー関数群---*/
 

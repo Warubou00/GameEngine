@@ -71,6 +71,7 @@ namespace RHI
             virtual bool Initialize() = 0;
             virtual bool Initialize(Device* device);
             virtual bool Initialize(CommandContext* commandContext);
+            virtual bool Initialize(Device* device, CommandContext* commandContext);
             virtual bool Initialize(Buffer* buffer);
             virtual bool Initialize(Texture* texture);
             virtual bool Initialize(Device* device = nullptr, CommandContext* commandContext = nullptr, Buffer* buffer = nullptr, Texture* texture = nullptr);

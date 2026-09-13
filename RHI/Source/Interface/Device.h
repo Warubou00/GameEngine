@@ -38,7 +38,7 @@
 * Structure Declarations
 ******************************************************************/
 
-
+class IDXGIFactory6;
 class ID3D12Device;
 class ID3D12Device5;
 class ID3D12Device9;
@@ -80,6 +80,8 @@ namespace RHI
 
             bool Initialize()override;
 
+            IDXGIFactory6* GetDxgiFactory6()const;
+
             ID3D12Device* GetDx12Device()const;
 
             ID3D12Device5* GetDx12Device5()const;
@@ -97,7 +99,6 @@ namespace RHI
             std::unique_ptr<DirectX::Adapter> _adapter;
             // DirectX12のデバイス
             std::unique_ptr<RHI::DirectX12::Device> _dx12Device;
-            
 
         };
 

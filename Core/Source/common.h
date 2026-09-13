@@ -1,34 +1,32 @@
 
 /***********************************************************************************
-* @file    IObject.cpp
-* @brief   RHI IObject
-* @details 
+* @file    common.h
+* @brief  汎用ヘッダー
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/02/02
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note    その他
 ************************************************************************************/
 
+#pragma once
+#ifndef CORE_COMMON_H_
+#define CORE_COMMON_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IObject.h"
 
-#include "Device.h"
-#include "CommandContext.h"
-#include "Buffer.h"
-#include "Texture.h"
 
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
-
+#define CORE_API __declspec(dllexport)
 
 /******************************************************************
 * Enumeration Definitions
@@ -41,44 +39,7 @@
 
 
 
-namespace RHI
-{
-	namespace ObjectInterface
-	{
-		IObject::IObject() = default;
-		IObject::~IObject() = default;
-
-		bool IObject::Initialize(Device* device) 
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(CommandContext* commandContext)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Device* device, CommandContext* commandContext)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Buffer* device)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Texture* device) 
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
-		{
-			return true;
-		}
-	}
-}
+#endif // CORE_COMMON_H_
 
 /************************************
 * End of file

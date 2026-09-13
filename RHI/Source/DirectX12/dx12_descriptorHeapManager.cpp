@@ -98,11 +98,26 @@ namespace RHI
             _freeSrvIndices.push_back(index);
         }
 
-        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvCpuHandle(uint32_t index)
+        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvCpuHandle(UINT index)
         {
             D3D12_CPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetCPUDescriptorHandleForHeapStart();
             handle.ptr += static_cast<SIZE_T>(index) * _srvDescriptorSize;
             return handle;
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvCpuHandleStart()
+        {
+            return _rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        }
+
+        UINT DescriptorHeapManager::GetSrvDescriptorSize()
+        {
+            return _srvDescriptorSize;
+        }
+
+        UINT DescriptorHeapManager::GetRtvDescriptorSize()
+        {
+            return _rtvDescriptorSize;
         }
 	}
 }

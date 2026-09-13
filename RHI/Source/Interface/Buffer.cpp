@@ -20,7 +20,9 @@
 ******************************************************************/
 #include "Buffer.h"
 #include "Device.h"
+#include "CommandContext.h"
 #include "../DirectX12/dx12_resourceManager.h"
+#include "../DirectX12/dx12_descriptorHeapManager.h"
 
 /******************************************************************
 * Macro Definitions
@@ -50,18 +52,55 @@ namespace RHI
 			return true;
 		}
 
-		bool Buffer::Initialize(Device* device)
+		bool Buffer::Initialize(Device* device, CommandContext* commandContext)
 		{
-			// TODO : Bufferの作成
-			// 頂点、インデックス、Initializeでやるべき？
-			// 都度呼ばれるようCreate()にすべきか
+			if (!device || !commandContext)
+			{
+				// TODO : 例外処理 -> nullptr
+				return false;
+			}
+
+			// DescriptorHeapの作成
+			DirectX12::DescriptorHeapManager::getInstance().Create(device->GetDx12Device());
+
+			// レンダーターゲットビューの作成
+			makeRtv(device, commandContext);
 
 			return true;
 		}
 
-		bool Buffer::Create(Device* device)
+		bool Buffer::CreateVertexBuffer(Device* device)
 		{
-			//DirectX12::ResourceManager::getInstance().CreateVertResource(device->GetDx12Device())
+			D3D12_HEAP_PROPERTIES hDesc = {};
+			D3D12_RESOURCE_DESC resDesc = {};
+			DirectX12::ResourceManager::getInstance().CreateVertResource(device->GetDx12Device(), hDesc, resDesc);
+
+			return true;
+		}
+
+		bool Buffer::makeRtv(Device* device, CommandContext* commandContext)
+		{
+			// RTVのハンドル取得
+			auto rtvHandle = DirectX12::DescriptorHeapManager::getInstance().GetRtvCpuHandleStart();
+
+			// SwapChainDescを取得
+			DXGI_SWAP_CHAIN_DESC1 scDesc = {};
+			auto swapChainDesc = commandContext->GetSwapChain()->GetDesc1(&scDesc);
+
+			// rtvの作成
+			ID3D12Resource* resource = nullptr;
+			for (int i = 0; i = scDesc.BufferCount; i++)
+			{
+				commandContext->GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&resource));
+
+				device->GetDx12Device()->CreateRenderTargetView(resource, nullptr, rtvHandle);
+
+				// サイズ分進める
+				rtvHandle.ptr += DirectX12::DescriptorHeapManager::getInstance().GetRtvDescriptorSize();
+
+				// ResourceManagerに登録
+				DirectX12::ResourceManager::getInstance().RegistRtvResource(resource);
+			}
 
 			return true;
 		}

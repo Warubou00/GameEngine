@@ -24,6 +24,7 @@
 #include "../DirectX12/Object/dx12_graphicsCommandList.h"
 #include "../DirectX12/Object/dx12_commandQueue.h"
 #include "../DirectX12/Object/dx12_commandAllocator.h"
+#include "../DirectX12/Object/dx12_swapChain.h"
 
 /******************************************************************
 * Macro Definitions
@@ -55,15 +56,21 @@ namespace RHI
 
 		bool CommandContext::Initialize(Device* device)
 		{
-			_commandQueue = std::make_unique<DirectX12::CommandQueue>();
-			_commandAllocator = std::make_unique<DirectX12::CommandAllocator>();
+			_commandQueue        = std::make_unique<DirectX12::CommandQueue>();
+			_commandAllocator    = std::make_unique<DirectX12::CommandAllocator>();
 			_graphicsCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
-			
-			HRESULT hr = _commandQueue->Create(device->GetDx12Device());
-			hr = _commandAllocator->Create(device->GetDx12Device());
-			hr = _graphicsCommandList->Create(device->GetDx12Device(), _commandAllocator->Get());
+			_swapChain           = std::make_unique<DirectX12::SwapChain>();
 
+			HRESULT hr = _commandQueue->Create(device->GetDx12Device());
+			hr         = _commandAllocator->Create(device->GetDx12Device());
+			hr         = _graphicsCommandList->Create(device->GetDx12Device(), _commandAllocator->Get());
+			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), nullptr, 1920, 1080);
 			return true;
+		}
+
+		IDXGISwapChain4* CommandContext::GetSwapChain()const
+		{
+			return _swapChain->Get();
 		}
 	}
 }
