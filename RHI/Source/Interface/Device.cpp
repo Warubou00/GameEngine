@@ -48,14 +48,14 @@ namespace RHI
 		Device::Device() = default;
 		Device::~Device() = default;
 
-		bool Device::Initialize()
+		RHI_RESULT Device::Initialize()
 		{
 			// オブジェクトの作成
 			_dxgiFactory = std::make_unique<DirectX::DXGIFactory6>();
-			_adapter = std::make_unique<DirectX::Adapter>();
-			_dx12Device = std::make_unique<DirectX12::Device>();
+			_adapter     = std::make_unique<DirectX::Adapter>();
+			_dx12Device  = std::make_unique<DirectX12::Device>();
 
-			HRESULT hr = _dxgiFactory->Create();
+			HRESULT hr   = _dxgiFactory->Create();
 #if 0
 			// 名前走査
 			_adapter->EnumerateAdaptersFromGpuName(_dxgiFactory->Get(), L"NVIDIA");
@@ -71,7 +71,7 @@ namespace RHI
 
 			hr = _dx12Device->TryVersionUp();
 
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
 		IDXGIFactory6* Device::GetDxgiFactory6()const

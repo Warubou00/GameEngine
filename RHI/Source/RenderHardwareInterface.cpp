@@ -45,21 +45,20 @@ namespace RHI
     RenderHardwareInterface::RenderHardwareInterface() = default;
     RenderHardwareInterface::~RenderHardwareInterface() = default;
     
-    bool RenderHardwareInterface::Initialize()
+    void RenderHardwareInterface::Initialize(RHI::RenderHardwareInterface::RHIInitializeInfo* info, RHI::RenderHardwareInterface::RHIInfo* rhiInfo)
     {
         _device = std::make_unique<ObjectInterface::Device>();
         _commandContext = std::make_unique<ObjectInterface::CommandContext>();
         _buffer = std::make_unique<ObjectInterface::Buffer>();
         _texture = std::make_unique<ObjectInterface::Texture>();
 
-        _device->Initialize();
-        _commandContext->Initialize(_device.get());
-        _buffer->Initialize();
-        _texture->Initialize();
+        HWND hWnd = static_cast<HWND>(rhiInfo->HWnd);
+        info->InitializedDevice         = _device->Initialize();
+        info->InitializedCommandContext = _commandContext->Initialize(_device.get(), &hWnd);
+        info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
+        info->InitializedTexture        = _texture->Initialize();
 
-
-
-        return true;
+        return;
     }
 
     /// <summary>

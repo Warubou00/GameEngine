@@ -67,8 +67,8 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            bool Initialize()override;
-            bool Initialize(Device* device, CommandContext* commandContext)override;
+            RHI_RESULT Initialize()override;
+            RHI_RESULT Initialize(Device* device, CommandContext* commandContext)override;
 
             bool CreateVertexBuffer(Device* device);
 

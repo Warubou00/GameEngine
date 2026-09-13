@@ -49,13 +49,19 @@ namespace RHI
 		CommandContext::CommandContext() = default;
 		CommandContext::~CommandContext() = default;
 
-		bool CommandContext::Initialize()
+		RHI_RESULT CommandContext::Initialize()
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool CommandContext::Initialize(Device* device)
+		RHI_RESULT CommandContext::Initialize(Device* device, HWND* hWnd)
 		{
+			if (!device)
+			{
+				// TODO : —áŠOˆ— -> nullptr
+				return RHI_FAILED;
+			}
+
 			_commandQueue        = std::make_unique<DirectX12::CommandQueue>();
 			_commandAllocator    = std::make_unique<DirectX12::CommandAllocator>();
 			_graphicsCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
@@ -64,8 +70,8 @@ namespace RHI
 			HRESULT hr = _commandQueue->Create(device->GetDx12Device());
 			hr         = _commandAllocator->Create(device->GetDx12Device());
 			hr         = _graphicsCommandList->Create(device->GetDx12Device(), _commandAllocator->Get());
-			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), nullptr, 1920, 1080);
-			return true;
+			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), hWnd, 1920, 1080);
+			return RHI_SUCCEEDED;
 		}
 
 		IDXGISwapChain4* CommandContext::GetSwapChain()const

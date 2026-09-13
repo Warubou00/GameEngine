@@ -47,17 +47,17 @@ namespace RHI
 		Buffer::Buffer() {}
 		Buffer::~Buffer() {}
 
-		bool Buffer::Initialize()
+		RHI_RESULT Buffer::Initialize()
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool Buffer::Initialize(Device* device, CommandContext* commandContext)
+		RHI_RESULT Buffer::Initialize(Device* device, CommandContext* commandContext)
 		{
 			if (!device || !commandContext)
 			{
 				// TODO : 例外処理 -> nullptr
-				return false;
+				return RHI_FAILED;
 			}
 
 			// DescriptorHeapの作成
@@ -66,7 +66,7 @@ namespace RHI
 			// レンダーターゲットビューの作成
 			makeRtv(device, commandContext);
 
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
 		bool Buffer::CreateVertexBuffer(Device* device)
