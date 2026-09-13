@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    IObject.cpp
-* @brief   RHI IObject
+* @file    spriteRenderer.h
+* @brief   Renderer meshRenderer
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/09/13
 * @version v_1.0.0
 *
 * @copyright
@@ -14,16 +14,14 @@
 * @note    
 ************************************************************************************/
 
+#pragma once
+#ifndef SPRITE_RENDERER_H_
+#define SPRITE_RENDERER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IObject.h"
-
-#include "Device.h"
-#include "CommandContext.h"
-#include "Buffer.h"
-#include "Texture.h"
+#include "../../RHI/Source/RenderHardwareInterface.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,44 +39,44 @@
 
 
 
-namespace RHI
+namespace Renderer
 {
-	namespace ObjectInterface
-	{
-		IObject::IObject() = default;
-		IObject::~IObject() = default;
 
-		bool IObject::Initialize(Device* device) 
-		{
-			return true;
-		}
+    class SpriteRenderer
+    {
+        /******************************************************************
+        * Internal Enumeration Declarations
+        ******************************************************************/
 
-		bool IObject::Initialize(CommandContext* commandContext)
-		{
-			return true;
-		}
 
-		bool IObject::Initialize(Device* device, CommandContext* commandContext)
-		{
-			return true;
-		}
+        /******************************************************************
+        * Internal Structure Declarations
+        ******************************************************************/
+        struct Sprite
+        {
 
-		bool IObject::Initialize(Buffer* device)
-		{
-			return true;
-		}
+        };
 
-		bool IObject::Initialize(Texture* device) 
-		{
-			return true;
-		}
+    public:          /*---コンストラクタ・デストラクタ---*/
+        SpriteRenderer() {}
+        ~SpriteRenderer() {}
 
-		bool IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
-		{
-			return true;
-		}
-	}
+
+    public:          /*---クラスメソッド---*/
+
+
+    public:          /*---アクセッサー関数群---*/
+
+
+    private:         /*---メンバ変数---*/
+
+
+    };
+
 }
+
+
+#endif // SPRITE_RENDERER_H_
 
 /************************************
 * End of file

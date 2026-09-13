@@ -111,6 +111,8 @@ namespace RHI
             ID3D12Resource* GetOtherResource(const ResourceHandle& handle) const;
             void ReleaseOtherResource(ResourceHandle& handle);
 
+            void RegistRtvResource(ID3D12Resource* resource);
+            const std::vector < Microsoft::WRL::ComPtr<ID3D12Resource>> GetRtvResources()const;
         public:          /*---アクセッサー関数群---*/
 
 
@@ -119,10 +121,11 @@ namespace RHI
             std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _texResources;
             std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _vertexResources;
             std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _indexResources;
+            std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _rtvResources;
             std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _otherResources;
 
         private:         /*---メンバ関数(非公開)---*/
-            ResourceHandle  _Create( const std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources, ID3D12Device* device, const D3D12_HEAP_PROPERTIES& heapProp, const D3D12_RESOURCE_DESC& resDesc, const ResourcePorperty& resourceProp = ResourcePorperty());
+            ResourceHandle  _Create(       std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources, ID3D12Device* device, const D3D12_HEAP_PROPERTIES& heapProp, const D3D12_RESOURCE_DESC& resDesc, const ResourcePorperty& resourceProp = ResourcePorperty());
             ID3D12Resource* _Get(    const std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources, const ResourceHandle& handle)const;
             void            _Release(      std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources, ResourceHandle& handle);
         };

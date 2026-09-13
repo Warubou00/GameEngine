@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    IObject.cpp
-* @brief   RHI IObject
+* @file    spriteRenderer.cpp
+* @brief   Renderer meshRenderer
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/09/13
 * @version v_1.0.0
 *
 * @copyright
@@ -18,12 +18,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IObject.h"
-
-#include "Device.h"
-#include "CommandContext.h"
-#include "Buffer.h"
-#include "Texture.h"
+#include "spriteRenderer.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,43 +36,10 @@
 
 
 
-namespace RHI
+namespace Renderer
 {
-	namespace ObjectInterface
-	{
-		IObject::IObject() = default;
-		IObject::~IObject() = default;
 
-		bool IObject::Initialize(Device* device) 
-		{
-			return true;
-		}
 
-		bool IObject::Initialize(CommandContext* commandContext)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Device* device, CommandContext* commandContext)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Buffer* device)
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Texture* device) 
-		{
-			return true;
-		}
-
-		bool IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
-		{
-			return true;
-		}
-	}
 }
 
 /************************************

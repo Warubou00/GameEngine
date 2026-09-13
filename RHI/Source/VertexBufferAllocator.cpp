@@ -18,7 +18,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "dx12_vertexBufferAllocator.h"
+#include "VertexBufferAllocator.h"
 
 /******************************************************************
 * Macro Definitions
@@ -38,14 +38,13 @@
 
 namespace RHI
 {
-	namespace DirectX12
+
+	VertexBufferAllocation VertexBufferAllocator::Allocate()
 	{
-		VertexBufferAllocation VertexBufferAllocator::Allocate()
-		{
-			VertexBufferAllocation result = {};
-			return result;
-		}
+		VertexBufferAllocation result = {};
+		return result;
 	}
+
 }
 
 /************************************

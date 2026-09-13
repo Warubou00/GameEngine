@@ -44,6 +44,9 @@ namespace RHI
 {
     namespace ObjectInterface
     {
+        class Device;
+        class CommandContext;
+
         class Buffer : IObject
         {
 
@@ -65,14 +68,16 @@ namespace RHI
         public:          /*---クラスメソッド---*/
 
             bool Initialize()override;
-            bool Initialize(Device* device)override;
-            bool Create(Device* device);
+            bool Initialize(Device* device, CommandContext* commandContext)override;
+
+            bool CreateVertexBuffer(Device* device);
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
 
+            bool makeRtv(Device* device, CommandContext* commandContext);
         };
     }
 }

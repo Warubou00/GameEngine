@@ -21,6 +21,8 @@
 #include "dx12_textureManager.h"
 #include <DirectXTex.h>
 
+#pragma comment(lib, "DirectXTex.lib")
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/

@@ -57,6 +57,8 @@ namespace RHI
         _buffer->Initialize();
         _texture->Initialize();
 
+
+
         return true;
     }
 
@@ -94,6 +96,21 @@ namespace RHI
     inline ObjectInterface::Texture* RenderHardwareInterface::GetTexture()
     {
         return _texture.get();
+    }
+
+    void RenderHardwareInterface::Begin()
+    {
+
+    }
+
+    void RenderHardwareInterface::End()
+    {
+
+    }
+
+    void RenderHardwareInterface::CleanUp()
+    {
+
     }
 
 }

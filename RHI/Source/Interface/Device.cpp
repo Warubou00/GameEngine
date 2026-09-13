@@ -74,6 +74,11 @@ namespace RHI
 			return true;
 		}
 
+		IDXGIFactory6* Device::GetDxgiFactory6()const
+		{
+			return _dxgiFactory->Get();
+		}
+
 		ID3D12Device* Device::GetDx12Device()const
 		{
 			return _dx12Device->GetDevice();

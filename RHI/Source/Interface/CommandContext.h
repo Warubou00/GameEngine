@@ -38,7 +38,7 @@
 * Structure Declarations
 ******************************************************************/
 
-
+class IDXGISwapChain4;
 
 namespace RHI
 {
@@ -47,6 +47,7 @@ namespace RHI
         class GraphicsCommandList;
         class CommandQueue;
         class CommandAllocator;
+        class SwapChain;
     }
 
     namespace ObjectInterface
@@ -76,6 +77,7 @@ namespace RHI
             bool Initialize()override;
             bool Initialize(Device* device)override;
 
+            IDXGISwapChain4* GetSwapChain()const;
 
         public:          /*---アクセッサー関数群---*/
 
@@ -84,7 +86,7 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _graphicsCommandList;
             std::unique_ptr<RHI::DirectX12::CommandQueue>        _commandQueue;
             std::unique_ptr<RHI::DirectX12::CommandAllocator>    _commandAllocator;
-
+            std::unique_ptr<RHI::DirectX12::SwapChain>           _swapChain;
         };
 
     }

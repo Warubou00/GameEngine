@@ -96,6 +96,21 @@ namespace RHI
         /// <returns>ObjectInterface::Texture テクスチャ</returns>
         ObjectInterface::Texture* GetTexture();
 
+        /// <summary>
+        /// 描画開始
+        /// </summary>
+        void Begin();
+
+        /// <summary>
+        /// 描画終了
+        /// </summary>
+        void End();
+
+        /// <summary>
+        /// 終了処理
+        /// </summary>
+        void CleanUp();
+
     public:          /*---アクセッサー関数群---*/
 
 
@@ -104,6 +119,9 @@ namespace RHI
         std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
         std::unique_ptr<ObjectInterface::Buffer> _buffer;
         std::unique_ptr<ObjectInterface::Texture> _texture;
+
+        // レンダーターゲットの作成
+        bool makeRenderTarget();
 
     };
 

@@ -104,6 +104,18 @@ namespace RHI
 			return _Create(_otherResources, device, heapProp, resDesc, resourceProp);
 		}
 
+		// RTVリソースの登録
+		void ResourceManager::RegistRtvResource(ID3D12Resource* resource)
+		{
+			_rtvResources.push_back(resource);
+		}
+
+		// RTVリソースの取得
+		const std::vector < Microsoft::WRL::ComPtr<ID3D12Resource>> ResourceManager::GetRtvResources()const
+		{
+			return _rtvResources;
+		}
+
 		// OtherResource取得
 		ID3D12Resource* ResourceManager::GetOtherResource(const ResourceHandle& handle) const
 		{
@@ -119,7 +131,7 @@ namespace RHI
 
 
 		ResourceHandle ResourceManager::_Create(
-			const std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources,
+			std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>& resources,
 			ID3D12Device* device,
 			const D3D12_HEAP_PROPERTIES& heapProp,
 			const D3D12_RESOURCE_DESC& resDesc,
@@ -139,9 +151,9 @@ namespace RHI
 				nullptr,
 				IID_PPV_ARGS(&pResource));
 
-			_indexResources.push_back(pResource);
+			resources.push_back(pResource);
 
-			return ResourceHandle(pResource.Get(), _indexResources.size() - 1);
+			return ResourceHandle(pResource.Get(), resources.size() - 1);
 		}
 
 
