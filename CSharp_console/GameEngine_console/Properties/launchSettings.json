@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "GameEngine_console": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

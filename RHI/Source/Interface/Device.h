@@ -78,7 +78,7 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            bool Initialize()override;
+            RHI_RESULT Initialize()override;
 
             IDXGIFactory6* GetDxgiFactory6()const;
 

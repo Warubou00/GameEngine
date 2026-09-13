@@ -21,7 +21,9 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-
+#include <stdint.h>
+#include <windows.h>
+#include "../common.h"
 
 /******************************************************************
 * Macro Definitions
@@ -68,13 +70,14 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            virtual bool Initialize() = 0;
-            virtual bool Initialize(Device* device);
-            virtual bool Initialize(CommandContext* commandContext);
-            virtual bool Initialize(Device* device, CommandContext* commandContext);
-            virtual bool Initialize(Buffer* buffer);
-            virtual bool Initialize(Texture* texture);
-            virtual bool Initialize(Device* device = nullptr, CommandContext* commandContext = nullptr, Buffer* buffer = nullptr, Texture* texture = nullptr);
+            virtual RHI_RESULT Initialize() = 0;
+            virtual RHI_RESULT Initialize(Device* device);
+            virtual RHI_RESULT Initialize(CommandContext* commandContext);
+            virtual RHI_RESULT Initialize(Device* device, CommandContext* commandContext);
+            virtual RHI_RESULT Initialize(Device* device, HWND* hWnd) { return RHI_SUCCEEDED; }
+            virtual RHI_RESULT Initialize(Buffer* buffer);
+            virtual RHI_RESULT Initialize(Texture* texture);
+            virtual RHI_RESULT Initialize(Device* device = nullptr, CommandContext* commandContext = nullptr, Buffer* buffer = nullptr, Texture* texture = nullptr);
         public:          /*---アクセッサー関数群---*/
 
 

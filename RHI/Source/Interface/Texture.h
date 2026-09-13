@@ -65,7 +65,7 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            bool Initialize()override { return true; }
+            RHI_RESULT Initialize()override { return RHI_SUCCEEDED; }
 
 
         public:          /*---アクセッサー関数群---*/

@@ -11,16 +11,44 @@ namespace GameEngine_console
         public static void Main(string[] args)
         {
             RHI rHI = new RHI();
+            RHI.RHIInitializedInfo info;
 
-            bool isOk = rHI.Initialize(5);
+            rHI.Initialize(out info);
 
-            if(isOk )
+            if(info.InitializedDevice == 0)
             {
-                Console.WriteLine("OK");
+                Console.WriteLine("Initialized Device");
             }
             else
             {
-                Console.WriteLine("NG");
+                Console.WriteLine("Failed Initialize Device");
+            }
+
+            if (info.InitializedCommandContext == 0)
+            {
+                Console.WriteLine("Initialized CommandContext");
+            }
+            else
+            {
+                Console.WriteLine("Failed Initialize CommandContext");
+            }
+
+            if(info.InitializedBuffer == 0)
+            {
+                Console.WriteLine("Initialized Buffer");
+            }
+            else
+            {
+                Console.WriteLine("Failed Initialize Buffer");
+            }
+
+            if(info.InitializedTexture == 0)
+            {
+                Console.WriteLine("Initialized Texture");
+            }
+            else
+            {
+                Console.WriteLine("Failed Initialize Texture");
             }
 
         }

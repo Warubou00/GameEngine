@@ -48,34 +48,34 @@ namespace RHI
 		IObject::IObject() = default;
 		IObject::~IObject() = default;
 
-		bool IObject::Initialize(Device* device) 
+		RHI_RESULT IObject::Initialize(Device* device) 
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool IObject::Initialize(CommandContext* commandContext)
+		RHI_RESULT IObject::Initialize(CommandContext* commandContext)
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool IObject::Initialize(Device* device, CommandContext* commandContext)
+		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext)
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool IObject::Initialize(Buffer* device)
+		RHI_RESULT IObject::Initialize(Buffer* device)
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool IObject::Initialize(Texture* device) 
+		RHI_RESULT IObject::Initialize(Texture* device) 
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 
-		bool IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
+		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
 		{
-			return true;
+			return RHI_SUCCEEDED;
 		}
 	}
 }

@@ -61,7 +61,22 @@ namespace RHI
         /******************************************************************
         * Internal Structure Declarations
         ******************************************************************/
-
+    public:
+        struct RHIInfo
+        {
+            void* HWnd;
+            uint32_t Width;
+            uint32_t Height;
+            uint32_t EnabledVSync;
+        };
+        
+        struct RHIInitializeInfo
+        {
+            uint32_t InitializedDevice         = -1;
+            uint32_t InitializedCommandContext = -1;
+            uint32_t InitializedBuffer         = -1;
+            uint32_t InitializedTexture        = -1;
+        };
 
     public:          /*---コンストラクタ・デストラクタ---*/
         RenderHardwareInterface();
@@ -70,7 +85,7 @@ namespace RHI
 
     public:          /*---クラスメソッド---*/
 
-        bool Initialize();
+        void Initialize(RHIInitializeInfo* info, RHIInfo* rhiInfo);
 
         /// <summary>
         /// デバイスの取得
