@@ -5,7 +5,6 @@ using System.Windows.Forms;
 public class RHI : IDisposable
 {
     private IntPtr             rhiHandle = IntPtr.Zero;
-    private bool               succeesed = false;
     private RHIInitializedInfo info;
     private RHIInfo            rhiInfo;
 
@@ -37,9 +36,9 @@ public class RHI : IDisposable
 
     public void Initialize(out RHIInitializedInfo info)
     {
-        rhiInfo.hwnd = window.Handle;
-        rhiInfo.width = window.Width;
-        rhiInfo.height = window.Height;
+        rhiInfo.hwnd        = window.Handle;
+        rhiInfo.width       = window.Width;
+        rhiInfo.height      = window.Height;
         rhiInfo.enableVSync = 0;
 
         RHI_Initialize(out info, rhiInfo);

@@ -54,7 +54,7 @@ namespace RHI
 			return RHI_SUCCEEDED;
 		}
 
-		RHI_RESULT CommandContext::Initialize(Device* device, HWND* hWnd)
+		RHI_RESULT CommandContext::Initialize(Device* device, ObjectInfo* info)
 		{
 			if (!device)
 			{
@@ -70,7 +70,18 @@ namespace RHI
 			HRESULT hr = _commandQueue->Create(device->GetDx12Device());
 			hr         = _commandAllocator->Create(device->GetDx12Device());
 			hr         = _graphicsCommandList->Create(device->GetDx12Device(), _commandAllocator->Get());
-			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), hWnd, 1920, 1080);
+
+			HWND hWnd   = static_cast<HWND>(info->HWnd);
+			UINT width  = static_cast<UINT>(info->Width);
+			UINT height = static_cast<UINT>(info->Height);
+			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), &hWnd, width, height);
+
+#ifdef CONSOLE_DEBUG
+			std::cout << "Succeeded Initialize CommandContext From C++" << std::endl;
+			std::cout << "Width  : " << width  << std::endl;
+			std::cout << "Height : " << height << std::endl;
+#endif
+
 			return RHI_SUCCEEDED;
 		}
 

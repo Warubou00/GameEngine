@@ -80,6 +80,8 @@ namespace RHI
             IDXGIAdapter1* GetAdapter1(void)const;
             IDXGIAdapter3* GetAdapter3(void)const;
 
+            WCHAR* GetAdapterName(void)const;
+
             void Release(void);
 
         public:          /*---アクセッサー関数群---*/

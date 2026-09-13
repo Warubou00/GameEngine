@@ -48,6 +48,7 @@ namespace RHI
         class CommandContext;
         class Buffer;
         class Texture;
+        struct ObjectInfo;
     }
 
     class RenderHardwareInterface
@@ -61,15 +62,7 @@ namespace RHI
         /******************************************************************
         * Internal Structure Declarations
         ******************************************************************/
-    public:
-        struct RHIInfo
-        {
-            void* HWnd;
-            uint32_t Width;
-            uint32_t Height;
-            uint32_t EnabledVSync;
-        };
-        
+    public:        
         struct RHIInitializeInfo
         {
             uint32_t InitializedDevice         = -1;
@@ -85,7 +78,7 @@ namespace RHI
 
     public:          /*---クラスメソッド---*/
 
-        void Initialize(RHIInitializeInfo* info, RHIInfo* rhiInfo);
+        void Initialize(RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objectInfo);
 
         /// <summary>
         /// デバイスの取得

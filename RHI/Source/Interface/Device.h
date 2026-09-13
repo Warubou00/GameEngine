@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include <memory>
+#include <string>
 #include "IObject.h"
 
 /******************************************************************
@@ -100,6 +101,8 @@ namespace RHI
             // DirectX12のデバイス
             std::unique_ptr<RHI::DirectX12::Device> _dx12Device;
 
+            std::string getDeviceVersion();
+            std::string getAdapterVersion();
         };
 
     }

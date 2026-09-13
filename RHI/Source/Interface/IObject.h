@@ -50,6 +50,14 @@ namespace RHI
         class Buffer;
         class Texture;
 
+        struct ObjectInfo
+        {
+            void* HWnd;
+            uint32_t Width;
+            uint32_t Height;
+            uint32_t EnabledVSync;
+        };
+
         class IObject
         {
 
@@ -74,7 +82,7 @@ namespace RHI
             virtual RHI_RESULT Initialize(Device* device);
             virtual RHI_RESULT Initialize(CommandContext* commandContext);
             virtual RHI_RESULT Initialize(Device* device, CommandContext* commandContext);
-            virtual RHI_RESULT Initialize(Device* device, HWND* hWnd) { return RHI_SUCCEEDED; }
+            virtual RHI_RESULT Initialize(Device* device, ObjectInfo* info) { return RHI_SUCCEEDED; }
             virtual RHI_RESULT Initialize(Buffer* buffer);
             virtual RHI_RESULT Initialize(Texture* texture);
             virtual RHI_RESULT Initialize(Device* device = nullptr, CommandContext* commandContext = nullptr, Buffer* buffer = nullptr, Texture* texture = nullptr);

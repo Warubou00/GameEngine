@@ -75,7 +75,7 @@ namespace RHI
         public:          /*---クラスメソッド---*/
 
             RHI_RESULT Initialize()override;
-            RHI_RESULT Initialize(Device* device, HWND* hWnd)override;
+            RHI_RESULT Initialize(Device* device, ObjectInfo* info)override;
 
             IDXGISwapChain4* GetSwapChain()const;
 

@@ -71,6 +71,20 @@ namespace RHI
 
 			hr = _dx12Device->TryVersionUp();
 
+#ifdef CONSOLE_DEBUG
+
+			WCHAR* gpuName             = _adapter->GetAdapterName();
+			std::string deviceVersion  = getDeviceVersion();
+			std::string adapterVersion = getAdapterVersion();
+
+			std::cout << "**************************************************" << std::endl;
+			std::cout << "Succeeded Initialize Device From C++" << std::endl;
+			std::cout << "Device  Name    : " << *gpuName << std::endl;
+			std::cout << "Device  Version : " << deviceVersion << std::endl;
+			std::cout << "Adapter Version : " << adapterVersion << std::endl;
+			std::cout << "**************************************************" << std::endl;
+#endif
+
 			return RHI_SUCCEEDED;
 		}
 
@@ -92,6 +106,50 @@ namespace RHI
 		ID3D12Device9* Device::GetDx12Device9()const
 		{
 			return _dx12Device->GetDevice9();
+		}
+
+		std::string Device::getDeviceVersion()
+		{
+			std::string deviceVersion;
+
+#ifdef CONSOLE_DEBUG
+			if (_dx12Device->GetDevice5())
+			{
+				deviceVersion = "Device5";
+				if (_dx12Device->GetDevice9())
+				{
+					deviceVersion = "Device9";
+				}
+			}
+			else
+			{
+				deviceVersion = "Device No Mark";
+			}
+#endif
+
+			return deviceVersion;
+		}
+
+		std::string Device::getAdapterVersion()
+		{
+			std::string adapterVersion;
+#ifdef CONSOLE_DEBUG
+
+			if (_adapter->GetAdapter1())
+			{
+				adapterVersion = "Adapter1";
+				if (_adapter->GetAdapter3())
+				{
+					adapterVersion = "Adapter3";
+				}
+			}
+			else
+			{
+				adapterVersion = "Adapter No Mark";
+			}
+#endif
+
+			return adapterVersion;
 		}
 	}
 }

@@ -66,6 +66,10 @@ namespace RHI
 			// レンダーターゲットビューの作成
 			makeRtv(device, commandContext);
 
+#ifdef CONSOLE_DEBUG
+			std::cout << "Succeeded Initialize Buffer From C++" << std::endl;
+#endif
+
 			return RHI_SUCCEEDED;
 		}
 

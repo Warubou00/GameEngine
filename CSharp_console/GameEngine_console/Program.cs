@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing.Text;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,7 +16,7 @@ namespace GameEngine_console
 
             rHI.Initialize(out info);
 
-            if(info.InitializedDevice == 0)
+            if(info.InitializedDevice == RHI_SUCCEEDED)
             {
                 Console.WriteLine("Initialized Device");
             }
@@ -24,7 +25,7 @@ namespace GameEngine_console
                 Console.WriteLine("Failed Initialize Device");
             }
 
-            if (info.InitializedCommandContext == 0)
+            if (info.InitializedCommandContext == RHI_SUCCEEDED)
             {
                 Console.WriteLine("Initialized CommandContext");
             }
@@ -33,7 +34,7 @@ namespace GameEngine_console
                 Console.WriteLine("Failed Initialize CommandContext");
             }
 
-            if(info.InitializedBuffer == 0)
+            if(info.InitializedBuffer == RHI_SUCCEEDED)
             {
                 Console.WriteLine("Initialized Buffer");
             }
@@ -42,7 +43,7 @@ namespace GameEngine_console
                 Console.WriteLine("Failed Initialize Buffer");
             }
 
-            if(info.InitializedTexture == 0)
+            if(info.InitializedTexture == RHI_SUCCEEDED)
             {
                 Console.WriteLine("Initialized Texture");
             }
@@ -50,7 +51,9 @@ namespace GameEngine_console
             {
                 Console.WriteLine("Failed Initialize Texture");
             }
-
         }
+
+        private const int RHI_SUCCEEDED = 1;
+        private const int RHI_FAILED    = -1;
     }
 }

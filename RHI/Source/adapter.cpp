@@ -129,6 +129,19 @@ namespace RHI
 			return _pAdapter3.Get();
 		}
 
+		WCHAR* Adapter::GetAdapterName(void)const
+		{
+			if (!_pAdapter)
+			{
+				// TODO : —áŠOˆ— -> nullptr
+				return nullptr;
+			}
+
+			DXGI_ADAPTER_DESC adDesc = {};
+			_pAdapter->GetDesc(&adDesc);
+			return adDesc.Description;
+		}
+
 		void Adapter::Release(void)
 		{
 			// ComPtr‚Ì‚½‚ß–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é

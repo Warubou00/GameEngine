@@ -65,7 +65,15 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override { return RHI_SUCCEEDED; }
+            RHI_RESULT Initialize()override 
+            {
+                
+#ifdef CONSOLE_DEBUG
+                std::cout << "Succeeded Initialize Texture From C++" << std::endl;
+#endif
+
+                return RHI_SUCCEEDED; 
+            }
 
 
         public:          /*---アクセッサー関数群---*/
