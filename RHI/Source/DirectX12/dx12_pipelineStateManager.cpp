@@ -44,17 +44,6 @@ namespace RHI
 		PipelineStateManager::PipelineStateManager() {}
 		PipelineStateManager::~PipelineStateManager() {}
 
-		PipelineStateManager* PipelineStateManager::getInstance()
-		{
-			if (!Instance)
-			{
-				Instance = new PipelineStateManager();
-				Instance->initialize();
-			}
-
-			return Instance;
-		}
-
 		int PipelineStateManager::Register(ID3D12PipelineState* state, const std::string& pipelineName)
 		{
 			int hashValue = _hash->HashIntegerForName(pipelineName.c_str(), pipelineName.size());
@@ -101,10 +90,6 @@ namespace RHI
 			_hash = new Core::Hash();
 			_hash->Initialize(PIPE_STATE_MAX_NUM - 1);
 		}
-
-
-		PipelineStateManager* PipelineStateManager::Instance = nullptr;
-
 	}
 }
 

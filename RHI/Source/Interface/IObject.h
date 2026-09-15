@@ -21,8 +21,8 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <stdint.h>
-#include <windows.h>
+#include <cstdint>
+#include <memory>
 #include "../common.h"
 
 /******************************************************************
@@ -52,7 +52,10 @@ namespace RHI
 
         struct ObjectInfo
         {
-            void* HWnd;
+            /******************************
+            * SwapChain
+            ******************************/
+            void*    HWnd;
             uint32_t Width;
             uint32_t Height;
             uint32_t EnabledVSync;

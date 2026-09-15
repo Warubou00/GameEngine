@@ -57,19 +57,11 @@ namespace RHI
             ******************************************************************/
 
 
-        private:          /*---コンストラクタ・デストラクタ---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             DescriptorHeapManager() {};
             ~DescriptorHeapManager() {};
-            DescriptorHeapManager(const DescriptorHeapManager&) = delete;
-            DescriptorHeapManager& operator=(const DescriptorHeapManager) = delete;
 
         public:          /*---クラスメソッド---*/
-
-            static DescriptorHeapManager& getInstance()
-            {
-                static DescriptorHeapManager instance;
-                return instance;
-            }
 
             /***********************************************************************************
              * @brief 生成関数
@@ -93,6 +85,15 @@ namespace RHI
 
             // 指定インデックスのCPUハンドル（実際の書き込み先アドレス）を取得する
             D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index);
+
+            // 指定インデックスのGPUハンドル（実際の書き込み先アドレス）を取得する
+            D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(UINT index);
+
+            // 指定インデックスのCPUハンドルを取得(RTV)
+            D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandle(UINT index);
+
+            // 指定インデックスのGPUハンドルを取得(RTV)
+            D3D12_GPU_DESCRIPTOR_HANDLE GetRtvGpuHandle(UINT index);
 
             // 基本2つなので先頭を返す
             D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();

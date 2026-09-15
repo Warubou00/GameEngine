@@ -66,19 +66,11 @@ namespace RHI
                 D3D12_RESOURCE_STATES resourceStates;
             };
 
-        private:          /*---コンストラクタ・デストラクタ---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             ResourceManager() {};
             ~ResourceManager() {};
-            ResourceManager(const ResourceManager&) = delete;
-            ResourceManager& operator=(const ResourceManager) = delete;
 
         public:          /*---クラスメソッド---*/
-
-            static ResourceManager& getInstance()
-            {
-                static ResourceManager instance;
-                return instance;
-            }
 
             /***********************************************************************************
              * @brief 生成関数

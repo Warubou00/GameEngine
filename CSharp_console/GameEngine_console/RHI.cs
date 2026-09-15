@@ -55,4 +55,37 @@ public class RHI : IDisposable
     {
 
     }
+
+    private enum RHI_RESULT
+    {
+        SUCCEEDED               = 1,
+        FAILED                  = -1,
+        FAILED_INITIALIZED      = -2,
+        FAILED_INVALID_ARGUMENT = -3,
+    }
+
+    public string CheckRHIResult(int id)
+    {
+        switch(id)
+        {
+            case (int)RHI_RESULT.SUCCEEDED:
+                return "RHI_RESULT_SUCCEEDED";
+            case (int)RHI_RESULT.FAILED:
+                return "RHI_RESULT_FAILED";
+            case (int)RHI_RESULT.FAILED_INITIALIZED:
+                return "RHI_RESULT_FAILED_INITIALIZED";
+            case (int)RHI_RESULT.FAILED_INVALID_ARGUMENT:
+                return "RHI_RESULT_FAILED_INVALID_ARGUMENT";
+            default:
+                return "NULL";
+        }
+    }
+
+    private readonly RHI_RESULT[] _rhiResult =
+    {
+        RHI_RESULT.SUCCEEDED,
+        RHI_RESULT.FAILED,
+        RHI_RESULT.FAILED_INITIALIZED,
+        RHI_RESULT.FAILED_INVALID_ARGUMENT
+    };
 }

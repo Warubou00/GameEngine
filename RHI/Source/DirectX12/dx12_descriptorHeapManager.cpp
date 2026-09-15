@@ -83,10 +83,10 @@ namespace RHI
             }
             else 
             {
-                if (_currentSrvIndex > _maxSrvCount)
+                if (_currentSrvIndex >= _maxSrvCount)
                 {// 許容オーバー
-                    MessageBox(NULL, "SRV / CBV / DSV Heap is full!", "SRV / CBV / DSV Heap is full!", MB_OK);
-                    return -1;
+
+                    return 10;
                 }
                 // なければ新しい番号を発行
                 return _currentSrvIndex++;
@@ -102,6 +102,29 @@ namespace RHI
         {
             D3D12_CPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetCPUDescriptorHandleForHeapStart();
             handle.ptr += static_cast<SIZE_T>(index) * _srvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvGpuHandle(UINT index)
+        {
+            D3D12_GPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetGPUDescriptorHandleForHeapStart();
+            // ポインタの加算 (GPUアドレスはUINT64ベース)
+            handle.ptr += static_cast<UINT64>(index) * _srvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvCpuHandle(UINT index)
+        {
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetCPUDescriptorHandleForHeapStart();
+            handle.ptr += static_cast<SIZE_T>(index) * _rtvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvGpuHandle(UINT index)
+        {
+            D3D12_GPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetGPUDescriptorHandleForHeapStart();
+            // ポインタの加算 (GPUアドレスはUINT64ベース)
+            handle.ptr += static_cast<UINT64>(index) * _rtvDescriptorSize;
             return handle;
         }
 

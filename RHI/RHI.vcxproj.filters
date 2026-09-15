@@ -156,6 +156,9 @@
     <ClInclude Include="Source\common.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_resourceBuffer.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -232,6 +235,9 @@
     </ClCompile>
     <ClCompile Include="Source\RHIDll.cpp">
       <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_resourceBuffer.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

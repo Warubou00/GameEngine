@@ -11,49 +11,15 @@ namespace GameEngine_console
     {
         public static void Main(string[] args)
         {
-            RHI rHI = new RHI();
+            RHI rhi = new RHI();
             RHI.RHIInitializedInfo info;
 
-            rHI.Initialize(out info);
+            rhi.Initialize(out info);
 
-            if(info.InitializedDevice == RHI_SUCCEEDED)
-            {
-                Console.WriteLine("Initialized Device");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Device");
-            }
-
-            if (info.InitializedCommandContext == RHI_SUCCEEDED)
-            {
-                Console.WriteLine("Initialized CommandContext");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize CommandContext");
-            }
-
-            if(info.InitializedBuffer == RHI_SUCCEEDED)
-            {
-                Console.WriteLine("Initialized Buffer");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Buffer");
-            }
-
-            if(info.InitializedTexture == RHI_SUCCEEDED)
-            {
-                Console.WriteLine("Initialized Texture");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Texture");
-            }
+            Console.WriteLine($"Device         : {rhi.CheckRHIResult(info.InitializedDevice)}");
+            Console.WriteLine($"CommandContext : {rhi.CheckRHIResult(info.InitializedCommandContext)}");
+            Console.WriteLine($"Buffer         : {rhi.CheckRHIResult(info.InitializedBuffer)}");
+            Console.WriteLine($"Texture        : {rhi.CheckRHIResult(info.InitializedTexture)}");
         }
-
-        private const int RHI_SUCCEEDED = 1;
-        private const int RHI_FAILED    = -1;
     }
 }

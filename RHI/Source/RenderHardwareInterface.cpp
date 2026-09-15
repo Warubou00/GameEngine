@@ -54,7 +54,7 @@ namespace RHI
 
         info->InitializedDevice         = _device->Initialize();
         info->InitializedCommandContext = _commandContext->Initialize(_device.get(), objInfo);
-        //info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
+        info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
         //info->InitializedTexture        = _texture->Initialize();
 
         return;

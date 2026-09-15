@@ -58,8 +58,7 @@ namespace RHI
 		{
 			if (!device)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return RHI_FAILED;
+				return RHI_FAILED_INVALID_ARGUMENT;
 			}
 
 			_commandQueue        = std::make_unique<DirectX12::CommandQueue>();
@@ -77,9 +76,11 @@ namespace RHI
 			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), &hWnd, width, height);
 
 #ifdef CONSOLE_DEBUG
+			std::cout << "**************************************************" << std::endl;
 			std::cout << "Succeeded Initialize CommandContext From C++" << std::endl;
 			std::cout << "Width  : " << width  << std::endl;
 			std::cout << "Height : " << height << std::endl;
+			std::cout << "**************************************************" << std::endl;
 #endif
 
 			return RHI_SUCCEEDED;

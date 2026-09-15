@@ -59,20 +59,11 @@ namespace RHI
             ******************************************************************/
 
 
-        private:          /*---コンストラクタ・デストラクタ---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             TextureManager() {};
             ~TextureManager() {};
-            TextureManager(const TextureManager&) = delete;
-            TextureManager& operator=(const TextureManager) = delete;
 
         public:          /*---クラスメソッド---*/
-
-            static TextureManager& getInstance()
-            {
-                static TextureManager instance;
-                return instance;
-            }
-
             /***********************************************************************************
              * @brief 生成関数
              * @details 

@@ -59,7 +59,7 @@ namespace RHI
             ******************************************************************/
 
 
-        private:          /*---コンストラクタ・デストラクタ---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             PipelineStateManager();
             ~PipelineStateManager();
 
@@ -68,17 +68,6 @@ namespace RHI
 
 
         public:          /*---アクセッサー関数群---*/
-
-
-            /***********************************************************************************
-             * @brief インスタンスの取得
-             * @details シングルトン設計
-             *
-             * @return GraphicsPipelineManager* グラフィックスパイプラインのマネージャーのポインタ
-             ************************************************************************************/
-            static PipelineStateManager* getInstance();
-
-
 
             /***********************************************************************************
              * @brief PSOの登録
@@ -97,8 +86,6 @@ namespace RHI
             void Release(void);
 
         private :         /*---メンバ変数---*/
-
-            static PipelineStateManager* Instance;
 
             std::vector<Microsoft::WRL::ComPtr<ID3D12PipelineState>> _states;
 

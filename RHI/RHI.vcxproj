@@ -167,6 +167,7 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_fence.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_graphicsCommandList.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_pipelineState.h" />
+    <ClInclude Include="Source\DirectX12\Object\dx12_resourceBuffer.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_rootSignature.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_swapChain.h" />
     <ClInclude Include="Source\DXGI\dxgiFactory6.h" />
@@ -199,6 +200,7 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_fence.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_graphicsCommandList.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_pipelineState.cpp" />
+    <ClCompile Include="Source\DirectX12\Object\dx12_resourceBuffer.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_rootSignature.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_swapChain.cpp" />
     <ClCompile Include="Source\DXGI\dxgiFactory6.cpp" />

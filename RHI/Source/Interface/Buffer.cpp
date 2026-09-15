@@ -21,8 +21,8 @@
 #include "Buffer.h"
 #include "Device.h"
 #include "CommandContext.h"
-#include "../DirectX12/dx12_resourceManager.h"
 #include "../DirectX12/dx12_descriptorHeapManager.h"
+#include "../DirectX12/Object/dx12_resourceBuffer.h"
 
 /******************************************************************
 * Macro Definitions
@@ -56,57 +56,153 @@ namespace RHI
 		{
 			if (!device || !commandContext)
 			{
-				// TODO : 例外処理 -> nullptr
-				return RHI_FAILED;
+				return RHI_FAILED_INVALID_ARGUMENT;
 			}
 
+			_descriptorHeapManager = std::make_unique<RHI::DirectX12::DescriptorHeapManager>();
+
 			// DescriptorHeapの作成
-			DirectX12::DescriptorHeapManager::getInstance().Create(device->GetDx12Device());
+			HRESULT hr = _descriptorHeapManager->Create(device->GetDx12Device());
+
+			if (FAILED(hr))
+			{
+				return RHI_FAILED_INITIALIZED;
+			}
 
 			// レンダーターゲットビューの作成
-			makeRtv(device, commandContext);
+			if (!makeRtv(device, commandContext))
+			{
+#ifdef CONSOLE_DEBUG
+				std::cout << "**************************************************" << std::endl;
+#endif
+				return RHI_FAILED_INITIALIZED;
+			}
+
+			if (!makeBuffer(device))
+			{
+#ifdef CONSOLE_DEBUG
+				std::cout << "Failed Initialize VB and CB" << std::endl;
+#endif
+				return RHI_FAILED_INITIALIZED;
+			}
+
+#ifdef CONSOLE_DEBUG
+			std::cout << "Succeeded Initialize Global Scene VB CB From C++" << std::endl;
+#endif
 
 #ifdef CONSOLE_DEBUG
 			std::cout << "Succeeded Initialize Buffer From C++" << std::endl;
+			std::cout << "**************************************************" << std::endl;
 #endif
 
 			return RHI_SUCCEEDED;
 		}
 
-		bool Buffer::CreateVertexBuffer(Device* device)
-		{
-			D3D12_HEAP_PROPERTIES hDesc = {};
-			D3D12_RESOURCE_DESC resDesc = {};
-			DirectX12::ResourceManager::getInstance().CreateVertResource(device->GetDx12Device(), hDesc, resDesc);
-
-			return true;
-		}
-
 		bool Buffer::makeRtv(Device* device, CommandContext* commandContext)
 		{
+			// Managerのnullチェック
+			if (!nullCheckManager())
+			{
+#ifdef CONSOLE_DEBUG
+				std::cout << "**************************************************" << std::endl;
+				std::cout << "Failed Initialize Render Target View"               << std::endl;
+#endif
+				return false;
+			}
 			// RTVのハンドル取得
-			auto rtvHandle = DirectX12::DescriptorHeapManager::getInstance().GetRtvCpuHandleStart();
+			auto rtvHandle = _descriptorHeapManager->GetRtvCpuHandleStart();
 
 			// SwapChainDescを取得
 			DXGI_SWAP_CHAIN_DESC1 scDesc = {};
-			auto swapChainDesc = commandContext->GetSwapChain()->GetDesc1(&scDesc);
+			auto hr = commandContext->GetSwapChain()->GetDesc1(&scDesc);
 
 			// rtvの作成
 			ID3D12Resource* resource = nullptr;
-			for (int i = 0; i = scDesc.BufferCount; i++)
+			for (int i = 0; i < scDesc.BufferCount; i++)
 			{
 				commandContext->GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&resource));
 
 				device->GetDx12Device()->CreateRenderTargetView(resource, nullptr, rtvHandle);
 
 				// サイズ分進める
-				rtvHandle.ptr += DirectX12::DescriptorHeapManager::getInstance().GetRtvDescriptorSize();
-
-				// ResourceManagerに登録
-				DirectX12::ResourceManager::getInstance().RegistRtvResource(resource);
+				rtvHandle.ptr += _descriptorHeapManager->GetRtvDescriptorSize();
 			}
 
+#ifdef CONSOLE_DEBUG
+			std::cout << "**************************************************"   << std::endl;
+			std::cout << "Succeeded Initialize Render Target View"              << std::endl;
+#endif
+
 			return true;
+		}
+
+		bool Buffer::nullCheckManager()
+		{
+			return _descriptorHeapManager != nullptr;
+		}
+
+		bool Buffer::makeBuffer(Device* device)
+		{
+			if (!device)return false;
+
+			if (!makeGlobalVB(device))return false;
+			if (!makeSceneVB(device))return false;
+			if (!makeGlobalCB(device))return false;
+			if (!makeSceneCB(device))return false;
+
+			return true;
+		}
+
+		bool Buffer::makeGlobalVB(Device* device)
+		{
+			_globalVB = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+			
+			HRESULT hr = _globalVB->Create(
+				device->GetDx12Device(),
+				_GLOBAL_VB_SIZE,
+				D3D12_HEAP_TYPE_DEFAULT
+			);
+
+			return SUCCEEDED(hr);
+		}
+
+		bool Buffer::makeSceneVB(Device* device)
+		{
+			_sceneVB = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+
+			HRESULT hr = _sceneVB->Create(
+				device->GetDx12Device(),
+				_SCENE_VB_SIZE,
+				D3D12_HEAP_TYPE_DEFAULT
+			);
+
+			return SUCCEEDED(hr);
+		}
+
+		bool Buffer::makeGlobalCB(Device* device)
+		{
+			_globalCB = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+
+			HRESULT hr = _globalCB->Create(
+				device->GetDx12Device(),
+				_GLOBAL_CB_SIZE,
+				D3D12_HEAP_TYPE_UPLOAD
+			);
+
+			return SUCCEEDED(hr);
+		}
+
+		bool Buffer::makeSceneCB(Device* device)
+		{
+			_sceneCB = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+
+			HRESULT hr = _sceneCB->Create(
+				device->GetDx12Device(),
+				_SCENE_CB_SIZE,
+				D3D12_HEAP_TYPE_UPLOAD
+			);
+
+			return SUCCEEDED(hr);
 		}
 	}
 }
