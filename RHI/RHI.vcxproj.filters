@@ -55,6 +55,12 @@
     <Filter Include="ヘッダー ファイル\DirectX12\Helper">
       <UniqueIdentifier>{ce1f4103-d67b-4ab2-be8c-2c59ab5e1610}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\Shader">
+      <UniqueIdentifier>{fd1a91d7-b539-4744-aad9-6132aaeed077}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Shader">
+      <UniqueIdentifier>{d8d8086a-4d0d-4813-9b24-f113b4c4241f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -159,6 +165,12 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_resourceBuffer.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Interface\Pipeline.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Shader\hlslCompiler.h">
+      <Filter>ヘッダー ファイル\Shader</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -238,6 +250,12 @@
     </ClCompile>
     <ClCompile Include="Source\DirectX12\Object\dx12_resourceBuffer.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Interface\Pipeline.cpp">
+      <Filter>ソース ファイル\Interface</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Shader\hlslCompiler.cpp">
+      <Filter>ソース ファイル\Shader</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

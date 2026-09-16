@@ -24,6 +24,9 @@
 #include <memory>
 #include "IObject.h"
 
+// TODO : 削除予定
+#include <d3d12.h>
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -93,12 +96,20 @@ namespace RHI
             bool makeRtv(Device* device, CommandContext* commandContext);
             bool nullCheckManager();
 
-            bool makeBuffer(Device* device);
-            bool makeGlobalVB(Device* device);
-            bool makeSceneVB(Device* device);
-            bool makeGlobalCB(Device* device);
-            bool makeSceneCB(Device* device);
+            bool makeCommonBuffer(Device* device);                                                                                               // Resource Bufferの作成
+            bool makeGlobalVB(Device* device);                                                                                                   // Global Vertex   Bufferの作成
+            bool makeSceneVB(Device* device);                                                                                                    // Scene  Vertex   Bufferの作成
+            bool makeGlobalCB(Device* device);                                                                                                   // Global Constant Bufferの作成
+            bool makeSceneCB(Device* device);                                                                                                    // Scene  Constant Bufferの作成
+            bool makeBuffer(Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType);     // TODO : D3D12の機能に直接触れたくないため要検討
 
+            bool makeCommonView(Device* device);                                                                                                 // Viewの作成
+            bool makeGlobalVBV(Device* device);                                                                                                  // Global Vertex   Buffer View(srv)の作成
+            bool makeSceneVBV(Device* device);                                                                                                   // Scene  Vertex   Buffer View(srv)の作成
+            bool makeGlobalCBV(Device* device);                                                                                                  // Global Constant Buffer View(cbv)の作成 ※未使用 RootCBVを採用
+            bool makeSceneCBV(Device* device);                                                                                                   // Scene  Constant Buffer View(cbv)の作成 ※未使用 RootCBVを採用
+            bool makeVBView(Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, uint32_t structureByteStride); // 頂点バッファをSRVとして実装
+            bool makeCBView(Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, uint32_t cbOffset);            // 未使用 RootCBVを採用
         };
     }
 }

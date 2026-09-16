@@ -114,7 +114,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>C:\Users\warub\OneDrive\デスクトップ\private25\GameEngine\DirectXTex\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\GameEngine_git\DirectXTex\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -134,7 +134,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>C:\Users\warub\OneDrive\デスクトップ\private25\GameEngine\DirectXTex\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>D:\GameEngine_git\DirectXTex\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -142,6 +142,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>D:\GameEngine_git\DirectXTex\lib\Release;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -175,8 +176,10 @@
     <ClInclude Include="Source\Interface\CommandContext.h" />
     <ClInclude Include="Source\Interface\Device.h" />
     <ClInclude Include="Source\Interface\IObject.h" />
+    <ClInclude Include="Source\Interface\Pipeline.h" />
     <ClInclude Include="Source\Interface\Texture.h" />
     <ClInclude Include="Source\RenderHardwareInterface.h" />
+    <ClInclude Include="Source\Shader\hlslCompiler.h" />
     <ClInclude Include="Source\TextureHandle.h" />
     <ClInclude Include="Source\VertexBufferAllocator.h" />
   </ItemGroup>
@@ -208,9 +211,11 @@
     <ClCompile Include="Source\Interface\CommandContext.cpp" />
     <ClCompile Include="Source\Interface\Device.cpp" />
     <ClCompile Include="Source\Interface\IObject.cpp" />
+    <ClCompile Include="Source\Interface\Pipeline.cpp" />
     <ClCompile Include="Source\Interface\Texture.cpp" />
     <ClCompile Include="Source\RenderHardwareInterface.cpp" />
     <ClCompile Include="Source\RHIDll.cpp" />
+    <ClCompile Include="Source\Shader\hlslCompiler.cpp" />
     <ClCompile Include="Source\VertexBufferAllocator.cpp" />
   </ItemGroup>
   <ItemGroup>

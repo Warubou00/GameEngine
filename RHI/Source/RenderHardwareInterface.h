@@ -48,6 +48,7 @@ namespace RHI
         class CommandContext;
         class Buffer;
         class Texture;
+        class Pipeline;
         struct ObjectInfo;
     }
 
@@ -123,13 +124,14 @@ namespace RHI
 
 
     private:         /*---メンバ変数---*/
-        std::unique_ptr<ObjectInterface::Device> _device;
+        std::unique_ptr<ObjectInterface::Device>         _device;
         std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
-        std::unique_ptr<ObjectInterface::Buffer> _buffer;
-        std::unique_ptr<ObjectInterface::Texture> _texture;
+        std::unique_ptr<ObjectInterface::Buffer>         _buffer;
+        std::unique_ptr<ObjectInterface::Texture>        _texture;
+        std::unique_ptr<ObjectInterface::Pipeline>       _pipeline;
 
         // レンダーターゲットの作成
-        bool makeRenderTarget();
+        bool makeRenderTarget() { return false; }
 
     };
 

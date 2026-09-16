@@ -142,6 +142,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Source\common.h" />
+    <ClInclude Include="Source\Log\logger.h" />
     <ClInclude Include="Source\Math\Float\float.h" />
     <ClInclude Include="Source\Math\Float\float2.h" />
     <ClInclude Include="Source\Math\Float\float3.h" />
@@ -150,6 +151,7 @@
     <ClInclude Include="Source\Math\random.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\Log\logger.cpp" />
     <ClCompile Include="Source\Math\Float\float2.cpp" />
     <ClCompile Include="Source\Math\Float\float3.cpp" />
     <ClCompile Include="Source\Math\Float\float4.cpp" />

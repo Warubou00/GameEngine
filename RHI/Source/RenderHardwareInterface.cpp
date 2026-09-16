@@ -23,6 +23,7 @@
 #include "Interface/CommandContext.h"
 #include "Interface/Buffer.h"
 #include "Interface/Texture.h"
+#include "Interface/Pipeline.h"
 
 /******************************************************************
 * Macro Definitions
@@ -47,15 +48,17 @@ namespace RHI
     
     void RenderHardwareInterface::Initialize(RHI::RenderHardwareInterface::RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objInfo)
     {
-        _device = std::make_unique<ObjectInterface::Device>();
+        _device         = std::make_unique<ObjectInterface::Device>();
         _commandContext = std::make_unique<ObjectInterface::CommandContext>();
-        _buffer = std::make_unique<ObjectInterface::Buffer>();
-        _texture = std::make_unique<ObjectInterface::Texture>();
+        _buffer         = std::make_unique<ObjectInterface::Buffer>();
+        _texture        = std::make_unique<ObjectInterface::Texture>();
+        _pipeline       = std::make_unique<ObjectInterface::Pipeline>();
 
         info->InitializedDevice         = _device->Initialize();
         info->InitializedCommandContext = _commandContext->Initialize(_device.get(), objInfo);
         info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
         //info->InitializedTexture        = _texture->Initialize();
+        info->InitializedTexture        = _pipeline->Initialize(_device.get());
 
         return;
     }

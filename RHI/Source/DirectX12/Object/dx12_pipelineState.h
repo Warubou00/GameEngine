@@ -44,7 +44,7 @@ namespace RHI
 		class PipelineState
 		{
 		public:
-			PipelineState();
+			PipelineState(D3D12_GRAPHICS_PIPELINE_STATE_DESC* pPsoDesc);
 			~PipelineState();
 
 
@@ -64,7 +64,7 @@ namespace RHI
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12PipelineState> _pPSO = nullptr;
-			D3D12_GRAPHICS_PIPELINE_STATE_DESC _psoDesc = {};
+			D3D12_GRAPHICS_PIPELINE_STATE_DESC* _pPsoDesc = {};
 		};
 	}
 }

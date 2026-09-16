@@ -25,6 +25,9 @@
 #include "../DXGI/dxgiFactory6.h"
 #include "../adapter.h"
 
+#include "../../Core/Source/Log/logger.h"
+
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -77,9 +80,8 @@ namespace RHI
 			std::string deviceVersion  = getDeviceVersion();
 			std::string adapterVersion = getAdapterVersion();
 
-			std::cout << "**************************************************" << std::endl;
-			std::cout << "Succeeded Initialize Device From C++" << std::endl;
-			std::cout << "Device  Name    : " << *gpuName << std::endl;
+			Core::Logger::Log("**************************************************");
+			Core::Logger::Log("Succeeded Initialize Device From C++");
 			std::cout << "Device  Version : " << deviceVersion << std::endl;
 			std::cout << "Adapter Version : " << adapterVersion << std::endl;
 			std::cout << "**************************************************" << std::endl;

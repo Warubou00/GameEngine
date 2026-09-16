@@ -38,15 +38,20 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		PipelineState::PipelineState() {}
+		PipelineState::PipelineState(D3D12_GRAPHICS_PIPELINE_STATE_DESC* pPsoDesc) : _pPsoDesc(pPsoDesc) {}
 		PipelineState::~PipelineState() {}
 
 		// ==============================================
-		// ƒtƒFƒ“ƒX‚Ìì¬
+		// PSO‚Ìì¬
 		// ==============================================
 		HRESULT PipelineState::Create(ID3D12Device* device)
 		{
-			return device->CreateGraphicsPipelineState(&_psoDesc, IID_PPV_ARGS(&_pPSO));
+			if (!device || !_pPsoDesc)
+			{
+				return E_NOTIMPL;
+			}
+
+			return device->CreateGraphicsPipelineState(_pPsoDesc, IID_PPV_ARGS(&_pPSO));
 		}
 
 		// ==============================================

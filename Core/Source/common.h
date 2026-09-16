@@ -26,7 +26,8 @@
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
-#define CORE_API __declspec(dllexport)
+#define CORE_API_CLASS __declspec(dllexport)
+#define CORE_API extern "C" CORE_API_CLASS
 
 /******************************************************************
 * Enumeration Definitions
