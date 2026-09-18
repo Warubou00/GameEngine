@@ -21,7 +21,9 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IObject.h"
+#include <vector>
+#include <string>
+#include "IRHIObject.h"
 
 /******************************************************************
 * Macro Definitions
@@ -37,7 +39,7 @@
 * Structure Declarations
 ******************************************************************/
 
-
+class ID3D12PipelineState;
 
 namespace RHI
 {
@@ -62,7 +64,11 @@ namespace RHI
             /******************************************************************
             * Internal Structure Declarations
             ******************************************************************/
-
+            struct CustomPipeline
+            {
+                const char* PipelineName;
+                std::unique_ptr<RHI::DirectX12::PipelineState> Pipeline;
+            };
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Pipeline();
@@ -74,6 +80,14 @@ namespace RHI
             RHI_RESULT Initialize()override;
             RHI_RESULT Initialize(Device* device)override;
 
+            ID3D12PipelineState* GetPipelineState()const;
+
+            RHI_RESULT MakeCustomPipeline(
+                const std::wstring& vsPath,
+                const std::string& vsEntry,
+                const std::wstring& psPath,
+                const std::string& psEntry
+            );
 
         public:          /*---アクセッサー関数群---*/
 
@@ -81,6 +95,7 @@ namespace RHI
         private:         /*---メンバ変数---*/
             std::unique_ptr<DirectX12::PipelineState> _pipelineState;
             std::unique_ptr<DirectX12::RootSignature> _rootSignature;
+            std::vector<CustomPipeline>               _customPipeline;
 
             RHI_RESULT makePipeline(Device* device);
         };

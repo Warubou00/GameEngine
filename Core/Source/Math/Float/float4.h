@@ -17,12 +17,14 @@
 #ifndef FLOAT4_H_
 #define FLOAT4_H_
 
+#include "../../common.h"
+
 namespace Core
 {
 	// ==========================================================
 	// Vector4
 	// ========================================================== 
-	struct Float4
+	struct CORE_API_CLASS Float4
 	{
 		union {
 			float _float[4];

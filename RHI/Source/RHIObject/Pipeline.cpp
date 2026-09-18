@@ -21,9 +21,11 @@
 #include "Pipeline.h"
 #include "Device.h"
 
+#include "../DirectX12/Object/dx12_device.h"
 #include "../DirectX12/Object/dx12_pipelineState.h"
 #include "../DirectX12/Object/dx12_rootSignature.h"
 #include "../Shader/hlslCompiler.h"
+#include "../DirectX12/Object/dx12_device.h" 
 
 /******************************************************************
 * Macro Definitions
@@ -64,6 +66,11 @@ namespace RHI
 
 			return RHI_SUCCEEDED;
 		}
+
+        ID3D12PipelineState* Pipeline::GetPipelineState()const
+        {
+            return _pipelineState->Get();
+        }
 
         RHI_RESULT Pipeline::makePipeline(Device* device)
         {
@@ -117,8 +124,8 @@ namespace RHI
 
             // RootSignatureクラスのCreate関数を呼び出し[cite: 2]
             _rootSignature = std::make_unique<DirectX12::RootSignature>();
-            hr = _rootSignature->Create(device->GetDx12Device(), rootSigDesc); //[cite: 2]
-            if (FAILED(hr)) return false;
+            hr = _rootSignature->Create(device->GetDevice()->GetDevice(), rootSigDesc); //[cite: 2]
+            if (FAILED(hr)) return RHI_FAILED_INITIALIZED;
 
 
             // ==============================================================
@@ -130,20 +137,23 @@ namespace RHI
             ID3DBlob* pErrorBlob;
 
             Shader::HLSLCompiler* hlslCompiler = new Shader::HLSLCompiler();
+            // VSのコンパイル
             hlslCompiler->CompileShader(
-                L"",
-                "",
+                L"../Shader/hlslTemplate.shader",
+                "VSMain",
                 "vs_6_0",
                 &pVSBlob,
                 &pErrorBlob
             );
+            // PSのコンパイル
             hlslCompiler->CompileShader(
-                L"",
-                "",
+                L"../Shader/hlslTemplate.shader",
+                "PSMain",
                 "ps_6_0",
                 &pPSBlob,
                 &pErrorBlob
             );
+            delete hlslCompiler;
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
             psoDesc.pRootSignature = _rootSignature->Get(); //[cite: 2]
@@ -205,10 +215,31 @@ namespace RHI
 
             // PipelineStateクラスのインスタンス化と生成
             _pipelineState = std::make_unique<RHI::DirectX12::PipelineState>(&psoDesc); //
-            hr = _pipelineState->Create(device->GetDx12Device()); //
+            hr = _pipelineState->Create(device->GetDevice()->GetDevice()); //
             if (FAILED(hr)) return false;
 
-            return true;
+            return RHI_SUCCEEDED;
+        }
+
+        RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)
+        {
+            Shader::HLSLCompiler* hlslCompiler = new Shader::HLSLCompiler();
+            ID3DBlob* vsBlob, *psBlob, *errorBlob;
+            hlslCompiler->CompileShader(
+                vsPath,
+                vsEntry,
+                "vs_6_0",
+                &vsBlob,
+                &errorBlob
+            );
+
+            hlslCompiler->CompileShader(
+                psPath,
+                psEntry,
+                "ps_6_0",
+                &psBlob,
+                &errorBlob
+            );
         }
 	}
 }

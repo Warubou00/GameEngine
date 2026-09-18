@@ -61,6 +61,15 @@
     <Filter Include="ソース ファイル\Shader">
       <UniqueIdentifier>{d8d8086a-4d0d-4813-9b24-f113b4c4241f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\RHIObject">
+      <UniqueIdentifier>{1e983494-8eb1-4ea0-895a-fe81c03c8bfa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\RHIObject">
+      <UniqueIdentifier>{c0ac86bd-9877-413a-9e49-c6771652097b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\DirectX12\TempObject">
+      <UniqueIdentifier>{246f28e2-5295-464b-bc1f-cb6fd0b2b8b9}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -74,18 +83,6 @@
     </ClInclude>
     <ClInclude Include="Source\DirectX12\dx12_header.h">
       <Filter>ヘッダー ファイル\DirectX12</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Interface\Texture.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Interface\Buffer.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Interface\CommandContext.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Interface\Device.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
     </ClInclude>
     <ClInclude Include="Source\RenderHardwareInterface.h">
       <Filter>ヘッダー ファイル</Filter>
@@ -153,9 +150,6 @@
     <ClInclude Include="Source\DirectX12\dx12_helperRootParameter.h">
       <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Interface\IObject.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
-    </ClInclude>
     <ClInclude Include="Source\VertexBufferAllocator.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
@@ -165,11 +159,32 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_resourceBuffer.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Interface\Pipeline.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Shader\hlslCompiler.h">
       <Filter>ヘッダー ファイル\Shader</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\Buffer.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\CommandContext.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\Device.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\IRHIObject.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\Pipeline.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\Texture.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Interface\IDevice.h">
+      <Filter>ヘッダー ファイル\Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\TempObject\dx12_device.h">
+      <Filter>ヘッダー ファイル\DirectX12\TempObject</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -181,9 +196,6 @@
     </ClCompile>
     <ClCompile Include="Source\RenderHardwareInterface.cpp">
       <Filter>ソース ファイル</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Interface\Device.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
     </ClCompile>
     <ClCompile Include="Source\DirectX12\Object\dx12_graphicsCommandList.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
@@ -218,9 +230,6 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_rootSignature.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Interface\Texture.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
-    </ClCompile>
     <ClCompile Include="Source\DirectX12\dx12_resourceManager.cpp">
       <Filter>ソース ファイル\DirectX12\Manager</Filter>
     </ClCompile>
@@ -233,15 +242,6 @@
     <ClCompile Include="Source\DirectX12\dx12_pipelineStateManager.cpp">
       <Filter>ソース ファイル\DirectX12\Manager</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Interface\CommandContext.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Interface\IObject.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Interface\Buffer.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
-    </ClCompile>
     <ClCompile Include="Source\VertexBufferAllocator.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
@@ -251,11 +251,26 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_resourceBuffer.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Interface\Pipeline.cpp">
-      <Filter>ソース ファイル\Interface</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Shader\hlslCompiler.cpp">
       <Filter>ソース ファイル\Shader</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\Buffer.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\CommandContext.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\Device.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\IRHIObject.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\Pipeline.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RHIObject\Texture.cpp">
+      <Filter>ソース ファイル\RHIObject</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -23,6 +23,11 @@
 #include "CommandContext.h"
 #include "../DirectX12/dx12_descriptorHeapManager.h"
 #include "../DirectX12/Object/dx12_resourceBuffer.h"
+#include "../DirectX12/Object/dx12_swapChain.h"
+#include "../DirectX12/Object/dx12_device.h"
+
+#include "../../Core/Source/Log/logger.h"
+#include "../../Core/Source/Math/Float/float.h"
 
 /******************************************************************
 * Macro Definitions
@@ -38,7 +43,12 @@
 * Structure Declarations
 ******************************************************************/
 
-
+// 仮の頂点データ
+struct Vertex
+{
+	Core::Float3 Position;
+	Core::Float4 Color;
+};
 
 namespace RHI
 {
@@ -62,7 +72,7 @@ namespace RHI
 			_descriptorHeapManager = std::make_unique<RHI::DirectX12::DescriptorHeapManager>();
 
 			// DescriptorHeapの作成
-			HRESULT hr = _descriptorHeapManager->Create(device->GetDx12Device());
+			HRESULT hr = _descriptorHeapManager->Create(device->GetDevice()->GetDevice());
 
 			if (FAILED(hr))
 			{
@@ -73,7 +83,7 @@ namespace RHI
 			if (!makeRtv(device, commandContext))
 			{
 #ifdef CONSOLE_DEBUG
-				std::cout << "**************************************************" << std::endl;
+				Core::Logger::Log("**************************************************");
 #endif
 				return RHI_FAILED_INITIALIZED;
 			}
@@ -81,21 +91,46 @@ namespace RHI
 			if (!makeCommonBuffer(device))
 			{
 #ifdef CONSOLE_DEBUG
-				std::cout << "Failed Initialize VB and CB" << std::endl;
+				Core::Logger::Log("Failed Initialize VB and CB");
 #endif
 				return RHI_FAILED_INITIALIZED;
 			}
 
 #ifdef CONSOLE_DEBUG
-			std::cout << "Succeeded Initialize Global Scene VB CB From C++" << std::endl;
+			Core::Logger::Log("Succeeded Initialize Global Scene VB CB From C++");
 #endif
 
 #ifdef CONSOLE_DEBUG
-			std::cout << "Succeeded Initialize Buffer From C++" << std::endl;
-			std::cout << "**************************************************" << std::endl;
+			Core::Logger::Log("Succeeded Initialize Buffer From C++");
+			Core::Logger::Log("**************************************************");
 #endif
 
 			return RHI_SUCCEEDED;
+		}
+
+		RHI::DirectX12::DescriptorHeapManager* Buffer::GetDescHeapManager()const
+		{
+			return _descriptorHeapManager.get();
+		}
+
+		RHI::DirectX12::ResourceBuffer* Buffer::GetGlobalVB()const
+		{
+			return _globalVB.get();
+		}
+
+		RHI::DirectX12::ResourceBuffer* Buffer::GetSceneVB()const
+		{
+			return _sceneVB.get();
+		}
+
+		RHI::DirectX12::ResourceBuffer* Buffer::GetGlobalCB()const
+		{
+			return _globalCB.get();
+		}
+
+		RHI::DirectX12::ResourceBuffer* Buffer::GetSceneCB()const
+		{
+			return _sceneCB.get();
 		}
 
 		bool Buffer::makeRtv(Device* device, CommandContext* commandContext)
@@ -104,8 +139,8 @@ namespace RHI
 			if (!nullCheckManager())
 			{
 #ifdef CONSOLE_DEBUG
-				std::cout << "**************************************************" << std::endl;
-				std::cout << "Failed Initialize Render Target View"               << std::endl;
+				Core::Logger::Log("**************************************************");
+				Core::Logger::Log("Failed Initialize Render Target View");
 #endif
 				return false;
 			}
@@ -114,23 +149,23 @@ namespace RHI
 
 			// SwapChainDescを取得
 			DXGI_SWAP_CHAIN_DESC1 scDesc = {};
-			auto hr = commandContext->GetSwapChain()->GetDesc1(&scDesc);
+			auto hr = commandContext->GetSwapChain()->Get()->GetDesc1(&scDesc);
 
 			// rtvの作成
 			ID3D12Resource* resource = nullptr;
 			for (int i = 0; i < scDesc.BufferCount; i++)
 			{
-				commandContext->GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&resource));
+				commandContext->GetSwapChain()->Get()->GetBuffer(i, IID_PPV_ARGS(&resource));
 
-				device->GetDx12Device()->CreateRenderTargetView(resource, nullptr, rtvHandle);
+				device->GetDevice()->GetDevice()->CreateRenderTargetView(resource, nullptr, rtvHandle);
 
 				// サイズ分進める
 				rtvHandle.ptr += _descriptorHeapManager->GetRtvDescriptorSize();
 			}
 
 #ifdef CONSOLE_DEBUG
-			std::cout << "**************************************************"   << std::endl;
-			std::cout << "Succeeded Initialize Render Target View"              << std::endl;
+			Core::Logger::Log("**************************************************");
+			Core::Logger::Log("Succeeded Initialize Render Target View");
 #endif
 
 			return true;
@@ -189,6 +224,7 @@ namespace RHI
 			);
 		}
 
+		// 未使用 Root CBVに統合
 		bool Buffer::makeSceneCB(Device* device)
 		{
 			_sceneCB = std::make_unique<RHI::DirectX12::ResourceBuffer>();
@@ -201,11 +237,12 @@ namespace RHI
 			);
 		}
 
+		// 未使用 Root CBVに統合
 		bool Buffer::makeBuffer(Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType)
 		{
 			return SUCCEEDED(
 				resourceBuffer->Create(
-					device->GetDx12Device(),
+					device->GetDevice()->GetDevice(),
 					sizeInBytes,
 					heapType
 				)
@@ -234,7 +271,7 @@ namespace RHI
 				device,
 				_globalVB.get(),
 				_GLOBAL_VB_SIZE,
-				sizeof(uint64_t)		// 仮 TODO : 頂点構造体に変更(4Byte)
+				sizeof(Vertex)
 			);
 		}
 
@@ -246,7 +283,7 @@ namespace RHI
 				device,
 				_sceneVB.get(),
 				_SCENE_VB_SIZE,
-				sizeof(uint64_t)		// 仮 TODO : 頂点構造体に変更(4Byte)
+				sizeof(Vertex)
 			);
 		}
 
@@ -296,11 +333,12 @@ namespace RHI
 			srvDesc.Buffer.StructureByteStride      = structureByteStride;
 
 			// 4. パレットの枠(cpuHandle)に、絵の具(Buffer)を登録！
-			device->GetDx12Device()->CreateShaderResourceView(resourceBuffer->Get(), &srvDesc, cpuHandle);
+			device->GetDevice()->GetDevice()->CreateShaderResourceView(resourceBuffer->Get(), &srvDesc, cpuHandle);
 
-			return S_OK;
+			return true;
 		}
 
+		// 未使用 Root CBVに統合
 		bool Buffer::makeCBView(Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, uint32_t cbOffset)
 		{
 			uint32_t cbvIndex = _descriptorHeapManager->AllocateSrv();
@@ -314,9 +352,9 @@ namespace RHI
 			cbvDesc.SizeInBytes = sizeInBytes;
 
 			// 4. CreateShaderResourceView ではなく CreateConstantBufferView を呼ぶ！
-			device->GetDx12Device()->CreateConstantBufferView(&cbvDesc, cbvHandle);
+			device->GetDevice()->GetDevice()->CreateConstantBufferView(&cbvDesc, cbvHandle);
 
-			return S_OK;
+			return true;
 		}
 	}
 }

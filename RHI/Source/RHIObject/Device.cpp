@@ -84,30 +84,25 @@ namespace RHI
 			Core::Logger::Log("Succeeded Initialize Device From C++");
 			std::cout << "Device  Version : " << deviceVersion << std::endl;
 			std::cout << "Adapter Version : " << adapterVersion << std::endl;
-			std::cout << "**************************************************" << std::endl;
+			Core::Logger::Log("**************************************************");
 #endif
 
 			return RHI_SUCCEEDED;
 		}
 
-		IDXGIFactory6* Device::GetDxgiFactory6()const
+		DirectX::DXGIFactory6* Device::GetDxgiFactory()const
 		{
-			return _dxgiFactory->Get();
+			return _dxgiFactory.get();
 		}
 
-		ID3D12Device* Device::GetDx12Device()const
+		DirectX::Adapter* Device::GetAdapter()const
 		{
-			return _dx12Device->GetDevice();
+			return _adapter.get();
 		}
 
-		ID3D12Device5* Device::GetDx12Device5()const
+		DirectX12::Device* Device::GetDevice()const
 		{
-			return _dx12Device->GetDevice5();
-		}
-
-		ID3D12Device9* Device::GetDx12Device9()const
-		{
-			return _dx12Device->GetDevice9();
+			return _dx12Device.get();
 		}
 
 		std::string Device::getDeviceVersion()

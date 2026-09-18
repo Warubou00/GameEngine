@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    Texture.h
-* @brief   RHI Texture
+* @file    CommandContext.h
+* @brief   RHI CommandContext
 * @details 
 *
 * @author  Keigo Onari
-* @date    2025/1/13
+* @date    2026/4/27
 * @version v_1.0.0
 *
 * @copyright
@@ -15,15 +15,13 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_TEXTURE_H_
-#define RHI_TEXTURE_H_
+#ifndef RHI_COMMAND_CONTEXT_H_
+#define RHI_COMMAND_CONTEXT_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <string>
-#include <vector>
-#include "IObject.h"
+#include "IRHIObject.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,13 +37,26 @@
 * Structure Declarations
 ******************************************************************/
 
-
+class IDXGISwapChain4;
+class ID3D12CommandQueue;
+class ID3D12GraphicsCommandList;
+class ID3D12CommandAllocator;
 
 namespace RHI
 {
+    namespace DirectX12
+    {
+        class GraphicsCommandList;
+        class CommandQueue;
+        class CommandAllocator;
+        class SwapChain;
+    }
+
     namespace ObjectInterface
     {
-        class Texture : IObject
+        class Device;
+
+        class CommandContext : IObject
         {
 
             /******************************************************************
@@ -59,34 +70,34 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Texture();
-            ~Texture();
+            CommandContext();
+            ~CommandContext();
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override 
-            {
-                
-#ifdef CONSOLE_DEBUG
-                std::cout << "Succeeded Initialize Texture From C++" << std::endl;
-#endif
+            RHI_RESULT Initialize()override;
+            RHI_RESULT Initialize(Device* device, ObjectInfo* info)override;
 
-                return RHI_SUCCEEDED; 
-            }
-
+            RHI::DirectX12::GraphicsCommandList* GetGraphicsCommandList()const;
+            RHI::DirectX12::CommandQueue*        GetCommandQueue()const;
+            RHI::DirectX12::CommandAllocator*    GetCommandAllocator()const;
+            RHI::DirectX12::SwapChain*           GetSwapChain()const;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
-
+            std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _graphicsCommandList;
+            std::unique_ptr<RHI::DirectX12::CommandQueue>        _commandQueue;
+            std::unique_ptr<RHI::DirectX12::CommandAllocator>    _commandAllocator;
+            std::unique_ptr<RHI::DirectX12::SwapChain>           _swapChain;
         };
+
     }
 }
 
-
-#endif // RHI_TEXTURE_H_
+#endif // RHI_COMMAND_CONTEXT_H_
 
 /************************************
 * End of file

@@ -86,7 +86,7 @@ namespace RHI
                 if (_currentSrvIndex >= _maxSrvCount)
                 {// 許容オーバー
 
-                    return 10;
+                    return 9999;
                 }
                 // なければ新しい番号を発行
                 return _currentSrvIndex++;

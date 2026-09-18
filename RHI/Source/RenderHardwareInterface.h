@@ -120,6 +120,8 @@ namespace RHI
         /// </summary>
         void CleanUp();
 
+        void TestRender();
+
     public:          /*---アクセッサー関数群---*/
 
 

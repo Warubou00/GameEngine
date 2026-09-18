@@ -54,6 +54,11 @@ namespace RHI
 			return device->CreateGraphicsPipelineState(_pPsoDesc, IID_PPV_ARGS(&_pPSO));
 		}
 
+		ID3D12PipelineState* PipelineState::Get()const
+		{
+			return _pPSO.Get();
+		}
+
 		// ==============================================
 		// ‰ð•ú
 		// ==============================================

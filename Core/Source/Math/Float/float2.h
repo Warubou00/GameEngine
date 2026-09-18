@@ -18,12 +18,14 @@
 #ifndef FLOAT2_H_
 #define FLOAT2_H_
 
+#include "../../common.h"
+
 namespace Core
 {
 	// =============================================================
 	// Float2
 	// ============================================================= 
-	struct Float2
+	struct CORE_API_CLASS Float2
 	{
 		union {
 			float _float[2];

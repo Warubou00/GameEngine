@@ -21,10 +21,16 @@
 #include "CommandContext.h"
 #include "Device.h"
 
+#include "../DXGI/dxgiFactory6.h"
+#include "../DirectX12/Object/dx12_device.h"
 #include "../DirectX12/Object/dx12_graphicsCommandList.h"
 #include "../DirectX12/Object/dx12_commandQueue.h"
 #include "../DirectX12/Object/dx12_commandAllocator.h"
 #include "../DirectX12/Object/dx12_swapChain.h"
+
+#include <d3d12.h>
+
+#include "../../Core/Source/Log/logger.h"
 
 /******************************************************************
 * Macro Definitions
@@ -66,29 +72,43 @@ namespace RHI
 			_graphicsCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
 			_swapChain           = std::make_unique<DirectX12::SwapChain>();
 
-			HRESULT hr = _commandQueue->Create(device->GetDx12Device());
-			hr         = _commandAllocator->Create(device->GetDx12Device());
-			hr         = _graphicsCommandList->Create(device->GetDx12Device(), _commandAllocator->Get());
+			ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
+			HRESULT hr = _commandQueue->Create(dx12Device);
+			hr         = _commandAllocator->Create(dx12Device);
+			hr         = _graphicsCommandList->Create(dx12Device, _commandAllocator->Get());
 
 			HWND hWnd   = static_cast<HWND>(info->HWnd);
 			UINT width  = static_cast<UINT>(info->Width);
 			UINT height = static_cast<UINT>(info->Height);
-			hr         = _swapChain->Create(device->GetDxgiFactory6(), _commandQueue->Get(), &hWnd, width, height);
+			hr         = _swapChain->Create(device->GetDxgiFactory()->Get(), _commandQueue->Get(), &hWnd, width, height);
 
 #ifdef CONSOLE_DEBUG
-			std::cout << "**************************************************" << std::endl;
+			Core::Logger::Log("**************************************************");
+			Core::Logger::Log("Succeeded Initialize CommandContext From C++");
 			std::cout << "Succeeded Initialize CommandContext From C++" << std::endl;
 			std::cout << "Width  : " << width  << std::endl;
 			std::cout << "Height : " << height << std::endl;
-			std::cout << "**************************************************" << std::endl;
+			Core::Logger::Log("**************************************************");
 #endif
 
 			return RHI_SUCCEEDED;
 		}
 
-		IDXGISwapChain4* CommandContext::GetSwapChain()const
+		RHI::DirectX12::GraphicsCommandList* CommandContext::GetGraphicsCommandList()const
 		{
-			return _swapChain->Get();
+			return _graphicsCommandList.get();
+		}
+		RHI::DirectX12::CommandQueue* CommandContext::GetCommandQueue()const
+		{
+			return _commandQueue.get();
+		}
+		RHI::DirectX12::CommandAllocator* CommandContext::GetCommandAllocator()const
+		{
+			return _commandAllocator.get();
+		}
+		RHI::DirectX12::SwapChain* CommandContext::GetSwapChain()const
+		{
+			return _swapChain.get();
 		}
 	}
 }

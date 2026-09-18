@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    CommandContext.h
-* @brief   RHI CommandContext
+* @file    Device.h
+* @brief   RHI Device
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/1/13
 * @version v_1.0.0
 *
 * @copyright
@@ -15,14 +15,14 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_COMMAND_CONTEXT_H_
-#define RHI_COMMAND_CONTEXT_H_
+#ifndef RHI_DEVICE_H_
+#define RHI_DEVICE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <memory>
-#include "IObject.h"
+#include <string>
+#include "IRHIObject.h"
 
 /******************************************************************
 * Macro Definitions
@@ -38,23 +38,22 @@
 * Structure Declarations
 ******************************************************************/
 
-class IDXGISwapChain4;
-
 namespace RHI
 {
+    namespace DirectX
+    {
+        class Adapter;
+        class DXGIFactory6;
+    }
+
     namespace DirectX12
     {
-        class GraphicsCommandList;
-        class CommandQueue;
-        class CommandAllocator;
-        class SwapChain;
+        class Device;
     }
 
     namespace ObjectInterface
     {
-        class Device;
-
-        class CommandContext : IObject
+        class Device : IObject
         {
 
             /******************************************************************
@@ -68,31 +67,38 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            CommandContext();
-            ~CommandContext();
+            Device();
+            ~Device();
 
 
         public:          /*---クラスメソッド---*/
 
             RHI_RESULT Initialize()override;
-            RHI_RESULT Initialize(Device* device, ObjectInfo* info)override;
 
-            IDXGISwapChain4* GetSwapChain()const;
+            DirectX::DXGIFactory6* GetDxgiFactory()const;
+            DirectX::Adapter*      GetAdapter()const;
+            DirectX12::Device*     GetDevice()const;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
-            std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _graphicsCommandList;
-            std::unique_ptr<RHI::DirectX12::CommandQueue>        _commandQueue;
-            std::unique_ptr<RHI::DirectX12::CommandAllocator>    _commandAllocator;
-            std::unique_ptr<RHI::DirectX12::SwapChain>           _swapChain;
+
+            // DXGIファクトリー
+            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
+            // アダプター
+            std::unique_ptr<DirectX::Adapter> _adapter;
+            // DirectX12のデバイス
+            std::unique_ptr<DirectX12::Device> _dx12Device;
+
+            std::string getDeviceVersion();
+            std::string getAdapterVersion();
         };
 
     }
 }
 
-#endif // RHI_COMMAND_CONTEXT_H_
+#endif // RHI_DEVICE_H_
 
 /************************************
 * End of file

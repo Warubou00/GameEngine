@@ -18,7 +18,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IObject.h"
+#include "IRHIObject.h"
 
 #include "Device.h"
 #include "CommandContext.h"

@@ -21,11 +21,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <memory>
-#include "IObject.h"
-
-// TODO : 削除予定
-#include <d3d12.h>
+#include "IRHIObject.h"
 
 /******************************************************************
 * Macro Definitions
@@ -79,6 +75,11 @@ namespace RHI
 
         public:          /*---アクセッサー関数群---*/
 
+            RHI::DirectX12::DescriptorHeapManager* GetDescHeapManager()const;
+            RHI::DirectX12::ResourceBuffer* GetGlobalVB()const;
+            RHI::DirectX12::ResourceBuffer* GetSceneVB()const;
+            RHI::DirectX12::ResourceBuffer* GetGlobalCB()const;
+            RHI::DirectX12::ResourceBuffer* GetSceneCB()const;
 
         private:         /*---メンバ変数---*/
 
