@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -31,8 +32,25 @@ public class RHI : IDisposable
         public int InitializedTexture;
     }
 
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void LogCallbackDelegate(
+            [MarshalAs(UnmanagedType.LPStr)] string message);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void WLogCallbackDelegate(
+            [MarshalAs(UnmanagedType.LPWStr)] string message);
+
+    private static LogCallbackDelegate _logCallback;
+    private static WLogCallbackDelegate _wLogCallback;
+
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void RHI_SetLogCallback(LogCallbackDelegate callback, WLogCallbackDelegate wcallback);
+
     [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern void RHI_Initialize(out RHIInitializedInfo info, RHIInfo rHIInfo);
+
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void RHI_TestRender();
 
     public void Initialize(out RHIInitializedInfo info)
     {
@@ -40,6 +58,12 @@ public class RHI : IDisposable
         rhiInfo.width       = window.Width;
         rhiInfo.height      = window.Height;
         rhiInfo.enableVSync = 0;
+        window.Show();
+
+        _logCallback  = new LogCallbackDelegate(Log);
+        _wLogCallback = new WLogCallbackDelegate(Log);
+
+        RHI_SetLogCallback(_logCallback, _wLogCallback);
 
         RHI_Initialize(out info, rhiInfo);
 
@@ -48,7 +72,7 @@ public class RHI : IDisposable
 
     public void Render()
     {
-
+        RHI_TestRender();
     }
 
     public void Dispose()
@@ -79,6 +103,11 @@ public class RHI : IDisposable
             default:
                 return "NULL";
         }
+    }
+
+    private void Log(string message)
+    {
+        Console.WriteLine(message);
     }
 
     private readonly RHI_RESULT[] _rhiResult =

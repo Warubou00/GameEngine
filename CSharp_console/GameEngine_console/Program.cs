@@ -20,6 +20,13 @@ namespace GameEngine_console
             Console.WriteLine($"CommandContext : {rhi.CheckRHIResult(info.InitializedCommandContext)}");
             Console.WriteLine($"Buffer         : {rhi.CheckRHIResult(info.InitializedBuffer)}");
             Console.WriteLine($"Texture        : {rhi.CheckRHIResult(info.InitializedTexture)}");
+
+            while(true)
+            {
+                System.Windows.Forms.Application.DoEvents();
+
+                rhi.Render();
+            }
         }
     }
 }

@@ -98,6 +98,8 @@ namespace RHI
             // 基本2つなので先頭を返す
             D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();
 
+            ID3D12DescriptorHeap* GetSrvHeap()const { return _srvUavCbvHeap.Get(); }
+
             // サイズ取得
             UINT GetSrvDescriptorSize();
             UINT GetRtvDescriptorSize();

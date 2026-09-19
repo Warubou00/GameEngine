@@ -22,6 +22,8 @@
 * Include Headers
 ******************************************************************/
 #include "IRHIObject.h"
+#include <vector>
+#include <d3d12.h>
 
 /******************************************************************
 * Macro Definitions
@@ -41,6 +43,8 @@ class IDXGISwapChain4;
 class ID3D12CommandQueue;
 class ID3D12GraphicsCommandList;
 class ID3D12CommandAllocator;
+class ID3D12Resource;
+class ID3D12Fence;
 
 namespace RHI
 {
@@ -55,6 +59,8 @@ namespace RHI
     namespace ObjectInterface
     {
         class Device;
+        class Pipeline;
+        class Buffer;
 
         class CommandContext : IObject
         {
@@ -67,6 +73,13 @@ namespace RHI
             /******************************************************************
             * Internal Structure Declarations
             ******************************************************************/
+        public:
+            struct RenderObj
+            {
+                uint32_t VertexOffset;
+                uint32_t CbOffset;
+                uint32_t VertexCount;
+            };
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
@@ -78,6 +91,13 @@ namespace RHI
 
             RHI_RESULT Initialize()override;
             RHI_RESULT Initialize(Device* device, ObjectInfo* info)override;
+
+            void RenderStart(Pipeline* pipeline, Buffer* buffer);
+            void RenderEnd();
+
+            void Render(Buffer* buffer, const std::vector<RenderObj>& renderQueue);
+
+            void ExecuteAndSync();
 
             RHI::DirectX12::GraphicsCommandList* GetGraphicsCommandList()const;
             RHI::DirectX12::CommandQueue*        GetCommandQueue()const;
@@ -92,6 +112,15 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::CommandQueue>        _commandQueue;
             std::unique_ptr<RHI::DirectX12::CommandAllocator>    _commandAllocator;
             std::unique_ptr<RHI::DirectX12::SwapChain>           _swapChain;
+            
+            // 追加: RenderStartとRenderEndで共有する変数
+            UINT            _frameBufferIndex = 0;
+            ID3D12Resource* _backBuffer = nullptr;
+
+            // 追加: 同期(Fence)用オブジェクト
+            ID3D12Fence* _fence = nullptr;
+            uint64_t        _fenceValue = 0;
+            void* _fenceEvent = nullptr; // HANDLEの代替
         };
 
     }

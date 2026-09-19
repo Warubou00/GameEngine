@@ -27,6 +27,8 @@
 #include "../Shader/hlslCompiler.h"
 #include "../DirectX12/Object/dx12_device.h" 
 
+#include "../../Core/Source/Log/logger.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -70,6 +72,11 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetPipelineState()const
         {
             return _pipelineState->Get();
+        }
+
+        ID3D12RootSignature* Pipeline::GetRootSignature()const
+        {
+            return _rootSignature->Get();
         }
 
         RHI_RESULT Pipeline::makePipeline(Device* device)
@@ -134,25 +141,39 @@ namespace RHI
             // シェーダーコードをコンパイル
             ID3DBlob* pVSBlob;
             ID3DBlob* pPSBlob;
-            ID3DBlob* pErrorBlob;
+            ID3DBlob* pErrorBlob = nullptr;
 
             Shader::HLSLCompiler* hlslCompiler = new Shader::HLSLCompiler();
             // VSのコンパイル
-            hlslCompiler->CompileShader(
+            if (FAILED(hlslCompiler->CompileShader(
                 L"../Shader/hlslTemplate.shader",
                 "VSMain",
-                "vs_6_0",
+                "vs_5_0",
                 &pVSBlob,
                 &pErrorBlob
-            );
+            )))
+            {
+                std::string errorLog(static_cast<const char*>(pErrorBlob->GetBufferPointer()), pErrorBlob->GetBufferSize());
+                Core::Logger::Log(errorLog.c_str());
+
+                return RHI_FAILED_INITIALIZED;
+            }
+
             // PSのコンパイル
-            hlslCompiler->CompileShader(
+            if (FAILED(hlslCompiler->CompileShader(
                 L"../Shader/hlslTemplate.shader",
                 "PSMain",
-                "ps_6_0",
+                "ps_5_0",
                 &pPSBlob,
                 &pErrorBlob
-            );
+            )))
+            {
+                std::string errorLog(static_cast<const char*>(pErrorBlob->GetBufferPointer()), pErrorBlob->GetBufferSize());
+                Core::Logger::Log(errorLog.c_str());
+
+                return RHI_FAILED_INITIALIZED;
+            }
+
             delete hlslCompiler;
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
@@ -232,6 +253,8 @@ namespace RHI
                 &vsBlob,
                 &errorBlob
             );
+            std::string errorLog(static_cast<const char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
+            Core::Logger::Log(errorLog.c_str());
 
             hlslCompiler->CompileShader(
                 psPath,
@@ -240,6 +263,10 @@ namespace RHI
                 &psBlob,
                 &errorBlob
             );
+            std::string errorLog2(static_cast<const char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
+            Core::Logger::Log(errorLog2.c_str());
+
+            return RHI_SUCCEEDED;
         }
 	}
 }

@@ -66,7 +66,7 @@ namespace RHI
 
         public:          /*---クラスメソッド---*/
 
-            void CompileShader(
+            HRESULT CompileShader(
                 const std::wstring& fileName,
                 const std::string& entryPoint,
                 const std::string& target,

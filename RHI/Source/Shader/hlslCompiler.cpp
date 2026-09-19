@@ -43,7 +43,7 @@ namespace RHI
 		HLSLCompiler::HLSLCompiler() = default;
 		HLSLCompiler::~HLSLCompiler() = default;
 
-		void HLSLCompiler::CompileShader(
+		HRESULT HLSLCompiler::CompileShader(
 			const std::wstring& fileName,
 			const std::string& entryPoint,
 			const std::string& target,
@@ -58,9 +58,17 @@ namespace RHI
 #else
 			flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
 #endif
-			(void)D3DCompileFromFile(fileName.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, entryPoint.c_str(), target.c_str(), flags /*D3DCOMPILE_ENABLE_STRICTNESS*/, 0, outBlob, errorBlob);
-
-			return;
+			return D3DCompileFromFile(
+				fileName.c_str(),
+				nullptr,
+				D3D_COMPILE_STANDARD_FILE_INCLUDE,
+				entryPoint.c_str(),
+				target.c_str(),
+				flags /*D3DCOMPILE_ENABLE_STRICTNESS*/,
+				0,
+				outBlob,
+				errorBlob
+			);
 		}
 	}
 }

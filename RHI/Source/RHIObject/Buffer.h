@@ -22,6 +22,11 @@
 * Include Headers
 ******************************************************************/
 #include "IRHIObject.h"
+#include <vector>
+
+// 仮置き
+#include <d3d12.h>
+#include "../../Core/Source/Math/Float/float.h"
 
 /******************************************************************
 * Macro Definitions
@@ -36,6 +41,13 @@
 /******************************************************************
 * Structure Declarations
 ******************************************************************/
+
+// 仮の頂点データ
+struct Vertex
+{
+    Core::Float3 Position;
+    Core::Float4 Color;
+};
 
 namespace RHI
 {
@@ -72,6 +84,8 @@ namespace RHI
 
             RHI_RESULT Initialize()override;
             RHI_RESULT Initialize(Device* device, CommandContext* commandContext)override;
+
+            bool UploadVertexData(Device* device, CommandContext* commandContext, const std::vector<Vertex>& vertices);
 
         public:          /*---アクセッサー関数群---*/
 

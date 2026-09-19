@@ -25,9 +25,9 @@
 #include "../DirectX12/Object/dx12_resourceBuffer.h"
 #include "../DirectX12/Object/dx12_swapChain.h"
 #include "../DirectX12/Object/dx12_device.h"
+#include "../DirectX12/Object/dx12_graphicsCommandList.h"
 
 #include "../../Core/Source/Log/logger.h"
-#include "../../Core/Source/Math/Float/float.h"
 
 /******************************************************************
 * Macro Definitions
@@ -42,13 +42,6 @@
 /******************************************************************
 * Structure Declarations
 ******************************************************************/
-
-// 仮の頂点データ
-struct Vertex
-{
-	Core::Float3 Position;
-	Core::Float4 Color;
-};
 
 namespace RHI
 {
@@ -96,6 +89,15 @@ namespace RHI
 				return RHI_FAILED_INITIALIZED;
 			}
 
+			if (!makeCommonView(device))
+			{
+#ifdef CONSOLE_DEBUG
+				Core::Logger::Log("Failed Initialize Common View");
+#endif
+
+				return RHI_FAILED_INITIALIZED;
+			}
+
 #ifdef CONSOLE_DEBUG
 			Core::Logger::Log("Succeeded Initialize Global Scene VB CB From C++");
 #endif
@@ -106,6 +108,62 @@ namespace RHI
 #endif
 
 			return RHI_SUCCEEDED;
+		}
+
+		bool Buffer::UploadVertexData(Device* device, CommandContext* commandContext, const std::vector<Vertex>& vertices)
+		{
+			if (vertices.empty()) return false;
+
+			UINT64 dataSize = vertices.size() * sizeof(Vertex);
+
+			// 1. 一時的なUPLOADバッファを作成
+			auto uploadBuffer = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+			uploadBuffer->Create(device->GetDevice()->GetDevice(), dataSize, D3D12_HEAP_TYPE_UPLOAD);
+
+				// 2. CPU側からUPLOADバッファへデータをコピー（Map/Unmap）
+			void* mappedData = nullptr;
+			// Map の引数: (Subresource, readRange(nullptrならCPUは読まない), ppData)
+			HRESULT hr = uploadBuffer->Get()->Map(0, nullptr, &mappedData);
+			if (FAILED(hr)) return false;
+
+			memcpy(mappedData, vertices.data(), dataSize);
+			uploadBuffer->Get()->Unmap(0, nullptr);
+
+			// 3. CommandContext を使って GPU側に コピー命令 (CopyBufferRegion) を積む
+			auto cmdList = commandContext->GetGraphicsCommandList()->GetCmdList();
+
+			// DEFAULTヒープ(コピー先)の状態を COMMON -> COPY_DEST へ遷移
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+			barrier.Transition.pResource = _sceneVB->Get();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+			cmdList->ResourceBarrier(1, &barrier);
+
+			// UPLOADバッファ から DEFAULTバッファ へデータをコピー
+			cmdList->CopyBufferRegion(
+				_sceneVB->Get(), // コピー先 (VRAM)
+				0,               // コピー先オフセット
+				uploadBuffer->Get(), // コピー元 (共有メモリ)
+				0,               // コピー元オフセット
+				dataSize         // コピーするサイズ
+			);
+
+			// DEFAULTヒープ(コピー先)の状態を COPY_DEST -> GENERIC_READ (シェーダーから読める状態) へ遷移
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+			cmdList->ResourceBarrier(1, &barrier);
+
+			// 4. コマンドを実行し、GPUの処理完了を待つ (フェンスを使用)
+			// ※ この時点では uploadBuffer はまだ破棄してはいけません。
+			// GPUがコピー処理を終えるまで待機するか、安全に破棄できる仕組みが必要です。
+
+			// （※仮実装：コマンドを閉じて実行し、同期する処理をCommandContextに持たせる必要があります）
+			commandContext->ExecuteAndSync();
+
+			return true;
 		}
 
 		RHI::DirectX12::DescriptorHeapManager* Buffer::GetDescHeapManager()const

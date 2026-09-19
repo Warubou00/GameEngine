@@ -40,6 +40,7 @@
 ******************************************************************/
 
 class ID3D12PipelineState;
+class ID3D12RootSignature;
 
 namespace RHI
 {
@@ -81,6 +82,7 @@ namespace RHI
             RHI_RESULT Initialize(Device* device)override;
 
             ID3D12PipelineState* GetPipelineState()const;
+            ID3D12RootSignature* GetRootSignature()const;
 
             RHI_RESULT MakeCustomPipeline(
                 const std::wstring& vsPath,
