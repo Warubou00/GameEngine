@@ -30,7 +30,7 @@
 ******************************************************************/
 #define RHI_API __declspec(dllexport)
 
-#define RHI_RESULT int32_t
+#define RHI_RESULT int
 #define RHI_SUCCEEDED	            (1)	 // ê¨å˜
 #define RHI_FAILED		            (-1) // îƒópìIÇ»é∏îs
 #define RHI_FAILED_INITIALIZED      (-2) // é∏îs_èâä˙âª
