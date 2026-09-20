@@ -20,6 +20,11 @@
 ******************************************************************/
 #include "dx12_device.h"
 
+// API DXGIオブジェクトをインクルード
+// ========================================
+#include "../../DXGI/dxgiFactory6.h"
+#include "../../DXGI/adapter.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -51,12 +56,25 @@ namespace RHI
 		Device::Device() : _isRaytracingSupported(false), _isRaytracingSupported_1_1(false), _isMeshShaderSupported(false) {}
 		Device::~Device() = default;
 
-		HRESULT Device::Create(IDXGIAdapter* adapter)
+		RHI_API_RESULT Device::Initialize()
 		{
+			// オブジェクト生成
+			_dxgiFactory6 = std::make_unique<DirectX::DXGIFactory6>();
+			_adapter = std::make_unique<DirectX::Adapter>();
+
+			// DXGI初期化
+			_dxgiFactory6->Create();
+
+			// つえぇGPU取得
+			_adapter->EnumerateAdapterFromHighPerformance(_dxgiFactory6->Get());
+
+			// アダプター取得
+			auto dxgiAdapter = _adapter->GetAdapter();
+
 			//Direct3Dデバイスの初期化
 			D3D_FEATURE_LEVEL featureLevel;
 			for (auto l : levels) {
-				if (D3D12CreateDevice(adapter, l, IID_PPV_ARGS(&_pDevice)) == S_OK) {
+				if (D3D12CreateDevice(dxgiAdapter, l, IID_PPV_ARGS(&_pDevice)) == S_OK) {
 					featureLevel = l;
 					return S_OK;
 				}
@@ -113,6 +131,11 @@ namespace RHI
 		ID3D12Device9* Device::GetDevice9()const
 		{
 			return _pDevice9.Get();
+		}
+
+		RHI::DirectX::DXGIFactory6* Device::GetDXGIFactory()const
+		{
+			return _dxgiFactory6.get();
 		}
 
 		void Device::Release(void)

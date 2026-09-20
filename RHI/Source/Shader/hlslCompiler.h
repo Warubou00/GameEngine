@@ -21,10 +21,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <d3dcompiler.h>
-#include <string>
-
-#pragma comment (lib, "d3dcompiler.lib")
+#include "hlslHeader.h"
 
 /******************************************************************
 * Macro Definitions

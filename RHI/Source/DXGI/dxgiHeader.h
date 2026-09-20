@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    Texture.cpp
-* @brief   RHI Texture
+* @file    dxgiHeader.h
+* @brief   DXGIHeaderƒNƒ‰ƒX
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/4/24
+* @date    2026/09/19
 * @version v_1.0.0
 *
 * @copyright
@@ -14,12 +14,17 @@
 * @note    
 ************************************************************************************/
 
+#pragma once
+#ifndef DXGI_HEADER_H_
+#define DXGI_HEADER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <DirectXTex.h>
-#include "Texture.h"
+#include<dxgi1_6.h>
+#include<wrl.h>
+
+#pragma comment(lib,"dxgi.lib")
 
 /******************************************************************
 * Macro Definitions
@@ -39,12 +44,14 @@
 
 namespace RHI
 {
-	namespace ObjectInterface
-	{
-		Texture::Texture() {}
-		Texture::~Texture() {}
-	}
+    namespace API
+    {
+
+    }
 }
+
+
+#endif // DXGI_HEADER_H_
 
 /************************************
 * End of file

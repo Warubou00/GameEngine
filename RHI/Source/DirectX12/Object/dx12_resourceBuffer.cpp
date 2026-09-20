@@ -20,6 +20,12 @@
 ******************************************************************/
 #include "dx12_resourceBuffer.h"
 
+// API DirectX12オブジェクトをインクルード
+// ========================================
+#include "dx12_device.h"
+#include "dx12_swapChain.h"
+#include "../dx12_descriptorHeapManager.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -38,17 +44,17 @@ namespace RHI
 {
 	namespace DirectX12
 	{
+        std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _rtvResources = std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>();
 		ResourceBuffer::ResourceBuffer() : _capacity(0ull), _currentOffset(0ull) {}
 		ResourceBuffer::~ResourceBuffer() {}
 
 		// ==============================================
 		// コマンドアロケータの作成
 		// ==============================================
-		HRESULT ResourceBuffer::Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType)
+		HRESULT ResourceBuffer::Create(RHI::DirectX12::Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType)
 		{
 			if (!device)
 			{
-				// TODO : 例外処理 -> nullptr
 				return E_NOTIMPL;
 			}
 
@@ -79,7 +85,7 @@ namespace RHI
                 ? D3D12_RESOURCE_STATE_GENERIC_READ
                 : D3D12_RESOURCE_STATE_COMMON;
 
-            return device->CreateCommittedResource(
+            return device->GetDevice()->CreateCommittedResource(
                 &heapProps,
                 D3D12_HEAP_FLAG_NONE,
                 &desc,
@@ -101,6 +107,50 @@ namespace RHI
             // オフセットを進める
             _currentOffset = alignedOffset + sizeInBytes;
             return alignedOffset;
+        }
+
+        void ResourceBuffer::CreateView(
+            RHI::DirectX12::Device* device,
+            const D3D12_SHADER_RESOURCE_VIEW_DESC& viewDesc,
+            const D3D12_CPU_DESCRIPTOR_HANDLE& handle
+        )
+        {
+            device->GetDevice()->CreateShaderResourceView(_resourceBuffer.Get(), &viewDesc, handle);
+        }
+
+        void ResourceBuffer::CreateView(
+            RHI::DirectX12::Device* device,
+            const D3D12_CONSTANT_BUFFER_VIEW_DESC& viewDesc,
+            const D3D12_CPU_DESCRIPTOR_HANDLE& handle
+        )
+        {
+            device->GetDevice()->CreateConstantBufferView(&viewDesc, handle);
+        }
+
+        HRESULT ResourceBuffer::CreateRtv(
+            RHI::DirectX12::Device* device,
+            RHI::DirectX12::SwapChain* swapChain,
+            RHI::DirectX12::DescriptorHeapManager* descHeapManager
+        )
+        {
+            // RTVのハンドル取得
+            auto rtvHandle = descHeapManager->GetRtvCpuHandleStart();
+
+            // SwapChainDescを取得
+            DXGI_SWAP_CHAIN_DESC1 scDesc = {};
+            auto hr = swapChain->Get()->GetDesc1(&scDesc);
+
+            // rtvの作成
+            ID3D12Resource* resource = nullptr;
+            for (int i = 0; i < scDesc.BufferCount; i++)
+            {
+                swapChain->Get()->GetBuffer(i, IID_PPV_ARGS(&resource));
+
+                device->GetDevice()->CreateRenderTargetView(resource, nullptr, rtvHandle);
+
+                // サイズ分進める
+                rtvHandle.ptr += descHeapManager->GetRtvDescriptorSize();
+            }
         }
 
         UINT64 ResourceBuffer::alignUp(UINT64 size, UINT64 alignment)

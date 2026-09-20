@@ -22,6 +22,8 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include <vector>
+#include "../../API/IResource.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,13 +43,22 @@
 
 namespace RHI
 {
+	namespace APIInterface
+	{
+		class IDevice;
+	}
+
 	namespace DirectX12
 	{
-		class ResourceBuffer
+		class Device;
+		class DescriptorHeapManager;
+		class SwapChain;
+
+		class ResourceBuffer : public APIInterface::IResource
 		{
 		public:
 			ResourceBuffer();
-			~ResourceBuffer();
+			~ResourceBuffer()override;
 
 
 			/***********************************************************************************
@@ -59,7 +70,7 @@ namespace RHI
 			 * @param[in] D3D12_HEAP_TYPE ヒープのタイプ
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType);
+			RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType)override;
 
 			/***********************************************************************************
 			 * @brief メモリの割り当て
@@ -71,12 +82,19 @@ namespace RHI
 			 ************************************************************************************/
 			UINT64 Allocate(UINT64 sizeInBytes, UINT64 alignment);
 
+			void CreateView(RHI::DirectX12::Device* device, const D3D12_SHADER_RESOURCE_VIEW_DESC& viewDesc, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
+			void CreateView(RHI::DirectX12::Device* device, const D3D12_CONSTANT_BUFFER_VIEW_DESC& viewDesc, const D3D12_CPU_DESCRIPTOR_HANDLE& handle);
 			ID3D12Resource* Get() { return _resourceBuffer.Get(); }
+
+			static HRESULT CreateRtv(RHI::DirectX12::Device* device, RHI::DirectX12::SwapChain* swapChain, RHI::DirectX12::DescriptorHeapManager* descHeapManager);
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12Resource> _resourceBuffer;
 			UINT64 _capacity;
 			UINT64 _currentOffset;
+
+			// 唯一のRTVResource
+			static std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _rtvResources;
 
 			//メモリの開始位置を特定のアライメント(倍数)に切り上げる便利関数
 			UINT64 alignUp(UINT64 size, UINT64 alignment);

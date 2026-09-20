@@ -1,28 +1,27 @@
 
 /***********************************************************************************
-* @file    Device.h
-* @brief   RHI Device
-* @details 
+* @file    IFence.h
+* @brief   フェンスクラス
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/1/13
+* @date    2026/09/20
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_DEVICE_H_
-#define RHI_DEVICE_H_
+#ifndef API_INTERFACE_FENCE_H_
+#define API_INTERFACE_FENCE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <string>
-#include "IRHIObject.h"
+#include "IAPI.h"
 
 /******************************************************************
 * Macro Definitions
@@ -38,22 +37,17 @@
 * Structure Declarations
 ******************************************************************/
 
+
+
 namespace RHI
 {
-    namespace DirectX
+    namespace APIInterface
     {
-        class Adapter;
-        class DXGIFactory6;
-    }
+        class IDevice;
+        class ICommandQueue;
+        class ISwapChain;
 
-    namespace DirectX12
-    {
-        class Device;
-    }
-
-    namespace ObjectInterface
-    {
-        class Device : IObject
+        class IFence
         {
 
             /******************************************************************
@@ -67,38 +61,26 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Device();
-            ~Device();
+            IFence() {};
+            virtual ~IFence() = default;
 
 
         public:          /*---クラスメソッド---*/
-
-            RHI_RESULT Initialize()override;
-
-            DirectX::DXGIFactory6* GetDxgiFactory()const;
-            DirectX::Adapter*      GetAdapter()const;
-            DirectX12::Device*     GetDevice()const;
+            virtual RHI_API_RESULT Initialize(IDevice* iDevice, ISwapChain* iSwapChain) = 0;
+            virtual void WaitForSignal(ICommandQueue* iCommandQueue) = 0;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
 
-            // DXGIファクトリー
-            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
-            // アダプター
-            std::unique_ptr<DirectX::Adapter> _adapter;
-            // DirectX12のデバイス
-            std::unique_ptr<DirectX12::Device> _dx12Device;
 
-            std::string getDeviceVersion();
-            std::string getAdapterVersion();
         };
-
     }
 }
 
-#endif // RHI_DEVICE_H_
+
+#endif // API_INTERFACE_FENCE_H_
 
 /************************************
 * End of file

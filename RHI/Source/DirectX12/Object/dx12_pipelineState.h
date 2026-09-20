@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/IPipeline.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,20 +42,23 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		class PipelineState
+		class Device;
+		class RootSignature;
+
+		class PipelineState : public APIInterface::IPipeline
 		{
 		public:
-			PipelineState(D3D12_GRAPHICS_PIPELINE_STATE_DESC* pPsoDesc);
-			~PipelineState();
-
+			PipelineState();
+			~PipelineState()override;
 
 			/***********************************************************************************
 			 * @brief 生成関数
 			 *
-			 * @param[in] ID3D12Device* device デバイスのポインタ
+			 * @param[in] RHI::DirectX12::Device* device デバイスのポインタ
+			 * @param[in] RHI::DirectX12::RootSignature* rootSignature ルートシグネチャのポインタ
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device);
+			RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice, RHI::APIInterface::IResourceBinding* iResourceBinding)override;
 
 			ID3D12PipelineState* Get()const;
 
@@ -66,7 +70,6 @@ namespace RHI
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12PipelineState> _pPSO = nullptr;
-			D3D12_GRAPHICS_PIPELINE_STATE_DESC* _pPsoDesc = {};
 		};
 	}
 }

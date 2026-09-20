@@ -146,9 +146,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h" />
-    <ClInclude Include="pch.h" />
-    <ClInclude Include="Source\adapter.h" />
+    <ClInclude Include="Source\API\IAPI.h" />
+    <ClInclude Include="Source\API\ICommandList.h" />
+    <ClInclude Include="Source\API\ICommandQueue.h" />
+    <ClInclude Include="Source\API\IDescriptorHeap.h" />
+    <ClInclude Include="Source\API\IDevice.h" />
+    <ClInclude Include="Source\API\IFence.h" />
+    <ClInclude Include="Source\API\IPipeline.h" />
+    <ClInclude Include="Source\API\IResource.h" />
+    <ClInclude Include="Source\API\IResourceBinding.h" />
+    <ClInclude Include="Source\API\ISwapChain.h" />
     <ClInclude Include="Source\common.h" />
     <ClInclude Include="Source\DirectX12\debugLayer.h" />
     <ClInclude Include="Source\DirectX12\dx12_descriptorHandle.h" />
@@ -160,7 +167,6 @@
     <ClInclude Include="Source\DirectX12\dx12_textureManager.h" />
     <ClInclude Include="Source\DirectX12\dx12_pipelineStateManager.h" />
     <ClInclude Include="Source\DirectX12\dx12_header.h" />
-    <ClInclude Include="Source\DirectX12\Object\dx12_commandAllocator.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_commandList.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_commandQueue.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_computeCommandList.h" />
@@ -171,33 +177,22 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_resourceBuffer.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_rootSignature.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_swapChain.h" />
-    <ClInclude Include="Source\DirectX12\TempObject\dx12_device.h" />
+    <ClInclude Include="Source\DXGI\adapter.h" />
     <ClInclude Include="Source\DXGI\dxgiFactory6.h" />
-    <ClInclude Include="Source\Interface\IDevice.h" />
+    <ClInclude Include="Source\DXGI\dxgiHeader.h" />
     <ClInclude Include="Source\RenderHardwareInterface.h" />
-    <ClInclude Include="Source\RHIObject\Buffer.h" />
-    <ClInclude Include="Source\RHIObject\CommandContext.h" />
-    <ClInclude Include="Source\RHIObject\Device.h" />
-    <ClInclude Include="Source\RHIObject\IRHIObject.h" />
-    <ClInclude Include="Source\RHIObject\Pipeline.h" />
-    <ClInclude Include="Source\RHIObject\Texture.h" />
+    <ClInclude Include="Source\Shader\hlslCompiledState.h" />
     <ClInclude Include="Source\Shader\hlslCompiler.h" />
+    <ClInclude Include="Source\Shader\hlslHeader.h" />
+    <ClInclude Include="Source\Shader\IShaderCompiledState.h" />
     <ClInclude Include="Source\TextureHandle.h" />
     <ClInclude Include="Source\VertexBufferAllocator.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="pch.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
-    </ClCompile>
-    <ClCompile Include="Source\adapter.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_descriptorHeapManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_resourceManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_pipelineStateManager.cpp" />
-    <ClCompile Include="Source\DirectX12\Object\dx12_commandAllocator.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_commandList.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_commandQueue.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_computeCommandList.cpp" />
@@ -208,15 +203,11 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_resourceBuffer.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_rootSignature.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_swapChain.cpp" />
+    <ClCompile Include="Source\DXGI\adapter.cpp" />
     <ClCompile Include="Source\DXGI\dxgiFactory6.cpp" />
     <ClCompile Include="Source\RenderHardwareInterface.cpp" />
     <ClCompile Include="Source\RHIDll.cpp" />
-    <ClCompile Include="Source\RHIObject\Buffer.cpp" />
-    <ClCompile Include="Source\RHIObject\CommandContext.cpp" />
-    <ClCompile Include="Source\RHIObject\Device.cpp" />
-    <ClCompile Include="Source\RHIObject\IRHIObject.cpp" />
-    <ClCompile Include="Source\RHIObject\Pipeline.cpp" />
-    <ClCompile Include="Source\RHIObject\Texture.cpp" />
+    <ClCompile Include="Source\Shader\hlslCompiledState.cpp" />
     <ClCompile Include="Source\Shader\hlslCompiler.cpp" />
     <ClCompile Include="Source\VertexBufferAllocator.cpp" />
   </ItemGroup>

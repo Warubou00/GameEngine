@@ -41,23 +41,76 @@
 
 namespace RHI
 {
+	namespace APIInterface
+	{
+		class IDevice;
+		class IPipeline;
+		class IDescriptorHeap;
+		class IResourceBinding;
+		class IResource;
+		class ISwapChain;
+	}
+	
 	namespace DirectX12
 	{
-		class GraphicsCommandList : CommandList
+		class Device;
+		class CommandAllocator;
+
+		class GraphicsCommandList : public CommandList
 		{
 		public:
 			GraphicsCommandList();
-			~GraphicsCommandList();
-
-
+			~GraphicsCommandList()override;
 
 			/***********************************************************************************
 			 * @brief コマンドリストの作成
 			 *
-			 * @param[in] ID3D12Device* device デバイス
+			 * @param[in] RHI::DirectX12::Device* device デバイス
+			 * @param[in] RHI::DirectX12::CommandAllocator* commandAllocator コマンドアロケータ
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator);
+			RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice)override;
+
+			/***********************************************************************************
+			 * @brief レンダリング初期処理
+			 * @details core explanation
+			 *
+			 * @param[in] IPipeline* パイプライン
+			 * @return 無し
+			 ************************************************************************************/
+			void Begin(RHI::APIInterface::IPipeline* iPipeline)override;
+
+			void ResourceBarriar(RHI::APIInterface::IResource* iResource, ResourceState before, ResourceState after)override;
+
+			/***********************************************************************************
+			 * @brief レンダリング
+			 * @details core explanation
+			 *
+			 * @param[in] IPipeline*        パイプライン
+			 * @param[in] IDescriptorHeap*  ディスクリプタヒープ
+			 * @param[in] IResourceBinding* リソースバインディング
+			 * @param[in] IResource*        リソース
+			 * @param[in] ISwapChain*       スワップチェイン
+			 * @return 無し
+			 ************************************************************************************/
+			void Render(
+				RHI::APIInterface::IPipeline*        iPipeline,
+				RHI::APIInterface::IDescriptorHeap*  iDescHeap,
+				RHI::APIInterface::IResourceBinding* iResourceBinding,
+				RHI::APIInterface::IResource*        iResource,
+				RHI::APIInterface::ISwapChain*       iSwapChian
+			)override;
+
+			/***********************************************************************************
+			 * @brief レンダリング修了処理
+			 * @details core explanation
+			 *
+			 * @param[in]
+			 * @return 無し
+			 ************************************************************************************/
+			void End()override;
+
+			ID3D12CommandList* GetQueueList(void);
 
 			/***********************************************************************************
 			 * @brief コマンドリストのバージョンアップの試み(4,6,7)
@@ -120,13 +173,14 @@ namespace RHI
 			 * @details ComPtrは解放しない
 			 * 
 			 ************************************************************************************/
-			void Release(void);
+			void Release(void)override;
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>  _pCmdList;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> _pCmdList4;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList6> _pCmdList6;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> _pCmdList7;
+			Microsoft::WRL::ComPtr<ID3D12CommandAllocator>     _pCmdAllocator;
 
 			HRESULT asCmdList();
 			HRESULT asCmdList4();

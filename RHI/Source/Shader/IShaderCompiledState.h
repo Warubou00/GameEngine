@@ -1,29 +1,27 @@
 
 /***********************************************************************************
-* @file    Texture.h
-* @brief   RHI Texture
-* @details 
+* @file    IShaderCompieldSate.h
+* @brief   シェーダーコンパイル後のステータス
+* @details
 *
 * @author  Keigo Onari
-* @date    2025/1/13
+* @date    2026/09/19
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_TEXTURE_H_
-#define RHI_TEXTURE_H_
+#ifndef INTERFACE_SHADER_COMPILED_STATE_H_
+#define INTERFACE_SHADER_COMPILED_STATE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <string>
-#include <vector>
-#include "IRHIObject.h"
+
 
 /******************************************************************
 * Macro Definitions
@@ -43,9 +41,9 @@
 
 namespace RHI
 {
-    namespace ObjectInterface
+    namespace Shader
     {
-        class Texture : IObject
+        class IShaderCompiledState
         {
 
             /******************************************************************
@@ -59,21 +57,13 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Texture();
-            ~Texture();
+            IShaderCompiledState();
+            ~IShaderCompiledState();
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override 
-            {
-                
-#ifdef CONSOLE_DEBUG
-                std::cout << "Succeeded Initialize Texture From C++" << std::endl;
-#endif
 
-                return RHI_SUCCEEDED; 
-            }
 
 
         public:          /*---アクセッサー関数群---*/
@@ -81,12 +71,13 @@ namespace RHI
 
         private:         /*---メンバ変数---*/
 
+
         };
     }
 }
 
 
-#endif // RHI_TEXTURE_H_
+#endif // INTERFACE_SHADER_COMPILED_STATE_H_
 
 /************************************
 * End of file

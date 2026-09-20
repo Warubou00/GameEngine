@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/ISwapChain.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,9 +42,22 @@
 
 namespace RHI
 {
+    namespace APIInterface
+    {
+        class IDevice;
+        class ICommandQueue;
+    }
+
+    namespace DirectX
+    {
+        class DXGIFactory6;
+    }
+
     namespace DirectX12
     {
-        class SwapChain
+        class CommandQueue;
+
+        class SwapChain : public APIInterface::ISwapChain
         {
 
             /******************************************************************
@@ -58,7 +72,7 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             SwapChain();
-            ~SwapChain();
+            ~SwapChain()override;
 
 
         public:          /*---クラスメソッド---*/
@@ -75,7 +89,7 @@ namespace RHI
              * @param[in] UINT height 高さ
              * @return HRESULT 成功の有無
              ************************************************************************************/
-            HRESULT Create(IDXGIFactory6* pDxgiFactory, ID3D12CommandQueue* pCmdQueue, HWND* hWnd, UINT width, UINT height);
+            RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice, RHI::APIInterface::ICommandQueue* iCmdQueue, HWND* hWnd, UINT width, UINT height)override;
 
             /***********************************************************************************
              * @brief 取得関数
@@ -83,6 +97,12 @@ namespace RHI
              * @return IDXGISwapChain4* スワップチェーンのポインタ
              ************************************************************************************/
             IDXGISwapChain4* Get(void)const;
+
+            UINT GetFrameBufferIndex(void)const;
+
+            ID3D12Resource* GetCurrentBuffer(void)const;
+
+            void Present(void)override;
 
             /***********************************************************************************
              * @brief 解放関数

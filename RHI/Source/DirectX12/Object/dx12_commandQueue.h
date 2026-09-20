@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/ICommandQueue.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,14 +40,22 @@
 
 namespace RHI
 {
+	namespace APIInterface
+	{
+		class IDevice;
+		class ICommandList;
+	}
+
 	namespace DirectX12
 	{
-		class CommandQueue
+		class Device;
+		class GraphicsCommandList;
+	
+		class CommandQueue : public APIInterface::ICommandQueue
 		{
 		public:
 			CommandQueue();
-			~CommandQueue();
-
+			~CommandQueue()override;
 
 
 			/***********************************************************************************
@@ -56,7 +65,7 @@ namespace RHI
 			 * @param[in] ID3D12Device* device デバイス
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device);
+			RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice)override;
 
 			/***********************************************************************************
 			 * @brief コマンドキューの取得
@@ -64,6 +73,8 @@ namespace RHI
 			 * @return ID3D12CommandQueue* コマンドキューのポインタ
 			 ************************************************************************************/
 			ID3D12CommandQueue* Get(void);
+
+			void End(RHI::APIInterface::ICommandList* iCmdList)override;
 
 			/***********************************************************************************
 			 * @brief 解放関数

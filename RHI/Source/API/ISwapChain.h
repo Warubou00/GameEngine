@@ -1,29 +1,27 @@
 
 /***********************************************************************************
-* @file    Pipeline.h
-* @brief   RHI Piepeline
-* @details 
+* @file    IResource.h
+* @brief   リソースクラス
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/09/16
+* @date    2026/09/20
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_PIPELINE_H_
-#define RHI_PIPELINE_H_
+#ifndef API_INTERFACE_SWAP_CHAIN_H_
+#define API_INTERFACE_SWAP_CHAIN_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <vector>
-#include <string>
-#include "IRHIObject.h"
+#include "IAPI.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,22 +37,16 @@
 * Structure Declarations
 ******************************************************************/
 
-class ID3D12PipelineState;
-class ID3D12RootSignature;
+
 
 namespace RHI
 {
-    namespace DirectX12
+    namespace APIInterface
     {
-        class PipelineState;
-        class RootSignature;
-    }
+        class IDevice;
+        class ICommandQueue;
 
-    namespace ObjectInterface
-    {
-        class Device;
-
-        class Pipeline : IObject
+        class ISwapChain
         {
 
             /******************************************************************
@@ -65,47 +57,31 @@ namespace RHI
             /******************************************************************
             * Internal Structure Declarations
             ******************************************************************/
-            struct CustomPipeline
-            {
-                const char* PipelineName;
-                std::unique_ptr<RHI::DirectX12::PipelineState> Pipeline;
-            };
+
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Pipeline();
-            ~Pipeline();
+            ISwapChain() {};
+            virtual ~ISwapChain() = default;
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override;
-            RHI_RESULT Initialize(Device* device)override;
+            virtual RHI_API_RESULT Initialize(IDevice* iDevice, ICommandQueue* iCommandQueue, HWND* hWnd, UINT width, UINT height) = 0;
 
-            ID3D12PipelineState* GetPipelineState()const;
-            ID3D12RootSignature* GetRootSignature()const;
-
-            RHI_RESULT MakeCustomPipeline(
-                const std::wstring& vsPath,
-                const std::string& vsEntry,
-                const std::wstring& psPath,
-                const std::string& psEntry
-            );
+            virtual void Present(void) = 0;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
-            std::unique_ptr<DirectX12::PipelineState> _pipelineState;
-            std::unique_ptr<DirectX12::RootSignature> _rootSignature;
-            std::vector<CustomPipeline>               _customPipeline;
 
-            RHI_RESULT makePipeline(Device* device);
+
         };
-
     }
 }
 
-#endif // RHI_PIPELINE_H_
+
+#endif // API_INTERFACE_SWAP_CHAIN_H_
 
 /************************************
 * End of file

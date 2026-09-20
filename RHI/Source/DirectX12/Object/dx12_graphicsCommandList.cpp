@@ -20,6 +20,16 @@
 ******************************************************************/
 #include "dx12_graphicsCommandList.h"
 
+// API DirectX12オブジェクトをインクルード
+// ========================================
+#include "dx12_device.h"
+#include "dx12_commandAllocator.h"
+#include "dx12_pipelineState.h"
+#include "dx12_rootSignature.h"
+#include "dx12_swapChain.h"
+#include "../dx12_descriptorHeapManager.h"
+#include "dx12_resourceBuffer.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -44,23 +54,140 @@ namespace RHI
 		// ==============================================
 		// コマンドリストの作成
 		// ==============================================
-		HRESULT GraphicsCommandList::Create(ID3D12Device* device, ID3D12CommandAllocator* cmdAllocator)
+		RHI_API_RESULT GraphicsCommandList::Initialize(RHI::APIInterface::IDevice* iDevice)
 		{
-			if (!device || !cmdAllocator)
+			if (!iDevice)
 			{
-				// TODO : 例外処理 -> nullptr
-
-				return E_NOTIMPL;
+				return RHI_API_FAILED_INVALID_ARGUMENT;
 			}
-			return device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cmdAllocator, nullptr, IID_PPV_ARGS(&_pCmdList));
+
+			auto device = static_cast<RHI::DirectX12::Device*>(iDevice);
+			if (!device)
+			{
+				return RHI_API_FAILED_INVALID_ARGUMENT;
+			}
+
+			device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_pCmdAllocator));
+			return device->GetDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _pCmdAllocator.Get(), nullptr, IID_PPV_ARGS(&_pCmdList));
+		}
+
+		// レンダリング初期処理
+		void GraphicsCommandList::Begin(RHI::APIInterface::IPipeline* iPipeline)
+		{
+			auto pipelineState = static_cast<PipelineState*>(iPipeline);
+			if (!pipelineState)
+			{
+				return;
+			}
+
+			// リセット
+			_pCmdList->Reset(_pCmdAllocator.Get(), pipelineState->Get());
+
+			// 2. ビューポートとシザー矩形の設定 (画面サイズに応じた設定)
+			UINT width = 1280;          // 仮
+			UINT height = 720;          // 仮
+			D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+			D3D12_RECT scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+			_pCmdList->RSSetViewports(1, &viewport);
+			_pCmdList->RSSetScissorRects(1, &scissorRect);
+
+		}
+
+		void GraphicsCommandList::ResourceBarriar(RHI::APIInterface::IResource* iResource, ResourceState before, ResourceState after)
+		{
+			if (!iResource)
+			{
+				return;
+			}
+
+			auto resource = static_cast<RHI::DirectX12::ResourceBuffer*>(iResource);
+
+			D3D12_RESOURCE_STATES stateBefore, stateAfter;
+			stateBefore = static_cast<D3D12_RESOURCE_STATES>(before);
+			stateAfter = static_cast<D3D12_RESOURCE_STATES>(after);
+
+			// 3. リソースバリア (Present -> RenderTarget)
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+			barrier.Transition.pResource = resource->Get();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = stateBefore;
+			barrier.Transition.StateAfter = stateAfter;
+			_pCmdList->ResourceBarrier(1, &barrier);
+		}
+
+		// レンダリング処理
+		void GraphicsCommandList::Render(
+			RHI::APIInterface::IPipeline*        iPipeline,
+			RHI::APIInterface::IDescriptorHeap*  iDescHeap,
+			RHI::APIInterface::IResourceBinding* iResourceBinding,
+			RHI::APIInterface::IResource*        iResource,
+			RHI::APIInterface::ISwapChain*       iSwapChain
+		)
+		{
+			// Beginとの間にResourceBarrierを記述
+			
+			auto pipelineState  = static_cast<PipelineState*>(iPipeline);
+			auto descHeap       = static_cast<DescriptorHeapManager*>(iDescHeap);
+			auto rootSignature  = static_cast<RootSignature*>(iResourceBinding);
+			auto resourceBuffer = static_cast<ResourceBuffer*>(iResource);
+			auto swapChain      = static_cast<SwapChain*>(iSwapChain);
+
+			if (!pipelineState || !descHeap || !rootSignature || !resourceBuffer)
+			{
+				return;
+			}
+
+			// 4. RTVの設定と画面クリア
+			auto rtvHandle = descHeap->GetRtvCpuHandle(swapChain->GetFrameBufferIndex()); //
+			_pCmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+			const float clearColor[] = { 0.1f, 0.2f, 0.4f, 1.0f };
+			_pCmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+			// ==============================================================
+			// 5. ルートシグネチャとヒープのセット
+			// ==============================================================
+			_pCmdList->SetGraphicsRootSignature(rootSignature->Get()); //[cite: 7]
+
+			// メガVB用のSRVが登録されているヒープをセット[cite: 4, 7]
+			ID3D12DescriptorHeap* heaps[] = { descHeap->GetSrvHeap() };
+			_pCmdList->SetDescriptorHeaps(1, heaps);
+
+			// [パラメータ1]: メガVBのSRVテーブル (t0) をセット[cite: 7]
+			_pCmdList->SetGraphicsRootDescriptorTable(1, descHeap->GetSrvGpuHandle(1));
+
+			// [パラメータ2]: Global定数バッファ (b1) を Root CBV としてセット[cite: 7]
+			D3D12_GPU_VIRTUAL_ADDRESS globalCbAddress = resourceBuffer->Get()->GetGPUVirtualAddress();
+			_pCmdList->SetGraphicsRootConstantBufferView(2, globalCbAddress);
+
+			// ==============================================================
+			// 6. オブジェクト単位の描画ループ
+			// ==============================================================
+			_pCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			// 以下にレンダリング処理を記述
+
+
+		}
+
+		// レンダリング修了処理
+		void GraphicsCommandList::End()
+		{
+			// 8. コマンドリストのクローズと実行
+			_pCmdList->Close();
+		}
+
+		ID3D12CommandList* GraphicsCommandList::GetQueueList(void)
+		{
+			ID3D12CommandList* cmdList = { _pCmdList.Get() };
+			return cmdList;
 		}
 
 		HRESULT GraphicsCommandList::TryVersionUp()
 		{
 			if (!_pCmdList)
 			{
-				// TODO : 例外処理 -> nullptr
-
 				return E_NOTIMPL;
 			}
 
@@ -71,8 +198,6 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : 例外処理 -> nullptr
-
 				return E_NOTIMPL;
 			}
 
@@ -83,8 +208,6 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : 例外処理 -> nullptr
-
 				return E_NOTIMPL;
 			}
 
@@ -97,8 +220,6 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : 例外処理 -> nullptr
-
 				return E_NOTIMPL;
 			}
 

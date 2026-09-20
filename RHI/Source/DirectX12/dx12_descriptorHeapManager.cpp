@@ -20,6 +20,10 @@
 ******************************************************************/
 #include "dx12_descriptorHeapManager.h"
 
+// API DirectX12をインクルード
+// ========================================
+#include "Object/dx12_device.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -40,12 +44,17 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-        HRESULT DescriptorHeapManager::Create(ID3D12Device* device)
+        RHI_API_RESULT DescriptorHeapManager::Initialize(RHI::APIInterface::IDevice* iDevice)
         {
+            if (!iDevice)
+            {
+                return RHI_API_FAILED_INVALID_ARGUMENT;
+            }
+
+            auto device = static_cast<RHI::DirectX12::Device*>(iDevice);
             if (!device)
             {
-                // TODO : 例外処理 -> nullptr
-                return E_INVALIDARG;
+                return RHI_API_FAILED_INVALID_ARGUMENT;
             }
 
             D3D12_DESCRIPTOR_HEAP_DESC descHeapDesc = {};
@@ -53,18 +62,18 @@ namespace RHI
             descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;                      // シェーダーから隠す
             descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;                       // RTV
             descHeapDesc.NodeMask       = 0;
-            HRESULT hr = device->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_rtvHeap));
+            HRESULT hr = device->GetDevice()->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_rtvHeap));
             if (FAILED(hr))return hr;
 
-            _rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+            _rtvDescriptorSize = device->GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
             descHeapDesc.NumDescriptors = _maxSrvCount;                                         // 最大ビュー数
             descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;            // シェーダーから見えるように
             descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;               // CBV/SRV/UAV
-            hr = device ->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_srvUavCbvHeap));   // 生成
+            hr = device ->GetDevice()->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_srvUavCbvHeap));   // 生成
             if (FAILED(hr))return hr;
 
-            _srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            _srvDescriptorSize = device->GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
             descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
             descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;

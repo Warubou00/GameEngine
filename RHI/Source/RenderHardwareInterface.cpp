@@ -19,15 +19,24 @@
 * Include Headers
 ******************************************************************/
 #include "RenderHardwareInterface.h"
-#include "RHIObject/Device.h"
-#include "RHIObject/CommandContext.h"
-#include "RHIObject/Buffer.h"
-#include "RHIObject/Texture.h"
-#include "RHIObject/Pipeline.h"
 
+#include <vector>
+
+
+// API DirectX12オブジェクトをインクルード
+// ========================================
+#include "DirectX12/Object/dx12_device.h"
+#include "DirectX12/Object/dx12_graphicsCommandList.h"
+#include "DirectX12/Object/dx12_commandQueue.h"
 #include "DirectX12/dx12_descriptorHeapManager.h"
+#include "DirectX12/Object/dx12_pipelineState.h"
+#include "DirectX12/Object/dx12_resourceBuffer.h"
+#include "DirectX12/Object/dx12_rootSignature.h"
+#include "DirectX12/Object/dx12_swapChain.h"
+#include "DirectX12/Object/dx12_fence.h"
+// ========================================
 
-#include <dxgi1_5.h>
+#include "../../Core/Source/Math/Float/float.h"
 
 /******************************************************************
 * Macro Definitions
@@ -44,26 +53,29 @@
 * Structure Declarations
 ******************************************************************/
 
-
+// 仮
+struct Vertex
+{
+    Core::Float3 Position;
+    Core::Float4 Color;
+};
 
 namespace RHI
 {
     RenderHardwareInterface::RenderHardwareInterface() = default;
     RenderHardwareInterface::~RenderHardwareInterface() = default;
-    
+
     void RenderHardwareInterface::Initialize(RHI::RenderHardwareInterface::RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objInfo)
     {
-        _device         = std::make_unique<ObjectInterface::Device>();
-        _commandContext = std::make_unique<ObjectInterface::CommandContext>();
-        _buffer         = std::make_unique<ObjectInterface::Buffer>();
-        _texture        = std::make_unique<ObjectInterface::Texture>();
-        _pipeline       = std::make_unique<ObjectInterface::Pipeline>();
-
-        info->InitializedDevice         = _device->Initialize();
-        info->InitializedCommandContext = _commandContext->Initialize(_device.get(), objInfo);
-        info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
-        //info->InitializedTexture        = _texture->Initialize();
-        info->InitializedTexture        = _pipeline->Initialize(_device.get());
+        _device = std::make_unique<APIInterface::IDevice>();
+        _cmdList = std::make_unique<APIInterface::ICommandList>();
+        _cmdQueue = std::make_unique<APIInterface::ICommandQueue>();
+        _descHeap = std::make_unique<APIInterface::IDescriptorHeap>();
+        _pipeline = std::make_unique<APIInterface::IPipeline>();
+        _resource = std::make_unique<APIInterface::IResource>();
+        _resourceBinding = std::make_unique<APIInterface::IResourceBinding>();
+        _swapChain = std::make_unique<APIInterface::ISwapChain>();
+        _fence = std::make_unique<APIInterface::IFence>();
 
         std::vector<Vertex> quadVertices = {
             // 1つ目の三角形 (左上, 右上, 左下)
@@ -87,56 +99,45 @@ namespace RHI
             { { 0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f} }  // 右下 (白)
         };
 
-        // バッファへ転送
-        _buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices);
+        _device->Initialize();
+        _cmdList->Initialize(_device.get());
+        _cmdQueue->Initialize(_device.get());
+        _descHeap->Initialize(_device.get());
+        _pipeline->Initialize(_device.get(), _resourceBinding.get());
+        _resource->Initialize(_device.get());
+        _resourceBinding->Initialize(_device.get());
+        _swapChain->Initialize(_device.get(), _cmdQueue.get(), nullptr, 0, 0);
+        _fence->Initialize(_device.get(), _swapChain.get());
 
         return;
     }
 
-    /// <summary>
-    /// デバイスの取得
-    /// </summary>
-    /// <returns>ObjectInterface::Device デバイス</returns>
-    inline ObjectInterface::Device* RenderHardwareInterface::GetDevice()
-    {
-        return _device.get();
-    }
-
-    /// <summary>
-    /// コマンドコンテキストの取得
-    /// </summary>
-    /// <returns>ObjectInterface::CommandContext コマンドコンテキスト</returns>
-    inline ObjectInterface::CommandContext* RenderHardwareInterface::GetCommandContext()
-    {
-        return _commandContext.get();
-    }
-
-    /// <summary>
-    /// バッファーの取得
-    /// </summary>
-    /// <returns>ObjectInterface::Buffer バッファー</returns>
-    inline ObjectInterface::Buffer* RenderHardwareInterface::GetBuffer()
-    {
-        return _buffer.get();
-    }
-
-    /// <summary>
-    /// テクスチャの取得
-    /// </summary>
-    /// <returns>ObjectInterface::Texture テクスチャ</returns>
-    inline ObjectInterface::Texture* RenderHardwareInterface::GetTexture()
-    {
-        return _texture.get();
-    }
-
     void RenderHardwareInterface::Begin()
+    {
+        _cmdList->Begin(_pipeline.get());
+        _cmdList->ResourceBarriar(
+            _resource.get(),
+            APIInterface::ICommandList::ResourceState::RESOURCE_STATE_PRESENT,
+            APIInterface::ICommandList::ResourceState::RESOURCE_STATE_RENDER_TARGET
+        );
+    }
+
+    void RenderHardwareInterface::Render()
     {
 
     }
 
     void RenderHardwareInterface::End()
     {
-
+        _cmdList->End();
+        _cmdQueue->End(_cmdList.get());
+        _cmdList->ResourceBarriar(
+            _resource.get(),
+            APIInterface::ICommandList::ResourceState::RESOURCE_STATE_RENDER_TARGET,
+            APIInterface::ICommandList::ResourceState::RESOURCE_STATE_PRESENT
+        );
+        _swapChain->Present();
+        _fence->WaitForSignal(_cmdQueue.get());
     }
 
     void RenderHardwareInterface::CleanUp()

@@ -23,6 +23,7 @@
 ******************************************************************/
 #include "dx12_header.h"
 #include <vector>
+#include "../API/IDescriptorHeap.h"
 
 /******************************************************************
 * Macro Definitions
@@ -42,9 +43,14 @@
 
 namespace RHI
 {
+    namespace APIInterface
+    {
+        class IDevice;
+    }
+
     namespace DirectX12
     {
-        class DescriptorHeapManager
+        class DescriptorHeapManager : public APIInterface::IDescriptorHeap
         {
 
             /******************************************************************
@@ -59,7 +65,7 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             DescriptorHeapManager() {};
-            ~DescriptorHeapManager() {};
+            ~DescriptorHeapManager()override {};
 
         public:          /*---クラスメソッド---*/
 
@@ -67,14 +73,10 @@ namespace RHI
              * @brief 生成関数
              * @details 
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6のポインタ
-             * @param[in] ID3D12CommandQueue* pCmdQueue コマンドキュー
-             * @param[in] HWND* hWnd ウインドウハンドルのポインタ
-             * @param[in] UINT width 幅
-             * @param[in] UINT height 高さ
+             * @param[in] RHI::DirectX12::Device* device デイバスのポインタ
              * @return HRESULT 成功の有無
              ************************************************************************************/
-            HRESULT Create(ID3D12Device* device);
+            RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice)override;
 
             // テクスチャロード時などに呼ばれる：空いているインデックスを返す
             uint32_t AllocateSrv();
@@ -123,10 +125,10 @@ namespace RHI
             std::vector<uint32_t> _freeSrvIndices;
 
             // 各ヒープのディスクリプタのサイズ（インデックスからアドレスを計算するのに必要）
-            UINT _srvDescriptorSize;
+            UINT _srvDescriptorSize = 0;
 
             // rtvのヒープサイズ
-            UINT _rtvDescriptorSize;
+            UINT _rtvDescriptorSize = 0;
 
         };
     }

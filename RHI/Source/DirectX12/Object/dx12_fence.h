@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/IFence.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,22 +40,32 @@
 
 namespace RHI
 {
+	namespace APIInterface
+	{
+		class ICommandQueue;
+		class IDevice;
+		class ISwapChain;
+	}
+
 	namespace DirectX12
 	{
-		class Fence
+
+		class Fence : public APIInterface::IFence
 		{
 		public:
 			Fence();
-			~Fence();
+			~Fence()override;
 
+			void WaitForSignal(RHI::APIInterface::ICommandQueue* iCommandList)override;
 
 			/***********************************************************************************
 			 * @brief 生成関数
 			 *
-			 * @param[in] ID3D12Device* device デバイスのポインタ
+			 * @param[in] RHI::APIInterface::IDevice* iDevice デバイスのポインタ
+			 * @param[in] RHI::APIInterface::ISwapChain* iSwapChain スワップチェーンのポインタ
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device);
+			 RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice, RHI::APIInterface::ISwapChain* iSwapChain)override;
 
 
 			/***********************************************************************************
@@ -67,21 +78,6 @@ namespace RHI
 
 
 			/***********************************************************************************
-			 * @brief フェンス値の取得関数
-			 *
-			 * @return const UINT64 フェンス値
-			 ************************************************************************************/
-			const UINT64 GetFenceValue(void)const;
-
-
-			/***********************************************************************************
-			 * @brief フェンス値の1増加
-			 *
-			 ************************************************************************************/
-			void IncrementFenceValue(void);
-
-
-			/***********************************************************************************
 			 * @briefe 解放関数
 			 *
 			 ************************************************************************************/
@@ -89,7 +85,9 @@ namespace RHI
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12Fence> _pFence = nullptr;
-			UINT64 _fenceVal = 0;
+			UINT64 _fenceVal         = 0;
+			UINT64 _frameBufferIndex = 0;
+			void*  _fenceEvent;
 		};
 	}
 }

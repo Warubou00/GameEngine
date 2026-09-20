@@ -20,6 +20,12 @@
 ******************************************************************/
 #include "dx12_swapChain.h"
 
+// API DirectX12オブジェクトをインクルード
+// ========================================
+#include "../../DXGI/dxgiFactory6.h"
+#include "dx12_device.h"
+#include "dx12_commandQueue.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -43,12 +49,28 @@ namespace RHI
 		SwapChain::SwapChain() = default;
 		SwapChain::~SwapChain() = default;
 
-		HRESULT SwapChain::Create(IDXGIFactory6* pDxgiFactory,
-			ID3D12CommandQueue* pCmdQueue,
+		RHI_API_RESULT SwapChain::Initialize(
+			RHI::APIInterface::IDevice* iDevice,
+			RHI::APIInterface::ICommandQueue* iCmdQueue,
 			HWND* hWnd,
 			UINT width,
-			UINT height)
+			UINT height
+		)
 		{
+			if (!iDevice || !iCmdQueue)
+			{
+				return RHI_API_FAILED_INVALID_ARGUMENT;
+			}
+
+			// 静的キャスト
+			auto device   = static_cast<RHI::DirectX12::Device*>(iDevice);
+			auto cmdQueue = static_cast<RHI::DirectX12::CommandQueue*>(iCmdQueue);
+
+			if (!device || !cmdQueue)
+			{
+				return RHI_API_FAILED_INVALID_ARGUMENT;
+			}
+
 			DXGI_SWAP_CHAIN_DESC1 swapchainDesc = {};
 			swapchainDesc.Width = width;
 			swapchainDesc.Height = height;
@@ -63,8 +85,8 @@ namespace RHI
 			swapchainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 			swapchainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
-			return pDxgiFactory->CreateSwapChainForHwnd(
-				pCmdQueue,
+			return device->GetDXGIFactory()->Get()->CreateSwapChainForHwnd(
+				cmdQueue->Get(),
 				*hWnd,
 				&swapchainDesc,
 				nullptr,
@@ -75,6 +97,26 @@ namespace RHI
 		IDXGISwapChain4* SwapChain::Get(void)const
 		{
 			return _pSwapChain.Get();
+		}
+
+		UINT SwapChain::GetFrameBufferIndex(void)const
+		{
+			return _pSwapChain->GetCurrentBackBufferIndex();
+		}
+
+		ID3D12Resource* SwapChain::GetCurrentBuffer(void)const
+		{
+			ID3D12Resource* resource = nullptr;
+			auto currentIndex = GetFrameBufferIndex();
+			_pSwapChain->GetBuffer(currentIndex, IID_PPV_ARGS(&resource));
+
+			return resource;
+		}
+
+		void SwapChain::Present()
+		{
+			// 9. 画面への表示とインデックス更新
+			_pSwapChain->Present(1, 0);
 		}
 
 		void SwapChain::Release(void)

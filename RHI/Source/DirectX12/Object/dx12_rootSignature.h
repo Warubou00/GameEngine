@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/IResourceBinding.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,9 +42,14 @@
 
 namespace RHI
 {
+    namespace APIInterface
+    {
+        class IDevice;
+    }
+
     namespace DirectX12
     {
-        class RootSignature
+        class RootSignature : public APIInterface::IResourceBinding
         {
 
             /******************************************************************
@@ -58,7 +64,7 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             RootSignature();
-            ~RootSignature();
+            ~RootSignature()override;
 
         public:          /*---クラスメソッド---*/
 
@@ -67,10 +73,9 @@ namespace RHI
              * @details 
              *
              * @param[in] ID3D12Device* device dx12デバイス
-             * @param[in] const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc ルートシグネチャのデスクリプタ設定
              * @return HRESULT 成功の有無
              ************************************************************************************/
-            HRESULT Create(ID3D12Device* device, const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc);
+            RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice)override;
 
             /***********************************************************************************
              * @brief 取得関数

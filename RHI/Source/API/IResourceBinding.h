@@ -1,29 +1,27 @@
 
 /***********************************************************************************
-* @file    IObject.h
-* @brief   RHI IObject
-* @details 
+* @file    IResourceBinding.h
+* @brief   リソースのバインディングを担うクラス
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/09/20
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_INTERFACE_OBJECT_H_
-#define RHI_INTERFACE_OBJECT_H_
+#ifndef API_INTERFACE_RESOURCE_BINDING_H_
+#define API_INTERFACE_RESOURCE_BINDING_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <cstdint>
-#include <memory>
-#include "../common.h"
+#include "IAPI.h"
 
 /******************************************************************
 * Macro Definitions
@@ -43,25 +41,11 @@
 
 namespace RHI
 {
-    namespace ObjectInterface
+    namespace APIInterface
     {
-        class Device;
-        class CommandContext;
-        class Buffer;
-        class Texture;
-
-        struct ObjectInfo
-        {
-            /******************************
-            * SwapChain
-            ******************************/
-            void*    HWnd;
-            uint32_t Width;
-            uint32_t Height;
-            uint32_t EnabledVSync;
-        };
-
-        class IObject
+        class IDevice;
+        
+        class IResourceBinding
         {
 
             /******************************************************************
@@ -75,20 +59,14 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            IObject();
-            ~IObject();
+            IResourceBinding() {};
+            virtual ~IResourceBinding() = default;
 
 
         public:          /*---クラスメソッド---*/
 
-            virtual RHI_RESULT Initialize() = 0;
-            virtual RHI_RESULT Initialize(Device* device);
-            virtual RHI_RESULT Initialize(CommandContext* commandContext);
-            virtual RHI_RESULT Initialize(Device* device, CommandContext* commandContext);
-            virtual RHI_RESULT Initialize(Device* device, ObjectInfo* info) { return RHI_SUCCEEDED; }
-            virtual RHI_RESULT Initialize(Buffer* buffer);
-            virtual RHI_RESULT Initialize(Texture* texture);
-            virtual RHI_RESULT Initialize(Device* device = nullptr, CommandContext* commandContext = nullptr, Buffer* buffer = nullptr, Texture* texture = nullptr);
+            virtual RHI_API_RESULT Initialize(RHI::APIInterface::IDevice* iDevice) = 0;
+
         public:          /*---アクセッサー関数群---*/
 
 
@@ -100,7 +78,7 @@ namespace RHI
 }
 
 
-#endif // RHI_INTERFACE_OBJECT_H_
+#endif // API_INTERFACE_RESOURCE_BINDING_H_
 
 /************************************
 * End of file

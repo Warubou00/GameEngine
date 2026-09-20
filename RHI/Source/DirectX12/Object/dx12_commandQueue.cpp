@@ -20,6 +20,11 @@
 ******************************************************************/
 #include "dx12_commandQueue.h"
 
+// API DirectX12オブジェクトをインクルード
+// ========================================
+#include "dx12_device.h"
+#include "dx12_graphicsCommandList.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -44,14 +49,25 @@ namespace RHI
 		// ==============================================
 		// コマンドキューの作成
 		// ==============================================
-		HRESULT CommandQueue::Create(ID3D12Device* device)
+		RHI_API_RESULT CommandQueue::Initialize(RHI::APIInterface::IDevice* iDevice)
 		{
+			if (!iDevice)
+			{
+				return RHI_API_FAILED_INVALID_ARGUMENT;
+			}
+
+			auto device = static_cast<RHI::DirectX12::Device*>(iDevice);
+			if (!device)
+			{
+				return E_NOTIMPL;
+			}
+
 			D3D12_COMMAND_QUEUE_DESC cmdQueueDesc = {};
 			cmdQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;																//タイムアウトなし
 			cmdQueueDesc.NodeMask = 0;
 			cmdQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;													//プライオリティ特に指定なし
 			cmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;																//コマンドリストと同値
-			return device->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(&_pCmdQueue));//コマンドキュー生成
+			return device->GetDevice()->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(&_pCmdQueue));//コマンドキュー生成
 		}
 
 		// ==============================================
@@ -60,6 +76,22 @@ namespace RHI
 		ID3D12CommandQueue* CommandQueue::Get(void)
 		{
 			return _pCmdQueue.Get();
+		}
+
+		void CommandQueue::End(RHI::APIInterface::ICommandList* iCmdList)
+		{
+			if (!iCmdList)
+			{
+				return;
+			}
+
+			auto grCmdList = static_cast<RHI::DirectX12::GraphicsCommandList*>(iCmdList);
+			if (!grCmdList)
+			{
+				return;
+			}
+			auto cmdList = grCmdList->GetQueueList();
+			_pCmdQueue.Get()->ExecuteCommandLists(1, &cmdList); //[cite: 5]
 		}
 
 		// ==============================================

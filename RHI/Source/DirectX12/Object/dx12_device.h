@@ -22,6 +22,9 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include <memory>
+
+#include "../../API/IDevice.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,9 +44,15 @@
 
 namespace RHI
 {
+    namespace DirectX
+    {
+        class DXGIFactory6;
+        class Adapter;
+    }
+
     namespace DirectX12
     {
-        class Device
+        class Device : public APIInterface::IDevice
         {
 
             /******************************************************************
@@ -58,7 +67,7 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Device();
-            ~Device();
+            ~Device()override;
 
 
         public:          /*---クラスメソッド---*/
@@ -69,7 +78,7 @@ namespace RHI
              *
              * @return HRESULT 失敗の有無
              ************************************************************************************/
-            HRESULT Create(IDXGIAdapter* adapter);
+            RHI_API_RESULT Initialize()override;
 
             /***********************************************************************************
              * @brief デバイスのバージョンアップの試み(All)
@@ -113,6 +122,8 @@ namespace RHI
              ************************************************************************************/
             ID3D12Device9* GetDevice9()const;
 
+            RHI::DirectX::DXGIFactory6* GetDXGIFactory()const;
+
             /***********************************************************************************
              * @brief 解放関数
              * @details ComPtrは解放しない
@@ -133,6 +144,9 @@ namespace RHI
             bool                                  _isRaytracingSupported;
             bool                                  _isRaytracingSupported_1_1;
             bool                                  _isMeshShaderSupported;
+
+            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory6;
+            std::unique_ptr<DirectX::Adapter>      _adapter;
 
             HRESULT asDevice();
             HRESULT asDevice5();

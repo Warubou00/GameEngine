@@ -21,6 +21,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include "../../API/ICommandList.h"
 
 /******************************************************************
 * Macro Definitions
@@ -36,33 +37,27 @@
 * Structure Declarations
 ******************************************************************/
 
+
 namespace RHI
 {
-	namespace DirectX12
+	namespace APIInterface
 	{
-		class CommandList
+		IDevice;
+	}
+	namespace DirectX12
+	{		
+		class CommandList : public APIInterface::ICommandList
 		{
+			/******************************************************************
+			* Internal Structure Declarations
+			******************************************************************/
+		public:
+
 		public:
 			CommandList();
-			~CommandList();
+			virtual ~CommandList() = default;
 
-
-			/***********************************************************************************
-			 * @brief コマンドリストの作成
-			 * @details core explanation
-			 *
-			 * @param[in] ID3D12Device* device デバイス
-			 * @param[in] ID3D12CommandAllocator* commandAllocator コマンドアロケーター
-			 * @return HRESULT 成功の有無
-			 ************************************************************************************/
-			virtual HRESULT Create(ID3D12Device* deviece, ID3D12CommandAllocator* commandAllocator) = 0;
-
-			/***********************************************************************************
-			 * @brief 解放関数
-			 * @details ComPtrは解放しない
-			 *
-			 ************************************************************************************/
-			virtual void Release(void) = 0;
+			//virtual RHI_API_RESULT Initialize(APIInterface::IDevice* iDevice) = 0;
 
 		private:
 

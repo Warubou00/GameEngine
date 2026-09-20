@@ -41,14 +41,21 @@
 
 namespace RHI
 {
+    namespace APIInterface
+    {
+        class IDevice;
+        class ICommandList;
+        class ICommandQueue;
+        class IDescriptorHeap;
+        class IPipeline;
+        class IResource;
+        class IResourceBinding;
+        class ISwapChain;
+        class IFence;
+    }
 
     namespace ObjectInterface
     {
-        class Device;
-        class CommandContext;
-        class Buffer;
-        class Texture;
-        class Pipeline;
         struct ObjectInfo;
     }
 
@@ -82,33 +89,14 @@ namespace RHI
         void Initialize(RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objectInfo);
 
         /// <summary>
-        /// デバイスの取得
-        /// </summary>
-        /// <returns>ObjectInterface::Device デバイス</returns>
-        ObjectInterface::Device* GetDevice();
-
-        /// <summary>
-        /// コマンドコンテキストの取得
-        /// </summary>
-        /// <returns>ObjectInterface::CommandContext コマンドコンテキスト</returns>
-        ObjectInterface::CommandContext* GetCommandContext();
-
-        /// <summary>
-        /// バッファーの取得
-        /// </summary>
-        /// <returns>ObjectInterface::Buffer バッファー</returns>
-        ObjectInterface::Buffer* GetBuffer();
-
-        /// <summary>
-        /// テクスチャの取得
-        /// </summary>
-        /// <returns>ObjectInterface::Texture テクスチャ</returns>
-        ObjectInterface::Texture* GetTexture();
-
-        /// <summary>
         /// 描画開始
         /// </summary>
         void Begin();
+
+        /// <summary>
+        /// 描画処理
+        /// </summary>
+        void Render();
 
         /// <summary>
         /// 描画終了
@@ -126,15 +114,18 @@ namespace RHI
 
 
     private:         /*---メンバ変数---*/
-        std::unique_ptr<ObjectInterface::Device>         _device;
-        std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
-        std::unique_ptr<ObjectInterface::Buffer>         _buffer;
-        std::unique_ptr<ObjectInterface::Texture>        _texture;
-        std::unique_ptr<ObjectInterface::Pipeline>       _pipeline;
+        std::unique_ptr<RHI::APIInterface::IDevice>            _device;
+        std::unique_ptr<RHI::APIInterface::ICommandList>       _cmdList;
+        std::unique_ptr<RHI::APIInterface::ICommandQueue>      _cmdQueue;
+        std::unique_ptr<RHI::APIInterface::IDescriptorHeap>    _descHeap;
+        std::unique_ptr<RHI::APIInterface::IPipeline>          _pipeline;
+        std::unique_ptr<RHI::APIInterface::IResource>          _resource;
+        std::unique_ptr<RHI::APIInterface::IResourceBinding>   _resourceBinding;
+        std::unique_ptr<RHI::APIInterface::ISwapChain>         _swapChain;
+        std::unique_ptr<RHI::APIInterface::IFence>             _fence;
 
         // レンダーターゲットの作成
         bool makeRenderTarget() { return false; }
-
     };
 
 }

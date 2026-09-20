@@ -1,29 +1,31 @@
 
 /***********************************************************************************
-* @file    IObject.cpp
-* @brief   RHI IObject
-* @details 
+* @file    hlslHeader.h
+* @brief   hlslÇÃÉwÉbÉ_Å[
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/09/19
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
+#pragma once
+#ifndef HLSL_HEADER_H_
+#define HLSL_HEADER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IRHIObject.h"
+#include <d3dcompiler.h>
+#include <string>
+#include <wrl.h>
 
-#include "Device.h"
-#include "CommandContext.h"
-#include "Buffer.h"
-#include "Texture.h"
+#pragma comment (lib, "d3dcompiler.lib")
 
 /******************************************************************
 * Macro Definitions
@@ -40,45 +42,7 @@
 ******************************************************************/
 
 
-
-namespace RHI
-{
-	namespace ObjectInterface
-	{
-		IObject::IObject() = default;
-		IObject::~IObject() = default;
-
-		RHI_RESULT IObject::Initialize(Device* device) 
-		{
-			return RHI_SUCCEEDED;
-		}
-
-		RHI_RESULT IObject::Initialize(CommandContext* commandContext)
-		{
-			return RHI_SUCCEEDED;
-		}
-
-		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext)
-		{
-			return RHI_SUCCEEDED;
-		}
-
-		RHI_RESULT IObject::Initialize(Buffer* device)
-		{
-			return RHI_SUCCEEDED;
-		}
-
-		RHI_RESULT IObject::Initialize(Texture* device) 
-		{
-			return RHI_SUCCEEDED;
-		}
-
-		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
-		{
-			return RHI_SUCCEEDED;
-		}
-	}
-}
+#endif // HLSL_HEADER_H_
 
 /************************************
 * End of file
