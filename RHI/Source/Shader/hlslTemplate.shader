@@ -41,20 +41,32 @@ cbuffer ObjectData : register(b2)
 // ==============================================================
 // Vertex Shader
 // ==============================================================
+//VSOutput VSMain(uint vertexID : SV_VertexID)
+//{
+//    VSOutput output;
+
+//    // Programmable Vertex Fetch: 頂点ID + オフセットでメガバッファから自力で取得
+//    Vertex v = g_MegaVB[g_BaseVertexIndex + vertexID];
+    
+//    // 行列計算 (World -> View -> Projection)
+//    matrix worldViewProj = mul(g_World, g_ViewProj);
+//    output.Position = mul(float4(v.Position, 1.0f), worldViewProj);
+    
+//    // カラーをそのままパス
+//    output.Color = v.Color;
+    
+//    return output;
+//}
+
 VSOutput VSMain(uint vertexID : SV_VertexID)
 {
     VSOutput output;
-
-    // Programmable Vertex Fetch: 頂点ID + オフセットでメガバッファから自力で取得
     Vertex v = g_MegaVB[g_BaseVertexIndex + vertexID];
     
-    // 行列計算 (World -> View -> Projection)
-    matrix worldViewProj = mul(g_World, g_ViewProj);
-    output.Position = mul(float4(v.Position, 1.0f), worldViewProj);
+    // 行列計算をスキップして、頂点座標をそのままクリップ空間の座標として扱う
+    output.Position = float4(v.Position, 1.0f);
     
-    // カラーをそのままパス
     output.Color = v.Color;
-    
     return output;
 }
 

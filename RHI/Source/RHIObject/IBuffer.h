@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    IObject.cpp
-* @brief   RHI IObject
+* @file    IBuffer.h
+* @brief   RHI interface buffer
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/4/27
+* @date    2026/09/21
 * @version v_1.0.0
 *
 * @copyright
@@ -14,16 +14,14 @@
 * @note    
 ************************************************************************************/
 
+#pragma once
+#ifndef RHI_OBJECT_INTERFACE_BUFFER_H_
+#define RHI_OBJECT_INTERFACE_BUFFER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
 #include "IRHIObject.h"
-
-#include "Device.h"
-#include "CommandContext.h"
-#include "Buffer.h"
-#include "Texture.h"
 
 /******************************************************************
 * Macro Definitions
@@ -43,42 +41,41 @@
 
 namespace RHI
 {
-	namespace ObjectInterface
-	{
-		IObject::IObject() = default;
-		IObject::~IObject() = default;
+    namespace ObjectInterface
+    {
+        class IBuffer : public IRHIObject
+        {
 
-		RHI_RESULT IObject::Initialize(Device* device) 
-		{
-			return RHI_SUCCEEDED;
-		}
+            /******************************************************************
+            * Internal Enumeration Declarations
+            ******************************************************************/
 
-		RHI_RESULT IObject::Initialize(CommandContext* commandContext)
-		{
-			return RHI_SUCCEEDED;
-		}
 
-		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext)
-		{
-			return RHI_SUCCEEDED;
-		}
+            /******************************************************************
+            * Internal Structure Declarations
+            ******************************************************************/
 
-		RHI_RESULT IObject::Initialize(Buffer* device)
-		{
-			return RHI_SUCCEEDED;
-		}
 
-		RHI_RESULT IObject::Initialize(Texture* device) 
-		{
-			return RHI_SUCCEEDED;
-		}
+        public:          /*---コンストラクタ・デストラクタ---*/
+            IBuffer() {};
+            virtual ~IBuffer() = default;
 
-		RHI_RESULT IObject::Initialize(Device* device, CommandContext* commandContext, Buffer* buffer, Texture* texture)
-		{
-			return RHI_SUCCEEDED;
-		}
-	}
+
+        public:          /*---クラスメソッド---*/
+
+
+        public:          /*---アクセッサー関数群---*/
+
+
+        private:         /*---メンバ変数---*/
+
+
+        };
+    }
 }
+
+
+#endif // RHI_OBJECT_INTERFACE_BUFFER_H_
 
 /************************************
 * End of file

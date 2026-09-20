@@ -21,9 +21,9 @@
 #include "Device.h"
 #include <d3d12.h>
 
-#include "../DirectX12/Object/dx12_device.h"
-#include "../DXGI/dxgiFactory6.h"
-#include "../adapter.h"
+#include "../Object/dx12_device.h"
+#include "../../DXGI/dxgiFactory6.h"
+#include "../../DXGI/adapter.h"
 
 #include "../../Core/Source/Log/logger.h"
 

@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    Texture.h
-* @brief   RHI Texture
+* @file    Device.h
+* @brief   RHI Device
 * @details 
 *
 * @author  Keigo Onari
-* @date    2025/1/13
+* @date    2026/1/13
 * @version v_1.0.0
 *
 * @copyright
@@ -15,15 +15,16 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_TEXTURE_H_
-#define RHI_TEXTURE_H_
+#ifndef RHI_DEVICE_H_
+#define RHI_DEVICE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
 #include <string>
-#include <vector>
-#include "IRHIObject.h"
+
+
+#include "../../RHIObject/IDevice.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,13 +40,22 @@
 * Structure Declarations
 ******************************************************************/
 
-
-
 namespace RHI
 {
+    namespace DirectX
+    {
+        class Adapter;
+        class DXGIFactory6;
+    }
+
+    namespace DirectX12
+    {
+        class Device;
+    }
+
     namespace ObjectInterface
     {
-        class Texture : IObject
+        class Device : public IDevice
         {
 
             /******************************************************************
@@ -59,34 +69,38 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Texture();
-            ~Texture();
+            Device();
+            ~Device()override;
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override 
-            {
-                
-#ifdef CONSOLE_DEBUG
-                std::cout << "Succeeded Initialize Texture From C++" << std::endl;
-#endif
+            RHI_RESULT Initialize();
 
-                return RHI_SUCCEEDED; 
-            }
-
+            DirectX::DXGIFactory6* GetDxgiFactory()const;
+            DirectX::Adapter*      GetAdapter()const;
+            DirectX12::Device*     GetDevice()const;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
 
+            // DXGIファクトリー
+            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
+            // アダプター
+            std::unique_ptr<DirectX::Adapter> _adapter;
+            // DirectX12のデバイス
+            std::unique_ptr<DirectX12::Device> _dx12Device;
+
+            std::string getDeviceVersion();
+            std::string getAdapterVersion();
         };
+
     }
 }
 
-
-#endif // RHI_TEXTURE_H_
+#endif // RHI_DEVICE_H_
 
 /************************************
 * End of file

@@ -21,9 +21,11 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IRHIObject.h"
 #include <vector>
 #include <d3d12.h>
+
+
+#include "../../RHIObject/ICommandContext.h"
 
 /******************************************************************
 * Macro Definitions
@@ -62,7 +64,7 @@ namespace RHI
         class Pipeline;
         class Buffer;
 
-        class CommandContext : IObject
+        class CommandContext : public ICommandContext
         {
 
             /******************************************************************
@@ -84,13 +86,13 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             CommandContext();
-            ~CommandContext();
+            ~CommandContext()override;
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override;
-            RHI_RESULT Initialize(Device* device, ObjectInfo* info)override;
+            RHI_RESULT Initialize();
+            RHI_RESULT Initialize(Device* device, ObjectInfo* info);
 
             void RenderStart(Pipeline* pipeline, Buffer* buffer);
             void RenderEnd();

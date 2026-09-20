@@ -67,17 +67,14 @@
     <Filter Include="ソース ファイル\RHIObject">
       <UniqueIdentifier>{c0ac86bd-9877-413a-9e49-c6771652097b}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ヘッダー ファイル\DirectX12\TempObject">
-      <UniqueIdentifier>{246f28e2-5295-464b-bc1f-cb6fd0b2b8b9}</UniqueIdentifier>
+    <Filter Include="ヘッダー ファイル\DirectX12\RHIObject">
+      <UniqueIdentifier>{8314c825-2315-4520-8cfe-1ac046fd54dd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\DirectX12\RHIObject">
+      <UniqueIdentifier>{c40a2530-b1e2-43e6-9f64-5bb3920b96a0}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
-    <ClInclude Include="pch.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="Source\DirectX12\Object\dx12_device.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
@@ -162,35 +159,44 @@
     <ClInclude Include="Source\Shader\hlslCompiler.h">
       <Filter>ヘッダー ファイル\Shader</Filter>
     </ClInclude>
-    <ClInclude Include="Source\RHIObject\Buffer.h">
-      <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\RHIObject\CommandContext.h">
-      <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\RHIObject\Device.h">
-      <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
     <ClInclude Include="Source\RHIObject\IRHIObject.h">
-      <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\RHIObject\Pipeline.h">
-      <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\RHIObject\Texture.h">
       <Filter>ヘッダー ファイル\RHIObject</Filter>
     </ClInclude>
     <ClInclude Include="Source\Interface\IDevice.h">
       <Filter>ヘッダー ファイル\Interface</Filter>
     </ClInclude>
-    <ClInclude Include="Source\DirectX12\TempObject\dx12_device.h">
-      <Filter>ヘッダー ファイル\DirectX12\TempObject</Filter>
+    <ClInclude Include="Source\RHIObject\IDevice.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\RHIObject\Texture.h">
+      <Filter>ヘッダー ファイル\DirectX12\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\RHIObject\Buffer.h">
+      <Filter>ヘッダー ファイル\DirectX12\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\RHIObject\CommandContext.h">
+      <Filter>ヘッダー ファイル\DirectX12\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\RHIObject\Device.h">
+      <Filter>ヘッダー ファイル\DirectX12\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\RHIObject\Pipeline.h">
+      <Filter>ヘッダー ファイル\DirectX12\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\ICommandContext.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\IBuffer.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\IPipeline.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\ITexture.h">
+      <Filter>ヘッダー ファイル\RHIObject</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="pch.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
     <ClCompile Include="Source\DirectX12\Object\dx12_device.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
@@ -254,23 +260,20 @@
     <ClCompile Include="Source\Shader\hlslCompiler.cpp">
       <Filter>ソース ファイル\Shader</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RHIObject\Buffer.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
+    <ClCompile Include="Source\DirectX12\RHIObject\Buffer.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RHIObject\CommandContext.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
+    <ClCompile Include="Source\DirectX12\RHIObject\CommandContext.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RHIObject\Device.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
+    <ClCompile Include="Source\DirectX12\RHIObject\Device.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RHIObject\IRHIObject.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
+    <ClCompile Include="Source\DirectX12\RHIObject\Pipeline.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RHIObject\Pipeline.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\RHIObject\Texture.cpp">
-      <Filter>ソース ファイル\RHIObject</Filter>
+    <ClCompile Include="Source\DirectX12\RHIObject\Texture.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -21,11 +21,11 @@
 #include "Buffer.h"
 #include "Device.h"
 #include "CommandContext.h"
-#include "../DirectX12/dx12_descriptorHeapManager.h"
-#include "../DirectX12/Object/dx12_resourceBuffer.h"
-#include "../DirectX12/Object/dx12_swapChain.h"
-#include "../DirectX12/Object/dx12_device.h"
-#include "../DirectX12/Object/dx12_graphicsCommandList.h"
+#include "../dx12_descriptorHeapManager.h"
+#include "../Object/dx12_resourceBuffer.h"
+#include "../Object/dx12_swapChain.h"
+#include "../Object/dx12_device.h"
+#include "../Object/dx12_graphicsCommandList.h"
 
 #include "../../Core/Source/Log/logger.h"
 

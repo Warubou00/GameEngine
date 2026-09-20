@@ -21,11 +21,10 @@
 #include "Pipeline.h"
 #include "Device.h"
 
-#include "../DirectX12/Object/dx12_device.h"
-#include "../DirectX12/Object/dx12_pipelineState.h"
-#include "../DirectX12/Object/dx12_rootSignature.h"
-#include "../Shader/hlslCompiler.h"
-#include "../DirectX12/Object/dx12_device.h" 
+#include "../Object/dx12_device.h"
+#include "../Object/dx12_pipelineState.h"
+#include "../Object/dx12_rootSignature.h"
+#include "../../Shader/hlslCompiler.h"
 
 #include "../../Core/Source/Log/logger.h"
 

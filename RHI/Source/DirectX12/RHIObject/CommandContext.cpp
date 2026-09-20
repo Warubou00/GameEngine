@@ -25,15 +25,15 @@
 
 // TODO : 削除方針
 // 目標 : Factory化し、これらをインクルードしない方向で行く
-#include "../DXGI/dxgiFactory6.h"
-#include "../DirectX12/Object/dx12_device.h"
-#include "../DirectX12/Object/dx12_graphicsCommandList.h"
-#include "../DirectX12/Object/dx12_commandQueue.h"
-#include "../DirectX12/Object/dx12_commandAllocator.h"
-#include "../DirectX12/Object/dx12_swapChain.h"
-#include "../DirectX12/Object/dx12_resourceBuffer.h"
-#include "../DirectX12/Object/dx12_rootSignature.h"
-#include "../DirectX12/dx12_descriptorHeapManager.h"
+#include "../../DXGI/dxgiFactory6.h"
+#include "../Object/dx12_device.h"
+#include "../Object/dx12_graphicsCommandList.h"
+#include "../Object/dx12_commandQueue.h"
+#include "../Object/dx12_commandAllocator.h"
+#include "../Object/dx12_swapChain.h"
+#include "../Object/dx12_resourceBuffer.h"
+#include "../Object/dx12_rootSignature.h"
+#include "../dx12_descriptorHeapManager.h"
 
 #include <d3d12.h>
 

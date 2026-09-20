@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    Device.h
-* @brief   RHI Device
+* @file    adapter.h
+* @brief   Graphicsボードのアダプタークラス
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/1/13
+* @date    2026/02/02
 * @version v_1.0.0
 *
 * @copyright
@@ -15,14 +15,19 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_DEVICE_H_
-#define RHI_DEVICE_H_
+#ifndef DIRECTX_ADAPTER_H_
+#define DIRECTX_ADAPTER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <dxgi1_6.h>
 #include <string>
-#include "IRHIObject.h"
+#include <vector>
+
+#include <wrl.h>
+
+#pragma comment(lib,"dxgi.lib")
 
 /******************************************************************
 * Macro Definitions
@@ -38,22 +43,13 @@
 * Structure Declarations
 ******************************************************************/
 
+
+
 namespace RHI
 {
     namespace DirectX
     {
-        class Adapter;
-        class DXGIFactory6;
-    }
-
-    namespace DirectX12
-    {
-        class Device;
-    }
-
-    namespace ObjectInterface
-    {
-        class Device : IObject
+        class Adapter
         {
 
             /******************************************************************
@@ -67,38 +63,46 @@ namespace RHI
 
 
         public:          /*---コンストラクタ・デストラクタ---*/
-            Device();
-            ~Device();
+            Adapter();
+            ~Adapter();
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override;
+            HRESULT EnumerateAdaptersFromGpuName(IDXGIFactory6* pFactory, const std::wstring& enumeratingGPU);
+            HRESULT EnumerateAdapterFromHighPerformance(IDXGIFactory6* pFactory);
 
-            DirectX::DXGIFactory6* GetDxgiFactory()const;
-            DirectX::Adapter*      GetAdapter()const;
-            DirectX12::Device*     GetDevice()const;
+            HRESULT TryVersionUp();
+            HRESULT TryVersionUp1();
+            HRESULT TryVersionUp3();
+
+            IDXGIAdapter* GetAdapter(void)const;
+            IDXGIAdapter1* GetAdapter1(void)const;
+            IDXGIAdapter3* GetAdapter3(void)const;
+
+            WCHAR* GetAdapterName(void)const;
+
+            void Release(void);
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
 
-            // DXGIファクトリー
-            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
-            // アダプター
-            std::unique_ptr<DirectX::Adapter> _adapter;
-            // DirectX12のデバイス
-            std::unique_ptr<DirectX12::Device> _dx12Device;
+            std::vector<IDXGIAdapter*> _pAdapters;
+            Microsoft::WRL::ComPtr<IDXGIAdapter>  _pAdapter;
+            Microsoft::WRL::ComPtr<IDXGIAdapter1> _pAdapter1;
+            Microsoft::WRL::ComPtr<IDXGIAdapter3> _pAdapter3;
 
-            std::string getDeviceVersion();
-            std::string getAdapterVersion();
+            HRESULT asAdapter();
+            HRESULT asAdapter1();
+            HRESULT asAdapter3();
         };
-
     }
 }
 
-#endif // RHI_DEVICE_H_
+
+#endif // DX12_DEVICE_H_
 
 /************************************
 * End of file

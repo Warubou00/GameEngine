@@ -19,11 +19,11 @@
 * Include Headers
 ******************************************************************/
 #include "RenderHardwareInterface.h"
-#include "RHIObject/Device.h"
-#include "RHIObject/CommandContext.h"
-#include "RHIObject/Buffer.h"
-#include "RHIObject/Texture.h"
-#include "RHIObject/Pipeline.h"
+#include "DirectX12/RHIObject/Device.h"
+#include "DirectX12/RHIObject/CommandContext.h"
+#include "DirectX12/RHIObject/Buffer.h"
+#include "DirectX12/RHIObject/Texture.h"
+#include "DirectX12/RHIObject/Pipeline.h"
 
 #include "DirectX12/dx12_descriptorHeapManager.h"
 

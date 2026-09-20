@@ -21,7 +21,8 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "IRHIObject.h"
+
+#include "../../RHIObject/IBuffer.h"
 #include <vector>
 
 // 仮置き
@@ -62,7 +63,7 @@ namespace RHI
         class Device;
         class CommandContext;
 
-        class Buffer : IObject
+        class Buffer : IBuffer
         {
 
             /******************************************************************
@@ -77,13 +78,13 @@ namespace RHI
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Buffer();
-            ~Buffer();
+            ~Buffer()override;
 
 
         public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize()override;
-            RHI_RESULT Initialize(Device* device, CommandContext* commandContext)override;
+            RHI_RESULT Initialize();
+            RHI_RESULT Initialize(Device* device, CommandContext* commandContext);
 
             bool UploadVertexData(Device* device, CommandContext* commandContext, const std::vector<Vertex>& vertices);
 
