@@ -164,6 +164,88 @@ namespace RHI
         _commandContext->RenderEnd();
     }
 
+    /*
+            bool Buffer::UploadVertexData(Device* device, CommandContext* commandContext, const std::vector<Vertex>& vertices)
+        {
+            if (vertices.empty()) return false;
+
+            UINT64 dataSize = vertices.size() * sizeof(Vertex);
+
+
+            auto uploadBuffer = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+            uploadBuffer->Create(device->GetDevice()->GetDevice(), dataSize, D3D12_HEAP_TYPE_UPLOAD);
+
+            void* mappedData = nullptr;
+
+            HRESULT hr = uploadBuffer->Get()->Map(0, nullptr, &mappedData);
+            if (FAILED(hr)) return false;
+
+            memcpy(mappedData, vertices.data(), dataSize);
+            uploadBuffer->Get()->Unmap(0, nullptr);
+
+            auto cmdList = commandContext->GetGraphicsCommandList()->GetCmdList();
+
+
+            D3D12_RESOURCE_BARRIER barrier = {};
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+            barrier.Transition.pResource = _sceneVB->Get();
+            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+            cmdList->ResourceBarrier(1, &barrier);
+
+
+            cmdList->CopyBufferRegion(
+                _sceneVB->Get(),
+                0,             
+                uploadBuffer->Get(), 
+                0,               
+                dataSize         
+            );
+
+
+            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+            cmdList->ResourceBarrier(1, &barrier);
+
+
+
+
+            commandContext->ExecuteAndSync();
+
+            return true;
+        }
+    */
+
+    /*
+            void CommandContext::ExecuteAndSync()
+        {
+
+            _graphicsCommandList->GetCmdList()->Close();
+
+
+            ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
+            _commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
+
+            const uint64_t currentFenceValue = _fenceValue;
+            _commandQueue->Get()->Signal(_fence, currentFenceValue);
+            _fenceValue++;
+
+
+            if (_fence->GetCompletedValue() < currentFenceValue)
+            {
+                _fence->SetEventOnCompletion(currentFenceValue, _fenceEvent);
+                WaitForSingleObject(_fenceEvent, INFINITE);
+            }
+
+
+            _commandAllocator->Get()->Reset();
+
+
+            _graphicsCommandList->GetCmdList()->Reset(_commandAllocator->Get(), nullptr);
+        }*/
+
 }
 
 /************************************
