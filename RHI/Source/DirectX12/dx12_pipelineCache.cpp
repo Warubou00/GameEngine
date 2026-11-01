@@ -114,6 +114,34 @@ namespace RHI
 			return S_OK;
 		}
 
+		HRESULT PipelineCache::GetOrCreateComputePipeline(
+			const wchar_t* name,
+			const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc,
+			Microsoft::WRL::ComPtr<ID3D12PipelineState>& outPipeline,
+			bool* outFromCache)
+		{
+			if (outFromCache) *outFromCache = false;
+			if (!_device || !name) return E_INVALIDARG;
+
+			if (_library && SUCCEEDED(_library->LoadComputePipeline(name, &desc, IID_PPV_ARGS(&outPipeline))))
+			{
+				if (outFromCache) *outFromCache = true;
+				return S_OK;
+			}
+
+			RHI_RETURN_IF_FAILED(_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&outPipeline)));
+			if (_library)
+			{
+				if (SUCCEEDED(_library->StorePipeline(name, outPipeline.Get()))) _dirty = true;
+				else
+				{
+					Core::Logger::Log(L"[PipelineCache] StorePipeline failed (name already used with a different desc?).");
+					Core::Logger::Log(name);
+				}
+			}
+			return S_OK;
+		}
+
 		void PipelineCache::Save()
 		{
 			if (!_library || !_dirty || _filePath.empty()) return;

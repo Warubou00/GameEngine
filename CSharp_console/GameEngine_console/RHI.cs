@@ -93,6 +93,12 @@ public class RHI : IDisposable
     [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void Renderer_SetInstancing([MarshalAs(UnmanagedType.I1)] bool enabled);
 
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_SetGpuCulling([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_TestInsideView();
+
     public void Initialize(out RHIInitializedInfo info)
     {
         rhiInfo.hwnd        = window.Handle;
@@ -148,6 +154,18 @@ public class RHI : IDisposable
     public void SetInstancing(bool enabled)
     {
         Renderer_SetInstancing(enabled);
+    }
+
+    // GPU カリングの ON / OFF (プロファイラーのチェックボックスでも切り替えられる)
+    public void SetGpuCulling(bool enabled)
+    {
+        Renderer_SetGpuCulling(enabled);
+    }
+
+    // 負荷テスト用 : 格子の中から前を見るカメラ
+    public void Test_InsideView()
+    {
+        Renderer_TestInsideView();
     }
 
     public void Render()

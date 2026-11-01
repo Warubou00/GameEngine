@@ -67,8 +67,9 @@ namespace RHI
 		 * @brief ImGui のウィンドウを作る (DebugUI::BeginFrame と EndFrame の間で呼ぶ)
 		 * @param[in,out] bool* indirectDraw ExecuteIndirect の ON / OFF のチェックボックス (nullptr なら出さない)
 		 * @param[in,out] bool* instancing   インスタンシングの ON / OFF のチェックボックス (nullptr なら出さない)
+		 * @param[in,out] bool* gpuCulling   GPU カリングの ON / OFF のチェックボックス (nullptr なら出さない)
 		 ************************************************************************************/
-		void Draw(bool* indirectDraw = nullptr, bool* instancing = nullptr);
+		void Draw(bool* indirectDraw = nullptr, bool* instancing = nullptr, bool* gpuCulling = nullptr);
 
 	private:
 		void updateVideoMemory();
@@ -106,6 +107,8 @@ namespace RHI
 		bool           _lastIndirect   = false;
 		bool           _lastInstancing = false;
 		uint32_t       _lastInstances  = 0;
+		bool           _lastCulling    = false;
+		uint32_t       _lastVisible    = 0;
 
 		// VRAM (0.5 秒ごとに更新)
 		uint64_t       _vramUsage  = 0;

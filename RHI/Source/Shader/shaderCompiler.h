@@ -47,6 +47,7 @@ namespace RHI
 		{
 			Vertex,
 			Pixel,
+			Compute,    // GPU カリングなど
 		};
 
 		// コンパイル結果

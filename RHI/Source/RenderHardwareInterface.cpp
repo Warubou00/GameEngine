@@ -255,9 +255,11 @@ namespace RHI
             // インスタンシングも同じように切り替えられる
             bool indirect   = _commandContext->IsIndirectDrawEnabled();
             bool instancing = _commandContext->IsInstancingEnabled();
-            _profiler.Draw(&indirect, &instancing);
+            bool culling    = _commandContext->IsGpuCullingEnabled();
+            _profiler.Draw(&indirect, &instancing, &culling);
             _commandContext->SetIndirectDrawEnabled(indirect);
             _commandContext->SetInstancingEnabled(instancing);
+            _commandContext->SetGpuCullingEnabled(culling);
             // ImGui の PSO は深度無しで作られているので、描画先をバックバッファだけにしてから積む
             _commandContext->BindBackBufferWithoutDepth();
             _debugUI.EndFrame(_commandContext->GetFrameCommandList());
@@ -293,6 +295,16 @@ namespace RHI
     bool RenderHardwareInterface::IsInstancingEnabled()const
     {
         return _commandContext ? _commandContext->IsInstancingEnabled() : false;
+    }
+
+    void RenderHardwareInterface::SetGpuCullingEnabled(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetGpuCullingEnabled(enabled);
+    }
+
+    bool RenderHardwareInterface::IsGpuCullingEnabled()const
+    {
+        return _commandContext ? _commandContext->IsGpuCullingEnabled() : false;
     }
 
     void RenderHardwareInterface::WaitForGpu()

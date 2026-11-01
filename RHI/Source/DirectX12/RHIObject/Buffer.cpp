@@ -18,6 +18,8 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <cmath>
+#include <algorithm>
 #include "Buffer.h"
 
 #include <DirectXMath.h>
@@ -176,6 +178,31 @@ namespace RHI
 			// シェーダーは g_MegaVB[BaseVertex + インデックスの値] で読む
 			range.BaseVertex = memoryAllocation.StrideOffset;
 			range.Count      = count;
+
+			// GPU カリング用の境界球 (AABB の中心から一番遠い頂点までの距離)。頂点が CPU にある今のうちに計算する
+			// (RHI::Vertex の位置は Core::Vector3 なので、XMVECTOR へは成分を並べて読む)
+			auto loadPosition = [](const RHI::Vertex& v) { return ::DirectX::XMVectorSet(v.Position._x, v.Position._y, v.Position._z, 0.0f); };
+			{
+				::DirectX::XMVECTOR minV = loadPosition(vertices[0]);
+				::DirectX::XMVECTOR maxV = minV;
+				for (uint32_t i = 1; i < count; ++i)
+				{
+					const ::DirectX::XMVECTOR p = loadPosition(vertices[i]);
+					minV = ::DirectX::XMVectorMin(minV, p);
+					maxV = ::DirectX::XMVectorMax(maxV, p);
+				}
+				const ::DirectX::XMVECTOR center = ::DirectX::XMVectorScale(::DirectX::XMVectorAdd(minV, maxV), 0.5f);
+				float radius2 = 0.0f;
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					const ::DirectX::XMVECTOR d = ::DirectX::XMVectorSubtract(loadPosition(vertices[i]), center);
+					radius2 = (std::max)(radius2, ::DirectX::XMVectorGetX(::DirectX::XMVector3LengthSq(d)));
+				}
+				::DirectX::XMFLOAT4 bounds;
+				::DirectX::XMStoreFloat4(&bounds, center);
+				bounds.w = std::sqrt(radius2);
+				_vertexBounds[range.BaseVertex] = bounds;
+			}
 			return range;
 		}
 
@@ -308,7 +335,7 @@ namespace RHI
 			_objectVersion[object.Index] = _objectsVersion;
 		}
 
-		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteObjectConstants(uint32_t frameIndex)
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteObjectConstants(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList)
 		{
 			if (!_sceneCB || frameIndex >= CommandContext::FRAME_COUNT)
 			{
@@ -322,6 +349,7 @@ namespace RHI
 			if (_objectsWrittenVersion[frameIndex] != _objectsVersion)
 			{
 				auto& written = _objectWritten[frameIndex];
+				size_t first = SIZE_MAX, last = 0;   // 書いた範囲 (VRAM へコピーする範囲)
 				for (size_t i = 0; i < _objects.size(); ++i)
 				{
 					// 変わったオブジェクトだけ書く (UPLOAD ヒープへの書き込みは遅いので最小限に)
@@ -330,12 +358,67 @@ namespace RHI
 					if (_sceneCB->WriteData(frameOffset + OBJECT_DATA_STRIDE * i, &_objects[i], sizeof(RHI::ObjectConstants)))
 					{
 						written[i] = _objectVersion[i];
+						first = (std::min)(first, i);
+						last  = (std::max)(last, i);
 					}
 				}
 				_objectsWrittenVersion[frameIndex] = _objectsVersion;
+
+				// 書いた範囲を VRAM 側へコピーする (間の変わっていない分も含めて 1 回で。止まっているシーンではコピー自体が無い)
+				//   バッファは毎フレーム COMMON に戻るので、コピーでは COPY_DEST に暗黙で昇格する。
+				//   コピー後は頂点シェーダー / GPU カリング (どちらも NON_PIXEL) が読む状態へ明示的に移す
+				//   コピーしなかったフレームは COMMON → NON_PIXEL_SHADER_RESOURCE に暗黙で昇格する
+				if (_objectGpu && cmdList && first <= last)
+				{
+					const UINT64 offset = frameOffset + OBJECT_DATA_STRIDE * first;
+					cmdList->CopyBufferRegion(_objectGpu->Get(), offset, _sceneCB->Get(), offset, OBJECT_DATA_STRIDE * (last - first + 1));
+
+					D3D12_RESOURCE_BARRIER barrier = {};
+					barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+					barrier.Transition.pResource   = _objectGpu->Get();
+					barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+					barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+					cmdList->ResourceBarrier(1, &barrier);
+				}
 			}
 
-			return _sceneCB->GetGPUVirtualAddress() + frameOffset;
+			// VRAM 側が作れなかった環境では、UPLOAD ヒープをそのまま読ませる (遅いが動く)
+			return (_objectGpu ? _objectGpu->GetGPUVirtualAddress() : _sceneCB->GetGPUVirtualAddress()) + frameOffset;
+		}
+
+		::DirectX::XMFLOAT4 Buffer::GetVertexBounds(uint32_t baseVertex)const
+		{
+			const auto found = _vertexBounds.find(baseVertex);
+			return found != _vertexBounds.end() ? found->second : ::DirectX::XMFLOAT4(0.0f, 0.0f, 0.0f, -1.0f);
+		}
+
+		const ::DirectX::XMFLOAT4* Buffer::GetFrustumPlanes()
+		{
+			if (_frustumVersion == _frameConstantsVersion) return _frustumPlanes;
+
+			// 保持している行列はシェーダー用に転置済みなので戻してから掛ける (行ベクトル : clip = p * View * Proj)
+			const ::DirectX::XMMATRIX view = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_viewMatrix));
+			const ::DirectX::XMMATRIX proj = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_projMatrix));
+			::DirectX::XMFLOAT4X4 m;
+			::DirectX::XMStoreFloat4x4(&m, ::DirectX::XMMatrixMultiply(view, proj));
+
+			// 列ベクトル c0〜c3 から平面を作る (Gribb / Hartmann の方法。深度は D3D の 0〜1)
+			//   左 = c3 + c0 / 右 = c3 - c0 / 下 = c3 + c1 / 上 = c3 - c1 / 手前 = c2 / 奥 = c3 - c2
+			auto column = [&](int c) { return ::DirectX::XMVectorSet(m.m[0][c], m.m[1][c], m.m[2][c], m.m[3][c]); };
+			const ::DirectX::XMVECTOR c0 = column(0), c1 = column(1), c2 = column(2), c3 = column(3);
+			const ::DirectX::XMVECTOR planes[6] = {
+				::DirectX::XMVectorAdd(c3, c0), ::DirectX::XMVectorSubtract(c3, c0),
+				::DirectX::XMVectorAdd(c3, c1), ::DirectX::XMVectorSubtract(c3, c1),
+				c2,                             ::DirectX::XMVectorSubtract(c3, c2),
+			};
+			for (int i = 0; i < 6; ++i)
+			{
+				// xyz を正規化すると、平面との距離がそのままワールド座標の長さになる (半径と比べられる)
+				::DirectX::XMStoreFloat4(&_frustumPlanes[i], ::DirectX::XMPlaneNormalize(planes[i]));
+			}
+			_frustumVersion = _frameConstantsVersion;
+			return _frustumPlanes;
 		}
 
 		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteFrameConstants(uint32_t frameIndex)
@@ -375,6 +458,7 @@ namespace RHI
 			if (_commonCB) _commonCB->Unmap();
 			if (_globalCB) _globalCB->Unmap();
 			if (_sceneCB)  _sceneCB->Unmap();
+			_objectGpu.reset();
 		}
 
 		RHI::DirectX12::DescriptorHeapManager* Buffer::GetDescHeapManager()const
@@ -491,12 +575,18 @@ namespace RHI
 
 			_sceneCBAllocator->Initialize(_SCENE_CB_SIZE);
 
-			return makeBuffer(
-				device,
-				_sceneCB.get(),
-				_SCENE_CB_SIZE,
-				D3D12_HEAP_TYPE_UPLOAD
-			);
+			if (!makeBuffer(device, _sceneCB.get(), _SCENE_CB_SIZE, D3D12_HEAP_TYPE_UPLOAD))
+			{
+				return false;
+			}
+
+			// VRAM 側の写し (作れなくても UPLOAD ヒープを直接読ませて続けられる)
+			_objectGpu = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+			if (!makeBuffer(device, _objectGpu.get(), _SCENE_CB_SIZE, D3D12_HEAP_TYPE_DEFAULT))
+			{
+				_objectGpu.reset();
+			}
+			return true;
 		}
 
 		bool Buffer::makeCommonCB(RHI::ObjectInterface::Device* device)

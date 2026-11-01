@@ -101,6 +101,23 @@ namespace RHI
                 ROOT_PARAM_COUNT
             };
 
+            // ----------------------------------------------------------
+            // GPU カリング (コンピュート) のルートシグネチャのパラメータ番号 (gpuCulling.shader と対応)
+            // ----------------------------------------------------------
+            enum CullRootParameterIndex : unsigned int
+            {
+                CULL_PARAM_CONSTANTS   = 0,  // b0 : 視錐台 / 数 (ルート定数)
+                CULL_PARAM_OBJECTS     = 1,  // t0 : オブジェクトのデータ (Root SRV)
+                CULL_PARAM_IN_DRAWS    = 2,  // t1 : CPU が並べた DrawData (Root SRV)
+                CULL_PARAM_CULL_DATA   = 3,  // t2 : 境界球と描画の番号 (Root SRV)
+                CULL_PARAM_IN_ARGS     = 4,  // t3 : CPU が並べた引数 (Root SRV)
+                CULL_PARAM_OUT_DRAWS   = 5,  // u0 : 映ったものの DrawData (Root UAV)
+                CULL_PARAM_OUT_ARGS    = 6,  // u1 : 映ったものの引数 + カウンター (Root UAV)
+                CULL_PARAM_COUNT
+            };
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 3;   // float4 ×6 + uint ×3
+            static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
+
         public:          /*---コンストラクタ・デストラクタ---*/
             Pipeline();
             ~Pipeline()override;
@@ -131,6 +148,12 @@ namespace RHI
             // ExecuteIndirect 用のコマンドシグネチャ (作れなかった環境では nullptr = 通常の描画だけ)
             ID3D12CommandSignature* GetIndirectDrawSignature()const;
 
+            // GPU カリング (作れなかった環境では nullptr = カリングしない)
+            bool                 IsGpuCullingAvailable()const;
+            ID3D12RootSignature* GetCullRootSignature()const;
+            ID3D12PipelineState* GetCullClearPipeline()const;   // CSClear
+            ID3D12PipelineState* GetCullPipeline()const;        // CSCull
+
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
 
@@ -138,6 +161,9 @@ namespace RHI
             std::unique_ptr<DirectX12::PipelineState>    _pipelineState;
             std::unique_ptr<DirectX12::RootSignature>    _rootSignature;
             std::unique_ptr<DirectX12::CommandSignature> _indirectDrawSignature;   // ExecuteIndirect 用
+            std::unique_ptr<DirectX12::RootSignature>    _cullRootSignature;       // GPU カリング用
+            std::unique_ptr<DirectX12::PipelineState>    _cullClearPipeline;
+            std::unique_ptr<DirectX12::PipelineState>    _cullPipeline;
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;
@@ -146,6 +172,7 @@ namespace RHI
             RHI_RESULT makeRootSignature(Device* device);
             RHI_RESULT makePipeline(Device* device);
             void       makeIndirectDrawSignature(Device* device);
+            void       makeCullingPipeline(Device* device);
         };
 
     }

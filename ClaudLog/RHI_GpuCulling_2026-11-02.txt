@@ -1,0 +1,83 @@
+====================================================================
+ GPU カリング (視錐台カリング) + オブジェクトのデータを VRAM へ
+ 日付   : 2026-11-02
+ ブランチ : feature/gpu-culling
+====================================================================
+
+■ 概要
+  毎フレーム、描く前にコンピュートシェーダーでカメラに映らないオブジェクトを除き、
+  残ったものだけの引数と DrawData を GPU が作って、そのまま ExecuteIndirect で描く。
+  CPU は結果を待たない (同じコマンドリストの中で完結する)。
+  途中で、オブジェクトのデータを GPU が UPLOAD ヒープ (メインメモリ) から読んでいたことが遅さの原因と分かり、
+  VRAM に写すようにした。これはカリングを使わない時の描画も速くしている。
+
+■ 流れ (CommandContext::recordCulling、Render の中で ExecuteIndirect の直前)
+  1. CSClear : CPU が並べた引数 (描画ごと) を Culled に写し、InstanceCount を 0 にする (1 スレッド = 描画 1 回分)
+  2. UAV バリア
+  3. CSCull  : オブジェクトごとに、メッシュの境界球をワールド行列で動かして視錐台の 6 平面と比べる (1 スレッド = 1 オブジェクト)
+               映るものだけ、自分の描画の InstanceCount を atomic で 1 増やし、その番号の場所に DrawData を書く
+               (描画ごとの DrawData の範囲は CPU が割り当てた範囲をそのまま使うので、溢れない)
+  4. Culled を INDIRECT_ARGUMENT | NON_PIXEL_SHADER_RESOURCE | COPY_SOURCE に移し、映った数を読み戻し用にコピー
+  5. 描画用の PSO に戻し、頂点シェーダーの DrawData (t1) を Culled に向けて ExecuteIndirect
+  - 映らなかった描画は InstanceCount = 0 で残る (GPU はほぼ何もしない)。描画数の詰め直しは今はしない。
+  - 頂点 / ピクセルシェーダーは変更なし (DrawData の読み先が変わるだけ)。
+  - インスタンシングの ON / OFF のどちらでも動く (OFF なら描画 1 回 = オブジェクト 1 個)。
+  - 1 個ずつ描く (direct) 時は使えない (引数を GPU が作るため)。ExecuteIndirect が OFF なら自動でカリングしない。
+
+■ 必要なデータ
+  - 境界球 : Buffer::UploadVertexData で頂点を受け取った時に、頂点の範囲ごとに計算 (AABB の中心 + 一番遠い頂点までの距離)。
+             BaseVertex → 球 の表で引く。Renderer 側の準備は不要。範囲全体の球なので、インデックスで一部だけ使う描画でも見落としは無い。
+             不明な時は半径 -1 (= 常に描く)。
+  - 半径はワールド行列の一番大きい軸の拡大率を掛ける (不均一スケールでも見落とさない)。
+  - 視錐台 : Buffer::GetFrustumPlanes。View × Projection の列から 6 平面を作って正規化 (Gribb / Hartmann)。カメラが変わった時だけ計算。
+  - 映った数 : グループ (64 スレッド) の中で groupshared で数えてから 1 回だけ全体に足す (atomic の集中を避ける)。
+               READBACK バッファに写し、FRAME_COUNT フレーム後に RenderStart で読む (プロファイラーの Visible (GPU))。
+
+■ オブジェクトのデータを VRAM へ (Buffer::WriteObjectConstants)
+  最初の計測では、カリングを ON にすると何も除かれない時に GPU が 0.27 → 0.45 ms と大きく遅くなった。
+  実験 (カリングのシェーダーで行列を読まないようにする) で 0.28 ms に戻ったので、
+  原因は「オブジェクトの行列を UPLOAD ヒープから読む」ことだと分かった
+  (20002 個 × 80 byte ≒ 1.6 MB を毎フレーム PCIe 越しに読む。頂点シェーダーも同じものを読んでいた)。
+  → UPLOAD 側 (_sceneCB) は今までどおり CPU が変わった所だけ書き、書いた範囲だけを VRAM 側 (_objectGpu) にコピーする。
+    止まっているシーンではコピーも無い。GPU は VRAM 側を読む。
+
+■ 計測結果 (RTX 2070 / Release / --stress 10000 = 20002 オブジェクト / ExecuteIndirect + インスタンシング)
+                                       GPU (前回まで)   GPU (今回)
+    全体が映る      カリングなし           0.27 ms        0.18 ms   ← VRAM 化の効果
+    全体が映る      カリングあり (全部映る)   -           0.20 ms   (カリング自体の負担 約 0.02 ms)
+    格子の中から    カリングなし           0.27 ms        0.14 ms
+    格子の中から    カリングあり (4996 個)    -           0.11 ms   (約 25% 減)
+
+  Debug (シェーダーは最適化なし) : 格子の中から カリングあり 0.10 ms、D3D12 デバッグレイヤーのエラー・警告なし。
+
+  正直なまとめ :
+    - このテストのメッシュは 1 個 22 三角形と小さいので、除いても減る仕事が少なく、カリングの効果は 25% 程度。
+      重いメッシュ (数千〜数万三角形) ほど効果は大きくなる。
+    - 全部映る場面では約 0.02 ms の損。
+    - 今回一番効いたのは、オブジェクトのデータの VRAM 化 (カリングなしでも 0.27 → 0.18 ms)。
+
+■ 確認したこと
+  - 格子の中から見たカメラで、カリングの ON / OFF で見た目が同じ (Visible (GPU) = 4996 / 20002)。
+  - 全体が映るカメラ / 通常起動 (箱 1 個) / 1 個ずつ描く (カリングは自動で無効) で正しく描かれる。
+
+■ 切り替え・計測
+  - プロファイラー (F1) : 「GPU culling」チェックボックス、Visible (GPU) の表示。
+  - rhi.h : SetGpuCullingEnabled / IsGpuCullingEnabled (既定 : 有効)
+  - Renderer.dll : Renderer_SetGpuCulling(bool), Renderer_TestInsideView()
+  - C# : --culling on|off、--view inside (格子の中から前を見るカメラ。--stress の後に書く)
+  - 終了時のサマリーログに visible と "+ GPU culling" を追加。
+
+■ 変更ファイル
+  新規 : RHI/Source/Shader/gpuCulling.shader (CSClear / CSCull)
+  RHI/Source/Shader/shaderCompiler.h/.cpp            (Stage::Compute → cs_6_6 / FXC なら cs_5_1)
+  RHI/Source/DirectX12/dx12_pipelineCache.h/.cpp     (GetOrCreateComputePipeline)
+  RHI/Source/DirectX12/Object/dx12_resourceBuffer.*  (Create に D3D12_RESOURCE_FLAGS を追加。UAV 用)
+  RHI/Source/DirectX12/RHIObject/Pipeline.h/.cpp     (カリング用ルートシグネチャ / PSO。ルート定数 + Root SRV×4 + Root UAV×2)
+  RHI/Source/DirectX12/RHIObject/Buffer.h/.cpp       (境界球 / 視錐台 / オブジェクトのデータの VRAM 化)
+  RHI/Source/DirectX12/RHIObject/CommandContext.h/.cpp (CullInstance の書き込み / recordCulling / 読み戻し)
+  RHI/Source/Profiler/*, Public/rhi.h, RenderHardwareInterface.*, Renderer/*, CSharp_console/*
+
+■ この先の案
+  - 描画数の詰め直し (映った描画だけを並べ、ExecuteIndirect の Count バッファを使う)。描画数が多く大半が映らない場面で効く。
+  - オクルージョンカリング (前のフレームの深度で隠れているものを除く)。
+  - オブジェクトを動かす場面でのコピー量 (今は書いた範囲の最初から最後までを 1 回でコピーする)。

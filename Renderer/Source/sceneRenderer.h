@@ -82,6 +82,15 @@ namespace Renderer
 		// インスタンシングするか (RHI に渡すだけ)
 		void SetInstancingEnabled(bool enabled);
 
+		// GPU カリングするか (RHI に渡すだけ)
+		void SetGpuCullingEnabled(bool enabled);
+
+		/***********************************************************************************
+		 * @brief 負荷テスト用 : 格子の中から低い位置で前を見るカメラにする
+		 * @details 全体を見下ろすカメラでは全部映ってしまい、カリングの効果が測れないため
+		 ************************************************************************************/
+		void SetTestInsideView();
+
 		// カメラの設定 (View / Projection 行列を作って RHI に渡す)
 		void SetCamera(const Camera& camera, Projection::ProjectionType type = Projection::ProjectionType::PROJECTION_TYPE_3D);
 

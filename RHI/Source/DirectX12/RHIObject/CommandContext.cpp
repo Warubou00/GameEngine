@@ -201,7 +201,9 @@ namespace RHI
 			// ---------- 描画ごとのデータと ExecuteIndirect の引数 (フレームごと) ----------
 			// シェーダーが描画番号で DrawData を読むので、通常の描画でも必須
 			{
-				const UINT64 size = DRAW_ARGS_OFFSET + static_cast<UINT64>(MAX_DRAWS) * sizeof(IndirectDrawCommand);
+				static_assert(sizeof(IndirectDrawCommand) == sizeof(D3D12_DRAW_INDEXED_ARGUMENTS), "IndirectDrawCommand must be DRAW_INDEXED_ARGUMENTS only");
+				const UINT64 size       = CULL_DATA_OFFSET + static_cast<UINT64>(MAX_DRAWS) * sizeof(CullInstance);
+				const UINT64 culledSize = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE + 16;   // + 映った数のカウンター
 				for (auto& frame : _draws)
 				{
 					frame = DrawFrame();
@@ -215,6 +217,17 @@ namespace RHI
 					}
 					frame.Cpu = static_cast<uint8_t*>(frame.Staging->GetMappedData());
 					frame.Args.reserve(1024);
+
+					// GPU カリングの結果 (作れなくてもカリングしないだけ)
+					frame.Culled   = std::make_unique<DirectX12::ResourceBuffer>();
+					frame.Readback = std::make_unique<DirectX12::ResourceBuffer>();
+					if (FAILED(frame.Culled->Create(dx12Device, culledSize, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) ||
+						FAILED(frame.Readback->Create(dx12Device, 16, D3D12_HEAP_TYPE_READBACK)))
+					{
+						Core::Logger::Log("[CommandContext] Failed create culling buffer. GPU culling disabled.");
+						frame.Culled.reset();
+						frame.Readback.reset();
+					}
 				}
 			}
 
@@ -294,6 +307,25 @@ namespace RHI
 			}
 			_stats.Width  = _swapChain->GetWidth();
 			_stats.Height = _swapChain->GetHeight();
+
+			// GPU カリングで映った数 (FRAME_COUNT フレーム前の結果。GPU は使い終わっているので読める)
+			{
+				DrawFrame& draws = _draws[_frameIndex];
+				_stats.VisibleValid = false;
+				if (draws.CullRecorded && draws.Readback)
+				{
+					void* mapped = nullptr;
+					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) };
+					if (SUCCEEDED(draws.Readback->Get()->Map(0, &readRange, &mapped)))
+					{
+						_stats.VisibleInstances = *static_cast<const uint32_t*>(mapped);
+						_stats.VisibleValid     = true;
+						const D3D12_RANGE noWrite = { 0, 0 };
+						draws.Readback->Get()->Unmap(0, &noWrite);
+					}
+				}
+				draws.CullRecorded = false;
+			}
 
 			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
 			hr = frame.Allocator->Reset();
@@ -440,21 +472,36 @@ namespace RHI
 			// オブジェクトの定数を、このフレーム用の領域に書いてからその先頭を Root SRV に設定する
 			// (変わったオブジェクトだけ書く。GPU が前のフレームで読んでいる領域には触らない)
 			// 以前は描画ごとに Root CBV でオブジェクトの位置を設定していた
-			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_OBJECT_DATA_SRV, buffer->WriteObjectConstants(_frameIndex));
+			// (この先頭アドレスは GPU カリングでも使う)
+			const D3D12_GPU_VIRTUAL_ADDRESS objectData = buffer->WriteObjectConstants(_frameIndex, cmdList);
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_OBJECT_DATA_SRV, objectData);
 
 			// 描画ごとのデータ (DrawData) と引数を用意する (描画リストが同じなら前回のものを使い回す)
-			const bool reused = updateDraws(frame, items, count);
-			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, frame.Gpu->GetGPUVirtualAddress());
+			const bool reused = updateDraws(frame, buffer, items, count);
 
 			ID3D12CommandSignature* signature = _currentPipeline ? _currentPipeline->GetIndirectDrawSignature() : nullptr;
 			const bool indirect = _useIndirectDraw && signature;
+			// GPU カリング : ExecuteIndirect の時だけ (結果の引数を GPU が作るので、1 個ずつ描く時は使えない)
+			const bool culling  = indirect && _useGpuCulling && frame.Culled && frame.Written > 0 &&
+			                      _currentPipeline->IsGpuCullingAvailable();
+
+			// 描画が読む DrawData と引数 : カリングした時はその結果、しない時は CPU が並べたもの
+			ID3D12Resource* drawSource = frame.Gpu->Get();
+			if (culling)
+			{
+				recordCulling(frame, buffer, objectData);
+				drawSource = frame.Culled->Get();
+			}
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, drawSource->GetGPUVirtualAddress());
+
 			if (frame.Written > 0)
 			{
 				if (indirect)
 				{
 					// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く。GPU は描画の引数を読むだけ (ルート引数は変えない)
 					// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
-					cmdList->ExecuteIndirect(signature, frame.Written, frame.Gpu->Get(), DRAW_ARGS_OFFSET, nullptr, 0);
+					// カリングした時は、映らなかった描画は InstanceCount = 0 になっている (GPU はほぼ何もしない)
+					cmdList->ExecuteIndirect(signature, frame.Written, drawSource, DRAW_ARGS_OFFSET, nullptr, 0);
 				}
 				else
 				{
@@ -472,10 +519,11 @@ namespace RHI
 			_stats.DrawCalls          = frame.Written;
 			_stats.Instances          = frame.Instances;
 			_stats.Instancing         = frame.Instanced;
+			_stats.GpuCulling         = culling;
 			_stats.Triangles          = frame.Triangles;
 		}
 
-		bool CommandContext::updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		bool CommandContext::updateDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count)
 		{
 			// 描画リスト (とインスタンシングの ON / OFF) が前回このフレームで書いたものと同じなら、書き込みもコピーも省く
 			// (止まっているシーンでは毎フレーム同じなので、UPLOAD ヒープにも触らず、コピーも走らない)
@@ -487,7 +535,7 @@ namespace RHI
 
 			frame.Args.clear();
 			frame.Triangles = 0;
-			const uint32_t instances = _useInstancing ? writeDrawsInstanced(frame, items, count) : writeDrawsDirect(frame, items, count);
+			const uint32_t instances = _useInstancing ? writeDrawsInstanced(frame, buffer, items, count) : writeDrawsDirect(frame, buffer, items, count);
 			const uint32_t written   = static_cast<uint32_t>(frame.Args.size());
 
 			// 引数はまとめて書く (UPLOAD ヒープは書き込み結合メモリなので、連続で書くのが速い)
@@ -511,6 +559,8 @@ namespace RHI
 				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * instances);
 				cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
 					sizeof(IndirectDrawCommand) * written);
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), CULL_DATA_OFFSET, frame.Staging->Get(), CULL_DATA_OFFSET,
+					sizeof(CullInstance) * instances);
 				const auto toRead = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST,
 					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 				cmdList->ResourceBarrier(1, &toRead);
@@ -518,10 +568,11 @@ namespace RHI
 			return false;
 		}
 
-		uint32_t CommandContext::writeDrawsDirect(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		uint32_t CommandContext::writeDrawsDirect(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count)
 		{
 			// DrawItem 1 個 = 描画 1 回 (InstanceCount = 1)
 			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
+			auto* cullData = reinterpret_cast<CullInstance*>(frame.Cpu + CULL_DATA_OFFSET);
 			uint32_t written = 0;
 			for (uint32_t i = 0; i < count; ++i)
 			{
@@ -531,6 +582,9 @@ namespace RHI
 
 				// 描画番号 written の描画 : シェーダーは DrawData[written] を読む
 				drawData[written] = { item.Object.Index, item.BaseVertex };
+				// GPU カリング用 : 境界球と、属する描画 (= 自分)
+				const ::DirectX::XMFLOAT4 sphere = buffer->GetVertexBounds(item.BaseVertex);
+				cullData[written] = { { sphere.x, sphere.y, sphere.z, sphere.w }, written };
 
 				D3D12_DRAW_INDEXED_ARGUMENTS args;
 				args.IndexCountPerInstance = item.IndexCount;
@@ -546,15 +600,15 @@ namespace RHI
 			return written;
 		}
 
-		uint32_t CommandContext::writeDrawsInstanced(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		uint32_t CommandContext::writeDrawsInstanced(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count)
 		{
 			// ==============================================================
 			// インスタンシング : 同じメッシュの DrawItem を、最大 INSTANCE_BATCH_SIZE 個ずつ 1 回の描画にまとめる
 			//   1. DrawItem を前から順に見て、そのメッシュの書き込み中のまとまりに入れる
 			//      (まとまりが無い / いっぱいなら新しく作る)。ここでは数えるだけ
 			//   2. まとまりを作られた順 (= 元の DrawItem の順番に近い) に並べ、DrawData の連続した範囲を割り当てる
-			//   3. 各 DrawItem の DrawData を、自分のまとまりの範囲に詰めて書く
-			//   4. 描画の引数はまとまりごとに 1 個 : InstanceCount = 個数, StartInstanceLocation = 範囲の先頭
+			//   3. 描画の引数はまとまりごとに 1 個 : InstanceCount = 個数, StartInstanceLocation = 範囲の先頭
+			//   4. 各 DrawItem の DrawData (と GPU カリング用の境界球・描画の番号) を、自分のまとまりの範囲に詰めて書く
 			// 描画番号バッファは 0, 1, 2, ... なので、インスタンス j には DRAWID = Start + j が届き、
 			// シェーダーはそのまま DrawData[Start + j] (= j 個目のオブジェクト) を読める。シェーダーの変更は不要
 			// 不透明なので、描く順番が少し変わっても見た目は同じ
@@ -576,7 +630,7 @@ namespace RHI
 				if (open == _openBatch.end() || _batches[open->second].Count >= INSTANCE_BATCH_SIZE)
 				{
 					const uint32_t index = static_cast<uint32_t>(_batches.size());
-					_batches.push_back({ key, 0, 0, 0 });
+					_batches.push_back({ key, 0, 0, 0, 0, {} });
 					if (open == _openBatch.end()) open = _openBatch.emplace(key, index).first;
 					else                          open->second = index;
 				}
@@ -598,18 +652,8 @@ namespace RHI
 				slot += batch.Count;
 			}
 
-			// 3. DrawData を書く
-			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
-			for (uint32_t i = 0; i < count; ++i)
-			{
-				if (_itemBatch[i] == UINT32_MAX) continue;
-				InstanceBatch& batch = _batches[_itemBatch[i]];
-				if (batch.Cursor >= batch.Start + batch.Count) continue;   // 入りきらなかった分
-				drawData[batch.Cursor++] = { items[i].Object.Index, items[i].BaseVertex };
-			}
-
-			// 4. 描画の引数 (まとまりごとに 1 個)
-			for (const auto& batch : _batches)
+			// 3. 描画の引数 (まとまりごとに 1 個)
+			for (auto& batch : _batches)
 			{
 				if (batch.Count == 0) continue;
 				D3D12_DRAW_INDEXED_ARGUMENTS args;
@@ -618,10 +662,92 @@ namespace RHI
 				args.StartIndexLocation    = batch.Key.FirstIndex;
 				args.BaseVertexLocation    = 0;             // SV_VertexID に加算されないので 0 (2-9)
 				args.StartInstanceLocation = batch.Start;   // インスタンス j の DRAWID = Start + j
+				batch.Draw   = static_cast<uint32_t>(frame.Args.size());
+				batch.Sphere = buffer->GetVertexBounds(batch.Key.BaseVertex);   // メッシュごとに 1 回だけ引く
 				frame.Args.push_back(args);
 				frame.Triangles += static_cast<uint64_t>(batch.Key.IndexCount / 3) * batch.Count;
 			}
+
+			// 4. DrawData と GPU カリング用のデータを書く
+			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
+			auto* cullData = reinterpret_cast<CullInstance*>(frame.Cpu + CULL_DATA_OFFSET);
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				if (_itemBatch[i] == UINT32_MAX) continue;
+				InstanceBatch& batch = _batches[_itemBatch[i]];
+				if (batch.Cursor >= batch.Start + batch.Count) continue;   // 入りきらなかった分
+				cullData[batch.Cursor] = { { batch.Sphere.x, batch.Sphere.y, batch.Sphere.z, batch.Sphere.w }, batch.Draw };
+				drawData[batch.Cursor] = { items[i].Object.Index, items[i].BaseVertex };
+				batch.Cursor++;
+			}
 			return slot;
+		}
+
+		void CommandContext::recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData)
+		{
+			// ==============================================================
+			// GPU カリング (描画の前に、同じコマンドリストでコンピュートシェーダーを 2 回実行する)
+			//   1. CSClear : CPU が並べた引数を Culled に写し、InstanceCount を 0 にする
+			//   2. CSCull  : オブジェクトごとに境界球と視錐台を比べ、映るものだけ
+			//                自分の描画の InstanceCount を増やして、その場所に DrawData を書く
+			//   3. Culled を ExecuteIndirect と頂点シェーダーが読む状態にする (映った数は読み戻し用にコピー)
+			// CPU は結果を待たない (同じフレームの ExecuteIndirect がそのまま使う)
+			// ==============================================================
+			auto cmdList = _frameCommandList->GetCmdList();
+			ID3D12Resource* culled = frame.Culled->Get();
+			const D3D12_GPU_VIRTUAL_ADDRESS input  = frame.Gpu->GetGPUVirtualAddress();
+			const D3D12_GPU_VIRTUAL_ADDRESS output = culled->GetGPUVirtualAddress();
+
+			CullConstants constants = {};
+			const ::DirectX::XMFLOAT4* planes = buffer->GetFrustumPlanes();
+			for (int i = 0; i < 6; ++i)
+			{
+				constants.Planes[i][0] = planes[i].x; constants.Planes[i][1] = planes[i].y;
+				constants.Planes[i][2] = planes[i].z; constants.Planes[i][3] = planes[i].w;
+			}
+			constants.InstanceCount = frame.Instances;
+			constants.DrawCount     = frame.Written;
+			constants.CounterOffset = static_cast<uint32_t>(CULL_COUNTER_OFFSET);
+			static_assert(sizeof(CullConstants) == Pipeline::CULL_CONSTANT_COUNT * sizeof(uint32_t), "CullConstants size mismatch");
+
+			// Culled はフレームの始めには COMMON (前のフレームの ExecuteCommandLists の完了で戻っている)
+			const auto toUav = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			cmdList->ResourceBarrier(1, &toUav);
+
+			cmdList->SetComputeRootSignature(_currentPipeline->GetCullRootSignature());
+			cmdList->SetComputeRoot32BitConstants(Pipeline::CULL_PARAM_CONSTANTS, Pipeline::CULL_CONSTANT_COUNT, &constants, 0);
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_OBJECTS,   objectData);
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_IN_DRAWS,  input);
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_CULL_DATA, input + CULL_DATA_OFFSET);
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_IN_ARGS,   input + DRAW_ARGS_OFFSET);
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_DRAWS, output);
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_ARGS,  output + DRAW_ARGS_OFFSET);
+
+			const UINT group = Pipeline::CULL_THREAD_GROUP;
+
+			// 1. 引数を写して InstanceCount = 0
+			cmdList->SetPipelineState(_currentPipeline->GetCullClearPipeline());
+			cmdList->Dispatch((frame.Written + group - 1) / group, 1, 1);
+
+			// CSClear の書き込みが終わってから CSCull が数え始めるように
+			D3D12_RESOURCE_BARRIER uavBarrier = {};
+			uavBarrier.Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+			uavBarrier.UAV.pResource = culled;
+			cmdList->ResourceBarrier(1, &uavBarrier);
+
+			// 2. 視錐台カリング
+			cmdList->SetPipelineState(_currentPipeline->GetCullPipeline());
+			cmdList->Dispatch((frame.Instances + group - 1) / group, 1, 1);
+
+			// 3. 描画が読む状態へ (読み戻しのコピー元にもする)
+			const auto toRead = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE);
+			cmdList->ResourceBarrier(1, &toRead);
+			cmdList->CopyBufferRegion(frame.Readback->Get(), 0, culled, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t));
+			frame.CullRecorded = true;
+
+			// 描画用の PSO に戻す (ルートシグネチャはグラフィックス用とコンピュート用で別なので、描画側の設定はそのまま)
+			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
 		}
 
 		void CommandContext::warnTooManyDraws()
@@ -747,7 +873,7 @@ namespace RHI
 			for (auto& frame : _draws)
 			{
 				if (frame.Staging) frame.Staging->Unmap();
-				frame = DrawFrame();
+				frame = DrawFrame();   // Culled / Readback もここで解放される
 			}
 			_drawIdBuffer.reset();
 			_currentPipeline = nullptr;

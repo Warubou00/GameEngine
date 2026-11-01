@@ -136,6 +136,24 @@ extern "C"
 		g_renderer->SetInstancingEnabled(enabled);
 	}
 
+	// GPU カリングするか (ExecuteIndirect の時だけ効く)
+	RENDERER_API void Renderer_SetGpuCulling(bool enabled)
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetGpuCullingEnabled(enabled);
+	}
+
+	// 負荷テスト用 : 格子の中から前を見るカメラ (カリングの効果を測る)
+	RENDERER_API void Renderer_TestInsideView()
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetTestInsideView();
+	}
+
 	RENDERER_API void Renderer_CleanUp()
 	{
 		if (g_renderer == nullptr)

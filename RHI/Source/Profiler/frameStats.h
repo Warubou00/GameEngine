@@ -40,6 +40,9 @@ namespace RHI
 		uint32_t DrawCalls     = 0;     // DrawIndexedInstanced の回数 (シーン)
 		uint32_t Instances     = 0;     // 描いたオブジェクトの数 (インスタンシングでまとめる前の数)
 		bool     Instancing    = false; // 同じメッシュを 1 回の描画にまとめたか
+		bool     GpuCulling    = false; // GPU カリングをしたか
+		uint32_t VisibleInstances = 0;  // GPU カリングで映った数 (FRAME_COUNT フレーム前の値)
+		bool     VisibleValid  = false;
 		uint64_t Triangles     = 0;
 		uint32_t Objects       = 0;     // 登録されている描画オブジェクトの数
 		bool     IndirectDraw  = false; // ExecuteIndirect で描いたか
