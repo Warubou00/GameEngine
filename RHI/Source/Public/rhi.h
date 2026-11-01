@@ -109,6 +109,11 @@ namespace RHI
 		virtual void SetInstancingEnabled(bool enabled) = 0;
 		virtual bool IsInstancingEnabled()const = 0;
 
+		// GPU カリング (視錐台カリング) をするか (既定 : true)。カメラに映らないオブジェクトを GPU が除いてから描く
+		// ExecuteIndirect の時だけ効く。メッシュの大きさは頂点を渡した時に RHI が計算するので、Renderer 側の準備は不要
+		virtual void SetGpuCullingEnabled(bool enabled) = 0;
+		virtual bool IsGpuCullingEnabled()const = 0;
+
 		// ======================================================================
 		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
 		// ======================================================================

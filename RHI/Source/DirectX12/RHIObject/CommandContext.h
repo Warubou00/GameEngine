@@ -34,6 +34,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <DirectXMath.h>
 #include <unordered_map>
 #include <vector>
 #include <memory>
@@ -167,6 +168,15 @@ namespace RHI
             void SetInstancingEnabled(bool enabled) { _useInstancing = enabled; }
             bool IsInstancingEnabled()const         { return _useInstancing; }
 
+            /***********************************************************************************
+             * @brief GPU カリング (視錐台カリング) をするか (既定 : true)
+             * @details 毎フレーム、描く前にコンピュートシェーダーでカメラに映らないオブジェクトを除き、
+             *          残ったものだけの引数を GPU が作って ExecuteIndirect で描く (CPU は結果を待たない)。
+             *          ExecuteIndirect が前提なので、ExecuteIndirect が OFF の時は行わない
+             ************************************************************************************/
+            void SetGpuCullingEnabled(bool enabled) { _useGpuCulling = enabled; }
+            bool IsGpuCullingEnabled()const         { return _useGpuCulling; }
+
             // インスタンシングで 1 回の描画にまとめる最大数
             // 全部を 1 回にまとめると、メッシュ A を画面全体に描いてからメッシュ B を描く順番になり、
             // 同じモデルの部品を続けて描く元の順番より GPU が遅くなった (画面上の近い場所を続けて描かなくなるため。
@@ -266,17 +276,44 @@ namespace RHI
             };
             // DrawFrame のバッファ内で、ExecuteIndirect の引数が始まる位置 (DrawData × MAX_DRAWS の後ろ)
             static constexpr UINT64 DRAW_ARGS_OFFSET = static_cast<UINT64>(MAX_DRAWS) * sizeof(DrawData);
+            static constexpr UINT64 DRAW_ARGS_SIZE   = static_cast<UINT64>(MAX_DRAWS) * sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+
+            // GPU カリングの入力 : オブジェクト 1 個分 (gpuCulling.shader の CullInstance と同じ並び : 20byte)
+            struct CullInstance
+            {
+                float    Sphere[4];   // メッシュのローカル座標での境界球 (w < 0 なら常に描く)
+                uint32_t Draw;        // 属する描画 (引数) の番号
+            };
+            static_assert(sizeof(CullInstance) == 20, "CullInstance must be 20 bytes (same as HLSL)");
+            // Staging / Gpu の中で CullInstance が始まる位置 (引数の後ろ)
+            static constexpr UINT64 CULL_DATA_OFFSET = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE;
+            // Culled (カリングの結果) の中で「映った数」のカウンターを置く位置 (引数の後ろ。引数の先頭からの距離)
+            static constexpr UINT64 CULL_COUNTER_OFFSET = DRAW_ARGS_SIZE;
+
+            // GPU カリングのルート定数 (gpuCulling.shader の cbuffer CullConstants と同じ並び)
+            struct CullConstants
+            {
+                float    Planes[6][4];
+                uint32_t InstanceCount;
+                uint32_t DrawCount;
+                uint32_t CounterOffset;
+            };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
             //   Staging : UPLOAD ヒープ。CPU が書き込む
             //   Gpu     : DEFAULT ヒープ (VRAM)。GPU はこちらを読む
             //             描画リストが変わった時だけ Staging からコピーする。
             //             (UPLOAD ヒープを直接読ませると、GPU が毎フレーム PCIe 越しにメインメモリを読むので遅い)
-            //   並び : [DrawData × MAX_DRAWS][IndirectDrawCommand × MAX_DRAWS]
+            //   並び : [DrawData × MAX_DRAWS][IndirectDrawCommand × MAX_DRAWS][CullInstance × MAX_DRAWS]
+            //   Culled   : DEFAULT ヒープ (UAV)。GPU カリングの結果 [DrawData × MAX_DRAWS][引数 × MAX_DRAWS][映った数]
+            //   Readback : 映った数を CPU で読む (プロファイラー用。FRAME_COUNT フレーム後に読む)
             struct DrawFrame
             {
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Staging;
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Gpu;
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Culled;
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Readback;
+                bool                       CullRecorded = false;    // このフレームでカリングを記録したか (読み戻しの有無)
                 uint8_t*                   Cpu       = nullptr;     // Staging を Map したままのアドレス
                 // 前回このフレームに書いた内容。描画リストが同じなら書き込みを省く
                 std::vector<RHI::DrawItem> LastItems;
@@ -293,6 +330,7 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _drawIdBuffer;
             bool                                                 _useIndirectDraw = true;
             bool                                                 _useInstancing   = true;
+            bool                                                 _useGpuCulling   = true;
             bool                                                 _warnedTooManyDraws = false;
 
             // インスタンシングでまとめる時の作業用 (毎回確保し直さないようメンバーに持つ)
@@ -321,6 +359,8 @@ namespace RHI
                 uint32_t Count;      // = InstanceCount
                 uint32_t Start;      // = StartInstanceLocation
                 uint32_t Cursor;     // 書き込み中の位置
+                uint32_t Draw;       // 引数の番号 (GPU カリングで使う)
+                ::DirectX::XMFLOAT4 Sphere;   // メッシュの境界球
             };
             std::unordered_map<MeshKey, uint32_t, MeshKeyHash>   _openBatch;        // メッシュ → 書き込み中の _batches の番号
             std::vector<InstanceBatch>                           _batches;
@@ -329,9 +369,12 @@ namespace RHI
 
             // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
             // (書き込みは writeDrawsDirect / writeDrawsInstanced。戻り値 = 書いた DrawData の数)
-            bool updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
-            uint32_t writeDrawsDirect(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
-            uint32_t writeDrawsInstanced(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
+            bool updateDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+            uint32_t writeDrawsDirect(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+            uint32_t writeDrawsInstanced(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+
+            // GPU カリングを記録する (Culled に映ったものだけの DrawData と引数ができる)
+            void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData);
             void     warnTooManyDraws();
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)

@@ -255,6 +255,23 @@ namespace Renderer
 		if (_rhi) _rhi->SetInstancingEnabled(enabled);
 	}
 
+	void SceneRenderer::SetGpuCullingEnabled(bool enabled)
+	{
+		if (_rhi) _rhi->SetGpuCullingEnabled(enabled);
+	}
+
+	void SceneRenderer::SetTestInsideView()
+	{
+		if (!IsInitialized()) return;
+
+		// 格子の中心の少し上から、+Z 方向 (格子の奥) を見る。後ろ半分と左右の外側は映らない
+		Camera camera;
+		camera.Position = Core::Vector3(0.0f, 4.0f, 0.0f);
+		camera.Target   = Core::Vector3(0.0f, 0.0f, 40.0f);
+		camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
+		SetCamera(camera);
+	}
+
 	void SceneRenderer::SetCamera(const Camera& camera, Projection::ProjectionType type)
 	{
 		_camera         = camera;

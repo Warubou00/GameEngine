@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 
+#include <unordered_map>
 #include "../../RHIObject/IBuffer.h"
 #include "CommandContext.h"     // FRAME_COUNT
 #include <vector>
@@ -155,8 +156,25 @@ namespace RHI
              * @brief オブジェクトの定数をこのフレームの領域へ書き込み、その先頭アドレスを返す
              * @details 前回このフレームの領域に書いてから変わったオブジェクトだけ書く
              *          戻り値を Root SRV (StructuredBuffer<ObjectData>) に渡す。オブジェクト i は戻り値 + i * OBJECT_DATA_STRIDE
+             *          書いた範囲は cmdList で VRAM 側 (_objectGpu) にコピーし、GPU はそちらを読む
+             *          (以前は UPLOAD ヒープを直接読ませていて、GPU が毎フレーム PCIe 越しに
+             *           オブジェクトの数 × 80byte を読んでいた。GPU カリングで 2 回読むようになり、はっきり遅くなった)
              ************************************************************************************/
-            D3D12_GPU_VIRTUAL_ADDRESS WriteObjectConstants(uint32_t frameIndex);
+            D3D12_GPU_VIRTUAL_ADDRESS WriteObjectConstants(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList);
+
+            /***********************************************************************************
+             * @brief メッシュのローカル座標での境界球 (GPU カリング用)
+             * @details UploadVertexData で頂点を受け取った時に計算しておく (頂点の範囲ごと)。
+             *          インデックスで頂点の一部だけを使う描画でも、範囲全体の球なので見落としは無い (少し大きめになるだけ)
+             * @return xyz = 中心, w = 半径。不明なら w = -1 (= カリングしない)
+             ************************************************************************************/
+            ::DirectX::XMFLOAT4 GetVertexBounds(uint32_t baseVertex)const;
+
+            /***********************************************************************************
+             * @brief 今のカメラの視錐台の 6 平面 (ワールド座標。内側が正、xyz は正規化済み)
+             * @details 左 / 右 / 下 / 上 / 手前 / 奥 の順。カメラが変わった時だけ計算し直す
+             ************************************************************************************/
+            const ::DirectX::XMFLOAT4* GetFrustumPlanes();
 
             // 登録されている描画オブジェクトの数 (プロファイラー用)
             uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size()); }
@@ -196,7 +214,8 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _globalVB;                   // グローバルなモデルデータを格納する頂点バッファ(タイトル等)
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _sceneVB;                    // 各シーンのみで使う頂点バッファ
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _globalCB;                   // グローバルな定数バッファ(タイトル等)
-            std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _sceneCB;                    // 各シーンのみで使う定数バッファ
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _sceneCB;                    // 各シーンのみで使う定数バッファ (UPLOAD。CPU が書く)
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _objectGpu;                  // _sceneCB の VRAM 側の写し (GPU が読む。変わった所だけコピー)
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _commonCB;                   // 汎用的な定数バッファ
             std::unique_ptr<RHI::ResourceBufferAllocator>          _globalVBAllocator;          // Global 頂点バッファのメモリ管理を行うクラス
             std::unique_ptr<RHI::ResourceBufferAllocator>          _sceneVBAllocator;           // Scene  頂点バッファのメモリ管理を行うクラス
@@ -227,6 +246,11 @@ namespace RHI
             // 行列を更新した回数。各フレームの領域に書いた時の値と比べて、変わっていなければ書き込みを省く
             uint64_t                            _frameConstantsVersion = 1;
             uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT] = {};
+
+            // ---------- GPU カリング用 ----------
+            std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;            // BaseVertex → 境界球
+            ::DirectX::XMFLOAT4                 _frustumPlanes[6] = {};
+            uint64_t                            _frustumVersion   = 0;                      // 計算した時の _frameConstantsVersion
 
             // ---------- オブジェクトごとの定数 (CPU 側) ----------
             std::vector<RHI::ObjectConstants>   _objects;                                   // シェーダー用に転置済み

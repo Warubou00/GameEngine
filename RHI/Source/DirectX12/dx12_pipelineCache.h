@@ -63,6 +63,13 @@ namespace RHI
 				bool* outFromCache = nullptr);
 
 			// 新しく登録したものがあればファイルに保存する (終了時に呼ぶ)
+			// コンピュート用 (GPU カリングなど)。使い方はグラフィックス用と同じ
+			HRESULT GetOrCreateComputePipeline(
+				const wchar_t* name,
+				const D3D12_COMPUTE_PIPELINE_STATE_DESC& desc,
+				Microsoft::WRL::ComPtr<ID3D12PipelineState>& outPipeline,
+				bool* outFromCache = nullptr);
+
 			void Save();
 
 			void Release();

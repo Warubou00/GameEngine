@@ -71,6 +71,7 @@ namespace RHI
 		{
 			// シェーダーのパス (実行ファイルからの相対パス)
 			constexpr const wchar_t* DEFAULT_SHADER_PATH = L"../Shader/hlslTemplate.shader";
+			constexpr const wchar_t* CULLING_SHADER_PATH = L"../Shader/gpuCulling.shader";
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -95,6 +96,9 @@ namespace RHI
 			_pipelineCache.reset();
 			_shaderCompiler.reset();
 			_indirectDrawSignature.reset();
+			_cullPipeline.reset();
+			_cullClearPipeline.reset();
+			_cullRootSignature.reset();
 			_customPipeline.clear();
 			_pipelineState.reset();
 			_rootSignature.reset();
@@ -125,6 +129,9 @@ namespace RHI
 
             // ExecuteIndirect 用 (作れなくても通常の描画で続けられる)
             makeIndirectDrawSignature(device);
+
+            // GPU カリング用 (ExecuteIndirect が前提。作れなくてもカリングせずに続けられる)
+            if (_indirectDrawSignature) makeCullingPipeline(device);
             return RHI_SUCCEEDED;
 		}
 
@@ -141,6 +148,26 @@ namespace RHI
         ID3D12CommandSignature* Pipeline::GetIndirectDrawSignature()const
         {
             return _indirectDrawSignature ? _indirectDrawSignature->Get() : nullptr;
+        }
+
+        bool Pipeline::IsGpuCullingAvailable()const
+        {
+            return _cullRootSignature && _cullClearPipeline && _cullPipeline;
+        }
+
+        ID3D12RootSignature* Pipeline::GetCullRootSignature()const
+        {
+            return _cullRootSignature ? _cullRootSignature->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetCullClearPipeline()const
+        {
+            return _cullClearPipeline ? _cullClearPipeline->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetCullPipeline()const
+        {
+            return _cullPipeline ? _cullPipeline->Get() : nullptr;
         }
 
         RHI_RESULT Pipeline::makeRootSignature(Device* device)
@@ -398,6 +425,85 @@ namespace RHI
                 Core::Logger::Log("[Pipeline] ExecuteIndirect is not available. Use direct draw only.");
                 _indirectDrawSignature.reset();
             }
+        }
+
+        void Pipeline::makeCullingPipeline(Device* device)
+        {
+            // ==============================================================
+            // GPU カリング (コンピュートシェーダー) のルートシグネチャと PSO
+            //   描画用とは別のルートシグネチャ。どれも 1 フレームに 1 回設定するだけなので
+            //   ディスクリプタヒープを使わず、ルート定数と Root SRV / UAV だけで組む
+            // ==============================================================
+            D3D12_ROOT_PARAMETER1 params[CULL_PARAM_COUNT] = {};
+
+            params[CULL_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            params[CULL_PARAM_CONSTANTS].Constants.ShaderRegister = 0;
+            params[CULL_PARAM_CONSTANTS].Constants.Num32BitValues = CULL_CONSTANT_COUNT;
+
+            // 読むだけのもの (t0〜t3)。カリングの間に中身は変わらない
+            const CullRootParameterIndex srvs[] = { CULL_PARAM_OBJECTS, CULL_PARAM_IN_DRAWS, CULL_PARAM_CULL_DATA, CULL_PARAM_IN_ARGS };
+            for (UINT i = 0; i < _countof(srvs); ++i)
+            {
+                auto& param = params[srvs[i]];
+                param.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+                param.Descriptor.ShaderRegister = i;
+                param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            }
+            // 書き込むもの (u0, u1)。atomic で書き換えるので DATA_VOLATILE
+            const CullRootParameterIndex uavs[] = { CULL_PARAM_OUT_DRAWS, CULL_PARAM_OUT_ARGS };
+            for (UINT i = 0; i < _countof(uavs); ++i)
+            {
+                auto& param = params[uavs[i]];
+                param.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+                param.Descriptor.ShaderRegister = i;
+                param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+            }
+            for (auto& param : params) param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;   // コンピュートは ALL のみ
+
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC desc = {};
+            desc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            desc.Desc_1_1.NumParameters = CULL_PARAM_COUNT;
+            desc.Desc_1_1.pParameters   = params;
+
+            auto rootSignature = std::make_unique<DirectX12::RootSignature>();
+            if (FAILED(rootSignature->Create(device->GetDevice()->GetDevice(), desc)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create culling root signature. GPU culling disabled.");
+                return;
+            }
+
+            // シェーダー (ShaderCache/ にあれば読むだけ) と PSO (pipeline.cache にあれば読むだけ)
+            auto makePso = [&](const char* entry, std::unique_ptr<DirectX12::PipelineState>& out) -> bool
+            {
+                Shader::CompiledShader cs;
+                if (!_shaderCompiler->Compile(CULLING_SHADER_PATH, entry, Shader::Stage::Compute, cs)) return false;
+
+                D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+                psoDesc.pRootSignature = rootSignature->Get();
+                psoDesc.CS             = cs.View();
+
+                const uint64_t rootSignatureHash = rootSignature->GetHash();
+                uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+                hash = fnv1a(cs.Bytecode.data(), cs.Bytecode.size(), hash);
+                wchar_t psoName[64] = {};
+                swprintf_s(psoName, L"Cull_%016llx", hash);
+
+                Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+                if (FAILED(_pipelineCache->GetOrCreateComputePipeline(psoName, psoDesc, pso))) return false;
+                out = std::make_unique<DirectX12::PipelineState>();
+                out->Attach(pso);
+                return true;
+            };
+
+            std::unique_ptr<DirectX12::PipelineState> clearPso, cullPso;
+            if (!makePso("CSClear", clearPso) || !makePso("CSCull", cullPso))
+            {
+                Core::Logger::Log("[Pipeline] Failed create culling pipeline. GPU culling disabled.");
+                return;
+            }
+            _cullRootSignature = std::move(rootSignature);
+            _cullClearPipeline = std::move(clearPso);
+            _cullPipeline      = std::move(cullPso);
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)

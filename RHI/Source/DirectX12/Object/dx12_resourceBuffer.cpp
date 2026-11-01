@@ -49,7 +49,7 @@ namespace RHI
 		// ==============================================
 		// バッファーの作成
 		// ==============================================
-		HRESULT ResourceBuffer::Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType)
+		HRESULT ResourceBuffer::Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_FLAGS flags)
 		{
 			if (!device || _resourceBuffer || sizeInBytes == 0)
 			{
@@ -74,7 +74,7 @@ namespace RHI
             desc.SampleDesc.Count           = 1;
             desc.SampleDesc.Quality         = 0;
             desc.Layout                     = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-            desc.Flags                      = D3D12_RESOURCE_FLAG_NONE;
+            desc.Flags                      = flags;
 
             // UPLOADヒープはGENERIC_READ固定、READBACKはCOPY_DEST固定、DEFAULTはCOMMONから開始する
             D3D12_RESOURCE_STATES initialState = D3D12_RESOURCE_STATE_COMMON;

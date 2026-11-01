@@ -62,7 +62,8 @@ namespace RHI
 			 * @param[in] D3D12_HEAP_TYPE ヒープのタイプ
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType);
+			// flags : コンピュートシェーダーから書き込むバッファは D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+			HRESULT Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
 
 			/***********************************************************************************
 			 * @brief テクスチャ用のバッファ作成

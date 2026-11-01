@@ -164,7 +164,8 @@ namespace RHI
 
 		std::string ShaderCompiler::targetFor(Stage stage)const
 		{
-			return std::string(stage == Stage::Vertex ? "vs_" : "ps_") + _shaderModel;
+			const char* prefix = stage == Stage::Vertex ? "vs_" : stage == Stage::Pixel ? "ps_" : "cs_";
+			return std::string(prefix) + _shaderModel;
 		}
 
 		bool ShaderCompiler::Compile(const std::wstring& path, const std::string& entry, Stage stage, CompiledShader& out)
