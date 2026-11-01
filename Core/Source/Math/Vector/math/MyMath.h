@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    MyMath.h
-* @brief   ”Šw®‚ÌŠÖ”‚ğ‚Â
+* @brief   æ•°å­¦å¼ã®é–¢æ•°ã‚’æŒã¤
 * @details 
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note –¼‘O‹óŠÔAƒCƒ“ƒNƒ‹[ƒhƒK[ƒh‚ğ•ÏX
+* @note åå‰ç©ºé–“ã€ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰ã‚¬ãƒ¼ãƒ‰ã‚’å¤‰æ›´
 ************************************************************************************/
 
 #pragma once
@@ -39,6 +39,13 @@
 
 
 
+// ----------------------------------------------------------------
+// æˆ»ã‚Šå€¤ã¯ã™ã¹ã¦ã€Œå€¤ã€ã§è¿”ã™
+// ä»¥å‰ã¯ const float& / const Vector3& ãªã©ã®å‚ç…§ã§è¿”ã—ã¦ã„ãŸãŒã€
+// è¿”ã—ã¦ã„ãŸã®ã¯é–¢æ•°å†…ã®ä¸€æ™‚ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã ã£ãŸãŸã‚ã€å—ã‘å–ã£ãŸæ™‚ç‚¹ã§ç„¡åŠ¹ãªå‚ç…§ã«ãªã£ã¦ã„ãŸ
+// (æœªå®šç¾©å‹•ä½œã€‚C4172 è­¦å‘Šã€Œãƒ­ãƒ¼ã‚«ãƒ«å¤‰æ•°ã¾ãŸã¯ãƒ†ãƒ³ãƒãƒ©ãƒªã®ã‚¢ãƒ‰ãƒ¬ã‚¹ã‚’è¿”ã—ã¾ã™ã€)
+// float / Vector ã¯å°ã•ã„ã®ã§å€¤ã§è¿”ã—ã¦ã‚‚ã‚³ãƒ”ãƒ¼ã®ã‚³ã‚¹ãƒˆã¯ã»ã¼ç„¡ã„ (RVO ã‚‚åŠ¹ã)
+// ----------------------------------------------------------------
 namespace Core
 {
 	static constexpr float PI = 3.14159265358979323846f;
@@ -46,390 +53,390 @@ namespace Core
 
 	namespace vector2
 	{
-		// Vector2‚©‚çfloatŒ^‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		// Vector2ã‹ã‚‰floatå‹ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector2& vec)noexcept;
-		// Vector2‚Ì2“_ŠÔ‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		float LengthSq(const Vector2& vec)noexcept;
+		// Vector2ã®2ç‚¹é–“ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector2& vec1, const Vector2& vec2)noexcept;
-		// Vector2‚©‚çfloatŒ^‚Ì’·‚³‚ğæ“¾
+		float LengthSq(const Vector2& vec1, const Vector2& vec2)noexcept;
+		// Vector2ã‹ã‚‰floatå‹ã®é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& Length(const Vector2& vec)noexcept;
-		// Vector2‚Ì2“_ŠÔ‚Ì’·‚³‚ğŒvZ
+		float Length(const Vector2& vec)noexcept;
+		// Vector2ã®2ç‚¹é–“ã®é•·ã•ã‚’è¨ˆç®—
 		// =============================================================
-		const float& Length(const Vector2& vec1, const Vector2& vec2)noexcept;
-		// Vector2‚©‚ç³‹K‰»‚µ‚½Vector2Œ^‚ğæ“¾
+		float Length(const Vector2& vec1, const Vector2& vec2)noexcept;
+		// Vector2ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector2å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector2& Normalize(const Vector2& vec)noexcept;
-		// Vector3‚©‚ç³‹K‰»‚µ‚½Vector2Œ^‚ğæ“¾
+		Vector2 Normalize(const Vector2& vec)noexcept;
+		// Vector3ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector2å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector2& Normalize(const Vector3& vec)noexcept;
-		// Vector4‚©‚ç³‹K‰»‚µ‚½Vector2Œ^‚ğæ“¾
+		Vector2 Normalize(const Vector3& vec)noexcept;
+		// Vector4ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector2å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector2& Normalize(const Vector4& vec)noexcept;
-		// Vector2‚©‚çfloatŒ^‚Ì“àÏ‚ğæ“¾
+		Vector2 Normalize(const Vector4& vec)noexcept;
+		// Vector2ã‹ã‚‰floatå‹ã®å†…ç©ã‚’å–å¾—
 		// =============================================================
-		const float& Dot(const Vector2& vec1, const Vector2& vec2)noexcept;
-		// Vector2‚©‚çfloatŒ^‚ÌŠOÏ‚ğæ“¾
+		float Dot(const Vector2& vec1, const Vector2& vec2)noexcept;
+		// Vector2ã‹ã‚‰floatå‹ã®å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const float& Cross(const Vector2& vec1, const Vector2& vec2)noexcept;
-		// Vector2‚©‚çVector2“¯m‚Ì·•ª‚ğæ“¾(Vector2Œ^)
+		float Cross(const Vector2& vec1, const Vector2& vec2)noexcept;
+		// Vector2ã‹ã‚‰Vector2åŒå£«ã®å·®åˆ†ã‚’å–å¾—(Vector2å‹)
 		// =============================================================
-		const Vector2& Subtract(const Vector2& vec1, const Vector2& vec2)noexcept;
-		// Vector2ŠÔ‚ğüŒ`•âŠ®‚µ‚Ä•Ô‹p
+		Vector2 Subtract(const Vector2& vec1, const Vector2& vec2)noexcept;
+		// Vector2é–“ã‚’ç·šå½¢è£œå®Œã—ã¦è¿”å´
 		// =============================================================
-		const Vector2& Vec2Lerp(const Vector2& vec1, const Vector2& vec2, float t)noexcept;
+		Vector2 Vec2Lerp(const Vector2& vec1, const Vector2& vec2, float t)noexcept;
 	}
 
 	namespace vector3
 	{
-		// Vector3‚©‚çfloatŒ^‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		// Vector3ã‹ã‚‰floatå‹ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector3& vec)noexcept;
-		// Vector3‚Ì2“_ŠÔ‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		float LengthSq(const Vector3& vec)noexcept;
+		// Vector3ã®2ç‚¹é–“ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3‚©‚çfloatŒ^‚Ì’·‚³‚ğæ“¾
+		float LengthSq(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3ã‹ã‚‰floatå‹ã®é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& Length(const Vector3& vec)noexcept;
-		// Vector3‚Ì2“_ŠÔ‚Ì’·‚³‚ğæ“¾
+		float Length(const Vector3& vec)noexcept;
+		// Vector3ã®2ç‚¹é–“ã®é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& Length(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3‚©‚ç³‹K‰»‚µ‚½Vector3Œ^‚ğæ“¾
+		float Length(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector3å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector3& Normalize(const Vector3& vec)noexcept;
-		// Vector4‚©‚ç³‹K‰»‚µ‚½Vector3Œ^‚ğæ“¾
+		Vector3 Normalize(const Vector3& vec)noexcept;
+		// Vector4ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector3å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector3& Normalize(const Vector4& vec)noexcept;
-		// Vector3‚©‚çfloatŒ^‚Ì“àÏ‚ğæ“¾
+		Vector3 Normalize(const Vector4& vec)noexcept;
+		// Vector3ã‹ã‚‰floatå‹ã®å†…ç©ã‚’å–å¾—
 		// =============================================================
-		const float& Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3‚©‚çVector3Œ^‚ÌŠOÏ‚ğæ“¾
+		float Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3ã‹ã‚‰Vector3å‹ã®å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector3& Cross(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3‚©‚çVector3“¯m‚Ì·•ª‚ğæ“¾(Vector3Œ^)
+		Vector3 Cross(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3ã‹ã‚‰Vector3åŒå£«ã®å·®åˆ†ã‚’å–å¾—(Vector3å‹)
 		// =============================================================
-		const Vector3& Subtract(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3ŠÔ‚ğüŒ`•âŠ®‚µ‚ÄVector2Œ^‚Æ‚µ‚Ä•Ô‹p
+		Vector3 Subtract(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3é–“ã‚’ç·šå½¢è£œå®Œã—ã¦Vector2å‹ã¨ã—ã¦è¿”å´
 		// =============================================================
-		const Vector2& Vec2Lerp(const Vector3& vec1, const Vector3& vec2, float t)noexcept;
-		// Vector3ŠÔ‚ğüŒ`•âŠ®‚µ‚ÄVector3Œ^‚Æ‚µ‚Ä•Ô‹p
+		Vector2 Vec2Lerp(const Vector3& vec1, const Vector3& vec2, float t)noexcept;
+		// Vector3é–“ã‚’ç·šå½¢è£œå®Œã—ã¦Vector3å‹ã¨ã—ã¦è¿”å´
 		// =============================================================
-		const Vector3& Vec3Lerp(const Vector3& vec1, const Vector3& vec2, float t)noexcept;
+		Vector3 Vec3Lerp(const Vector3& vec1, const Vector3& vec2, float t)noexcept;
 	}
 
 	namespace vector4
 	{
-		// Vector4‚©‚çfloatŒ^‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		// Vector4ã‹ã‚‰floatå‹ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector4& vec)noexcept;
-		// Vector4‚Ì2“_ŠÔ‚Ì’·‚³‚Ì2æ‚ğæ“¾
+		float LengthSq(const Vector4& vec)noexcept;
+		// Vector4ã®2ç‚¹é–“ã®é•·ã•ã®2ä¹—ã‚’å–å¾—
 		// =============================================================
-		const float& LengthSq(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4‚©‚çfloatŒ^‚Ì’·‚³‚ğæ“¾
+		float LengthSq(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4ã‹ã‚‰floatå‹ã®é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& Length(const Vector4& vec)noexcept;
-		// Vector4‚Ì2“_ŠÔ‚Ì’·‚³‚ğæ“¾
+		float Length(const Vector4& vec)noexcept;
+		// Vector4ã®2ç‚¹é–“ã®é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& Length(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4‚©‚ç³‹K‰»‚µ‚½Vector4Œ^‚ğæ“¾
+		float Length(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4ã‹ã‚‰æ­£è¦åŒ–ã—ãŸVector4å‹ã‚’å–å¾—
 		// =============================================================
-		const Vector4& Normalize(const Vector4& vec)noexcept;
-		// Vector4‚©‚çfloatŒ^‚Ì“àÏ‚ğæ“¾
+		Vector4 Normalize(const Vector4& vec)noexcept;
+		// Vector4ã‹ã‚‰floatå‹ã®å†…ç©ã‚’å–å¾—
 		// =============================================================
-		const float& Dot(const Vector4& vec1, const Vector4 vec2)noexcept;
-		// Vector4‚©‚çVector4Œ^‚ÌŠOÏ‚ğæ“¾
-		// –¢À‘•
+		float Dot(const Vector4& vec1, const Vector4 vec2)noexcept;
+		// Vector4ã‹ã‚‰Vector4å‹ã®å¤–ç©ã‚’å–å¾—
+		// æœªå®Ÿè£…
 		// =============================================================
-		const Vector4& Cross(const Vector4& vec1, const Vector4 vec2)noexcept;
-		// Vector4‚©‚çVector4“¯m‚Ì·•ª‚ğæ“¾(Vector4Œ^)
+		Vector4 Cross(const Vector4& vec1, const Vector4 vec2)noexcept;
+		// Vector4ã‹ã‚‰Vector4åŒå£«ã®å·®åˆ†ã‚’å–å¾—(Vector4å‹)
 		// =============================================================
-		const Vector4& Subtract(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4ŠÔ‚ğüŒ`•âŠ®‚µ‚ÄVector3Œ^‚Æ‚µ‚Ä•Ô‹p
+		Vector4 Subtract(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4é–“ã‚’ç·šå½¢è£œå®Œã—ã¦Vector3å‹ã¨ã—ã¦è¿”å´
 		// =============================================================
-		const Vector2& Vec2Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
-		// Vector4ŠÔ‚ğüŒ`•âŠ®‚µ‚ÄVector3Œ^‚Æ‚µ‚Ä•Ô‹p
+		Vector2 Vec2Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
+		// Vector4é–“ã‚’ç·šå½¢è£œå®Œã—ã¦Vector3å‹ã¨ã—ã¦è¿”å´
 		// =============================================================
-		const Vector3& Vec3Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
-		// Vector4ŠÔ‚ğüŒ`•âŠ®‚µ‚ÄVector3Œ^‚Æ‚µ‚Ä•Ô‹p
+		Vector3 Vec3Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
+		// Vector4é–“ã‚’ç·šå½¢è£œå®Œã—ã¦Vector3å‹ã¨ã—ã¦è¿”å´
 		// =============================================================
-		const Vector4& Vec4Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
+		Vector4 Vec4Lerp(const Vector4& vec1, const Vector4& vec2, float t)noexcept;
 	}
 
 	namespace color
 	{
-		// Šî–{“I‚ÈƒOƒŒ[ƒXƒP[ƒ‹‚ÌF‚ğæ“¾
+		// åŸºæœ¬çš„ãªã‚°ãƒ¬ãƒ¼ã‚¹ã‚±ãƒ¼ãƒ«ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorGrayScale(const Color& color)noexcept;
-		// R‚ğŠî’²‚Æ‚µ‚½ƒOƒŒ[ƒXƒP[ƒ‹‚ÌF‚ğæ“¾
+		Color ColorGrayScale(const Color& color)noexcept;
+		// Rã‚’åŸºèª¿ã¨ã—ãŸã‚°ãƒ¬ãƒ¼ã‚¹ã‚±ãƒ¼ãƒ«ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorGrayScaleR(const Color& color)noexcept;
-		// G‚ğŠî’²‚Æ‚µ‚½ƒOƒŒ[ƒXƒP[ƒ‹‚ÌF‚ğæ“¾
+		Color ColorGrayScaleR(const Color& color)noexcept;
+		// Gã‚’åŸºèª¿ã¨ã—ãŸã‚°ãƒ¬ãƒ¼ã‚¹ã‚±ãƒ¼ãƒ«ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorGrayScaleG(const Color& color)noexcept;
-		// B‚ğŠî’²‚Æ‚µ‚½ƒOƒŒ[ƒXƒP[ƒ‹‚ÌF‚ğæ“¾
+		Color ColorGrayScaleG(const Color& color)noexcept;
+		// Bã‚’åŸºèª¿ã¨ã—ãŸã‚°ãƒ¬ãƒ¼ã‚¹ã‚±ãƒ¼ãƒ«ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorGrayScaleB(const Color& color)noexcept;
-		// R,G,B‚ğ‚»‚ê‚¼‚ê”½“]‚µ‚½F‚ğæ“¾
+		Color ColorGrayScaleB(const Color& color)noexcept;
+		// R,G,Bã‚’ãã‚Œãã‚Œåè»¢ã—ãŸè‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorNegapoji(const Color& color)noexcept;
-		// ƒZƒsƒA’²‚ÌF‚ğæ“¾
+		Color ColorNegapoji(const Color& color)noexcept;
+		// ã‚»ãƒ”ã‚¢èª¿ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorSepia(const Color& color)noexcept;
-		// ƒ‚ƒmƒNƒ’²‚ÌF‚ğæ“¾
+		Color ColorSepia(const Color& color)noexcept;
+		// ãƒ¢ãƒã‚¯ãƒ­èª¿ã®è‰²ã‚’å–å¾—
 		// =============================================================
-		const Color& ColorMonocrome(const Color& color)noexcept;
-		// R‚Ì’l‚Ì‚İæ“¾
+		Color ColorMonocrome(const Color& color)noexcept;
+		// Rã®å€¤ã®ã¿å–å¾—
 		// =============================================================
-		const Color& ColorRScale(const Color& color)noexcept;
-		// G‚Ì’l‚Ì‚İæ“¾
+		Color ColorRScale(const Color& color)noexcept;
+		// Gã®å€¤ã®ã¿å–å¾—
 		// =============================================================
-		const Color& ColorGScale(const Color& color)noexcept;
-		// B‚Ì’l‚Ì‚İæ“¾
+		Color ColorGScale(const Color& color)noexcept;
+		// Bã®å€¤ã®ã¿å–å¾—
 		// =============================================================
-		const Color& ColorBScale(const Color& color)noexcept;
-		// 0.0f`1.0f‚Ì’l‚Éû‚ß‚Äæ“¾
+		Color ColorBScale(const Color& color)noexcept;
+		// 0.0fã€œ1.0fã®å€¤ã«åã‚ã¦å–å¾—
 		// =============================================================
-		const Color& ColorSaturate(const Color& color)noexcept;
+		Color ColorSaturate(const Color& color)noexcept;
 	}
 
 	namespace myVector
 	{
-		// MyVECTOR‚ğ•Ô‚è’l‚Éˆø”‚ğƒZƒbƒg
+		// MyVECTORã‚’è¿”ã‚Šå€¤ã«å¼•æ•°ã‚’ã‚»ãƒƒãƒˆ
 		// =============================================================
-		const MyVECTOR& MyVectorSet(const float& X, const float& Y, const float& Z, const float& W)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat‚ğæ“¾‚µfloatŒ^‚Å’·‚³‚ğæ“¾
+		MyVECTOR MyVectorSet(const float& X, const float& Y, const float& Z, const float& W)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloatã‚’å–å¾—ã—floatå‹ã§é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& MyVector2Length(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat,_zFloat‚ğæ“¾‚µfloatŒ^‚Å’·‚³‚ğæ“¾
+		float MyVector2Length(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloat,_zFloatã‚’å–å¾—ã—floatå‹ã§é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& MyVector3Length(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚ç’l‘S‚Ä‚ğæ“¾‚µfloatŒ^‚Å’·‚³‚ğæ“¾
+		float MyVector3Length(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰å€¤å…¨ã¦ã‚’å–å¾—ã—floatå‹ã§é•·ã•ã‚’å–å¾—
 		// =============================================================
-		const float& MyVector4Length(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat‚ğæ“¾‚µMyVECTORŒ^‚Å³‹K‰»‚ğæ“¾
+		float MyVector4Length(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloatã‚’å–å¾—ã—MyVECTORå‹ã§æ­£è¦åŒ–ã‚’å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVector2Normalize(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat, _zFloat‚ğæ“¾‚µMyVECTORŒ^‚Å³‹K‰»‚ğæ“¾
+		MyVECTOR MyVector2Normalize(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloat, _zFloatã‚’å–å¾—ã—MyVECTORå‹ã§æ­£è¦åŒ–ã‚’å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVector3Normalize(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚ç’l‘S‚Ä‚ğæ“¾‚µMyVECTORŒ^‚Å³‹K‰»‚ğæ“¾
+		MyVECTOR MyVector3Normalize(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰å€¤å…¨ã¦ã‚’å–å¾—ã—MyVECTORå‹ã§æ­£è¦åŒ–ã‚’å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVector4Normalize(const MyVECTOR& vec)noexcept;
-		// 2’l‚ÌMyVECTOR‚©‚çvec1‚©‚çvec2‚ğˆø‚¢‚½·•ª‚ğMyVECTORŒ^‚Åæ“¾
+		MyVECTOR MyVector4Normalize(const MyVECTOR& vec)noexcept;
+		// 2å€¤ã®MyVECTORã‹ã‚‰vec1ã‹ã‚‰vec2ã‚’å¼•ã„ãŸå·®åˆ†ã‚’MyVECTORå‹ã§å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVectorSubtract(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat‚ğæ“¾‚µMyVECTORŒ^‚Å“àÏ‚ğæ“¾
-		// ‘S’l‚Í‘S‚Ä“¯‚¶‚É‚È‚é
+		MyVECTOR MyVectorSubtract(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloatã‚’å–å¾—ã—MyVECTORå‹ã§å†…ç©ã‚’å–å¾—
+		// å…¨å€¤ã¯å…¨ã¦åŒã˜ã«ãªã‚‹
 		// =============================================================
-		const MyVECTOR& MyVector2Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat,_zFloat‚ğæ“¾‚µMyVECTORŒ^‚Å“àÏ‚ğæ“¾
-		// ‘S’l‚Í‘S‚Ä“¯‚¶‚É‚È‚é
+		MyVECTOR MyVector2Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloat,_zFloatã‚’å–å¾—ã—MyVECTORå‹ã§å†…ç©ã‚’å–å¾—
+		// å…¨å€¤ã¯å…¨ã¦åŒã˜ã«ãªã‚‹
 		// =============================================================
-		const MyVECTOR& MyVector3Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç‘S‚Ä‚Ì’l‚ğæ“¾‚µMyVECTORŒ^‚Å“àÏ‚ğæ“¾
-		// ‘S’l‚Í‘S‚Ä“¯‚¶‚É‚È‚é
+		MyVECTOR MyVector3Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰å…¨ã¦ã®å€¤ã‚’å–å¾—ã—MyVECTORå‹ã§å†…ç©ã‚’å–å¾—
+		// å…¨å€¤ã¯å…¨ã¦åŒã˜ã«ãªã‚‹
 		// =============================================================
-		const MyVECTOR& MyVector4Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat‚ğæ“¾‚µMyVECTORŒ^‚ÅŠOÏ‚ğæ“¾
-		// ‘S’l‚Í‘S‚Ä“¯‚¶‚É‚È‚é
+		MyVECTOR MyVector4Dot(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloatã‚’å–å¾—ã—MyVECTORå‹ã§å¤–ç©ã‚’å–å¾—
+		// å…¨å€¤ã¯å…¨ã¦åŒã˜ã«ãªã‚‹
 		// =============================================================
-		const MyVECTOR& MyVector2Cross(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç_xFloat,_yFloat,_zFloat‚ğæ“¾‚µMyVECTORŒ^‚ÅŠOÏ‚ğæ“¾
+		MyVECTOR MyVector2Cross(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰_xFloat,_yFloat,_zFloatã‚’å–å¾—ã—MyVECTORå‹ã§å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVector3Cross(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// MyVECTOR‚©‚ç‘S’l‚ğæ“¾‚µMyVECTORŒ^‚ÅŠOÏ‚ğæ“¾
+		MyVECTOR MyVector3Cross(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// MyVECTORã‹ã‚‰å…¨å€¤ã‚’å–å¾—ã—MyVECTORå‹ã§å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const MyVECTOR& MyVector4Cross(const MyVECTOR& vec1, const MyVECTOR& vec2, const MyVECTOR& vec3)noexcept;
-		// MyVECTOR‚©‚çX¬•ª‚ğfloatŒ^‚Åæ“¾
+		MyVECTOR MyVector4Cross(const MyVECTOR& vec1, const MyVECTOR& vec2, const MyVECTOR& vec3)noexcept;
+		// MyVECTORã‹ã‚‰Xæˆåˆ†ã‚’floatå‹ã§å–å¾—
 		// =============================================================
-		const float& MyVectorGetXF(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚çY¬•ª‚ğfloatŒ^‚Åæ“¾
+		float MyVectorGetXF(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰Yæˆåˆ†ã‚’floatå‹ã§å–å¾—
 		// =============================================================
-		const float& MyVectorGetYF(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚çZ¬•ª‚ğfloatŒ^‚Åæ“¾
+		float MyVectorGetYF(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰Zæˆåˆ†ã‚’floatå‹ã§å–å¾—
 		// =============================================================
-		const float& MyVectorGetZF(const MyVECTOR& vec)noexcept;
-		// MyVECTOR‚©‚çZ¬•ª‚ğfloatŒ^‚Åæ“¾
+		float MyVectorGetZF(const MyVECTOR& vec)noexcept;
+		// MyVECTORã‹ã‚‰Zæˆåˆ†ã‚’floatå‹ã§å–å¾—
 		// =============================================================
-		const float& MyVectorGetWF(const MyVECTOR& vec)noexcept;
+		float MyVectorGetWF(const MyVECTOR& vec)noexcept;
 #if 0
-		// MyVECTOR‚©‚ç”Û’è‚ğŒvZ(DirectX::XMVectorNegate()‚É€‹’)
+		// MyVECTORã‹ã‚‰å¦å®šã‚’è¨ˆç®—(DirectX::XMVectorNegate()ã«æº–æ‹ )
 		// =============================================================
-		const MyVECTOR& MyVectorNegate(const MyVECTOR& vec)noexcept;
-		// Vector4‚©‚ç”Û’è‚ğŒvZ(DirectX::XMVectorNegate()‚É€‹’)
+		MyVECTOR MyVectorNegate(const MyVECTOR& vec)noexcept;
+		// Vector4ã‹ã‚‰å¦å®šã‚’è¨ˆç®—(DirectX::XMVectorNegate()ã«æº–æ‹ )
 		// =============================================================
-		const MyVECTOR& MyVectorNegate(const Vector4& vec)noexcept;
-		// ‚Ü‚Ÿ‚Æ‚è‚ ‚¦‚¸‚·‚°‚¥ŠÖ”(DirectX::XMVectorSelect()‚É€‹’)
+		MyVECTOR MyVectorNegate(const Vector4& vec)noexcept;
+		// ã¾ãã¨ã‚Šã‚ãˆãšã™ã’ã‡é–¢æ•°(DirectX::XMVectorSelect()ã«æº–æ‹ )
 		// =============================================================
-		const MyVECTOR& MyVectorSelect(const MyVECTOR& vec1, const MyVECTOR& vec2, const MyVECTOR& controllVec)noexcept;
+		MyVECTOR MyVectorSelect(const MyVECTOR& vec1, const MyVECTOR& vec2, const MyVECTOR& controllVec)noexcept;
 #endif
-		// ‘S—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		// å…¨è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector4Equal(MyVECTOR& vec1, MyVECTOR& vec2)noexcept;
-		// 3—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		bool MyVector4Equal(MyVECTOR& vec1, MyVECTOR& vec2)noexcept;
+		// 3è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector3Equal(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
-		// 2—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		bool MyVector3Equal(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		// 2è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector2Equal(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
+		bool MyVector2Equal(const MyVECTOR& vec1, const MyVECTOR& vec2)noexcept;
 
-		// Vector3Œ^‚©‚çVector3Œ^‚Ì³‹K‰»ƒxƒNƒgƒ‹‚ğæ“¾
+		// Vector3å‹ã‹ã‚‰Vector3å‹ã®æ­£è¦åŒ–ãƒ™ã‚¯ãƒˆãƒ«ã‚’å–å¾—
 		// =============================================================
-		const Vector3& MyVector3Normalize(const Vector3& vec)noexcept;
-		// Vector4Œ^‚©‚çVector3Œ^‚Ì³‹K‰»ƒxƒNƒgƒ‹‚ğæ“¾
-		// _w‚Í–³‹
+		Vector3 MyVector3Normalize(const Vector3& vec)noexcept;
+		// Vector4å‹ã‹ã‚‰Vector3å‹ã®æ­£è¦åŒ–ãƒ™ã‚¯ãƒˆãƒ«ã‚’å–å¾—
+		// _wã¯ç„¡è¦–
 		// =============================================================
-		const Vector3& MyVector3Normalize(const Vector4& vec)noexcept;
-		// Vector4Œ^‚©‚çVector4Œ^‚Ì³‹K‰»ƒxƒNƒgƒ‹‚ğæ“¾
+		Vector3 MyVector3Normalize(const Vector4& vec)noexcept;
+		// Vector4å‹ã‹ã‚‰Vector4å‹ã®æ­£è¦åŒ–ãƒ™ã‚¯ãƒˆãƒ«ã‚’å–å¾—
 		// =============================================================
-		const Vector4& MyVector4Normalize(const Vector4& vec)noexcept;
-		// Vector3Œ^‚©‚çVector4Œ^‚Ì³‹K‰»ƒxƒNƒgƒ‹‚ğæ“¾
+		Vector4 MyVector4Normalize(const Vector4& vec)noexcept;
+		// Vector3å‹ã‹ã‚‰Vector4å‹ã®æ­£è¦åŒ–ãƒ™ã‚¯ãƒˆãƒ«ã‚’å–å¾—
 		// =============================================================
-		const Vector4& MyVector4Normalize(const Vector3& vec)noexcept;
-		// Vector4“¯m‚Ì·•ª‚ğvector4Œ^‚Åæ“¾
+		Vector4 MyVector4Normalize(const Vector3& vec)noexcept;
+		// Vector4åŒå£«ã®å·®åˆ†ã‚’vector4å‹ã§å–å¾—
 		// =============================================================
-		const Vector4& MyVectorSubtract(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4“¯m‚Ì·•ª‚ğVector3Œ^‚Åæ“¾
+		Vector4 MyVectorSubtract(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4åŒå£«ã®å·®åˆ†ã‚’Vector3å‹ã§å–å¾—
 		// =============================================================
-		const Vector3& MyVectorSubtractVec3(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector3“¯m‚ÅVector3‚Ì“àÏ‚ğæ“¾
+		Vector3 MyVectorSubtractVec3(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector3åŒå£«ã§Vector3ã®å†…ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector3& MyVector3Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector4“¯m‚ÅVector3‚Ì“àÏ‚ğæ“¾
-		// _w‚Í–³‹
+		Vector3 MyVector3Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector4åŒå£«ã§Vector3ã®å†…ç©ã‚’å–å¾—
+		// _wã¯ç„¡è¦–
 		// =============================================================
-		const Vector3& MyVector3Dot(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4“¯m‚ÅVector4‚Ì“àÏ‚ğæ“¾
+		Vector3 MyVector3Dot(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4åŒå£«ã§Vector4ã®å†…ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector4& MyVector4Dot(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// vector3“¯m‚Åvector4‚Ì“àÏ‚ğæ“¾
-		// _w‚Í0.0fŒÅ’è
+		Vector4 MyVector4Dot(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// vector3åŒå£«ã§vector4ã®å†…ç©ã‚’å–å¾—
+		// _wã¯0.0få›ºå®š
 		// =============================================================
-		const Vector4& MyVector4Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector3“¯m‚ÅVector3‚ÌŠOÏ‚ğæ“¾
+		Vector4 MyVector4Dot(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector3åŒå£«ã§Vector3ã®å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector3& MyVector3Cross(const Vector3& vec1, const Vector3& vec2)noexcept;
-		// Vector4“¯m‚ÅVector3‚ÌŠOÏ‚ğæ“¾
-		// _w‚Í–³‹
+		Vector3 MyVector3Cross(const Vector3& vec1, const Vector3& vec2)noexcept;
+		// Vector4åŒå£«ã§Vector3ã®å¤–ç©ã‚’å–å¾—
+		// _wã¯ç„¡è¦–
 		// =============================================================
-		const Vector3& MyVector3Cross(const Vector4& vec1, const Vector4& vec2)noexcept;
-		// Vector4Œ^3‚Â‚ÅVector4Œ^‚ÌŠOÏ‚ğæ“¾
+		Vector3 MyVector3Cross(const Vector4& vec1, const Vector4& vec2)noexcept;
+		// Vector4å‹3ã¤ã§Vector4å‹ã®å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector4& MyVector4Cross(const Vector4& vec1, const Vector4& vec2, const Vector4& vec3)noexcept;
-		// Vector3Œ^3‚Â‚ÅVector4Œ^‚ÌŠOÏ‚ğæ“¾
+		Vector4 MyVector4Cross(const Vector4& vec1, const Vector4& vec2, const Vector4& vec3)noexcept;
+		// Vector3å‹3ã¤ã§Vector4å‹ã®å¤–ç©ã‚’å–å¾—
 		// =============================================================
-		const Vector4& MyVector4Cross(const Vector3& vec1, const Vector3& vec2, const Vector3& vec3)noexcept;
-		// 3—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		Vector4 MyVector4Cross(const Vector3& vec1, const Vector3& vec2, const Vector3& vec3)noexcept;
+		// 3è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector3Equal(Vector4& vec1, Vector4& vec2)noexcept;
-		// 2—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		bool MyVector3Equal(Vector4& vec1, Vector4& vec2)noexcept;
+		// 2è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector2Equal(Vector4& vec1, Vector4& vec2)noexcept;
-		// 2—v‘f‚ª“™‚µ‚¢‚©ŒŸo
+		bool MyVector2Equal(Vector4& vec1, Vector4& vec2)noexcept;
+		// 2è¦ç´ ãŒç­‰ã—ã„ã‹æ¤œå‡º
 		// =============================================================
-		const bool& MyVector2Equal(Vector3& vec1, Vector3& vec2)noexcept;
+		bool MyVector2Equal(Vector3& vec1, Vector3& vec2)noexcept;
 	}
 
 #if 0
 	namespace myMatrix
 	{
-		// ’PˆÊs—ñ‚ğ¶¬
+		// å˜ä½è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixIdentity(void)noexcept;
-		// ƒXƒP[ƒ‹‚Ìs—ñ‚ğ¶¬
+		Matrix KOMatrixIdentity(void)noexcept;
+		// ã‚¹ã‚±ãƒ¼ãƒ«ã®è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixScaling(float scaleX, float scaleY, float scaleZ)noexcept;
-		// Vector3‚©‚çƒXƒP[ƒ‹s—ñ‚ğ¶¬
+		Matrix KOMatrixScaling(float scaleX, float scaleY, float scaleZ)noexcept;
+		// Vector3ã‹ã‚‰ã‚¹ã‚±ãƒ¼ãƒ«è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixScaling(Vector3 scale)noexcept;
-		// ‰ñ“]s—ñ‚ğ¶¬
+		Matrix KOMatrixScaling(Vector3 scale)noexcept;
+		// å›è»¢è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixYawPitchRoll(float rotX, float rotY, float rotZ)noexcept;
-		// Vector3‚©‚ç‰ñ“]s—ñ‚ğ¶¬
+		Matrix KOMatrixYawPitchRoll(float rotX, float rotY, float rotZ)noexcept;
+		// Vector3ã‹ã‚‰å›è»¢è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixYawPitchRoll(Vector3 rot)noexcept;
-		// ˆÚ“®s—ñ‚ğ¶¬
+		Matrix KOMatrixYawPitchRoll(Vector3 rot)noexcept;
+		// ç§»å‹•è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixTranslation(float offsetX, float offsetY, float offsetZ)noexcept;
-		// Vector3‚©‚çˆÚ“®s—ñ‚ğ¶¬
+		Matrix KOMatrixTranslation(float offsetX, float offsetY, float offsetZ)noexcept;
+		// Vector3ã‹ã‚‰ç§»å‹•è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixTranslation(Vector3 offset)noexcept;
-		// Matrix“¯m‚Ìs—ñ‚ÌŠ|‚¯Z‚ğs‚¤
+		Matrix KOMatrixTranslation(Vector3 offset)noexcept;
+		// MatrixåŒå£«ã®è¡Œåˆ—ã®æ›ã‘ç®—ã‚’è¡Œã†
 		// =============================================================
-		const Matrix& KOMatrixMultiply(const Matrix& m1, const Matrix& m2)noexcept;
-		// KOVECTOR‚©‚ç‹“_‚ÌŒü‚«‚ğ—˜—p‚µ‚½¶èÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixMultiply(const Matrix& m1, const Matrix& m2)noexcept;
+		// KOVECTORã‹ã‚‰è¦–ç‚¹ã®å‘ãã‚’åˆ©ç”¨ã—ãŸå·¦æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookToLH(const KOVECTOR& eyePosition, const KOVECTOR& eyeDirection, const KOVECTOR& upDirection)noexcept;
-		// Vector4‚©‚ç‹“_‚ÌŒü‚«‚ğ—˜—p‚µ‚½¶èÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookToLH(const KOVECTOR& eyePosition, const KOVECTOR& eyeDirection, const KOVECTOR& upDirection)noexcept;
+		// Vector4ã‹ã‚‰è¦–ç‚¹ã®å‘ãã‚’åˆ©ç”¨ã—ãŸå·¦æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookToLH(const Vector4& eyePosition, const Vector4& eyeDirection, const Vector4& upDirection)noexcept;
-		// KOVECTOR‚©‚ç’‹“_‚ğ—˜—p‚µ‚½¶èÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookToLH(const Vector4& eyePosition, const Vector4& eyeDirection, const Vector4& upDirection)noexcept;
+		// KOVECTORã‹ã‚‰æ³¨è¦–ç‚¹ã‚’åˆ©ç”¨ã—ãŸå·¦æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookAtLH(const KOVECTOR& eyePosition, const KOVECTOR& focusPosition, const KOVECTOR& upDirection)noexcept;
-		// Vector4‚©‚ç’‹“_‚ğ—˜—p‚µ‚½¶èÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookAtLH(const KOVECTOR& eyePosition, const KOVECTOR& focusPosition, const KOVECTOR& upDirection)noexcept;
+		// Vector4ã‹ã‚‰æ³¨è¦–ç‚¹ã‚’åˆ©ç”¨ã—ãŸå·¦æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookAtLH(const Vector4& eyePosition, const Vector4& focusPosition, const Vector4& upDirection)noexcept;
-		// KOVECTOR‚©‚ç‹“_‚ÌŒü‚«‚ğ—˜—p‚µ‚½‰EèÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookAtLH(const Vector4& eyePosition, const Vector4& focusPosition, const Vector4& upDirection)noexcept;
+		// KOVECTORã‹ã‚‰è¦–ç‚¹ã®å‘ãã‚’åˆ©ç”¨ã—ãŸå³æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookToRH(const KOVECTOR& eyePosition, const KOVECTOR& eyeDirection, const KOVECTOR& upDirection)noexcept;
-		// KOVECTOR‚©‚ç‹“_‚ÌŒü‚«‚ğ—˜—p‚µ‚½‰EèÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookToRH(const KOVECTOR& eyePosition, const KOVECTOR& eyeDirection, const KOVECTOR& upDirection)noexcept;
+		// KOVECTORã‹ã‚‰è¦–ç‚¹ã®å‘ãã‚’åˆ©ç”¨ã—ãŸå³æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookToRH(const Vector4& eyePosition, const Vector4& eyeDirection, const Vector4& upDirection)noexcept;
-		// KOVECTOR‚©‚ç’‹“_‚ğ—˜—p‚µ‚½‰EèÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookToRH(const Vector4& eyePosition, const Vector4& eyeDirection, const Vector4& upDirection)noexcept;
+		// KOVECTORã‹ã‚‰æ³¨è¦–ç‚¹ã‚’åˆ©ç”¨ã—ãŸå³æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookAtRH(const KOVECTOR& eyePosition, const KOVECTOR& focusPosition, const KOVECTOR& upDirection)noexcept;
-		// Vector4‚©‚ç’‹“_‚ğ—˜—p‚µ‚½‰EèÀ•WŒnƒrƒ…[s—ñ‚ğ¶¬
+		Matrix KOMatrixLookAtRH(const KOVECTOR& eyePosition, const KOVECTOR& focusPosition, const KOVECTOR& upDirection)noexcept;
+		// Vector4ã‹ã‚‰æ³¨è¦–ç‚¹ã‚’åˆ©ç”¨ã—ãŸå³æ‰‹åº§æ¨™ç³»ãƒ“ãƒ¥ãƒ¼è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixLookAtRH(const Vector4& eyePosition, const Vector4& focusPosition, const Vector4& upDirection)noexcept;
-		// ‹ts—ñ‚ğ¶¬
+		Matrix KOMatrixLookAtRH(const Vector4& eyePosition, const Vector4& focusPosition, const Vector4& upDirection)noexcept;
+		// é€†è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixInverse(const Matrix& mat)noexcept;
-		// “§‹“Š‰e‚Ìs—ñ‚ğ¶¬
+		Matrix KOMatrixInverse(const Matrix& mat)noexcept;
+		// é€è¦–æŠ•å½±ã®è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixPerspectiveFovLH(float fovAngleY, float aspectRatio, float nearZ, float farZ)noexcept;
-		// •½s“Š‰e‚Ìs—ñ‚ğ¶¬
+		Matrix KOMatrixPerspectiveFovLH(float fovAngleY, float aspectRatio, float nearZ, float farZ)noexcept;
+		// å¹³è¡ŒæŠ•å½±ã®è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixOrthographicOffCenterLH(float viewLeft, float viewRight, float viewBottom, float viewTop, float nearZ, float farZ)noexcept;
-		// •½s“Š‰e‚Ìs—ñ‚ğ¶¬(Part2)
+		Matrix KOMatrixOrthographicOffCenterLH(float viewLeft, float viewRight, float viewBottom, float viewTop, float nearZ, float farZ)noexcept;
+		// å¹³è¡ŒæŠ•å½±ã®è¡Œåˆ—ã‚’ç”Ÿæˆ(Part2)
 		// =============================================================
-		const Matrix& KOMatrixOrthographicLH(float viewWidth, float viewHeight, float nearZ, float farZ)noexcept;
-		// “]’us—ñ‚ğ¶¬
+		Matrix KOMatrixOrthographicLH(float viewWidth, float viewHeight, float nearZ, float farZ)noexcept;
+		// è»¢ç½®è¡Œåˆ—ã‚’ç”Ÿæˆ
 		// =============================================================
-		const Matrix& KOMatrixTranspose(const Matrix& mat)noexcept;
+		Matrix KOMatrixTranspose(const Matrix& mat)noexcept;
 	}
 #endif
 
 	namespace myMath
 	{
-		// ¬‚³‚¢‚Ù‚¤‚ğ•Ô‹pB“¯’l‚Ívalue1‚ğ•Ô‹p
+		// å°ã•ã„ã»ã†ã‚’è¿”å´ã€‚åŒå€¤ã¯value1ã‚’è¿”å´
 		// =============================================================
 		template<class T>
-		const T& Min(const T& value1, const T& value2)noexcept
+		T Min(const T& value1, const T& value2)noexcept
 		{
 			return (value1 <= value2) ? value1 : value2;
 		}
 
-		// ‘å‚«‚¢‚Ù‚¤‚ğ•Ô‹pB“¯’l‚Ívalue1‚ğ•Ô‹p
+		// å¤§ãã„ã»ã†ã‚’è¿”å´ã€‚åŒå€¤ã¯value1ã‚’è¿”å´
 		// =============================================================
 		template<class T>
-		const T& Max(const T& value1, const T& value2)noexcept
+		T Max(const T& value1, const T& value2)noexcept
 		{
 			return (value1 >= value2) ? value1 : value2;
 		}
 
-		// min,max‚Ì”ÍˆÍ“à‚É’²®‚µ‚Ä•Ô‹p
+		// min,maxã®ç¯„å›²å†…ã«èª¿æ•´ã—ã¦è¿”å´
 		// =============================================================
 		template<class T>
-		const T& Clamp(const T& value, const T& min, const T& max)noexcept
+		T Clamp(const T& value, const T& min, const T& max)noexcept
 		{
 			return Max(min, Min(value, max));
 		}
 
-		// —İæ‚ğŒvZ‚µ‚Ä•Ô‹p
+		// ç´¯ä¹—ã‚’è¨ˆç®—ã—ã¦è¿”å´
 		// =============================================================
 		template<class T>
-		const T& Pow(const T& value, const int& count)noexcept
+		T Pow(const T& value, const int& count)noexcept
 		{
 			if (count == 0) {
 				return 1.0;
@@ -438,15 +445,15 @@ namespace Core
 				return value * Pow(value, count - 1);
 			}
 			else {
-				// •‰‚Ìw”‚Ìê‡
+				// è² ã®æŒ‡æ•°ã®å ´åˆ
 				return 1.0 / (value * Pow(value, -count - 1));
 			}
 		}
 
-		// â‘Î’l‚ğŒvZ
+		// çµ¶å¯¾å€¤ã‚’è¨ˆç®—
 		// =============================================================
 		template<class T>
-		const T& Abs(const T& value)
+		T Abs(const T& value)
 		{
 			if (value == 0)
 				return value;
@@ -454,7 +461,7 @@ namespace Core
 			return value > 0 ? value : -value;
 		}
 
-		//// DirectX::XMVECTOR‚Ì‰‰Zq‚ÌƒI[ƒo[ƒ[ƒh
+		//// DirectX::XMVECTORã®æ¼”ç®—å­ã®ã‚ªãƒ¼ãƒãƒ¼ãƒ­ãƒ¼ãƒ‰
 		//// =============================================================
 		//const DirectX::XMVECTOR operator*(const DirectX::XMVECTOR& v, const float t)
 		//{
@@ -471,63 +478,63 @@ namespace Core
 		//	return DirectX::XMVectorAdd(DirectX::XMVectorScale(start, (1 - t)), DirectX::XMVectorScale(end, t));
 		//}
 
-		// 2’lŠÔ‚ğüŒ`•âŠ®‚µ‚Ä•Ô‹p
+		// 2å€¤é–“ã‚’ç·šå½¢è£œå®Œã—ã¦è¿”å´
 		// =============================================================
 		template<class T>
-		const T& SingleLerp(const T& start, const T& end, const float t)
+		T SingleLerp(const T& start, const T& end, const float t)
 		{
 			return start * (1 - t) + end * t;
 		}
 
-		// Še—v‘f‚ğmin`max‚Éû‚ß‚Äæ“¾
+		// å„è¦ç´ ã‚’minã€œmaxã«åã‚ã¦å–å¾—
 		// =============================================================
-		const Color& ColorClamp(const Color& color, const Color& min, const Color& max)noexcept;
-		// Še—v‘f‚Ì¬‚³‚¢’l‚Ì•û‚ÅF‚ğæ“¾
-		// “¯’l‚Ícolor1‚Ì—v‘f‚ğ•Ô‹p
+		Color ColorClamp(const Color& color, const Color& min, const Color& max)noexcept;
+		// å„è¦ç´ ã®å°ã•ã„å€¤ã®æ–¹ã§è‰²ã‚’å–å¾—
+		// åŒå€¤ã¯color1ã®è¦ç´ ã‚’è¿”å´
 		// =============================================================
-		const Color& ColorMin(const Color& color1, const Color& color2)noexcept;
-		// Še—v‘f‚Ì‘å‚«‚¢’l‚Ì•û‚ÅF‚ğæ“¾
-		// “¯’l‚Ícolor1‚Ì—v‘f‚ğ•Ô‹p
+		Color ColorMin(const Color& color1, const Color& color2)noexcept;
+		// å„è¦ç´ ã®å¤§ãã„å€¤ã®æ–¹ã§è‰²ã‚’å–å¾—
+		// åŒå€¤ã¯color1ã®è¦ç´ ã‚’è¿”å´
 		// =============================================================
-		const Color& ColorMax(const Color& color1, const Color& color2)noexcept;
+		Color ColorMax(const Color& color1, const Color& color2)noexcept;
 
-		// Še—v‘f‚ğmin`max‚Éû‚ß‚Äæ“¾
+		// å„è¦ç´ ã‚’minã€œmaxã«åã‚ã¦å–å¾—
 		// =============================================================
-		const Vector4& Vec4Clamp(const Vector4& vec4, const Vector4& minVec, const Vector4& maxVec)noexcept;
-		// Še—v‘f‚Ì¬‚³‚¢’l‚Ì•û‚ÅF‚ğæ“¾
-		// “¯’l‚Ícolor1‚Ì—v‘f‚ğ•Ô‹p
+		Vector4 Vec4Clamp(const Vector4& vec4, const Vector4& minVec, const Vector4& maxVec)noexcept;
+		// å„è¦ç´ ã®å°ã•ã„å€¤ã®æ–¹ã§è‰²ã‚’å–å¾—
+		// åŒå€¤ã¯color1ã®è¦ç´ ã‚’è¿”å´
 		// =============================================================
-		const Vector4& Vec4Min(const Vector4& vec4_1, const Vector4& vec4_2)noexcept;
-		// Še—v‘f‚Ì‘å‚«‚¢’l‚Ì•û‚ÅF‚ğæ“¾
-		// “¯’l‚Ícolor1‚Ì—v‘f‚ğ•Ô‹p
+		Vector4 Vec4Min(const Vector4& vec4_1, const Vector4& vec4_2)noexcept;
+		// å„è¦ç´ ã®å¤§ãã„å€¤ã®æ–¹ã§è‰²ã‚’å–å¾—
+		// åŒå€¤ã¯color1ã®è¦ç´ ã‚’è¿”å´
 		// =============================================================
-		const Vector4& Vec4Max(const Vector4& vec4_1, const Vector4& vec4_2)noexcept;
+		Vector4 Vec4Max(const Vector4& vec4_1, const Vector4& vec4_2)noexcept;
 
-		/// Šp“x‚ğDegree’PˆÊ‚©‚çRadian’PˆÊ‚É•ÏŠ·‚·‚éB
+		/// è§’åº¦ã‚’Degreeå˜ä½ã‹ã‚‰Radianå˜ä½ã«å¤‰æ›ã™ã‚‹ã€‚
 		// =============================================================
-		const float& DegToRad(const float& deg)noexcept;
+		float DegToRad(const float& deg)noexcept;
 
-		/// Šp“x‚ğRadian’PˆÊ‚©‚çDegree’PˆÊ‚É•ÏŠ·‚·‚éB
+		/// è§’åº¦ã‚’Radianå˜ä½ã‹ã‚‰Degreeå˜ä½ã«å¤‰æ›ã™ã‚‹ã€‚
 		// =============================================================
-		const float& RadToDeg(const float& rad)noexcept;
+		float RadToDeg(const float& rad)noexcept;
 
 #if 0
-		// viewMatrix‚©‚çƒJƒƒ‰‚Ì‰ñ“]Šp‚ğ‹‚ß‚é
+		// viewMatrixã‹ã‚‰ã‚«ãƒ¡ãƒ©ã®å›è»¢è§’ã‚’æ±‚ã‚ã‚‹
 		// =============================================================
-		const Vector3& ExtractRotationAnglesFromViewMatrix(const Matrix& viewMatrix);
+		Vector3 ExtractRotationAnglesFromViewMatrix(const Matrix& viewMatrix);
 #endif
 
-		// forward‚ğ‹‚ß‚é
+		// forwardã‚’æ±‚ã‚ã‚‹
 		// =============================================================
-		const Vector3& CalculateForward(float yaw, float pitch);
+		Vector3 CalculateForward(float yaw, float pitch);
 
-		// right‚ğ‹‚ß‚é
+		// rightã‚’æ±‚ã‚ã‚‹
 		// =============================================================
-		const Vector3& CalculateRight(float yaw);
+		Vector3 CalculateRight(float yaw);
 
-		// up‚ğ‹‚ß‚é
+		// upã‚’æ±‚ã‚ã‚‹
 		// =============================================================
-		const Vector3& CalculateUp(float yaw, float pitch, float roll);
+		Vector3 CalculateUp(float yaw, float pitch, float roll);
 	}
 }
 
@@ -536,4 +543,4 @@ namespace Core
 
 /************************************
 * End of file
-************************************/
+************************************/
