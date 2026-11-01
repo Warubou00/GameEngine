@@ -70,10 +70,13 @@ namespace RHI
 			void CALLBACK onDebugMessage(
 				D3D12_MESSAGE_CATEGORY /*category*/,
 				D3D12_MESSAGE_SEVERITY severity,
-				D3D12_MESSAGE_ID       /*id*/,
+				D3D12_MESSAGE_ID       id,
 				LPCSTR                 description,
 				void*                  /*context*/)
 			{
+				// PSO キャッシュに無い名前を読もうとした時の警告は、初回起動では必ず出る想定どおりのものなので出さない
+				if (id == D3D12_MESSAGE_ID_LOADPIPELINE_NAMENOTFOUND) return;
+
 				// INFO / MESSAGE は量が多いので警告以上だけ出す
 				const char* label = nullptr;
 				switch (severity)

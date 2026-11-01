@@ -43,6 +43,7 @@
 // d3d12.h では struct として宣言されているので合わせる (class だと C4099 警告になる)
 struct ID3D12PipelineState;
 struct ID3D12RootSignature;
+struct ID3D12CommandSignature;
 
 namespace RHI
 {
@@ -50,9 +51,13 @@ namespace RHI
     {
         class PipelineState;
         class RootSignature;
-
-        // 2026/09/23 仮
         class CommandSignature;
+        class PipelineCache;
+    }
+
+    namespace Shader
+    {
+        class ShaderCompiler;
     }
 
     namespace ObjectInterface
@@ -120,17 +125,24 @@ namespace RHI
             ID3D12PipelineState* GetPipelineState()const;
             ID3D12RootSignature* GetRootSignature()const;
 
+            // ExecuteIndirect 用のコマンドシグネチャ (作れなかった環境では nullptr = 通常の描画だけ)
+            ID3D12CommandSignature* GetIndirectDrawSignature()const;
+
+            // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
+            const std::string& GetDescription()const { return _description; }
+
         private:         /*---メンバ変数---*/
-            std::unique_ptr<DirectX12::PipelineState> _pipelineState;
-            std::unique_ptr<DirectX12::RootSignature> _rootSignature;
-            std::vector<CustomPipeline>               _customPipeline;
+            std::unique_ptr<DirectX12::PipelineState>    _pipelineState;
+            std::unique_ptr<DirectX12::RootSignature>    _rootSignature;
+            std::unique_ptr<DirectX12::CommandSignature> _indirectDrawSignature;   // ExecuteIndirect 用
+            std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
+            std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
+            std::vector<CustomPipeline>                  _customPipeline;
+            std::string                                  _description;
 
+            RHI_RESULT makeRootSignature(Device* device);
             RHI_RESULT makePipeline(Device* device);
-
-            //2026/09/23 仮
-            std::unique_ptr<RHI::DirectX12::CommandSignature> _commandSignature;
-        public:
-            void InitCommandSignature(RHI::ObjectInterface::Device* device);
+            void       makeIndirectDrawSignature(Device* device);
         };
 
     }

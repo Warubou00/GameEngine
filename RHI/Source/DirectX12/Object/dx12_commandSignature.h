@@ -46,12 +46,20 @@ namespace RHI
 		class CommandSignature
 		{
 		public:
-			// GPUに処理させる1回分の描画コマンドの構造体
-			struct IndirectCommand
+			// ExecuteIndirect で GPU に渡す、描画 1 回分の引数
+			// コマンドシグネチャの引数の並び (Pipeline::makeIndirectDrawSignature) と同じ順番にすること
+			// ※D3D12 の決まりで、ルート引数はルートパラメータの番号が小さい順に並べる必要がある
+			//   1. 頂点の開始位置 (ルート定数 b0 の 2 個 : 2 個目は 64bit のアドレスを 8byte 境界にそろえるための詰め物) : 8byte
+			//   2. オブジェクトの定数バッファのアドレス (Root CBV b2)                                                   : 8byte
+			//   3. DrawIndexedInstanced の引数                                                                           : 20byte
+			struct IndirectDrawCommand
 			{
-				UINT32 ObjectID;                            // シェーダーに渡すオブジェクトID (4バイト)
-				D3D12_DRAW_ARGUMENTS DrawArguments; // DrawInstancedの引数 (16バイト)
+				UINT                         BaseVertex;
+				UINT                         Padding;
+				D3D12_GPU_VIRTUAL_ADDRESS    ObjectCbv;
+				D3D12_DRAW_INDEXED_ARGUMENTS Draw;
 			};
+			static_assert(sizeof(IndirectDrawCommand) == 40, "IndirectDrawCommand must be 40 bytes");
 
 		public:
 			CommandSignature();
@@ -88,4 +96,4 @@ namespace RHI
 
 /************************************
 * End of file
-************************************/
+************************************/

@@ -18,6 +18,7 @@
 ******************************************************************/
 #include "sceneRenderer.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "mesh.h"
@@ -151,6 +152,9 @@ namespace Renderer
 			}
 		}
 
+		_modelItems.clear();
+		_modelTextures.clear();
+
 		// 4. サブメッシュごとにインデックスを登録し、描画オブジェクトと DrawItem を作る
 		//    (サブメッシュ i はマテリアル i を使う。OBJ の usemtl の順番)
 		for (size_t i = 0; i < mesh->Indecies.size(); ++i)
@@ -180,6 +184,8 @@ namespace Renderer
 			item.IndexCount = range.Count;
 			item.Object     = object;
 			_drawItems.push_back(item);
+			_modelItems.push_back(item);
+			_modelTextures.push_back(constants.TextureIndex);
 		}
 
 		// プロファイラーに表示 (描画リストの数)
@@ -187,6 +193,61 @@ namespace Renderer
 
 		// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
 		return true;
+	}
+
+	void SceneRenderer::SpawnTestGrid(uint32_t count, float spacing)
+	{
+		if (!IsInitialized() || _modelItems.empty() || count == 0) return;
+
+		// 正方形に近い格子 (side x side) に並べる。原点が中心になるようにずらす
+		uint32_t side = 1;
+		while (side * side < count) ++side;
+		const float half = (side - 1) * spacing * 0.5f;
+
+		uint32_t spawned = 0;
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			const float x = (i % side) * spacing - half;
+			const float z = (i / side) * spacing - half;
+
+			for (size_t j = 0; j < _modelItems.size(); ++j)
+			{
+				const RHI::ObjectHandle object = _rhi->CreateObject();
+				if (!object.IsValid())
+				{
+					// オブジェクトの上限 (RHI 側で 1 フレーム 32,768 個)
+					Core::Logger::Log("[SceneRenderer] Object limit reached.");
+					i = count;
+					break;
+				}
+
+				RHI::ObjectConstants constants;
+				::DirectX::XMStoreFloat4x4(&constants.World, ::DirectX::XMMatrixTranslation(x, 0.0f, z));
+				constants.TextureIndex = _modelTextures[j];
+				_rhi->UpdateObject(object, constants);
+
+				RHI::DrawItem item = _modelItems[j];   // 頂点 / インデックスは同じものを使う
+				item.Object = object;
+				_drawItems.push_back(item);
+			}
+			++spawned;
+		}
+
+		// 全体が見えるようにカメラを引く (斜め上から原点を見る)
+		const float distance = (std::max)(10.0f, side * spacing * 0.9f);
+		Camera camera;
+		camera.Position = Core::Vector3(0.0f, distance * 0.8f, -distance);
+		camera.Target   = Core::Vector3(0.0f, 0.0f, 0.0f);
+		camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
+		SetCamera(camera);
+
+		_rhi->ReportProfilerValue("Test grid (models)", static_cast<double>(spawned));
+		_rhi->ReportProfilerValue("Draw items", static_cast<double>(_drawItems.size()));
+	}
+
+	void SceneRenderer::SetIndirectDrawEnabled(bool enabled)
+	{
+		if (_rhi) _rhi->SetIndirectDrawEnabled(enabled);
 	}
 
 	void SceneRenderer::SetCamera(const Camera& camera, Projection::ProjectionType type)

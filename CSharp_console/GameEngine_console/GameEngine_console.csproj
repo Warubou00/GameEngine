@@ -23,6 +23,13 @@
     <!-- C# の Debug / Release に合わせて C++ 側の構成を選ぶ -->
     <NativeConfiguration Condition="'$(Configuration)' == 'Release'">Release</NativeConfiguration>
     <NativeConfiguration Condition="'$(NativeConfiguration)' == ''">Debug</NativeConfiguration>
+    <!--
+      DXC (シェーダーコンパイラ)。Windows 本体には入っていないので Windows SDK のものをコピーする
+      Redist\D3D の DXC は古く (10.0.19041)、IDxcUtils に対応していないため、
+      SDK 10.0.26100 の bin にある新しい DXC (1.8) を優先する。無い環境では Redist の版 (RHI が FXC に戻す)
+    -->
+    <DxcRedistDir>$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.0.26100.0\x64\</DxcRedistDir>
+    <DxcRedistDir Condition="!Exists('$(DxcRedistDir)dxcompiler.dll')">$(MSBuildProgramFiles32)\Windows Kits\10\Redist\D3D\x64\</DxcRedistDir>
   </PropertyGroup>
 
   <Target Name="CopyNativeEngineFiles" AfterTargets="Build">
@@ -31,6 +38,8 @@
       <NativeEngineFile Include="$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.dll;$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.pdb" />
       <NativeEngineFile Include="$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.dll;$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.pdb" />
       <NativeEngineFile Include="$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll;$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.pdb" />
+      <!-- DXC : dxcompiler.dll (コンパイラ) と dxil.dll (シェーダーの署名)。無い時は RHI が FXC に戻す -->
+      <NativeEngineFile Include="$(DxcRedistDir)dxcompiler.dll;$(DxcRedistDir)dxil.dll" />
       <!-- シェーダー : RHI は実行時に "../Shader/" から読むので、出力フォルダの 1 つ上に置く -->
       <EngineShaderFile Include="$(EngineRootDir)RHI\Source\Shader\*.shader" />
     </ItemGroup>

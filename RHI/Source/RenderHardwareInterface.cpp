@@ -35,6 +35,7 @@
 // ========================================
 
 #include "../../Core/Source/Log/logger.h"
+#include "../../Core/Source/Log/scopedTimer.h"
 
 namespace RHI
 {
@@ -49,6 +50,9 @@ namespace RHI
     {
         InitializeResult result;
         _isInitialized = false;
+
+        // 起動時間の計測 (シェーダーのキャッシュ / PSO キャッシュの効果確認用)
+        Core::ScopedTimer initTimer("RHI Initialize (total)");
 
 #ifdef _DEBUG
         RHI::DirectX12::EnableDebugLayer();
@@ -74,22 +78,35 @@ namespace RHI
             return succeeded;
         };
 
-        result.Device = _device->Initialize();
+        {
+            Core::ScopedTimer t("RHI Initialize : Device");
+            result.Device = _device->Initialize();
+        }
         if (result.Device != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Device."); return finish(false); }
 
-        result.CommandContext = _commandContext->Initialize(_device.get(), &objInfo);
+        {
+            Core::ScopedTimer t("RHI Initialize : CommandContext (queue / swap chain / upload)");
+            result.CommandContext = _commandContext->Initialize(_device.get(), &objInfo);
+        }
         if (result.CommandContext != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize CommandContext."); return finish(false); }
 
-        result.Buffer = _buffer->Initialize(_device.get(), _commandContext.get());
+        {
+            Core::ScopedTimer t("RHI Initialize : Buffer (mega buffers / default texture)");
+            result.Buffer = _buffer->Initialize(_device.get(), _commandContext.get());
+        }
         if (result.Buffer != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Buffer."); return finish(false); }
 
         // テクスチャは Buffer の初期化で既定テクスチャまで作ってある
         result.Texture = Result::Succeeded;
 
-        result.Pipeline = _pipeline->Initialize(_device.get());
+        {
+            Core::ScopedTimer pipelineTimer("RHI Initialize : Pipeline (shader + root signature + PSO)");
+            result.Pipeline = _pipeline->Initialize(_device.get());
+        }
         if (result.Pipeline != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Pipeline."); return finish(false); }
 
         // プロファイラー (ImGui)。失敗しても描画は続けられるので、初期化の失敗にはしない
+        Core::ScopedTimer uiTimer("RHI Initialize : DebugUI (ImGui)");
         if (!_debugUI.Initialize(static_cast<HWND>(desc.WindowHandle), _device->GetDevice()->GetDevice(),
                                  _buffer->GetDescHeapManager(), ObjectInterface::CommandContext::FRAME_COUNT,
                                  DirectX12::SwapChain::FORMAT))
@@ -97,6 +114,7 @@ namespace RHI
             Core::Logger::Log("[RHI] Profiler (ImGui) is not available.");
         }
         _profiler.Initialize(_device->GetAdapter()->GetAdapter3(), _device->GetAdapter()->GetAdapterName());
+        _profiler.SetInfo("Pipeline", _pipeline->GetDescription());   // 例 : "DXC / SM 6_6 / shader from cache / PSO from cache"
         _hasLastFrame = false;
 
         return finish(true);
@@ -109,6 +127,9 @@ namespace RHI
         //   2. GPU リソースを持つオブジェクトを破棄
         //   3. 最後に Device
         if (_commandContext) _commandContext->WaitForGpu();
+
+        // 起動からの平均をログに出す (計測用)
+        if (_isInitialized) _profiler.LogSummary();
 
         // ImGui は SRV ヒープ (Buffer が持つ) とデバイスを使うので、それらより先に破棄する
         _debugUI.Shutdown();
@@ -230,7 +251,10 @@ namespace RHI
         if (_debugUI.IsVisible())
         {
             _debugUI.BeginFrame();
-            _profiler.Draw();
+            // プロファイラーから ExecuteIndirect の ON / OFF を切り替えられる (効果をその場で比べるため)
+            bool indirect = _commandContext->IsIndirectDrawEnabled();
+            _profiler.Draw(&indirect);
+            _commandContext->SetIndirectDrawEnabled(indirect);
             // ImGui の PSO は深度無しで作られているので、描画先をバックバッファだけにしてから積む
             _commandContext->BindBackBufferWithoutDepth();
             _debugUI.EndFrame(_commandContext->GetFrameCommandList());
@@ -246,6 +270,16 @@ namespace RHI
         if (frameMs > 0.0) _profiler.AddFrame(stats);
 
         return _commandContext->RenderEnd();
+    }
+
+    void RenderHardwareInterface::SetIndirectDrawEnabled(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetIndirectDrawEnabled(enabled);
+    }
+
+    bool RenderHardwareInterface::IsIndirectDrawEnabled()const
+    {
+        return _commandContext ? _commandContext->IsIndirectDrawEnabled() : false;
     }
 
     void RenderHardwareInterface::WaitForGpu()

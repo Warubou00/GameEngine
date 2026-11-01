@@ -21,6 +21,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <cstdint>
 #include "../dx12_header.h"
 
 /******************************************************************
@@ -73,6 +74,19 @@ namespace RHI
             HRESULT Create(ID3D12Device* device, const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc);
 
             /***********************************************************************************
+             * @brief 生成関数 (バージョン指定。1.1 なら範囲ごとに「データが変わらない」などの情報を渡せる)
+             * @details 1.1 を渡しても GPU / ランタイムが 1.1 に対応していなければ 1.0 に変換して作る
+             *          (1.1 の追加情報は捨てられるだけで、動作は同じ)
+             ************************************************************************************/
+            HRESULT Create(ID3D12Device* device, const D3D12_VERSIONED_ROOT_SIGNATURE_DESC& rootSignatureDesc);
+
+            // ルートシグネチャ 1.1 が使えるか
+            static bool IsVersion11Supported(ID3D12Device* device);
+
+            // シリアライズした中身のハッシュ (PSO キャッシュの名前に使う。ルートシグネチャが変わったら別の PSO になる)
+            uint64_t GetHash()const { return _hash; }
+
+            /***********************************************************************************
              * @brief 取得関数
              * @details
              *
@@ -88,6 +102,7 @@ namespace RHI
         private:         /*---メンバ変数---*/
 
             Microsoft::WRL::ComPtr<ID3D12RootSignature> _rootSignature;
+            uint64_t                                    _hash = 0;
 
         };
     }

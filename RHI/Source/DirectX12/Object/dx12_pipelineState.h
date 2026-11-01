@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "../dx12_header.h"
+#include <utility>     // std::move
 
 /******************************************************************
 * Macro Definitions
@@ -62,6 +63,9 @@ namespace RHI
 
 			ID3D12PipelineState* Get()const;
 
+			// 作成済みの PSO を持たせる (PSO キャッシュから読み込んだ時など)
+			void Attach(Microsoft::WRL::ComPtr<ID3D12PipelineState> pso) { _pPSO = std::move(pso); }
+
 			/***********************************************************************************
 			 * @brief 解放関数
 			 *
@@ -74,4 +78,4 @@ namespace RHI
 	}
 }
 
-#endif // DX12_PIPELINE_STATE_H_
+#endif // DX12_PIPELINE_STATE_H_

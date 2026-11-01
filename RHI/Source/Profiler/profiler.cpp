@@ -23,6 +23,7 @@
 #include <dxgi1_6.h>
 
 #include "../../../ImGui/imgui.h"
+#include "../../../Core/Source/Log/logger.h"
 
 namespace RHI
 {
@@ -72,12 +73,25 @@ namespace RHI
 		_adapter     = adapter;
 		_gpuName     = toUtf8(gpuName);
 		_windowStart = std::chrono::steady_clock::now();
+		_startTime   = _windowStart;
 		updateVideoMemory();
 	}
 
 	void Profiler::AddFrame(const FrameStats& stats)
 	{
 		_latest = stats;
+
+		// 起動から 1 秒以降の合計 (LogSummary 用)
+		if (std::chrono::duration<double>(std::chrono::steady_clock::now() - _startTime).count() >= 1.0)
+		{
+			_totalFrames++;
+			_totalFrameMs  += stats.FrameMs;
+			_totalRecordMs += stats.SceneRecordMs;
+			_totalUiMs     += stats.UiMs;
+			if (stats.GpuValid) { _totalGpuMs += stats.GpuTotalMs; _totalGpuFrames++; }
+			_lastDrawCalls = stats.DrawCalls;
+			_lastIndirect  = stats.IndirectDraw;
+		}
 
 		// グラフの履歴
 		_frameMsHistory[_historyOffset] = static_cast<float>(stats.FrameMs);
@@ -122,6 +136,30 @@ namespace RHI
 		_values.emplace_back(name, value);
 	}
 
+	void Profiler::LogSummary()const
+	{
+		if (_totalFrames == 0) return;
+
+		const double n = static_cast<double>(_totalFrames);
+		char message[320] = {};
+		sprintf_s(message,
+			"[Profiler] Summary (%llu frames) : %.1f FPS / frame %.3f ms / record scene %.3f ms / UI %.3f ms / GPU %.3f ms / draws %u (%s)",
+			_totalFrames, 1000.0 / (_totalFrameMs / n), _totalFrameMs / n, _totalRecordMs / n, _totalUiMs / n,
+			_totalGpuFrames ? _totalGpuMs / static_cast<double>(_totalGpuFrames) : 0.0,
+			_lastDrawCalls, _lastIndirect ? "ExecuteIndirect" : "direct");
+		Core::Logger::Log(message);
+	}
+
+	void Profiler::SetInfo(const char* name, const std::string& text)
+	{
+		if (!name) return;
+		for (auto& info : _infos)
+		{
+			if (info.first == name) { info.second = text; return; }
+		}
+		_infos.emplace_back(name, text);
+	}
+
 	void Profiler::updateVideoMemory()
 	{
 		if (!_adapter) return;
@@ -135,7 +173,7 @@ namespace RHI
 		}
 	}
 
-	void Profiler::Draw()
+	void Profiler::Draw(bool* indirectDraw)
 	{
 		ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowBgAlpha(0.85f);
@@ -157,6 +195,10 @@ namespace RHI
 		if (!_gpuName.empty()) ImGui::TextDisabled("%s", _gpuName.c_str());
 		ImGui::TextDisabled("%ux%u  VSync %s  Tearing %s  Frames in flight %u",
 			s.Width, s.Height, s.VSync ? "ON" : "OFF", s.Tearing ? "ON" : "OFF", s.FramesInFlight);
+		for (const auto& info : _infos)
+		{
+			ImGui::TextDisabled("%s : %s", info.first.c_str(), info.second.c_str());
+		}
 
 		// ---------- グラフ ----------
 		float maxMs = 1.0f;
@@ -199,7 +241,16 @@ namespace RHI
 		}
 
 		// ---------- 描画 ----------
-		if (ImGui::CollapsingHeader("Draw", ImGuiTreeNodeFlags_DefaultOpen) && ImGui::BeginTable("draw", 2, tableFlags))
+		const bool drawOpen = ImGui::CollapsingHeader("Draw", ImGuiTreeNodeFlags_DefaultOpen);
+		if (drawOpen && indirectDraw)
+		{
+			// ExecuteIndirect の ON / OFF (その場で切り替えて CPU 時間を比べられる)
+			ImGui::Checkbox("ExecuteIndirect", indirectDraw);
+			ImGui::SameLine();
+			if (s.IndirectDraw) ImGui::TextDisabled(s.IndirectArgsReused ? "(args reused)" : "(args written)");
+			else                ImGui::TextDisabled("(direct draw)");
+		}
+		if (drawOpen && ImGui::BeginTable("draw", 2, tableFlags))
 		{
 			row("Draw calls", "%.0f", static_cast<double>(s.DrawCalls));
 			row("Triangles",  "%.0f", static_cast<double>(s.Triangles));

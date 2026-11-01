@@ -1,0 +1,143 @@
+====================================================================
+ RHI Phase 4 : DXC / シェーダーキャッシュ / PSO キャッシュ / ExecuteIndirect
+ 日付   : 2026-11-02
+ ブランチ : feature/rhi-phase4
+====================================================================
+
+■ 概要
+  ロードマップ Phase 4 の 3 項目を実装した。
+    1. DXC (Shader Model 6.6) によるシェーダーコンパイル + ディスクキャッシュ (FXC へのフォールバック付き)
+    2. ID3D12PipelineLibrary による PSO キャッシュ (pipeline.cache) + ルートシグネチャ 1.1
+    3. ExecuteIndirect による描画 (CPU の記録コストをほぼゼロに)
+  あわせて、計測用の負荷テスト (--stress N / --draw direct|indirect) と
+  プロファイラーの ExecuteIndirect 切り替え・終了時サマリーログを追加した。
+
+--------------------------------------------------------------------
+■ 1. シェーダーコンパイラ (新規 RHI/Source/Shader/shaderCompiler.h/.cpp)
+--------------------------------------------------------------------
+  - dxcompiler.dll を LoadLibrary で読み、IDxcUtils / IDxcCompiler3 でコンパイルする。
+    DLL が無い・初期化に失敗した時は従来の FXC (SM 5.1) に戻す。
+  - 目標は SM 6.6 (デバイスが対応する最大 SM と比べて下げる)。
+  - 引数 : -E <entry> -T <target>、Debug は -Od -Zi -Qembed_debug、Release は -O3。
+  - 失敗時はどの段階 (DLL / DxcUtils / Compiler / 読み込み / コンパイル) で失敗したかをログに出す。
+  - コンパイル結果を ShaderCache/<名前>_<entry>_<target>_<ハッシュ>.bin に保存する。
+    ハッシュ (FNV-1a 64bit) はソース本文 + entry + target + 構成から作るので、
+    シェーダーを書き換えると自動で作り直される。
+
+  ※ DXC の取得元 (GameEngine_console.csproj)
+    Windows Kits\10\Redist\D3D\x64 の DXC は 10.0.19041 と古く、IDxcUtils が
+    E_NOINTERFACE (0x80004002) で作れなかった。
+    → SDK 10.0.26100 の bin にある DXC 1.8 (dxcompiler.dll + dxil.dll) をコピーするよう変更。
+      無い環境では Redist 版を使い、それも使えなければ FXC に戻る。
+
+--------------------------------------------------------------------
+■ 2. PSO キャッシュ (新規 RHI/Source/DirectX12/dx12_pipelineCache.h/.cpp)
+--------------------------------------------------------------------
+  - ID3D12PipelineLibrary を pipeline.cache から読み込み、名前で PSO を引く。
+    無ければ通常どおり作って StorePipeline し、終了時 (Pipeline::Dispose) に保存する。
+  - 名前は Default_<ハッシュ>。ハッシュにはルートシグネチャ (シリアライズ結果のハッシュ)、
+    VS/PS のバイトコード、ラスタライザ・深度設定、RT/DS フォーマットを含める。
+    (最初はルートシグネチャを含めておらず、ルートシグネチャだけ変えると古い PSO を引いてしまうところだった)
+  - ファイルが壊れている / ドライバが変わった時は作り直す (失敗を許容)。
+  - キャッシュに無い名前を探した時のデバッグメッセージ
+    (D3D12_MESSAGE_ID_LOADPIPELINE_NAMENOTFOUND) は正常動作なので Device.cpp で無視する。
+
+  ルートシグネチャ 1.1 (dx12_rootSignature.h/.cpp)
+  - Create(D3D12_VERSIONED_ROOT_SIGNATURE_DESC) を追加。1.1 非対応環境では 1.0 に変換して作る。
+  - フラグ :
+      頂点バッファの範囲      : DATA_VOLATILE
+      テクスチャの範囲        : DESCRIPTORS_VOLATILE | DATA_STATIC_WHILE_SET_AT_EXECUTE
+      ルート CBV             : DATA_STATIC_WHILE_SET_AT_EXECUTE
+      ルートシグネチャ全体    : HS / DS / GS からのアクセスを拒否
+    → ドライバが「中身が変わらない」前提で最適化できる。
+  - GetHash() : PSO キャッシュの名前に使う。
+
+--------------------------------------------------------------------
+■ 3. ExecuteIndirect
+--------------------------------------------------------------------
+  コマンドシグネチャ (dx12_commandSignature.h / Pipeline.cpp)
+    引数の並び : [ルート定数 root0 ×2] [ルート CBV root3] [DrawIndexed]
+    struct IndirectDrawCommand { UINT BaseVertex; UINT Padding; GPU_VA ObjectCbv; DRAW_INDEXED_ARGUMENTS Draw; } = 40 バイト
+    ※ 引数はルートパラメータ番号の昇順でないといけない
+       (「Root parameter {slots, offset} must be increasing」で作成に失敗した)。
+       そのため root0 を先頭にし、CBV の GPU アドレスを 8 バイト境界に置くため
+       ルート定数を 2 個にした (2 個目は詰め物)。
+
+  CommandContext (CommandContext.h/.cpp)
+    - フレームごと (FRAME_COUNT) に引数バッファを持つ (最大 32768 描画)。
+        Staging : UPLOAD ヒープ。CPU が書き込む (Map したまま)
+        Gpu     : DEFAULT ヒープ (VRAM)。GPU はこちらを読む
+    - 描画リスト (DrawItem 列) とオブジェクト CB の先頭アドレスが前回と同じなら
+      引数を書き直さず、そのまま ExecuteIndirect する (args reused)。
+      変わった時だけ Staging に書いて Gpu にコピーし、COPY_DEST → INDIRECT_ARGUMENT のバリアを張る。
+      (バッファは ExecuteCommandLists の完了で COMMON に戻るので、コピー時と読む時は暗黙の昇格に任せる)
+    - 32768 を超えた分や、引数バッファの作成に失敗した時は従来の 1 描画ずつのループで描く。
+    - SetIndirectDrawEnabled(bool) / IsIndirectDrawEnabled() を rhi.h に追加 (既定 : 有効)。
+
+--------------------------------------------------------------------
+■ 4. 計測まわり
+--------------------------------------------------------------------
+  - RHI 初期化の段階ごとの時間を出す
+    ([Time] RHI Initialize : Device / CommandContext / Buffer / Pipeline / DebugUI / 合計)。
+  - プロファイラー : 使っているシェーダーコンパイラ / PSO キャッシュの状態を表示、
+    ExecuteIndirect のチェックボックス (args reused / args written / direct draw の表示)、
+    終了時に平均値のサマリーをログに出す (起動直後 1 秒は除外)。
+  - 負荷テスト : SceneRenderer::SpawnTestGrid でモデルを格子状に複製する。
+      GameEngine_console.exe --stress 10000 --draw indirect
+      GameEngine_console.exe --stress 10000 --draw direct
+
+--------------------------------------------------------------------
+■ 5. 計測結果 (10000 モデル = 20002 描画)
+--------------------------------------------------------------------
+  起動 (Pipeline 初期化)
+    Debug   : FXC キャッシュ無し 約 17 ms → DXC 初回 約 47〜85 ms / 2 回目以降 (キャッシュ) 約 13.5 ms
+    Release : 2 回目以降 約 5〜7 ms (初回のみ DXC コンパイルで約 1 秒)
+    ※ 起動時間の大半は Device 作成 (740〜1300 ms) で、ここは Phase 4 の範囲外。
+
+  描画 (平均)
+                         FPS     記録 (CPU)   GPU
+    Debug   direct       13.3    72.4 ms      2.30 ms
+    Debug   indirect    600.6     0.065 ms    0.86 ms
+    Release direct      653.8     0.468 ms    0.61 ms
+    Release indirect    700.3     0.050 ms    0.84 ms
+
+  所見 (正直に)
+    - CPU の記録時間は Release でも約 1/9、Debug では 1/1000 以上になった。
+    - 一方 GPU 時間は Release で direct より約 0.2 ms 増える。
+      最初は引数を UPLOAD ヒープから読ませているのが原因と考えて VRAM へ移したが、
+      ほぼ変わらなかった (0.859 → 0.839 ms)。
+      → 原因は ExecuteIndirect で描画ごとにルート CBV / ルート定数を切り替えるコスト
+        (GPU のコマンドプロセッサ側の処理) と考えられる。
+    - フレーム全体では indirect の方が速い (1.53 → 1.43 ms) ので既定は indirect のまま。
+    - さらに詰めるなら : オブジェクト CB を 1 本の StructuredBuffer にまとめて
+      ルート定数 (インデックス) だけを切り替える / GPU カリングで引数を GPU 側で作る (Phase 5 以降)。
+
+--------------------------------------------------------------------
+■ 変更ファイル
+--------------------------------------------------------------------
+  新規
+    RHI/Source/Shader/shaderCompiler.h/.cpp
+    RHI/Source/DirectX12/dx12_pipelineCache.h/.cpp
+  変更
+    RHI/Source/DirectX12/Object/dx12_rootSignature.h/.cpp   (1.1 / ハッシュ)
+    RHI/Source/DirectX12/Object/dx12_pipelineState.h        (Attach)
+    RHI/Source/DirectX12/Object/dx12_commandSignature.h     (IndirectDrawCommand)
+    RHI/Source/DirectX12/RHIObject/Pipeline.h/.cpp          (DXC / PSO キャッシュ / コマンドシグネチャ)
+    RHI/Source/DirectX12/RHIObject/CommandContext.h/.cpp    (ExecuteIndirect)
+    RHI/Source/DirectX12/RHIObject/Device.cpp               (NAMENOTFOUND を無視)
+    RHI/Source/Profiler/*                                   (切り替え / サマリー)
+    RHI/Source/RenderHardwareInterface.h/.cpp, Public/rhi.h
+    RHI/RHI.vcxproj(.filters)
+    Renderer/Source/sceneRenderer.h/.cpp, rendererDll.cpp   (負荷テスト / 切り替え)
+    CSharp_console/GameEngine_console/*                     (--stress / --draw / DXC のコピー)
+
+  実行時に作られるファイル (コミットしない)
+    bin/.../ShaderCache/*.bin, bin/.../pipeline.cache
+
+--------------------------------------------------------------------
+■ 目視確認のお願い
+--------------------------------------------------------------------
+  1. 通常起動でモデルが今までどおり描画されること
+  2. F1 のプロファイラーで ExecuteIndirect の ON/OFF を切り替えても見た目が変わらないこと
+  3. --stress 10000 で格子状に並んだモデルが表示されること
+  4. 2 回目の起動でログに PSO / シェーダーがキャッシュから読まれたと出ること

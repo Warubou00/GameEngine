@@ -32,7 +32,8 @@
 #include "../Object/dx12_pipelineState.h"
 #include "../Object/dx12_rootSignature.h"
 #include "../Object/dx12_swapChain.h"
-#include "../../Shader/hlslCompiler.h"
+#include "../../Shader/shaderCompiler.h"
+#include "../dx12_pipelineCache.h"
 
 // 2026/09/23 仮
 #include "../Object/dx12_commandSignature.h"
@@ -71,34 +72,15 @@ namespace RHI
 			// シェーダーのパス (実行ファイルからの相対パス)
 			constexpr const wchar_t* DEFAULT_SHADER_PATH = L"../Shader/hlslTemplate.shader";
 
-			// シェーダーをコンパイルし、失敗時はエラー内容をログに出す
-			// 以前はファイルが見つからない時など errorBlob が nullptr のまま参照してクラッシュしていた (1-14)
-			bool compileShader(
-				Shader::HLSLCompiler& compiler,
-				const std::wstring& path,
-				const std::string& entry,
-				const std::string& target,
-				Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
+			// PSO キャッシュのファイル (実行フォルダ)
+			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
+
+			// FNV-1a (64bit) : PSO キャッシュの名前用 (シェーダーが変わったら別の名前になる)
+			uint64_t fnv1a(const void* data, size_t size, uint64_t hash = 14695981039346656037ull)
 			{
-				Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
-				const HRESULT hr = compiler.CompileShader(path, entry, target, outBlob.ReleaseAndGetAddressOf(), errorBlob.GetAddressOf());
-
-				// 成功時でも警告が入っていることがあるので、あれば出す
-				if (errorBlob && errorBlob->GetBufferSize() > 0)
-				{
-					std::string errorLog(static_cast<const char*>(errorBlob->GetBufferPointer()), errorBlob->GetBufferSize());
-					Core::Logger::Log(errorLog.c_str());
-				}
-
-				if (FAILED(hr))
-				{
-					char message[128] = {};
-					sprintf_s(message, "[Pipeline] Failed compile shader (%s / %s). HRESULT = 0x%08X", entry.c_str(), target.c_str(), static_cast<unsigned int>(hr));
-					Core::Logger::Log(message);
-					Core::Logger::Log(path.c_str());
-					return false;
-				}
-				return true;
+				const uint8_t* p = static_cast<const uint8_t*>(data);
+				for (size_t i = 0; i < size; ++i) { hash ^= p[i]; hash *= 1099511628211ull; }
+				return hash;
 			}
 		}
 
@@ -108,7 +90,11 @@ namespace RHI
 		void Pipeline::Dispose()
 		{
 			// GPUの完了待ちは CommandContext::Dispose で済ませてある前提
-			_commandSignature.reset();
+			// 新しく作った PSO があればキャッシュをファイルに保存する
+			if (_pipelineCache) _pipelineCache->Release();
+			_pipelineCache.reset();
+			_shaderCompiler.reset();
+			_indirectDrawSignature.reset();
 			_customPipeline.clear();
 			_pipelineState.reset();
 			_rootSignature.reset();
@@ -122,12 +108,24 @@ namespace RHI
             }
 
             auto device = static_cast<RHI::ObjectInterface::Device*>(iDevice);
-			if (!device)
-			{
-				return RHI_FAILED_INVALID_ARGUMENT;
-			}
+            ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
 
-            return makePipeline(device);
+            // シェーダーのコンパイラ (DXC / 無ければ FXC) と PSO キャッシュ
+            _shaderCompiler = std::make_unique<Shader::ShaderCompiler>();
+            _shaderCompiler->Initialize(dx12Device);
+
+            _pipelineCache = std::make_unique<DirectX12::PipelineCache>();
+            _pipelineCache->Initialize(dx12Device, PIPELINE_CACHE_PATH);
+
+            RHI_RESULT result = makeRootSignature(device);
+            if (result != RHI_SUCCEEDED) return result;
+
+            result = makePipeline(device);
+            if (result != RHI_SUCCEEDED) return result;
+
+            // ExecuteIndirect 用 (作れなくても通常の描画で続けられる)
+            makeIndirectDrawSignature(device);
+            return RHI_SUCCEEDED;
 		}
 
         ID3D12PipelineState* Pipeline::GetPipelineState()const
@@ -140,39 +138,51 @@ namespace RHI
             return _rootSignature ? _rootSignature->Get() : nullptr;
         }
 
-        RHI_RESULT Pipeline::makePipeline(Device* device)
+        ID3D12CommandSignature* Pipeline::GetIndirectDrawSignature()const
         {
-            HRESULT hr;
+            return _indirectDrawSignature ? _indirectDrawSignature->Get() : nullptr;
+        }
 
+        RHI_RESULT Pipeline::makeRootSignature(Device* device)
+        {
             // ==============================================================
-            // 1. ルートシグネチャの構築 (dx12_rootSignature.cpp を使用)
+            // ルートシグネチャ (バージョン 1.1)
+            //   1.1 では範囲ごとに「データ / ディスクリプタが変わるかどうか」を伝えられ、
+            //   ドライバーが変わらないものを前提に最適化できる (レビュー 3-6)
+            //   1.1 に対応していない環境では RootSignature::Create が 1.0 に変換する
             // ==============================================================
 
             // SRV(メガVB)用のディスクリプタレンジ (t0)
-            D3D12_DESCRIPTOR_RANGE srvRangeVB            = {};
-            srvRangeVB.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-            srvRangeVB.NumDescriptors                    = 1;
-            srvRangeVB.BaseShaderRegister                = 0; // t0
-            srvRangeVB.RegisterSpace                     = 0;
-            srvRangeVB.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+            // DATA_VOLATILE : 描画中に COPY キューが同じバッファの別の場所へ新しいモデルを書き込むことがあるため
+            D3D12_DESCRIPTOR_RANGE1 srvRangeVB            = {};
+            srvRangeVB.RangeType                          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            srvRangeVB.NumDescriptors                     = 1;
+            srvRangeVB.BaseShaderRegister                 = 0; // t0
+            srvRangeVB.RegisterSpace                      = 0;
+            srvRangeVB.Flags                              = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+            srvRangeVB.OffsetInDescriptorsFromTableStart  = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-            // ★追加: テクスチャ配列用のディスクリプタレンジ (t1)
-            D3D12_DESCRIPTOR_RANGE srvRangeTex            = {};
+            // テクスチャ配列用のディスクリプタレンジ (t1)
+            // DESCRIPTORS_VOLATILE : 無制限の範囲の中にまだテクスチャを入れていない枠があるため (1.0 では既定でこの扱い)
+            // DATA_STATIC_WHILE_SET_AT_EXECUTE : テクスチャの中身は描画中に変わらない
+            D3D12_DESCRIPTOR_RANGE1 srvRangeTex           = {};
             srvRangeTex.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
             srvRangeTex.NumDescriptors                    = UINT_MAX; // UINT_MAX(-1) で無制限(Unbounded)配列を指定
             srvRangeTex.BaseShaderRegister                = 1;  // t1
             srvRangeTex.RegisterSpace                     = 0;
+            srvRangeTex.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE |
+                                                            D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             srvRangeTex.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-            // D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE 相当のフラグは D3D12_ROOT_SIGNATURE_FLAG で後述
 
             // パラメータの設定 (番号は Pipeline.h の RootParameterIndex を参照)
-            D3D12_ROOT_PARAMETER rootParams[ROOT_PARAM_COUNT] = {};
+            D3D12_ROOT_PARAMETER1 rootParams[ROOT_PARAM_COUNT] = {};
 
             // [0]: メッシュの頂点オフセット (b0) - 32Bit Constants
             auto& baseVertex = rootParams[ROOT_PARAM_BASE_VERTEX];
             baseVertex.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
             baseVertex.Constants.ShaderRegister            = 0;
-            baseVertex.Constants.Num32BitValues            = 1;
+            // 2 個目は ExecuteIndirect の引数で 64bit のアドレスを 8byte 境界にそろえるための詰め物 (シェーダーでは使わない)
+            baseVertex.Constants.Num32BitValues            = 2;
             baseVertex.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_VERTEX;
 
             // [1]: メガVBのSRV (t0) - Descriptor Table
@@ -183,10 +193,12 @@ namespace RHI
             vbTable.ShaderVisibility                       = D3D12_SHADER_VISIBILITY_VERTEX;
 
             // [2]: Global定数バッファ (b1) - Root CBV
+            //      フレームごとの領域に描画前に書き込み、描画中は変えないので DATA_STATIC_WHILE_SET_AT_EXECUTE
             auto& globalCbv = rootParams[ROOT_PARAM_GLOBAL_CBV];
             globalCbv.ParameterType                        = D3D12_ROOT_PARAMETER_TYPE_CBV;
             globalCbv.Descriptor.ShaderRegister            = 1;
             globalCbv.Descriptor.RegisterSpace             = 0;
+            globalCbv.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             globalCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_ALL;
 
             // [3]: Scene(Object)定数バッファ (b2) - Root CBV
@@ -194,6 +206,7 @@ namespace RHI
             objectCbv.ParameterType                        = D3D12_ROOT_PARAMETER_TYPE_CBV;
             objectCbv.Descriptor.ShaderRegister            = 2;
             objectCbv.Descriptor.RegisterSpace             = 0;
+            objectCbv.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             objectCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_ALL;
 
             // [4]: テクスチャ配列のSRV (t1) - Descriptor Table
@@ -203,9 +216,9 @@ namespace RHI
             texTable.DescriptorTable.pDescriptorRanges     = &srvRangeTex;
             texTable.ShaderVisibility                      = D3D12_SHADER_VISIBILITY_PIXEL; // テクスチャはピクセルシェーダーで読む
 
-            // ★追加: 静的サンプラーの設定 (s0)
+            // 静的サンプラーの設定 (s0)
             D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
-            samplerDesc.Filter                    = D3D12_FILTER_MIN_MAG_MIP_LINEAR; // 一般的な線形補間
+            samplerDesc.Filter                    = D3D12_FILTER_MIN_MAG_MIP_LINEAR; // ミップマップ間も線形補間 (トライリニア)
             samplerDesc.AddressU                  = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
             samplerDesc.AddressV                  = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
             samplerDesc.AddressW                  = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
@@ -219,47 +232,45 @@ namespace RHI
             samplerDesc.RegisterSpace             = 0;
             samplerDesc.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
-            D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-            rootSigDesc.NumParameters             = ROOT_PARAM_COUNT;
-            rootSigDesc.pParameters               = rootParams;
-            rootSigDesc.NumStaticSamplers         = 1; // サンプラーを1つ追加
-            rootSigDesc.pStaticSamplers           = &samplerDesc;
-            // Shader Model 5.1 の Unbounded Array を機能させるため、フラグを追加する場合がありますが、
-            // 基本的には D3D12_ROOT_SIGNATURE_FLAG_NONE で動作します。
-            rootSigDesc.Flags                     = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc = {};
+            rootSigDesc.Version                       = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            rootSigDesc.Desc_1_1.NumParameters        = ROOT_PARAM_COUNT;
+            rootSigDesc.Desc_1_1.pParameters          = rootParams;
+            rootSigDesc.Desc_1_1.NumStaticSamplers    = 1;
+            rootSigDesc.Desc_1_1.pStaticSamplers      = &samplerDesc;
+            // 使わないシェーダーステージからのアクセスを禁止すると、ドライバーが少し最適化できる
+            rootSigDesc.Desc_1_1.Flags                = D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+                                                        D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
+                                                        D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
-            // RootSignatureクラスのCreate関数を呼び出し
             _rootSignature = std::make_unique<DirectX12::RootSignature>();
-            hr = _rootSignature->Create(device->GetDevice()->GetDevice(), rootSigDesc);
+            const HRESULT hr = _rootSignature->Create(device->GetDevice()->GetDevice(), rootSigDesc);
             if (FAILED(hr))
             {
                 Core::Logger::Log("[Pipeline] Failed create root signature.");
                 return RHI_FAILED_CREATE_ANY_OBJECT;
             }
+            return RHI_SUCCEEDED;
+        }
 
-
+        RHI_RESULT Pipeline::makePipeline(Device* device)
+        {
             // ==============================================================
-            // 2. パイプラインステート (PSO) の構築 (dx12_pipelineState.cpp を使用)
+            // パイプラインステート (PSO)
             // ==============================================================
-            // シェーダーコードをコンパイル
-            // 以前は生ポインタで受けて解放しておらずリークしていた (1-14)
-            Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-            Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-            Shader::HLSLCompiler hlslCompiler;
-
-            // FXC(D3DCompile) が扱えるのは Shader Model 5.1 まで (6.x は DXC が必要)
-            if (!compileShader(hlslCompiler, DEFAULT_SHADER_PATH, "VSMain", "vs_5_1", vsBlob)) return RHI_FAILED_COMPILED_SHADER;
-            if (!compileShader(hlslCompiler, DEFAULT_SHADER_PATH, "PSMain", "ps_5_1", psBlob)) return RHI_FAILED_COMPILED_SHADER;
+            // シェーダーのコンパイル (DXC / FXC。ShaderCache/ にあれば読むだけ)
+            Shader::CompiledShader vs, ps;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "VSMain", Shader::Stage::Vertex, vs)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSMain", Shader::Stage::Pixel,  ps)) return RHI_FAILED_COMPILED_SHADER;
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
             psoDesc.pRootSignature = _rootSignature->Get();
-            psoDesc.VS = { vsBlob->GetBufferPointer(), vsBlob->GetBufferSize() };
-            psoDesc.PS = { psBlob->GetBufferPointer(), psBlob->GetBufferSize() };
+            psoDesc.VS = vs.View();
+            psoDesc.PS = ps.View();
 
             // 【最重要】Programmable Vertex Fetchなので入力レイアウトは空にする！
             psoDesc.InputLayout = { nullptr, 0 };
 
-            // その他の標準的な設定 (適宜変更してください)
             // ==============================================================
             // ラスタライザステート (RasterizerState) の設定
             // ==============================================================
@@ -279,15 +290,13 @@ namespace RHI
             rasterizerDesc.ForcedSampleCount = 0;
             rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-
             // ==============================================================
-            // ブレンドステート (BlendState) の設定
+            // ブレンドステート (BlendState) の設定 (不透明 : 上書き)
             // ==============================================================
             D3D12_BLEND_DESC blendDesc = {};
             blendDesc.AlphaToCoverageEnable = FALSE;
             blendDesc.IndependentBlendEnable = FALSE; // 複数のレンダーターゲットで同じブレンド設定を使う
 
-            // RenderTarget[0] (メインの画面) に対するブレンド設定（ここでは不透明：上書き）
             const D3D12_RENDER_TARGET_BLEND_DESC defaultRenderTargetBlendDesc = {
                 FALSE, FALSE,                     // BlendEnable, LogicOpEnable
                 D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,       // RGBのブレンド設定
@@ -295,8 +304,6 @@ namespace RHI
                 D3D12_LOGIC_OP_NOOP,                                         // 論理演算
                 D3D12_COLOR_WRITE_ENABLE_ALL                                 // RGBA全てに書き込む
             };
-
-            // 配列の0番目（レンダーターゲット0）に設定を適用
             for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
             {
                 blendDesc.RenderTarget[i] = defaultRenderTargetBlendDesc;
@@ -319,65 +326,89 @@ namespace RHI
             psoDesc.RTVFormats[0] = RHI::DirectX12::SwapChain::FORMAT;  // スワップチェーンと必ず一致させる
             psoDesc.SampleDesc.Count = 1;
 
-            // PipelineStateクラスのインスタンス化と生成
-            _pipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
-            hr = _pipelineState->Create(device->GetDevice()->GetDevice(), psoDesc);
+            // PSO キャッシュの名前 : ルートシグネチャ・シェーダー・主な設定から作る (どれかが変われば別の PSO として作り直される)
+            const uint64_t rootSignatureHash = _rootSignature->GetHash();
+            uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+            hash = fnv1a(vs.Bytecode.data(), vs.Bytecode.size(), hash);
+            hash = fnv1a(ps.Bytecode.data(), ps.Bytecode.size(), hash);
+            hash = fnv1a(&rasterizerDesc, sizeof(rasterizerDesc), hash);
+            hash = fnv1a(&psoDesc.DepthStencilState, sizeof(psoDesc.DepthStencilState), hash);
+            hash = fnv1a(&psoDesc.RTVFormats[0], sizeof(psoDesc.RTVFormats[0]), hash);
+            hash = fnv1a(&psoDesc.DSVFormat, sizeof(psoDesc.DSVFormat), hash);
+            wchar_t psoName[64] = {};
+            swprintf_s(psoName, L"Default_%016llx", hash);
+
+            // キャッシュにあれば読み込み、無ければ作成して登録する
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+            bool fromCache = false;
+            const HRESULT hr = _pipelineCache->GetOrCreateGraphicsPipeline(psoName, psoDesc, pso, &fromCache);
             if (FAILED(hr))
             {
                 Core::Logger::Log("[Pipeline] Failed create pipeline state.");
                 return RHI_FAILED_CREATE_ANY_OBJECT;
             }
+            _pipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
+            _pipelineState->Attach(pso);
+
+            // プロファイラー / ログ用の説明
+            _description = std::string(_shaderCompiler->GetBackendName()) + " / SM " + _shaderCompiler->GetShaderModel() +
+                           " / shader " + (vs.FromCache && ps.FromCache ? "from cache" : "compiled") +
+                           " / PSO " + (fromCache ? "from cache" : "created");
+            Core::Logger::Log(("[Pipeline] " + _description).c_str());
 
             return RHI_SUCCEEDED;
         }
 
-        void Pipeline::InitCommandSignature(RHI::ObjectInterface::Device* device)
+        void Pipeline::makeIndirectDrawSignature(Device* device)
         {
-            if (!device || !_rootSignature)
-            {
-                return;
-            }
+            // ==============================================================
+            // ExecuteIndirect 用のコマンドシグネチャ
+            //   描画 1 回ごとに GPU が引数バッファから読んで設定するもの :
+            //     1. 頂点の開始位置 (ルート定数 : b0。2 個目は詰め物)
+            //     2. オブジェクトの定数バッファ (Root CBV : b2)
+            //     3. DrawIndexedInstanced
+            //   ルート引数はルートパラメータの番号が小さい順に並べる決まりがある
+            //   (逆にすると "Root parameter {slots, offset} must be increasing" のエラーになる)
+            //   並び順は CommandSignature::IndirectDrawCommand と一致させること
+            // ==============================================================
+            D3D12_INDIRECT_ARGUMENT_DESC args[3] = {};
 
-            _commandSignature = std::make_unique<RHI::DirectX12::CommandSignature>();
-         
-            D3D12_INDIRECT_ARGUMENT_DESC argumentDescs[2] = {};
+            args[0].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+            args[0].Constant.RootParameterIndex     = ROOT_PARAM_BASE_VERTEX;
+            args[0].Constant.DestOffsetIn32BitValues = 0;
+            args[0].Constant.Num32BitValuesToSet    = 2;
 
-            // 1つ目: 構造体の先頭にある ObjectID を RootParameter[0] にセットする指示
-            argumentDescs[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-            argumentDescs[0].Constant.RootParameterIndex = ROOT_PARAM_BASE_VERTEX; // ルートシグネチャのパラメータ番号
-            argumentDescs[0].Constant.Num32BitValuesToSet = 1;
-            argumentDescs[0].Constant.DestOffsetIn32BitValues = 0;
+            args[1].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
+            args[1].ConstantBufferView.RootParameterIndex = ROOT_PARAM_OBJECT_CBV;
 
-            // 2つ目: 構造体の後半にある DrawArguments を使って描画を行う指示
-            argumentDescs[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+            args[2].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
 
-            D3D12_COMMAND_SIGNATURE_DESC commandSignatureDesc = {};
-            commandSignatureDesc.pArgumentDescs = argumentDescs;
-            commandSignatureDesc.NumArgumentDescs = 2;
-            commandSignatureDesc.ByteStride = sizeof(RHI::DirectX12::CommandSignature::IndirectCommand); // 20バイト (4の倍数である必要があります)
+            D3D12_COMMAND_SIGNATURE_DESC desc = {};
+            desc.ByteStride       = sizeof(RHI::DirectX12::CommandSignature::IndirectDrawCommand);
+            desc.NumArgumentDescs = _countof(args);
+            desc.pArgumentDescs   = args;
 
-            HRESULT hr = _commandSignature->Create(device->GetDevice()->GetDevice(), _rootSignature->Get(), commandSignatureDesc);
+            // ルート引数を書き換える引数を含むので、ルートシグネチャの指定が必要
+            _indirectDrawSignature = std::make_unique<RHI::DirectX12::CommandSignature>();
+            const HRESULT hr = _indirectDrawSignature->Create(device->GetDevice()->GetDevice(), _rootSignature->Get(), desc);
             if (FAILED(hr))
             {
-                Core::Logger::Log("Failed Create CommandSignature");
-            }
-            else
-            {
-                Core::Logger::Log("Succeeded Create CommandSignature");
+                Core::Logger::Log("[Pipeline] ExecuteIndirect is not available. Use direct draw only.");
+                _indirectDrawSignature.reset();
             }
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)
         {
-            // 以前は FXC に vs_6_0 / ps_6_0 を渡していたため必ず失敗し、さらに nullptr の errorBlob を参照していた (1-14)
-            Shader::HLSLCompiler hlslCompiler;
-            Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-            Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+            if (!_shaderCompiler) return RHI_FAILED_INITIALIZED;
 
-            if (!compileShader(hlslCompiler, vsPath, vsEntry, "vs_5_1", vsBlob)) return RHI_FAILED_COMPILED_SHADER;
-            if (!compileShader(hlslCompiler, psPath, psEntry, "ps_5_1", psBlob)) return RHI_FAILED_COMPILED_SHADER;
+            // シェーダーのコンパイルの確認まで (DXC / FXC、ディスクキャッシュあり)
+            Shader::CompiledShader vs, ps;
+            // 以前は FXC に vs_6_0 / ps_6_0 を渡していたため必ず失敗していた (1-14)。今は使えるコンパイラに合わせてターゲットを選ぶ
+            if (!_shaderCompiler->Compile(vsPath, vsEntry, Shader::Stage::Vertex, vs)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(psPath, psEntry, Shader::Stage::Pixel,  ps)) return RHI_FAILED_COMPILED_SHADER;
 
-            // TODO : PSO を作って _customPipeline に登録する (Phase 4 の PSO キャッシュで対応)
+            // TODO : PSO を作って _customPipeline に登録する (_pipelineCache->GetOrCreateGraphicsPipeline を使う)
             return RHI_SUCCEEDED;
         }
 	}

@@ -73,6 +73,9 @@ namespace RHI
         bool Render(const DrawItem* items, uint32_t count)override;
         void WaitForGpu()override;
 
+        void SetIndirectDrawEnabled(bool enabled)override;
+        bool IsIndirectDrawEnabled()const override;
+
         void SetProfilerVisible(bool visible)override { _debugUI.SetVisible(visible); }
         bool IsProfilerVisible()const override         { return _debugUI.IsVisible(); }
         void ReportProfilerValue(const char* name, double value)override { _profiler.SetValue(name, value); }

@@ -83,6 +83,13 @@ public class RHI : IDisposable
     [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void Renderer_TestLoadModel(float posX, float posY, float posZ);
 
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_TestSpawnGrid(uint count);
+
+    // C++ の bool は 1 バイトなので I1 で渡す
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_SetIndirectDraw([MarshalAs(UnmanagedType.I1)] bool enabled);
+
     public void Initialize(out RHIInitializedInfo info)
     {
         rhiInfo.hwnd        = window.Handle;
@@ -120,6 +127,18 @@ public class RHI : IDisposable
     public void Test_LoadModel(float posX, float posY, float posZ)
     {
         Renderer_TestLoadModel(posX, posY, posZ);
+    }
+
+    // 負荷テスト : 読み込んだモデルを count 個並べる
+    public void Test_SpawnGrid(uint count)
+    {
+        Renderer_TestSpawnGrid(count);
+    }
+
+    // ExecuteIndirect の ON / OFF (プロファイラーのチェックボックスでも切り替えられる)
+    public void SetIndirectDraw(bool enabled)
+    {
+        Renderer_SetIndirectDraw(enabled);
     }
 
     public void Render()
