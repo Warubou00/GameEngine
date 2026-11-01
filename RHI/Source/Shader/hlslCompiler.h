@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    hlslCompiler.h
-* @brief   hlsl‚ÌƒRƒ“ƒpƒCƒ‰[
+* @brief   hlslã®ã‚³ãƒ³ãƒ‘ã‚¤ãƒ©ãƒ¼
 * @details
 *
 * @author  Keigo Onari
@@ -56,12 +56,12 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             HLSLCompiler();
             ~HLSLCompiler();
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
             HRESULT CompileShader(
                 const std::wstring& fileName,
@@ -72,10 +72,10 @@ namespace RHI
             );
 
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
 
         };

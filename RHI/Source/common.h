@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    common.h
-* @brief   ”Ä—p“I‚Èƒwƒbƒ_[
+* @brief   æ±ç”¨çš„ãªãƒ˜ãƒƒãƒ€ãƒ¼
 * @details
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ‚»‚Ì‘¼
+* @note    ãã®ä»–
 ************************************************************************************/
 
 #pragma once
@@ -31,10 +31,12 @@
 #define RHI_API __declspec(dllexport)
 
 #define RHI_RESULT int
-#define RHI_SUCCEEDED	            (1)	 // ¬Œ÷
-#define RHI_FAILED		            (-1) // ”Ä—p“I‚È¸”s
-#define RHI_FAILED_INITIALIZED      (-2) // ¸”s_‰Šú‰»
-#define RHI_FAILED_INVALID_ARGUMENT (-3) // ¸”s_•s“K‚Èˆø”
+#define RHI_SUCCEEDED	             (1)  // æˆåŠŸ
+#define RHI_FAILED		             (-1) // æ±ç”¨çš„ãªå¤±æ•—
+#define RHI_FAILED_INITIALIZED       (-2) // å¤±æ•—_åˆæœŸåŒ–
+#define RHI_FAILED_INVALID_ARGUMENT  (-3) // å¤±æ•—_ä¸é©ãªå¼•æ•°
+#define RHI_FAILED_CREATE_ANY_OBJECT (-4) // å¤±æ•—_ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆç”Ÿæˆ
+#define RHI_FAILED_COMPILED_SHADER   (-5) // å¤±æ•—_ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼ã‚³ãƒ³ãƒ‘ã‚¤ãƒ«
 
 /******************************************************************
 * Enumeration Definitions

@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
-* @file    dx12_vertexBufferAllocator.h
-* @brief   DX12�̃e�N�X�`�����Ǘ�
+* @file    ResourceBufferAllocator.h
+* @brief   リソースバッファのメモリ管理
 * @details
 *
 * @author  Keigo Onari
@@ -15,13 +15,13 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef VERTEX_BUFFER_ALLOCATOR_H_
-#define VERTEX_BUFFER_ALLOCATOR_H_
+#ifndef RESOURCE_BUFFER_ALLOCATOR_H_
+#define RESOURCE_BUFFER_ALLOCATOR_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include <windows.h>
+#include <stdint.h>
 
 
 /******************************************************************
@@ -42,13 +42,15 @@
 
 namespace RHI
 {
-    struct VertexBufferAllocation
+    struct ResourceBufferAllocation
     {
-        UINT StartIndexLocation;
-        INT  BaseVertexLocation;
+        uint64_t ByteOffset   = 0;     // VRAMへのコピー時に CopyBufferRegion に渡すオフセット
+        uint32_t StrideOffset = 0;     // 描画時に SetGraphicsRoot32BitConstants へ渡す頂点オフセット
+        uint32_t Count        = 0;     // 割り当てられた数
+        bool     IsValid      = false; // 確保できたか (以前は失敗しても全て0で返り、先頭を上書きしていた)
     };
 
-    class VertexBufferAllocator
+    class ResourceBufferAllocator
     {
 
         /******************************************************************
@@ -61,33 +63,41 @@ namespace RHI
         ******************************************************************/
 
 
-    public:          /*---�R���X�g���N�^�E�f�X�g���N�^---*/
-        VertexBufferAllocator() {}
-        ~VertexBufferAllocator() {}
+    public:          /*---コンストラクタ・デストラクタ---*/
+        ResourceBufferAllocator();
+        ~ResourceBufferAllocator();
 
-    public:          /*---�N���X���\�b�h---*/
+    public:          /*---クラスメソッド---*/
 
+        void Initialize(uint64_t maxByteSize);
 
 
         /***********************************************************************************
-         * @brief ���������̍쐬
+         * @brief メモリ情報の作成
          * @details
          *
-         * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6�̃|�C���^
-         * @return VertexBufferAllocation ���_�o�b�t�@�[�̃��������
+         * @param[in] uint32_t count 数
+         * @param[in] uint32_t stride 1つ当たりのサイズ
+         * @return ResourceBufferAllocation バッファーのメモリ情報 (容量不足なら IsValid == false)
          ************************************************************************************/
-        VertexBufferAllocation Allocate();
+        ResourceBufferAllocation Allocate(uint32_t count, uint32_t stride);
 
-    public:          /*---�A�N�Z�b�T�[�֐��Q---*/
+        void Reset();
+
+    public:          /*---アクセッサー関数群---*/
 
 
-    private:         /*---�����o�ϐ�---*/
+    private:         /*---メンバ変数---*/
+
+        uint64_t _maxByteSize         = 0;
+        uint64_t _currentByteOffset   = 0;     // 4GB を超えるバッファでも溢れないよう 64bit
+        uint32_t _currentVertexOffset = 0;
 
 
     };
 }
 
-#endif // VERTEX_BUFFER_ALLOCATOR_H_
+#endif // RESOURCE_BUFFER_ALLOCATOR_H_
 
 /************************************
 * End of file

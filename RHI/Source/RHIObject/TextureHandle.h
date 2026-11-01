@@ -1,11 +1,11 @@
-
+ï»¿
 /***********************************************************************************
-* @file    spriteRenderer.h
-* @brief   Renderer meshRenderer
+* @file    TextureHandle.h
+* @brief   texture handle
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/09/13
+* @date    2026/09/22
 * @version v_1.0.0
 *
 * @copyright
@@ -15,13 +15,15 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef SPRITE_RENDERER_H_
-#define SPRITE_RENDERER_H_
+#ifndef RHI_OBJECT_TEXTURE_HANDLE_H_
+#define RHI_OBJECT_TEXTURE_HANDLE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "../../RHI/Source/RenderHardwareInterface.h"
+#include <stdint.h>
+#include "IHandle.h"
+
 
 /******************************************************************
 * Macro Definitions
@@ -39,44 +41,23 @@
 
 
 
-namespace Renderer
+namespace RHI
 {
-
-    class SpriteRenderer
+    namespace ObjectInterface
     {
-        /******************************************************************
-        * Internal Enumeration Declarations
-        ******************************************************************/
-
-
-        /******************************************************************
-        * Internal Structure Declarations
-        ******************************************************************/
-        struct Sprite
+        struct TextureHandle : public IHandle
         {
+            // æ—¢å®šãƒ†ã‚¯ã‚¹ãƒãƒ£(ç™½ 1x1)ã®ç•ªå·ã€‚èª­ã¿è¾¼ã¿ã«å¤±æ•—ã—ãŸæ™‚ã‚‚ã“ã‚ŒãŒè¿”ã‚‹
+            static constexpr uint32_t DEFAULT_TEXTURE_ID = 0;
 
+            // ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼ã®ãƒ†ã‚¯ã‚¹ãƒãƒ£é…åˆ— g_Textures[] ã®æ·»ãˆå­— (ãƒ‡ã‚£ã‚¹ã‚¯ãƒªãƒ—ã‚¿ãƒ’ãƒ¼ãƒ—ã®ç•ªå·ã§ã¯ãªã„)
+            uint32_t TextureID = DEFAULT_TEXTURE_ID;
         };
-
-    public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
-        SpriteRenderer() {}
-        ~SpriteRenderer() {}
-
-
-    public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
-
-
-    public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
-
-
-    private:         /*---ƒƒ“ƒo•Ï”---*/
-
-
-    };
-
+    }
 }
 
 
-#endif // SPRITE_RENDERER_H_
+#endif // RHI_OBJECT_TEXTURE_HANDLE_H_
 
 /************************************
 * End of file

@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    dx12_fence.h
-* @brief   DX12�̃t�F���X
+* @brief   DX12のフェンス
 * @details
 *
 * @author  Keigo Onari
@@ -41,55 +41,82 @@ namespace RHI
 {
 	namespace DirectX12
 	{
+		class CommandQueue;
+
 		class Fence
 		{
 		public:
 			Fence();
 			~Fence();
 
+			// イベントハンドルを所有するのでコピー禁止
+			Fence(const Fence&) = delete;
+			Fence& operator=(const Fence&) = delete;
 
 			/***********************************************************************************
-			 * @brief �����֐�
+			 * @brief 生成関数
+			 * @details フェンス本体と待機用イベントを生成する
 			 *
-			 * @param[in] ID3D12Device* device �f�o�C�X�̃|�C���^
-			 * @return HRESULT �����̗L��
+			 * @param[in] ID3D12Device* device デバイスのポインタ
+			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
 			HRESULT Create(ID3D12Device* device);
 
-
 			/***********************************************************************************
-			 * @brief �擾�֐�
+			 * @brief 取得関数
 			 *
-			 * @param[in] value param explanation
-			 * @return ID3D12Fence* �t�F���X�ւ̃|�C���^
+			 * @return ID3D12Fence* フェンスへのポインタ
 			 ************************************************************************************/
 			ID3D12Fence* Get(void)const;
 
-
 			/***********************************************************************************
-			 * @brief �t�F���X�l�̎擾�֐�
+			 * @brief キューにシグナルを積む
+			 * @details 待機はしない。戻り値の値を WaitForValue / IsCompleted に渡す
 			 *
-			 * @return const UINT64 �t�F���X�l
+			 * @param[in] ID3D12CommandQueue* cmdQueue コマンドキュー
+			 * @return UINT64 シグナルしたフェンス値 (失敗時は0)
 			 ************************************************************************************/
-			const UINT64 GetFenceValue(void)const;
-
+			UINT64 Signal(ID3D12CommandQueue* cmdQueue);
 
 			/***********************************************************************************
-			 * @brief �t�F���X�l��1����
+			 * @brief 指定したフェンス値にGPUが到達したか
 			 *
+			 * @param[in] UINT64 value フェンス値
+			 * @return bool 到達済みか
 			 ************************************************************************************/
-			void IncrementFenceValue(void);
-
+			bool IsCompleted(UINT64 value)const;
 
 			/***********************************************************************************
-			 * @briefe ����֐�
+			 * @brief 指定したフェンス値にGPUが到達するまでCPUを待機させる
+			 *
+			 * @param[in] UINT64 value フェンス値
+			 * @return HRESULT 成功の有無
+			 ************************************************************************************/
+			HRESULT WaitForValue(UINT64 value);
+
+			/***********************************************************************************
+			 * @brief シグナルを積んで完了まで待機する (GPUの完全同期)
+			 *
+			 * @param[in] CommandQueue* cmdQueue コマンドキュー
+			 * @return HRESULT 成功の有無
+			 ************************************************************************************/
+			HRESULT WaitForSignal(RHI::DirectX12::CommandQueue* cmdQueue);
+
+			/***********************************************************************************
+			 * @brief 最後にシグナルしたフェンス値
+			 ************************************************************************************/
+			UINT64 GetLastSignaledValue(void)const;
+
+			/***********************************************************************************
+			 * @brief 解放関数
 			 *
 			 ************************************************************************************/
 			void Release(void);
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12Fence> _pFence = nullptr;
-			UINT64 _fenceVal = 0;
+			UINT64 _nextValue  = 1;          // 次にシグナルする値 (0は初期値なので1から)
+			HANDLE _fenceEvent = nullptr;
 		};
 	}
 }

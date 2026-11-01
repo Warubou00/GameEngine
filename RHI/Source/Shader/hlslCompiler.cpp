@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    hlslCompiler.cpp
-* @brief   hlsl‚ÌƒRƒ“ƒpƒCƒ‰[
+* @brief   hlslã®ã‚³ãƒ³ãƒ‘ã‚¤ãƒ©ãƒ¼
 * @details 
 *
 * @author  Keigo Onari
@@ -51,7 +51,7 @@ namespace RHI
 			ID3DBlob** errorBlob
 		)
 		{
-			// ƒVƒF[ƒ_ƒRƒ“ƒpƒCƒ‹
+			// ã‚·ã‚§ãƒ¼ãƒ€ã‚³ãƒ³ãƒ‘ã‚¤ãƒ«
 			UINT flags = 0;
 #ifdef _DEBUG
 			flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;

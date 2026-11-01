@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    dxgiFactory6.cpp
-* @brief   DXGI6�N���X
+* @brief   DXGI6クラス
 * @details 
 *
 * @author  Keigo Onari
@@ -45,11 +45,20 @@ namespace RHI
 
 		HRESULT DXGIFactory6::Create(void)
 		{
-			if (FAILED(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&_pDxgi6Factory)))) {
-				if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&_pDxgi6Factory)))) {
-					return S_FALSE;
-				}
+			if (_pDxgi6Factory)
+			{
+				return S_OK;
 			}
+
+#if defined(_DEBUG)
+			// デバッグ版はDXGIのデバッグ出力を有効にする (Graphics Toolsが無い環境では失敗するので通常版に落とす)
+			if (SUCCEEDED(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&_pDxgi6Factory))))
+			{
+				return S_OK;
+			}
+#endif
+			// 失敗時は S_FALSE(=成功扱い) ではなく実際のエラーコードを返す
+			return CreateDXGIFactory2(0, IID_PPV_ARGS(&_pDxgi6Factory));
 		}
 
 		IDXGIFactory6* DXGIFactory6::Get(void)const
@@ -64,8 +73,7 @@ namespace RHI
 
 		void DXGIFactory6::Release(void)
 		{
-			// ComPtr�̂��ߔj���͔�����
-			//if (_pDxgi6Factory.Get())_pDxgi6Factory.Get()->Release();
+			_pDxgi6Factory.Reset();
 		}
 	}
 }

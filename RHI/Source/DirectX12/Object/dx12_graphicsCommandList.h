@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_graphicsCommandList.h
-* @brief   DX12‚ÌƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg
+* @brief   DX12ã®ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ
 * @details
 *
 * @author  Keigo Onari
@@ -43,90 +43,112 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		class GraphicsCommandList : CommandList
+		// ä»¥å‰ã¯ private ç¶™æ‰¿ã«ãªã£ã¦ã„ãŸãŸã‚ public ã«
+		class GraphicsCommandList : public CommandList
 		{
 		public:
 			GraphicsCommandList();
-			~GraphicsCommandList();
+			~GraphicsCommandList() override;
 
 
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìì¬
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ä½œæˆ
 			 *
-			 * @param[in] ID3D12Device* device ƒfƒoƒCƒX
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @param[in] ID3D12Device* device ãƒ‡ãƒã‚¤ã‚¹
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator);
+			HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator) override;
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìƒo[ƒWƒ‡ƒ“ƒAƒbƒv‚Ì‚İ(4,6,7)
+			 * @brief è¨˜éŒ²ã®é–‹å§‹ (ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒªã‚»ãƒƒãƒˆ)
+			 * @details Closeæ¸ˆã¿ã§ã‚ã‚‹ã“ã¨
 			 *
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @param[in] ID3D12CommandAllocator* commandAllocator è¨˜éŒ²å…ˆã®ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼
+			 * @param[in] ID3D12PipelineState* pso åˆæœŸPSO (nullptrå¯)
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
+			 ************************************************************************************/
+			HRESULT Reset(ID3D12CommandAllocator* commandAllocator, ID3D12PipelineState* pso = nullptr);
+
+			/***********************************************************************************
+			 * @brief è¨˜éŒ²ã®çµ‚äº†
+			 * @details è¨˜éŒ²ä¸­ã§ãªã‘ã‚Œã°ä½•ã‚‚ã—ãªã„
+			 *
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡ (è¨˜éŒ²ã—ãŸã‚³ãƒãƒ³ãƒ‰ã«ä¸æ­£ãŒã‚ã‚‹ã¨ã“ã“ã§å¤±æ•—ã™ã‚‹)
+			 ************************************************************************************/
+			HRESULT Close(void);
+
+			bool IsRecording(void)const { return _isRecording; }
+
+			/***********************************************************************************
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ã‚¢ãƒƒãƒ—ã®è©¦ã¿(4,6,7)
+			 *
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
 			HRESULT TryVersionUp();
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìƒo[ƒWƒ‡ƒ“ƒAƒbƒv‚Ì‚İ(4)
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ã‚¢ãƒƒãƒ—ã®è©¦ã¿(4)
 			 *
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
 			HRESULT TryVersionUp4();
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìƒo[ƒWƒ‡ƒ“ƒAƒbƒv‚Ì‚İ(6)
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ã‚¢ãƒƒãƒ—ã®è©¦ã¿(6)
 			 *
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
 			HRESULT TryVersionUp6();
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìƒo[ƒWƒ‡ƒ“ƒAƒbƒv‚Ì‚İ(7)
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ã‚¢ãƒƒãƒ—ã®è©¦ã¿(7)
 			 *
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
 			HRESULT TryVersionUp7();
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìæ“¾
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®å–å¾—
 			 *
-			 * @return ID3D12GraphicsCommandList* ƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg
+			 * @return ID3D12GraphicsCommandList* ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ
 			 ************************************************************************************/
 			ID3D12GraphicsCommandList* GetCmdList(void)const;
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìæ“¾
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®å–å¾—
 			 *
-			 * @return ID3D12GraphicsCommandList4* ƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg4
+			 * @return ID3D12GraphicsCommandList4* ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ4
 			 ************************************************************************************/
 			ID3D12GraphicsCommandList4* GetCmdList4(void)const;
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìæ“¾
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®å–å¾—
 			 *
-			 * @return ID3D12GraphicsCommandList6* ƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg6
+			 * @return ID3D12GraphicsCommandList6* ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ6
 			 ************************************************************************************/
 			ID3D12GraphicsCommandList6* GetCmdList6(void)const;
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìæ“¾
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®å–å¾—
 			 *
-			 * @return ID3D12GraphicsCommandList7* ƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg7
+			 * @return ID3D12GraphicsCommandList7* ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ7
 			 ************************************************************************************/
 			ID3D12GraphicsCommandList7* GetCmdList7(void)const;
 
 			/***********************************************************************************
-			 * @brief ‰ğ•úŠÖ”
-			 * @details ComPtr‚Í‰ğ•ú‚µ‚È‚¢
+			 * @brief è§£æ”¾é–¢æ•°
+			 * @details ä¿æŒã—ã¦ã„ã‚‹å‚ç…§ã‚’æ‰‹æ”¾ã™
 			 * 
 			 ************************************************************************************/
-			void Release(void);
+			void Release(void) override;
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList>  _pCmdList;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> _pCmdList4;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList6> _pCmdList6;
 			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> _pCmdList7;
+			bool                                               _isRecording = false;
 
 			HRESULT asCmdList();
 			HRESULT asCmdList4();
@@ -140,4 +162,4 @@ namespace RHI
 
 /************************************
 * End of file
-************************************/
+************************************/

@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_commandQueue.cpp
-* @brief   DX12‚ÌƒRƒ}ƒ“ƒhƒLƒ…[
+* @brief   DX12ã®ã‚³ãƒžãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼
 * @details
 *
 * @author  Keigo Onari
@@ -42,37 +42,43 @@ namespace RHI
 		CommandQueue::~CommandQueue() {}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒLƒ…[‚Ìì¬
+		// ã‚³ãƒžãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ã®ä½œæˆ
 		// ==============================================
-		HRESULT CommandQueue::Create(ID3D12Device* device)
+		HRESULT CommandQueue::Create(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type)
 		{
+			if (!device || _pCmdQueue)
+			{
+				return E_INVALIDARG;
+			}
+
+			_type = type;
+
 			D3D12_COMMAND_QUEUE_DESC cmdQueueDesc = {};
-			cmdQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;																//ƒ^ƒCƒ€ƒAƒEƒg‚È‚µ
+			cmdQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;																//ã‚¿ã‚¤ãƒ ã‚¢ã‚¦ãƒˆãªã—
 			cmdQueueDesc.NodeMask = 0;
-			cmdQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;													//ƒvƒ‰ƒCƒIƒŠƒeƒB“Á‚ÉŽw’è‚È‚µ
-			cmdQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;																//ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Æ“¯’l
-			return device->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(&_pCmdQueue));//ƒRƒ}ƒ“ƒhƒLƒ…[¶¬
+			cmdQueueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;													//ãƒ—ãƒ©ã‚¤ã‚ªãƒªãƒ†ã‚£ç‰¹ã«æŒ‡å®šãªã—
+			cmdQueueDesc.Type = type;																//ã‚³ãƒžãƒ³ãƒ‰ãƒªã‚¹ãƒˆã¨åŒå€¤
+			return device->CreateCommandQueue(&cmdQueueDesc, IID_PPV_ARGS(&_pCmdQueue));//ã‚³ãƒžãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ç”Ÿæˆ
 		}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒLƒ…[‚ÌŽæ“¾
+		// ã‚³ãƒžãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ã®å–å¾—
 		// ==============================================
-		ID3D12CommandQueue* CommandQueue::Get(void)
+		ID3D12CommandQueue* CommandQueue::Get(void)const
 		{
 			return _pCmdQueue.Get();
 		}
 
 		// ==============================================
-		// ‰ð•ú
+		// è§£æ”¾
 		// ==============================================
 		void CommandQueue::Release(void)
 		{
-			// ComPtr‚Ì‚½‚ßA–¾Ž¦“I‚È‰ð•ú‚Í‚µ‚È‚¢
-			//if (_pCmdQueue.Get())_pCmdQueue->Release();
+			_pCmdQueue.Reset();
 		}
 	}
 }
 
 /************************************
 * End of file
-************************************/
+************************************/

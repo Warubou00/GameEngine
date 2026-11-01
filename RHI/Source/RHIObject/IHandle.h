@@ -1,11 +1,11 @@
-
+﻿
 /***********************************************************************************
-* @file    meshRenderer.cpp
-* @brief   Renderer meshRenderer
+* @file    IHandle.h
+* @brief   RHI interface handle
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/1/13
+* @date    2026/09/22
 * @version v_1.0.0
 *
 * @copyright
@@ -14,11 +14,14 @@
 * @note    
 ************************************************************************************/
 
+#pragma once
+#ifndef RHI_OBJECT_INTERFACE_HANDLE_H_
+#define RHI_OBJECT_INTERFACE_HANDLE_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "meshRenderer.h"
+
 
 /******************************************************************
 * Macro Definitions
@@ -36,11 +39,19 @@
 
 
 
-namespace Renderer
+namespace RHI
 {
+    namespace ObjectInterface
+    {
+        struct IHandle
+        {
 
-
+        };
+    }
 }
+
+
+#endif // RHI_OBJECT_INTERFACE_HANDLE_H_
 
 /************************************
 * End of file

@@ -1,11 +1,11 @@
 
 /***********************************************************************************
-* @file    meshRenderer.h
-* @brief   Renderer meshRenderer
+* @file    modelLoader.h
+* @brief   モデルを読み込む親クラス
 * @details 
 *
 * @author  Keigo Onari
-* @date    2026/1/13
+* @date    2024/4/1
 * @version v_1.0.0
 *
 * @copyright
@@ -15,13 +15,18 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef MESH_RENDERER_H_
-#define MESH_RENDERER_H_
+#ifndef RENDERER_MODEL_INTERFACE_LOADER_H_
+#define RENDERER_MODEL_INTERFACE_LOADER_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "../../RHI/Source/RenderHardwareInterface.h"
+#include <string>
+#include "../../../Core/Source/File/file.h"
+
+#include "../common.h"
+
+//#include "modelData.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,8 +46,12 @@
 
 namespace Renderer
 {
+	struct Mesh;
 
-    class MeshRenderer
+	/***********************************************************************************
+	 * @brief   モデルのローダー(親クラス)
+	 ************************************************************************************/
+    class RENDERER_API_CLASS IModelLoader
     {
 
         /******************************************************************
@@ -55,26 +64,35 @@ namespace Renderer
         ******************************************************************/
 
 
-    public:          /*---コンストラクタ・デストラクタ---*/
-        MeshRenderer() {}
-        ~MeshRenderer() {}
+    public:          /*---コンストラクタ---*/
+		IModelLoader() {}
+		virtual ~IModelLoader() = default;
 
 
     public:          /*---クラスメソッド---*/
 
 
-    public:          /*---アクセッサー関数群---*/
+		/***********************************************************************************
+		 * @brief モデルのロード
+		 * @details モデルのロード
+		 *
+		 * @param[const std::wstring&] wfileName モデルのパス
+		 * @return Mesh* メッシュ
+		 ************************************************************************************/
+		virtual Mesh* LoadModel(const std::wstring& wfileName) = 0;
 
-
-    private:         /*---メンバ変数---*/
-
+    protected:          /*---アクセッサー関数群---*/
+	
+    protected:         /*---メンバ変数---*/
+		Core::File _file;
+		Core::File _mtlFile;
 
     };
 
 }
 
 
-#endif // MESH_RENDERER_H_
+#endif // RENDERER_MODEL_INTERFACE_LOADER_H_
 
 /************************************
 * End of file

@@ -1,8 +1,8 @@
-
+﻿
 /***********************************************************************************
 * @file    adapter.h
-* @brief   Graphics�{�[�h�̃A�_�v�^�[�N���X
-* @details 
+* @brief   Graphicsボードのアダプタークラス
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/02/02
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
@@ -23,7 +23,6 @@
 ******************************************************************/
 #include <dxgi1_6.h>
 #include <string>
-#include <vector>
 
 #include <wrl.h>
 
@@ -62,14 +61,30 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---�R���X�g���N�^�E�f�X�g���N�^---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             Adapter();
             ~Adapter();
 
 
-        public:          /*---�N���X���\�b�h---*/
+        public:          /*---クラスメソッド---*/
 
+            /***********************************************************************************
+             * @brief GPU名の部分一致でアダプターを選ぶ
+             * @details ソフトウェアアダプター(WARP等)は対象外
+             *
+             * @param[in] IDXGIFactory6* pFactory ファクトリー
+             * @param[in] const std::wstring& enumeratingGPU 探すGPU名 (例: L"NVIDIA")
+             * @return HRESULT 見つからなければ DXGI_ERROR_NOT_FOUND
+             ************************************************************************************/
             HRESULT EnumerateAdaptersFromGpuName(IDXGIFactory6* pFactory, const std::wstring& enumeratingGPU);
+
+            /***********************************************************************************
+             * @brief 高性能GPUを優先してアダプターを選ぶ
+             * @details ソフトウェアアダプター(WARP等)は飛ばす
+             *
+             * @param[in] IDXGIFactory6* pFactory ファクトリー
+             * @return HRESULT 見つからなければ DXGI_ERROR_NOT_FOUND
+             ************************************************************************************/
             HRESULT EnumerateAdapterFromHighPerformance(IDXGIFactory6* pFactory);
 
             HRESULT TryVersionUp();
@@ -80,16 +95,21 @@ namespace RHI
             IDXGIAdapter1* GetAdapter1(void)const;
             IDXGIAdapter3* GetAdapter3(void)const;
 
-            WCHAR* GetAdapterName(void)const;
+            /***********************************************************************************
+             * @brief アダプター名の取得
+             * @details 以前はスタック上の DXGI_ADAPTER_DESC 内を指すポインタを返していた(関数終了で無効)ため値で返す
+             *
+             * @return std::wstring アダプター名 (未選択なら空)
+             ************************************************************************************/
+            std::wstring GetAdapterName(void)const;
 
             void Release(void);
 
-        public:          /*---�A�N�Z�b�T�[�֐��Q---*/
+        public:          /*---アクセッサー関数群---*/
 
 
-        private:         /*---�����o�ϐ�---*/
+        private:         /*---メンバ変数---*/
 
-            std::vector<IDXGIAdapter*> _pAdapters;
             Microsoft::WRL::ComPtr<IDXGIAdapter>  _pAdapter;
             Microsoft::WRL::ComPtr<IDXGIAdapter1> _pAdapter1;
             Microsoft::WRL::ComPtr<IDXGIAdapter3> _pAdapter3;
@@ -102,7 +122,7 @@ namespace RHI
 }
 
 
-#endif // DX12_DEVICE_H_
+#endif // DIRECTX_ADAPTER_H_
 
 /************************************
 * End of file

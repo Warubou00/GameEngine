@@ -1,4 +1,4 @@
-
+﻿
 /***********************************************************************************
 * @file    Device.h
 * @brief   RHI Device
@@ -68,33 +68,46 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---�R���X�g���N�^�E�f�X�g���N�^---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             Device();
             ~Device()override;
 
 
-        public:          /*---�N���X���\�b�h---*/
+        public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize();
+            RHI_RESULT Initialize()override;
+
+            /***********************************************************************************
+             * @brief 終了処理
+             * @details デバイスは最後に破棄すること (他のRHIオブジェクトを先に Dispose する)
+             ************************************************************************************/
+            void Dispose()override;
+
+        public:          /*---アクセッサー関数群---*/
 
             DirectX::DXGIFactory6* GetDxgiFactory()const;
             DirectX::Adapter*      GetAdapter()const;
             DirectX12::Device*     GetDevice()const;
 
-        public:          /*---�A�N�Z�b�T�[�֐��Q---*/
 
 
-        private:         /*---�����o�ϐ�---*/
+        private:         /*---メンバ変数---*/
 
-            // DXGI�t�@�N�g���[
+            // DXGIファクトリー
             std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
-            // �A�_�v�^�[
+            // アダプター
             std::unique_ptr<DirectX::Adapter> _adapter;
-            // DirectX12�̃f�o�C�X
+            // DirectX12のデバイス
             std::unique_ptr<DirectX12::Device> _dx12Device;
+            // デバッグメッセージのコールバック登録ID (0なら未登録)
+            unsigned long _debugCallbackCookie = 0;
 
             std::string getDeviceVersion();
             std::string getAdapterVersion();
+
+            // デバッグレイヤーのメッセージを Logger に流す (Debugビルドのみ)
+            void registerDebugMessageCallback();
+            void unregisterDebugMessageCallback();
         };
 
     }

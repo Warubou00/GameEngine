@@ -1,4 +1,4 @@
-
+ï»¿
 /***********************************************************************************
 * @file    ITexture.h
 * @brief   RHI interface texture
@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include "IRHIObject.h"
+#include "TextureHandle.h"
 
 /******************************************************************
 * Macro Definitions
@@ -43,6 +44,10 @@ namespace RHI
 {
     namespace ObjectInterface
     {
+        class IDevice;
+        class ICommandContext;
+        class IBuffer;
+
         class ITexture : public IRHIObject
         {
 
@@ -56,18 +61,23 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             ITexture() {};
             virtual ~ITexture() = default;
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
+
+            virtual TextureHandle LoadTextureFromFile(
+                RHI::ObjectInterface::IDevice* iDevice,
+                RHI::ObjectInterface::ICommandContext* iCommandContext,
+                RHI::ObjectInterface::IBuffer* iBuffer,
+                const wchar_t* filePath) = 0;
+
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
-
-
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
 
         };

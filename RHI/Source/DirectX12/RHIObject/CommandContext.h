@@ -1,8 +1,8 @@
-
+﻿
 /***********************************************************************************
 * @file    CommandContext.h
 * @brief   RHI CommandContext
-* @details 
+* @details コマンドの記録・送信・画面表示・GPU同期をまとめて扱うクラス
 *
 * @author  Keigo Onari
 * @date    2026/4/27
@@ -11,7 +11,9 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note    コマンドリストの状態遷移
+*            [記録中] --ExecuteAndSync / RenderEnd--> [Close済み] --BeginRecording / RenderStart--> [記録中]
+*          生成直後は記録中。アップロード処理などで何かを積む前には必ず BeginRecording() を呼ぶこと
 ************************************************************************************/
 
 #pragma once
@@ -26,6 +28,7 @@
 
 
 #include "../../RHIObject/ICommandContext.h"
+#include "../../dataDefinition.h"
 
 /******************************************************************
 * Macro Definitions
@@ -41,13 +44,6 @@
 * Structure Declarations
 ******************************************************************/
 
-class IDXGISwapChain4;
-class ID3D12CommandQueue;
-class ID3D12GraphicsCommandList;
-class ID3D12CommandAllocator;
-class ID3D12Resource;
-class ID3D12Fence;
-
 namespace RHI
 {
     namespace DirectX12
@@ -56,6 +52,7 @@ namespace RHI
         class CommandQueue;
         class CommandAllocator;
         class SwapChain;
+        class Fence;
     }
 
     namespace ObjectInterface
@@ -76,53 +73,86 @@ namespace RHI
             * Internal Structure Declarations
             ******************************************************************/
         public:
-            struct RenderObj
-            {
-                uint32_t VertexOffset;
-                uint32_t CbOffset;
-                uint32_t VertexCount;
-            };
 
 
-        public:          /*---�R���X�g���N�^�E�f�X�g���N�^---*/
+
+        public:          /*---コンストラクタ・デストラクタ---*/
             CommandContext();
             ~CommandContext()override;
 
 
-        public:          /*---�N���X���\�b�h---*/
+        public:          /*---クラスメソッド---*/
 
-            RHI_RESULT Initialize();
-            RHI_RESULT Initialize(Device* device, ObjectInfo* info);
+            RHI_RESULT Initialize(RHI::ObjectInterface::IDevice* iDevice, ObjectInfo* info)override;
 
-            void RenderStart(Pipeline* pipeline, Buffer* buffer);
-            void RenderEnd();
+            /***********************************************************************************
+             * @brief コマンドの記録を開始する
+             * @details 既に記録中なら何もしない。Close済みならアロケーターとコマンドリストをリセットする。
+             *          ※現状は送信のたびにGPUの完了を待っているので、ここでアロケーターをリセットしても安全。
+             *            Phase 1 でフレームを重ねる(FrameContext)ようになったら、フレームごとのアロケーターに変える
+             *
+             * @return bool 記録を開始できたか
+             ************************************************************************************/
+            bool BeginRecording();
 
-            void Render(Buffer* buffer, const std::vector<RenderObj>& renderQueue);
+            /***********************************************************************************
+             * @brief 描画の開始 (記録開始・バックバッファの準備・共通リソースのセット)
+             *
+             * @return bool 成功の有無
+             ************************************************************************************/
+            bool RenderStart(Pipeline* pipeline, Buffer* buffer);
 
-            void ExecuteAndSync();
+            /***********************************************************************************
+             * @brief 描画の終了 (送信・画面表示・GPU完了待ち)
+             *
+             * @return bool 成功の有無 (デバイスロスト時もfalse)
+             ************************************************************************************/
+            bool RenderEnd();
+
+            void Render(Buffer* buffer, const RenderQueue& renderQueue);
+
+            /***********************************************************************************
+             * @brief 記録したコマンドを送信して、GPUの完了まで待つ
+             * @details 終了後のコマンドリストはClose済みのまま。次に積む前に BeginRecording() を呼ぶこと
+             *
+             * @return bool 成功の有無
+             ************************************************************************************/
+            bool ExecuteAndSync();
+
+            /***********************************************************************************
+             * @brief GPUが今積まれている処理を全て終えるまで待つ (終了処理・リサイズ前に使う)
+             ************************************************************************************/
+            void WaitForGpu();
+
+            /***********************************************************************************
+             * @brief 終了処理。GPUの完了を待ってから内部オブジェクトを破棄する
+             ************************************************************************************/
+            void Dispose()override;
+
+        public:          /*---アクセッサー関数群---*/
 
             RHI::DirectX12::GraphicsCommandList* GetGraphicsCommandList()const;
             RHI::DirectX12::CommandQueue*        GetCommandQueue()const;
             RHI::DirectX12::CommandAllocator*    GetCommandAllocator()const;
             RHI::DirectX12::SwapChain*           GetSwapChain()const;
 
-        public:          /*---�A�N�Z�b�T�[�֐��Q---*/
+            // スワップチェーン(=描画先)のサイズ
+            uint32_t GetWidth()const;
+            uint32_t GetHeight()const;
 
-
-        private:         /*---�����o�ϐ�---*/
+        private:         /*---メンバ変数---*/
             std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _graphicsCommandList;
             std::unique_ptr<RHI::DirectX12::CommandQueue>        _commandQueue;
             std::unique_ptr<RHI::DirectX12::CommandAllocator>    _commandAllocator;
             std::unique_ptr<RHI::DirectX12::SwapChain>           _swapChain;
-            
-            // �ǉ�: RenderStart��RenderEnd�ŋ��L����ϐ�
-            UINT            _frameBufferIndex = 0;
-            ID3D12Resource* _backBuffer = nullptr;
+            std::unique_ptr<RHI::DirectX12::Fence>               _fence;
 
-            // �ǉ�: ����(Fence)�p�I�u�W�F�N�g
-            ID3D12Fence* _fence = nullptr;
-            uint64_t        _fenceValue = 0;
-            void* _fenceEvent = nullptr; // HANDLE�̑��
+            Device*         _device            = nullptr;   // 所有しない (デバイスロストの原因取得に使う)
+            ID3D12Resource* _currentBackBuffer = nullptr;   // 所有しない (スワップチェーンが保持している)
+            UINT            _syncInterval      = 1;         // Presentに渡す値 0:VSyncなし 1:VSyncあり
+
+            // デバイスロスト時に原因をログへ出す
+            void logDeviceRemovedReason(HRESULT presentResult);
         };
 
     }

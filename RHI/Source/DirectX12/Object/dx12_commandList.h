@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_commandList.h
-* @brief   DX12‚ÌƒRƒ}ƒ“ƒhƒŠƒXƒg
+* @brief   DX12ã®ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ
 * @details
 *
 * @author  Keigo Onari
@@ -44,22 +44,21 @@ namespace RHI
 		{
 		public:
 			CommandList();
-			~CommandList();
+			virtual ~CommandList();
 
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìì¬
-			 * @details core explanation
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ä½œæˆ
 			 *
-			 * @param[in] ID3D12Device* device ƒfƒoƒCƒX
-			 * @param[in] ID3D12CommandAllocator* commandAllocator ƒRƒ}ƒ“ƒhƒAƒƒP[ƒ^[
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @param[in] ID3D12Device* device ãƒ‡ãƒã‚¤ã‚¹
+			 * @param[in] ID3D12CommandAllocator* commandAllocator ã‚³ãƒãƒ³ãƒ‰ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
-			virtual HRESULT Create(ID3D12Device* deviece, ID3D12CommandAllocator* commandAllocator) = 0;
+			virtual HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator) = 0;
 
 			/***********************************************************************************
-			 * @brief ‰ğ•úŠÖ”
-			 * @details ComPtr‚Í‰ğ•ú‚µ‚È‚¢
+			 * @brief è§£æ”¾é–¢æ•°
+			 * @details ä¿æŒã—ã¦ã„ã‚‹å‚ç…§ã‚’æ‰‹æ”¾ã™
 			 *
 			 ************************************************************************************/
 			virtual void Release(void) = 0;
@@ -74,4 +73,4 @@ namespace RHI
 
 /************************************
 * End of file
-************************************/
+************************************/

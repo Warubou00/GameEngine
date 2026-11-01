@@ -1,0 +1,163 @@
+================================================================================
+ RHI Phase 0 - Step 1 : 低レベルラッパー (DirectX12/Object, DXGI) の修正記録
+ 日付   : 2026-11-01
+ ブランチ: docs/rhi-design-review (未コミット)
+ 対象   : RHI/Source/DirectX12/Object/*, RHI/Source/DXGI/*, dx12_header.h, debugLayer.h
+ 参照   : RHI_DesignReview_2026-11-01.txt の項目番号
+================================================================================
+
+■ ビルド確認
+  - RHI.vcxproj  Debug|x64 (Rebuild) / Release|x64 : 成功
+  - 残っている警告は全て上位層 (Buffer.cpp / Pipeline.h / Renderer側ヘッダー等)。
+    今回触ったラッパーからの警告はなし。
+  - 実行(描画)確認はまだ。C#ホストから起動して動作確認が必要。
+
+
+--------------------------------------------------------------------------------
+0. 共通の変更
+--------------------------------------------------------------------------------
+  [文字コード] (レビュー 3-8)
+    今回触ったファイルは Shift-JIS → UTF-8(BOM付き) / CRLF に変換した。
+    MSVC は BOM 付き UTF-8 を追加設定なしで読める。
+    触っていないファイルは Shift-JIS のまま (混在状態)。いずれ全体を揃えるのが望ましい。
+
+  [dx12_header.h]
+    - NOMINMAX を Windows.h より前に移動 (以前は d3d12.h が先に Windows.h を読むので無効だった)
+    - RHI_RETURN_IF_FAILED(expr) マクロを追加 (HRESULT 失敗時にそのまま return)
+
+  [Release() の意味の統一]
+    以前は全クラスで「ComPtrなので何もしない」空実装だった。
+    今は保持している ComPtr を Reset() して参照を手放すようにした。
+    (呼び出し元は現状どこにもないので挙動への影響はなし)
+
+  [引数不正時の戻り値]
+    E_NOTIMPL を返していた箇所は E_INVALIDARG / E_FAIL に置き換えた。
+    二重 Create も E_INVALIDARG で弾くようにした。
+
+
+--------------------------------------------------------------------------------
+1. 致命バグの修正
+--------------------------------------------------------------------------------
+  [1-1] DXGIFactory6::Create が成功時に return していなかった
+    - 成功時は S_OK、失敗時は CreateDXGIFactory2 の実際のエラーを返すようにした
+      (以前は失敗時に S_FALSE = 成功扱いの値を返していた)
+    - DXGI_CREATE_FACTORY_DEBUG は _DEBUG ビルドの時だけ試すようにした
+
+  [1-3] ResourceBuffer::_mappedData が未初期化
+    - メンバを nullptr / 0 で初期化した
+    - Map 失敗時に _mappedData を nullptr に戻す
+    - 未生成のまま Map した時に S_OK を返していたのを E_FAIL にした
+    - デストラクタで Unmap するようにした
+    - Create で _capacity を記録するようにした (以前は常に0)
+    - WriteData に範囲チェックを追加し、戻り値を bool にした (範囲外ならfalse)
+    - Regist した外部バッファの場合は GetDesc().Width から容量を取るようにした
+    - 使われていなかった alignUp() と #if 0 の Allocate() は削除した
+    - GetGPUVirtualAddress() / GetCapacity() / IsMapped() を追加。Get() を const にした
+
+  [1-4] Fence::_fenceEvent が未初期化で、CloseHandle もしていなかった
+    - Create() の中でイベントも生成するようにした → InitCreateEvent() は廃止
+      (CommandContext.cpp の呼び出し 1 行を削除)
+    - デストラクタ / Release() で CloseHandle するようにした。コピーは禁止
+    - Signal / IsCompleted / WaitForValue / GetLastSignaledValue を追加
+      → Phase 1 の FrameContext[N] (フレームごとのフェンス値待ち) にそのまま使える
+    - WaitForSignal は Signal + WaitForValue の組み合わせにし、HRESULT を返すようにした
+
+  [1-5] Adapter::GetAdapterName がスタック上のポインタを返していた
+    - 戻り値を std::wstring (値渡し) にした (Device.cpp の受け側 1 行を変更)
+
+  [1-6] EnumerateAdaptersFromGpuName が二重解放していた
+    - 生ポインタの vector (_pAdapters) を廃止し、ComPtr のみで列挙するようにした
+    - 見つからなかった時は DXGI_ERROR_NOT_FOUND を返す (以前は常に S_OK)
+    - EnumerateAdapterFromHighPerformance も含め、ソフトウェアアダプター(WARP等)は飛ばす
+    - EnumAdapters → EnumAdapters1 に変更 (Flags を見るため)
+
+  [1-12] SwapChain::GetBackBuffer / GetBufferFromIndex が毎回参照をリークしていた
+    - Create 時にバックバッファを ComPtr 配列で保持し、参照カウントを増やさないポインタを返すようにした
+      (呼び出し側は Release しなくてよい。Buffer.cpp / CommandContext.cpp の変更は不要)
+
+  [1-13] PipelineState がスタック上の Desc へのポインタを保持していた
+    - コンストラクタ引数を削除し、Create(device, const DESC&) で直接受け取るようにした
+      (Pipeline.cpp の生成箇所 2 行を変更)
+
+  [1-14 の一部] RootSignature の Blob がリークし、errorBlob が未初期化だった
+    - ComPtr で受けるようにした
+    - シリアライズ失敗時はエラーメッセージを OutputDebugStringA に出すようにした
+      (シェーダーコンパイラ側の 1-14 はまだ。上位層の作業で対応する)
+
+
+--------------------------------------------------------------------------------
+2. 重大項目・その他の修正
+--------------------------------------------------------------------------------
+  [2-10] メッシュシェーダー対応判定のフラグが違っていた
+    - OPTIONS9.MeshShaderPipelineStatsSupported → OPTIONS7.MeshShaderTier
+  [Device その他]
+    - インターフェイス(Device5/9)の取得と、機能(レイトレ/メッシュシェーダー)の判定を分けた
+      (以前はレイトレ非対応GPUだと Device5 が取れていても失敗扱いになっていた)
+    - 実際に採用された FeatureLevel を保持するようにした
+    - GetFeatureLevel / IsRaytracingSupported / IsRaytracing11Supported / IsMeshShaderSupported を追加
+    - adapter == nullptr のチェックを追加。失敗時は最後の HRESULT を返す
+    - feature level の配列はグローバル変数から無名名前空間の constexpr に変えた
+
+  [SwapChain その他]
+    - CreateSwapChainForHwnd の出力を reinterpret_cast で SwapChain4 に直接書いていた
+      → SwapChain1 で受けてから As() するようにした (型の取り違えを解消)
+    - BufferUsage を DXGI_USAGE_BACK_BUFFER から DXGI_USAGE_RENDER_TARGET_OUTPUT に変更
+    - BUFFER_COUNT / FORMAT を static constexpr として公開した (PSO 側の RTVFormats と揃える時に使う)
+    - Resize(width, height) を追加 (2-4 の準備。0 サイズ = 最小化中は無視)
+    - Present(syncInterval) を追加 (2-5 の準備。HRESULT を返すので DEVICE_REMOVED も検知できる)
+    - GetWidth / GetHeight を追加。引数の null / 0 サイズチェックも追加
+
+  [CommandQueue / CommandAllocator]
+    - Create に D3D12_COMMAND_LIST_TYPE 引数を追加 (既定値は DIRECT。3-4 の COPY キューの準備)
+    - Get() を const にした。CommandAllocator::Reset() を追加
+
+  [CommandList / GraphicsCommandList]
+    - GraphicsCommandList の継承が private になっていたので public にした
+    - 基底 CommandList のデストラクタを virtual にし、override を付けた
+    - Reset(allocator, pso) / Close() / IsRecording() を追加
+      記録中かどうかを自前で持つので、二重 Close も防げる (1-10 を直すための部品)
+    - TryVersionUp は上位版の取得に失敗した時点で打ち切るようにした
+
+  [CommandSignature]
+    - Get() が無く、作っても使えなかったので追加
+    - 閉じタグ側のガード名の綴り (SIGNATUER) を修正
+
+  [debugLayer.h] (レビュー 3-7)
+    - ヘッダー定義の関数を inline にした (ODR 違反の回避)
+    - 戻り値を bool にした。引数で GPU ベース検証も有効にできる (既定は OFF)
+
+
+--------------------------------------------------------------------------------
+3. ファイル構成の変更 (レビュー 3-8)
+--------------------------------------------------------------------------------
+  - adapter.h / adapter.cpp が Source/ と Source/DXGI/ に重複していた。
+    vcxproj は Source/adapter.cpp をビルドしていたが、Device.cpp は DXGI/adapter.h を
+    include していたため、宣言と定義が別のファイルになっていた (今回の変更でリンクエラーとして表面化)。
+    → Source/DXGI/ の方に一本化した (git mv)。RHI.vcxproj / .filters の参照も DXGI/ に変更した。
+
+
+--------------------------------------------------------------------------------
+4. 上位層 (RHIObject) で必要な対応 = 次のステップ
+--------------------------------------------------------------------------------
+  今回はラッパーに合わせてコンパイルを通すための最小限の変更しかしていない。
+  以下は次のステップ (RHIObject 層の Phase 0) で対応する:
+
+  - [1-10] CommandContext::ExecuteAndSync が最後にコマンドリストを Reset して記録中のまま返すため、
+           次の RenderStart で allocator->Reset() が「記録中のリストがある」状態で呼ばれる。
+           → GraphicsCommandList::Close / Reset と CommandAllocator::Reset を使って書き直す
+  - [1-15] Device::Initialize / CommandContext::Initialize が HRESULT を無視して常に成功を返す
+           → RHI_RETURN_IF_FAILED 相当で失敗を伝える。Adapter の DXGI_ERROR_NOT_FOUND も見る
+  - [1-2]  Buffer::makeGlobalVBV / makeSceneVBV に return が無い (ビルド時の C4715 警告がこれ)
+  - CommandContext::RenderEnd の Present を SwapChain::Present に置き換え、VSync 設定を渡す (2-5)
+  - CommandContext::_backBuffer->Regist() がバックバッファの参照を持ち続けるので、
+    Resize の前にはそれを手放す必要がある (Release() を呼べばよい)
+  - PSO の RTVFormats を SwapChain::FORMAT から取るようにする
+
+
+--------------------------------------------------------------------------------
+5. 変換前ファイルのバックアップ
+--------------------------------------------------------------------------------
+  Shift-JIS の変換前ファイル (未コミットの変更を含む状態) はセッションの作業領域に退避した。
+  内容は git の差分でも確認できる (ただし文字コード変換が入るので差分は全行になる)。
+
+================================================================================

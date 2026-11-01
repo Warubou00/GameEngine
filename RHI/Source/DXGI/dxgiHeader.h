@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dxgiHeader.h
-* @brief   DXGIHeaderƒNƒ‰ƒX
+* @brief   DXGIHeaderã‚¯ãƒ©ã‚¹
 * @details 
 *
 * @author  Keigo Onari

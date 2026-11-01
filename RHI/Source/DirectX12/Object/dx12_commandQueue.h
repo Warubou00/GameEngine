@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_commandQueue.h
-* @brief   DX12‚ÌƒRƒ}ƒ“ƒhƒŠƒXƒgƒLƒ…[
+* @brief   DX12ã®ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã‚­ãƒ¥ãƒ¼
 * @details
 *
 * @author  Keigo Onari
@@ -50,30 +50,33 @@ namespace RHI
 
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒLƒ…[‚Ìì¬
-			 * @details core explanation
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ã®ä½œæˆ
 			 *
-			 * @param[in] ID3D12Device* device ƒfƒoƒCƒX
-			 * @return HRESULT ¬Œ÷‚Ì—L–³
+			 * @param[in] ID3D12Device* device ãƒ‡ãƒã‚¤ã‚¹
+			 * @param[in] D3D12_COMMAND_LIST_TYPE type ã‚­ãƒ¥ãƒ¼ã®ç¨®é¡ (DIRECT / COMPUTE / COPY)
+			 * @return HRESULT æˆåŠŸã®æœ‰ç„¡
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device);
+			HRESULT Create(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
 
 			/***********************************************************************************
-			 * @brief ƒRƒ}ƒ“ƒhƒLƒ…[‚Ìæ“¾
+			 * @brief ã‚³ãƒãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ã®å–å¾—
 			 *
-			 * @return ID3D12CommandQueue* ƒRƒ}ƒ“ƒhƒLƒ…[‚Ìƒ|ƒCƒ“ƒ^
+			 * @return ID3D12CommandQueue* ã‚³ãƒãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼ã®ãƒã‚¤ãƒ³ã‚¿
 			 ************************************************************************************/
-			ID3D12CommandQueue* Get(void);
+			ID3D12CommandQueue* Get(void)const;
+
+			D3D12_COMMAND_LIST_TYPE GetType(void)const { return _type; }
 
 			/***********************************************************************************
-			 * @brief ‰ğ•úŠÖ”
-			 * @details ComPtr‚Í‰ğ•ú‚µ‚È‚¢
+			 * @brief è§£æ”¾é–¢æ•°
+			 * @details ä¿æŒã—ã¦ã„ã‚‹å‚ç…§ã‚’æ‰‹æ”¾ã™
 			 *
 			 ************************************************************************************/
 			void Release(void);
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12CommandQueue> _pCmdQueue = nullptr;
+			D3D12_COMMAND_LIST_TYPE                    _type      = D3D12_COMMAND_LIST_TYPE_DIRECT;
 		};
 	}
 }
@@ -82,4 +85,4 @@ namespace RHI
 
 /************************************
 * End of file
-************************************/
+************************************/

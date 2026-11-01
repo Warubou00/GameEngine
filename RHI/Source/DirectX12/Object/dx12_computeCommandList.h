@@ -1,3 +1,3 @@
-#pragma once
+ï»¿#pragma once
 
-// Œã‚É‹LÚ
+// å¾Œã«è¨˜è¼‰

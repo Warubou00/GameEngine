@@ -1,24 +1,28 @@
 
 /***********************************************************************************
-* @file    spriteRenderer.cpp
-* @brief   Renderer meshRenderer
-* @details 
+* @file    camera.h
+* @brief   Renderer camera
+* @details
 *
 * @author  Keigo Onari
-* @date    2026/09/13
+* @date    2026/09/26
 * @version v_1.0.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
+#pragma once
+#ifndef RENDERER_CANERA_H_
+#define RENDERER_CANERA_H_
 
 /******************************************************************
 * Include Headers
 ******************************************************************/
-#include "spriteRenderer.h"
+#include "common.h"
+#include "../../Core/Source/Math/Vector/vector.h"
 
 /******************************************************************
 * Macro Definitions
@@ -39,8 +43,17 @@
 namespace Renderer
 {
 
+    struct RENDERER_API_CLASS Camera
+    {
+        Core::Vector3 Position;
+        Core::Vector3 Target;
+        Core::Vector3 Up;
+    };
 
 }
+
+
+#endif // RENDERER_CAMERA_H_
 
 /************************************
 * End of file

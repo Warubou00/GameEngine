@@ -1,4 +1,4 @@
-
+Ôªø
 /***********************************************************************************
 * @file    IBuffer.h
 * @brief   RHI interface buffer
@@ -23,6 +23,13 @@
 ******************************************************************/
 #include "IRHIObject.h"
 
+#include <vector>
+
+#include "../../Renderer/Source/vertex.h"
+#include "../../Renderer/Source/camera.h"
+#include "../../Renderer/Source/WVP/viewMatrix.h"
+#include "../../Renderer/Source/WVP/projectionMatrix.h"
+
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
@@ -37,12 +44,13 @@
 * Structure Declarations
 ******************************************************************/
 
-
-
 namespace RHI
 {
     namespace ObjectInterface
     {
+        class IDevice;
+        class ICommandContext;
+
         class IBuffer : public IRHIObject
         {
 
@@ -56,18 +64,21 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ÉRÉìÉXÉgÉâÉNÉ^ÅEÉfÉXÉgÉâÉNÉ^---*/
+        public:          /*---„Ç≥„É≥„Çπ„Éà„É©„ÇØ„Çø„Éª„Éá„Çπ„Éà„É©„ÇØ„Çø---*/
             IBuffer() {};
             virtual ~IBuffer() = default;
 
 
-        public:          /*---ÉNÉâÉXÉÅÉ\ÉbÉh---*/
+        public:          /*---„ÇØ„É©„Çπ„É°„ÇΩ„ÉÉ„Éâ---*/
+
+            virtual RHI_RESULT Initialize(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext) = 0;
+            virtual bool UploadVertexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const std::vector<Renderer::Vertex>& vertices) = 0;
+            virtual bool UploadIndexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const std::vector<uint32_t>& indecies) = 0;
+            virtual void UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type) = 0;
+        public:          /*---„Ç¢„ÇØ„Çª„ÉÉ„Çµ„ÉºÈñ¢Êï∞Áæ§---*/
 
 
-        public:          /*---ÉAÉNÉZÉbÉTÅ[ä÷êîåQ---*/
-
-
-        private:         /*---ÉÅÉìÉoïœêî---*/
+        private:         /*---„É°„É≥„ÉêÂ§âÊï∞---*/
 
 
         };

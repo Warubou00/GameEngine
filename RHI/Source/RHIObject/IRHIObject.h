@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    IRHIObject.h
-* @brief   RHIObject‚ÌƒCƒ“ƒ^[ƒtƒFƒCƒX
+* @brief   RHIObjectã®ã‚¤ãƒ³ã‚¿ãƒ¼ãƒ•ã‚§ã‚¤ã‚¹
 * @details 
 *
 * @author  Keigo Onari
@@ -45,11 +45,6 @@ namespace RHI
 {
     namespace ObjectInterface
     {
-        class Device;
-        class CommandContext;
-        class Buffer;
-        class Texture;
-
         struct ObjectInfo
         {
             /******************************
@@ -74,18 +69,19 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             IRHIObject() {};
             virtual ~IRHIObject() = default;
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
+
+            virtual void Dispose() = 0;
+
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
-
-
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
 
         };

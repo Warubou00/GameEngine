@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    dx12_descriptorHeap.h
-* @brief   DX12�̃f�X�N���v�^�q�[�v�ꊇ�Ǘ�
+* @brief   DX12のデスクリプタヒープ一括管理
 * @details 
 *
 * @author  Keigo Onari
@@ -57,75 +57,78 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---�R���X�g���N�^�E�f�X�g���N�^---*/
+        public:          /*---コンストラクタ・デストラクタ---*/
             DescriptorHeapManager() {};
             ~DescriptorHeapManager() {};
 
-        public:          /*---�N���X���\�b�h---*/
+        public:          /*---クラスメソッド---*/
 
             /***********************************************************************************
-             * @brief �����֐�
+             * @brief 生成関数
              * @details 
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6�̃|�C���^
-             * @param[in] ID3D12CommandQueue* pCmdQueue �R�}���h�L���[
-             * @param[in] HWND* hWnd �E�C���h�E�n���h���̃|�C���^
-             * @param[in] UINT width ��
-             * @param[in] UINT height ����
-             * @return HRESULT �����̗L��
+             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6のポインタ
+             * @param[in] ID3D12CommandQueue* pCmdQueue コマンドキュー
+             * @param[in] HWND* hWnd ウインドウハンドルのポインタ
+             * @param[in] UINT width 幅
+             * @param[in] UINT height 高さ
+             * @return HRESULT 成功の有無
              ************************************************************************************/
             HRESULT Create(ID3D12Device* device);
 
-            // �e�N�X�`�����[�h���ȂǂɌĂ΂��F�󂢂Ă���C���f�b�N�X��Ԃ�
+            // 確保に失敗した時の値 (以前は 9999 を返していたが、9999番も正しい番号になり得るため最大値に変更)
+            static constexpr uint32_t INVALID_INDEX = 0xFFFFFFFFu;
+
+            // テクスチャロード時などに呼ばれる：空いているインデックスを返す (満杯なら INVALID_INDEX)
             uint32_t AllocateSrv();
 
 
-            // �e�N�X�`���j�����ɌĂ΂��F�C���f�b�N�X���󂫃��X�g�ɖ߂�
+            // テクスチャ破棄時に呼ばれる：インデックスを空きリストに戻す
             void FreeSrv(uint32_t index);
 
-            // �w��C���f�b�N�X��CPU�n���h���i���ۂ̏������ݐ�A�h���X�j���擾����
+            // 指定インデックスのCPUハンドル（実際の書き込み先アドレス）を取得する
             D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index);
 
-            // �w��C���f�b�N�X��GPU�n���h���i���ۂ̏������ݐ�A�h���X�j���擾����
+            // 指定インデックスのGPUハンドル（実際の書き込み先アドレス）を取得する
             D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(UINT index);
 
-            // �w��C���f�b�N�X��CPU�n���h�����擾(RTV)
+            // 指定インデックスのCPUハンドルを取得(RTV)
             D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandle(UINT index);
 
-            // �w��C���f�b�N�X��GPU�n���h�����擾(RTV)
+            // 指定インデックスのGPUハンドルを取得(RTV)
             D3D12_GPU_DESCRIPTOR_HANDLE GetRtvGpuHandle(UINT index);
 
-            // ��{2�Ȃ̂Ő擪��Ԃ�
+            // 基本2つなので先頭を返す
             D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();
 
             ID3D12DescriptorHeap* GetSrvHeap()const { return _srvUavCbvHeap.Get(); }
 
-            // �T�C�Y�擾
+            // サイズ取得
             UINT GetSrvDescriptorSize();
             UINT GetRtvDescriptorSize();
 
-        public:          /*---�A�N�Z�b�T�[�֐��Q---*/
+        public:          /*---アクセッサー関数群---*/
 
 
-        private:         /*---�����o�ϐ�---*/
+        private:         /*---メンバ変数---*/
 
-            // DX12�̃q�[�v����
+            // DX12のヒープ実体
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _srvUavCbvHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _samplerHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _rtvHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _dsvHeap;
 
-            // --- SRV�q�[�v�̃A���P�[�^�i�C���f�b�N�X�Ǘ��j ---
-            const uint32_t _maxSrvCount = 1000000; // �m�ۂ����ő吔
-            uint32_t _currentSrvIndex = 0;   // ���ݖ��g�p�̐擪�C���f�b�N�X
+            // --- SRVヒープのアロケータ（インデックス管理） ---
+            const uint32_t _maxSrvCount = 1000000; // 確保した最大数
+            uint32_t _currentSrvIndex = 0;   // 現在未使用の先頭インデックス
 
-            // �j������čė��p�\�ɂȂ����C���f�b�N�X�̃��X�g�iFreeList�j
+            // 破棄されて再利用可能になったインデックスのリスト（FreeList）
             std::vector<uint32_t> _freeSrvIndices;
 
-            // �e�q�[�v�̃f�B�X�N���v�^�̃T�C�Y�i�C���f�b�N�X����A�h���X���v�Z����̂ɕK�v�j
+            // 各ヒープのディスクリプタのサイズ（インデックスからアドレスを計算するのに必要）
             UINT _srvDescriptorSize;
 
-            // rtv�̃q�[�v�T�C�Y
+            // rtvのヒープサイズ
             UINT _rtvDescriptorSize;
 
         };

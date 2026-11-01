@@ -31,6 +31,24 @@
     <Filter Include="ソース ファイル\Log">
       <UniqueIdentifier>{d99f7425-c0a4-4e74-8f7f-44c2ef87821e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\File">
+      <UniqueIdentifier>{543d5323-1b20-46c2-942e-0ea500d83d88}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\File">
+      <UniqueIdentifier>{bc030f4d-b23d-47db-abda-ea007df8bc26}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\Vector">
+      <UniqueIdentifier>{65091ede-bf90-413c-bb43-ba4cd3a9240a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Vector">
+      <UniqueIdentifier>{1c33a51b-5aee-46f6-9ece-2535a061bd28}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\Vector\Math">
+      <UniqueIdentifier>{8f6b34c6-3f76-40aa-b119-c50eaa48bc46}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Vector\Math">
+      <UniqueIdentifier>{81cb7b86-bbf6-4b78-832b-140db5053aeb}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Math\Float\float4.h">
@@ -57,6 +75,33 @@
     <ClInclude Include="Source\Log\logger.h">
       <Filter>ヘッダー ファイル\Log</Filter>
     </ClInclude>
+    <ClInclude Include="Source\File\file.h">
+      <Filter>ヘッダー ファイル\File</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\color.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\vector.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\vector2.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\vector3.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\vector4.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\math\MyMath.h">
+      <Filter>ヘッダー ファイル\Vector\Math</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\MyVector.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Math\Vector\quaternion.h">
+      <Filter>ヘッダー ファイル\Vector</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Math\Float\float2.cpp">
@@ -76,6 +121,27 @@
     </ClCompile>
     <ClCompile Include="Source\Log\logger.cpp">
       <Filter>ソース ファイル\Log</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\File\file.cpp">
+      <Filter>ソース ファイル\File</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\vector4.cpp">
+      <Filter>ソース ファイル\Vector</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\vector3.cpp">
+      <Filter>ソース ファイル\Vector</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\vector2.cpp">
+      <Filter>ソース ファイル\Vector</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\color.cpp">
+      <Filter>ソース ファイル\Vector</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\math\MyMath.cpp">
+      <Filter>ソース ファイル\Vector\Math</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Math\Vector\Myvector.cpp">
+      <Filter>ソース ファイル\Vector</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

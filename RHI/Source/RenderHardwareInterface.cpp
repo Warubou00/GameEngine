@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    RenderHardwareInterface.cpp
-* @brief   RHI\‘¢
+* @brief   RHIæ§‹é€ 
 * @details 
 *
 * @author  Keigo Onari
@@ -19,15 +19,23 @@
 * Include Headers
 ******************************************************************/
 #include "RenderHardwareInterface.h"
+#include "dataDefinition.h"
+
+// DirectX12
+// ========================================
 #include "DirectX12/RHIObject/Device.h"
 #include "DirectX12/RHIObject/CommandContext.h"
 #include "DirectX12/RHIObject/Buffer.h"
 #include "DirectX12/RHIObject/Texture.h"
 #include "DirectX12/RHIObject/Pipeline.h"
+#include "DirectX12/debugLayer.h"
+// ========================================
 
-#include "DirectX12/dx12_descriptorHeapManager.h"
-
-#include <dxgi1_5.h>
+#include "../../Core/Source/Log/logger.h"
+#include "../../Renderer/Source/camera.h"
+#include "../../Renderer/Source/WVP/projectionMatrix.h"
+#include "../../Renderer/Source/mesh.h"
+#include "../../Renderer/Source/constant.h"
 
 /******************************************************************
 * Macro Definitions
@@ -49,118 +57,188 @@
 namespace RHI
 {
     RenderHardwareInterface::RenderHardwareInterface() = default;
-    RenderHardwareInterface::~RenderHardwareInterface() = default;
+    RenderHardwareInterface::~RenderHardwareInterface()
+    {
+        // CleanUp ã‚’å‘¼ã³å¿˜ã‚Œã¦ã‚‚ã€GPUã®å®Œäº†ã‚’å¾…ã£ã¦ã‹ã‚‰æ­£ã—ã„é †ç•ªã§ç ´æ£„ã•ã‚Œã‚‹ã‚ˆã†ã«ã™ã‚‹
+        CleanUp();
+    }
     
     void RenderHardwareInterface::Initialize(RHI::RenderHardwareInterface::RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objInfo)
     {
+#ifdef _DEBUG
+        RHI::DirectX12::EnableDebugLayer();
+#endif
+
         _device         = std::make_unique<ObjectInterface::Device>();
         _commandContext = std::make_unique<ObjectInterface::CommandContext>();
         _buffer         = std::make_unique<ObjectInterface::Buffer>();
         _texture        = std::make_unique<ObjectInterface::Texture>();
         _pipeline       = std::make_unique<ObjectInterface::Pipeline>();
 
-        info->InitializedDevice         = _device->Initialize();
+        _isInitialized = false;
+
+        // ä»¥å‰ã¯å‰ã®æ®µéšãŒå¤±æ•—ã—ã¦ã„ã¦ã‚‚æ¬¡ã¸é€²ã¿ã€å£Šã‚ŒãŸãƒ‡ãƒã‚¤ã‚¹ã§åˆæœŸåŒ–ã‚’ç¶šã‘ã¦ã„ãŸ
+        // â†’ å¤±æ•—ã—ãŸæ®µéšã§æ­¢ã‚ã‚‹ (ãã‚Œä»¥é™ã®é …ç›®ã¯ -1 ã®ã¾ã¾ = æœªåˆæœŸåŒ–)
+        info->InitializedDevice = _device->Initialize();
+        if (info->InitializedDevice != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Device."); return; }
+
         info->InitializedCommandContext = _commandContext->Initialize(_device.get(), objInfo);
-        info->InitializedBuffer         = _buffer->Initialize(_device.get(), _commandContext.get());
-        //info->InitializedTexture        = _texture->Initialize();
-        info->InitializedTexture        = _pipeline->Initialize(_device.get());
+        if (info->InitializedCommandContext != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize CommandContext."); return; }
 
-        std::vector<Vertex> quadVertices = {
-            // 1‚Â–Ú‚ÌOŠpŒ` (¶ã, ‰Eã, ¶‰º)
-            { {-0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f} }, // ¶ã (Ô)
-            { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f} }, // ‰Eã (—Î)
-            { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f} }, // ¶‰º (Â)
+        info->InitializedBuffer = _buffer->Initialize(_device.get(), _commandContext.get());
+        if (info->InitializedBuffer != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Buffer."); return; }
 
-            // 2‚Â–Ú‚ÌOŠpŒ` (¶‰º, ‰Eã, ‰E‰º)
-            { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f} }, // ¶‰º (Â)
-            { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f} }, // ‰Eã (—Î)
-            { { 0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f} }, // ‰E‰º (”’)
+        info->InitializedTexture = RHI_SUCCEEDED;
 
-            // 3‚Â–Ú‚ÌOŠpŒ` (¶ã, ‰Eã, ¶‰º)
-            { {-0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f} }, // ¶ã (Ô)
-            { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f} }, // ‰Eã (—Î)
-            { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f} }, // ¶‰º (Â)
+        info->InitializedPipeline = _pipeline->Initialize(_device.get());
+        if (info->InitializedPipeline != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Pipeline."); return; }
 
-            // 4‚Â–Ú‚ÌOŠpŒ` (¶‰º, ‰Eã, ‰E‰º)
-            { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f} }, // ¶‰º (Â)
-            { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f} }, // ‰Eã (—Î)
-            { { 0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f} }  // ‰E‰º (”’)
-        };
+        _isInitialized = true;
 
-        // ƒoƒbƒtƒ@‚Ö“]‘—
-        _buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices);
+
+        //// TODO : ä½•ã‹ã—ã‚‰ã®ãƒ¢ãƒ‡ãƒ«ã®èª­ã¿è¾¼ã¿ãŒã‚ã£ãŸå ´åˆã¨ã—ã¦ã®ä»®
+        //// ãƒ¢ãƒ‡ãƒ«1
+        //std::vector<Renderer::Vertex> quadVertices1 = {
+        //    // 1ã¤ç›®ã®ä¸‰è§’å½¢ (å·¦ä¸Š, å³ä¸Š, å·¦ä¸‹)
+        //    { {-0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f} }, // å·¦ä¸Š (èµ¤)
+        //    { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // å³ä¸Š (ç·‘)
+        //    { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // å·¦ä¸‹ (é’)
+
+        //    // 2ã¤ç›®ã®ä¸‰è§’å½¢ (å·¦ä¸‹, å³ä¸Š, å³ä¸‹)
+        //    { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // å·¦ä¸‹ (é’)
+        //    { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // å³ä¸Š (ç·‘)
+        //    { { 0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f} }  // å³ä¸‹ (ç™½)
+        //};
+
+        //// ãƒ¢ãƒ‡ãƒ«2
+        //std::vector<Renderer::Vertex> quadVertices2 = {
+        //    // 1ã¤ç›®ã®ä¸‰è§’å½¢ (å·¦ä¸Š, å³ä¸Š, å·¦ä¸‹)
+        //    { {-0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f} }, // å·¦ä¸Š (èµ¤)
+        //    { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // å³ä¸Š (ç·‘)
+        //    { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // å·¦ä¸‹ (é’)
+
+        //    // 2ã¤ç›®ã®ä¸‰è§’å½¢ (å·¦ä¸‹, å³ä¸Š, å³ä¸‹)
+        //    { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f}, { 0.0f, 0.0f, 1.0f, 1.0f }, {0.0f, 1.0f} }, // å·¦ä¸‹ (é’)
+        //    { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // å³ä¸Š (ç·‘)
+        //    { { 0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f} }  // å³ä¸‹ (ç™½)
+        //};
+
+        ////// ãƒãƒƒãƒ•ã‚¡ã¸è»¢é€
+        //_buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices1);
+        //_buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices2);
+
+        //Test_LoadTexture();
 
         return;
     }
 
-    /// <summary>
-    /// ƒfƒoƒCƒX‚Ìæ“¾
-    /// </summary>
-    /// <returns>ObjectInterface::Device ƒfƒoƒCƒX</returns>
-    inline ObjectInterface::Device* RenderHardwareInterface::GetDevice()
+
+    bool RenderHardwareInterface::Begin()
     {
-        return _device.get();
+        if (!_isInitialized) return false;
+        return _commandContext->RenderStart(_pipeline.get(), _buffer.get());
     }
 
-    /// <summary>
-    /// ƒRƒ}ƒ“ƒhƒRƒ“ƒeƒLƒXƒg‚Ìæ“¾
-    /// </summary>
-    /// <returns>ObjectInterface::CommandContext ƒRƒ}ƒ“ƒhƒRƒ“ƒeƒLƒXƒg</returns>
-    inline ObjectInterface::CommandContext* RenderHardwareInterface::GetCommandContext()
+    bool RenderHardwareInterface::End()
     {
-        return _commandContext.get();
-    }
-
-    /// <summary>
-    /// ƒoƒbƒtƒ@[‚Ìæ“¾
-    /// </summary>
-    /// <returns>ObjectInterface::Buffer ƒoƒbƒtƒ@[</returns>
-    inline ObjectInterface::Buffer* RenderHardwareInterface::GetBuffer()
-    {
-        return _buffer.get();
-    }
-
-    /// <summary>
-    /// ƒeƒNƒXƒ`ƒƒ‚Ìæ“¾
-    /// </summary>
-    /// <returns>ObjectInterface::Texture ƒeƒNƒXƒ`ƒƒ</returns>
-    inline ObjectInterface::Texture* RenderHardwareInterface::GetTexture()
-    {
-        return _texture.get();
-    }
-
-    void RenderHardwareInterface::Begin()
-    {
-
-    }
-
-    void RenderHardwareInterface::End()
-    {
-
+        if (!_isInitialized) return false;
+        return _commandContext->RenderEnd();
     }
 
     void RenderHardwareInterface::CleanUp()
     {
+        // ç ´æ£„ã®é †ç•ªãŒé‡è¦:
+        //   1. CommandContext ã§ GPU ã®å®Œäº†ã‚’å¾…ã¤ (ä½¿ç”¨ä¸­ã®ãƒªã‚½ãƒ¼ã‚¹ã‚’æ¶ˆã•ãªã„ãŸã‚)
+        //   2. GPU ãƒªã‚½ãƒ¼ã‚¹ã‚’æŒã¤ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã‚’ç ´æ£„
+        //   3. æœ€å¾Œã« Device
+        // ä»¥å‰ã¯ Device ã‚’æœ€åˆã« Dispose ã—ã¦ã„ãŸ (2-11)
+        if (_commandContext) _commandContext->WaitForGpu();
 
+        if (_texture)  _texture->Dispose();
+        if (_pipeline) _pipeline->Dispose();
+        if (_buffer)   _buffer->Dispose();
+        if (_commandContext) _commandContext->Dispose();
+
+        _texture.reset();
+        _pipeline.reset();
+        _buffer.reset();
+        _commandContext.reset();
+
+        if (_device) _device->Dispose();
+        _device.reset();
+
+        _renderQueue.RenderObjects.clear();
+        _isInitialized = false;
+    }
+
+    void RenderHardwareInterface::Test_LoadTexture()
+    {
+        if (!_isInitialized) return;
+        _texture->LoadTextureFromFile(_device.get(), _commandContext.get(), _buffer.get(), L"../Image/image.png");
+    }
+
+    void RenderHardwareInterface::Test_LoadModel(float cameraPosX, float cameraPosY, float cameraPosZ)
+    {
+        if (!_isInitialized) return;
+
+        Core::Logger::Log("call Test_LoadModel()");
+        auto mesh = _buffer->LoadModel(_device.get(), _commandContext.get(), L"../Model/box.obj");
+        if (!mesh)
+        {
+            // ä»¥å‰ã¯èª­ã¿è¾¼ã¿å¤±æ•—æ™‚ã« nullptr ã‚’å‚ç…§ã—ã¦ã„ãŸ
+            Core::Logger::Log("[RHI] Failed load model.");
+            return;
+        }
+
+        uint32_t offset = 0;
+        uint32_t idx = 0;
+        for (const auto& index : mesh->Indecies)
+        {
+            _renderObj.VertexOffset = 0;
+            _renderObj.IndexOffset  = offset;
+            _renderObj.VertexCount  = static_cast<uint32_t>(mesh->Vertices.size());
+            _renderObj.IndexCount   = static_cast<uint32_t>(index.size());
+            // Root CBV ã¯ 256byte å¢ƒç•ŒãŒå¿…é ˆã€‚Buffer::LoadModel ãŒæ›¸ãè¾¼ã‚€é–“éš”ã¨åŒã˜å€¤ã‚’ä½¿ã† (1-9)
+            _renderObj.CbOffset     = static_cast<uint32_t>(idx * ObjectInterface::Buffer::SCENE_CB_STRIDE);
+            _renderQueue.RenderObjects.emplace_back(_renderObj);
+            offset += static_cast<uint32_t>(index.size());
+            idx++;
+        }
+
+        Core::Logger::Log("called Test_LoadModel()");
+
+        Renderer::Camera camera;
+        camera.Position = Core::Vector3(cameraPosX, cameraPosY, cameraPosZ);
+        camera.Target   = Core::Vector3(0.0f, 0.0f, 0.0f);
+        camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
+        Core::Logger::Log("call UpdateViewProjection()");
+        _buffer->UpdateViewProjection(camera, Renderer::Projection::ProjectionType::PROJECTION_TYPE_3D);
+        Core::Logger::Log("called UpdateViewProjection()");
     }
 
     void RenderHardwareInterface::TestRender()
     {
-        std::vector<RHI::ObjectInterface::CommandContext::RenderObj> renderQueue;
-        RHI::ObjectInterface::CommandContext::RenderObj renderObj1 = {}, renderObj2 = {};
-        renderObj1.VertexCount  = 6;
-        renderObj1.CbOffset     = 0;
-        renderObj1.VertexOffset = 0;
-        renderObj1.VertexCount  = 6;
-        renderObj2.CbOffset     = 0;
-        renderObj2.VertexOffset = 6;
+        //RenderQueue renderQueue;
+        //RenderObject renderObj1 = {}, renderObj2 = {};
+        //renderObj1.VertexCount  = 6;
+        //renderObj1.CbOffset     = 0;
+        //renderObj1.VertexOffset = 0;
+        //renderObj2.VertexCount  = 6;
+        //renderObj2.CbOffset     = 0;
+        //renderObj2.VertexOffset = 6;
 
-        renderQueue.push_back(renderObj1);
-        renderQueue.push_back(renderObj2);
+        //renderQueue.RenderObjects.push_back(renderObj1);
+        //renderQueue.RenderObjects.push_back(renderObj2);
 
-        _commandContext->RenderStart(_pipeline.get(), _buffer.get());
-        _commandContext->Render(_buffer.get(), renderQueue);
-        _commandContext->RenderEnd();
+        if (!Begin()) return;
+        _commandContext->Render(_buffer.get(), _renderQueue);
+        End();
+    }
+
+    void RenderHardwareInterface::DebugExecute()
+    {
+        if (!_isInitialized) return;
+        _pipeline->InitCommandSignature(_device.get());
     }
 
 }

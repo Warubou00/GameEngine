@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    dx12_resourceBuffer.h
-* @brief   ���\�[�X�o�b�t�@�[
+* @brief   リソースバッファー
 * @details
 *
 * @author  Keigo Onari
@@ -49,37 +49,83 @@ namespace RHI
 			ResourceBuffer();
 			~ResourceBuffer();
 
+			// Map中のポインタを所有するのでコピー禁止
+			ResourceBuffer(const ResourceBuffer&) = delete;
+			ResourceBuffer& operator=(const ResourceBuffer&) = delete;
 
 			/***********************************************************************************
-			 * @brief �o�b�t�@�[�̐���
-			 * @details core explanation
+			 * @brief バッファーの生成
+			 * @details CreateかCreateTextureしか呼べない
 			 *
-			 * @param[in] ID3D12Device* �f�o�C�X
-			 * @param[in] UINT64 �o�b�t�@�[�T�C�Y
-			 * @param[in] D3D12_HEAP_TYPE �q�[�v�̃^�C�v
-			 * @return HRESULT �����̗L��
+			 * @param[in] ID3D12Device* デバイス
+			 * @param[in] UINT64 バッファーサイズ
+			 * @param[in] D3D12_HEAP_TYPE ヒープのタイプ
+			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
 			HRESULT Create(ID3D12Device* device, UINT64 sizeInBytes, D3D12_HEAP_TYPE heapType);
 
 			/***********************************************************************************
-			 * @brief �������̊��蓖��
-			 * @details core explanation
+			 * @brief テクスチャ用のバッファ作成
+			 * @details CreateかCreateTextureしか呼べない
 			 *
-			 * @param[in] UINT64 sizeInBytes �o�b�t�@�[�T�C�Y
-			 * @param[in] UINT64 allignment �o�b�t�@�̃A���C�����g ���_�o�b�t�@�Ȃ�4byte, �萔�o�b�t�@��256byte�w��
-			 * @return UINT64 �������I�t�Z�b�g
+			 * @param[in] ID3D12Device* デバイス
+			 * @param[in] UINT64 width 幅
+			 * @param[in] UINT height 高さ
+			 * @param[in] DXGI_FORMAT format フォーマット
+			 * @param[in] UINT16 mipLevel ミップレベル
+			 * @param[in] UINT16 arraySize サイズ
+			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			UINT64 Allocate(UINT64 sizeInBytes, UINT64 alignment);
+			HRESULT CreateTexture(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, UINT16 mipLevels, UINT16 arraySize);
 
-			ID3D12Resource* Get() { return _resourceBuffer.Get(); }
+			/***********************************************************************************
+			 * @brief バッファーの登録
+			 * @details Createと対照的に直接外部からのResourceを登録する (参照カウントは+1される)
+			 *
+			 * @param[in] ID3D12Resource* リソース
+			 * @return 無し
+			 ************************************************************************************/
+			void Regist(ID3D12Resource* resource);
+
+			ID3D12Resource* Get()const { return _resourceBuffer.Get(); }
+
+			/***********************************************************************************
+			 * @brief バッファーのGPU仮想アドレス (未生成なら0)
+			 ************************************************************************************/
+			D3D12_GPU_VIRTUAL_ADDRESS GetGPUVirtualAddress()const;
+
+			/***********************************************************************************
+			 * @brief バッファーのサイズ(byte)。テクスチャ/未生成なら0
+			 ************************************************************************************/
+			UINT64 GetCapacity()const { return _capacity; }
+
+			/***********************************************************************************
+			 * @brief CPUから書き込むためにMapする
+			 * @details UPLOADヒープ以外ではMapできない。既にMap済みならS_OK
+			 *
+			 * @return HRESULT 成功の有無
+			 ************************************************************************************/
+			HRESULT Map();
+			void Unmap();
+			bool IsMapped()const { return _mappedData != nullptr; }
+
+			/***********************************************************************************
+			 * @brief 指定したオフセットにデータを書き込む
+			 * @details Map済みであること。範囲外の書き込みは行わずfalseを返す
+			 *
+			 * @param[in] UINT64 offset 書き込み開始位置(byte)
+			 * @param[in] const void* data データ
+			 * @param[in] size_t dataSize データサイズ(byte)
+			 * @return bool 書き込めたか
+			 ************************************************************************************/
+			bool WriteData(UINT64 offset, const void* data, size_t dataSize);
+
+			void Release(void);
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12Resource> _resourceBuffer;
-			UINT64 _capacity;
-			UINT64 _currentOffset;
-
-			//�������̊J�n�ʒu�����̃A���C�����g(�{��)�ɐ؂�グ��֗��֐�
-			UINT64 alignUp(UINT64 size, UINT64 alignment);
+			UINT64 _capacity   = 0;
+			void*  _mappedData = nullptr;
 		};
 	}
 }

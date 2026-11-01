@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    RHIdll
-* @brief   RHI��dll
+* @brief   RHIのdll
 * @details
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ���̑�
+* @note    その他
 ************************************************************************************/
 
 
@@ -36,6 +36,10 @@
 /******************************************************************
 * Structure Declarations
 ******************************************************************/
+struct OutRenderObjData
+{
+	uint32_t RenderObjectID;
+};
 
 static RHI::RenderHardwareInterface* g_pRhi = nullptr;
 
@@ -68,6 +72,22 @@ extern "C"
 		g_pRhi->TestRender();
 	}
 
+	RHI_API void RHI_TestLoadModel(float posX, float posY, float posZ)
+	{
+		if (g_pRhi == nullptr)
+			return;
+
+		g_pRhi->Test_LoadModel(posX, posY, posZ);
+	}
+
+	RHI_API void RHI_DebugExecute()
+	{
+		if (g_pRhi == nullptr)
+			return;
+
+		g_pRhi->DebugExecute();
+	}
+
 	RHI_API void RHI_BeginRender()
 	{
 
@@ -80,7 +100,13 @@ extern "C"
 
 	RHI_API void RHI_CleanUp()
 	{
+		if (g_pRhi == nullptr)
+			return;
 
+		// 以前は CleanUp だけで g_pRhi 自体が delete されずリークしていた (2-11)
+		g_pRhi->CleanUp();
+		delete g_pRhi;
+		g_pRhi = nullptr;
 	}
 }
 

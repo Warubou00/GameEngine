@@ -13,27 +13,60 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="ヘッダー ファイル\Loader">
+      <UniqueIdentifier>{90ae1a3a-277b-4559-b743-ddce26186bf8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Loader">
+      <UniqueIdentifier>{b0dc5bb6-8132-4a01-b774-2c11cab4f8f3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\WVP">
+      <UniqueIdentifier>{1a53bee5-ea68-48ac-80a6-e432bbdbb578}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Source\meshRenderer.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="Source\mesh.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
-    <ClInclude Include="Source\spriteRenderer.h">
+    <ClInclude Include="Source\common.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\material.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\vertex.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Loader\objLoader.h">
+      <Filter>ヘッダー ファイル\Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Loader\IModelLoader.h">
+      <Filter>ヘッダー ファイル\Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Loader\modelData.h">
+      <Filter>ヘッダー ファイル\Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\WVP\worldMatrix.h">
+      <Filter>ヘッダー ファイル\WVP</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\WVP\WVP.h">
+      <Filter>ヘッダー ファイル\WVP</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\camera.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\WVP\viewMatrix.h">
+      <Filter>ヘッダー ファイル\WVP</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\WVP\projectionMatrix.h">
+      <Filter>ヘッダー ファイル\WVP</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\constant.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Source\meshRenderer.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\mesh.cpp">
-      <Filter>ソース ファイル</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\spriteRenderer.cpp">
-      <Filter>ソース ファイル</Filter>
+    <ClCompile Include="Source\Loader\objLoader.cpp">
+      <Filter>ソース ファイル\Loader</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    RenderHardwareInterface.h
-* @brief   RHI\‘¢
+* @brief   RHIæ§‹é€ 
 * @details 
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ‚»‚Ì‘¼
+* @note    ãã®ä»–
 ************************************************************************************/
 
 #pragma once
@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include <memory>
+#include "dataDefinition.h"
 
 /******************************************************************
 * Macro Definitions
@@ -70,69 +71,73 @@ namespace RHI
             uint32_t InitializedCommandContext = -1;
             uint32_t InitializedBuffer         = -1;
             uint32_t InitializedTexture        = -1;
+            uint32_t InitializedPipeline       = -1;
         };
 
-    public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+    public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
         RenderHardwareInterface();
         ~RenderHardwareInterface();
 
 
-    public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+    public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
         void Initialize(RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objectInfo);
 
         /// <summary>
-        /// ƒfƒoƒCƒX‚Ìæ“¾
+        /// æç”»é–‹å§‹ (å¤±æ•—ã—ãŸã‚‰ falseã€‚ãã®å ´åˆã¯ End ã‚’å‘¼ã°ãªã„ã“ã¨)
         /// </summary>
-        /// <returns>ObjectInterface::Device ƒfƒoƒCƒX</returns>
-        ObjectInterface::Device* GetDevice();
+        bool Begin();
 
         /// <summary>
-        /// ƒRƒ}ƒ“ƒhƒRƒ“ƒeƒLƒXƒg‚Ìæ“¾
+        /// æç”»çµ‚äº†
         /// </summary>
-        /// <returns>ObjectInterface::CommandContext ƒRƒ}ƒ“ƒhƒRƒ“ƒeƒLƒXƒg</returns>
-        ObjectInterface::CommandContext* GetCommandContext();
+        bool End();
 
         /// <summary>
-        /// ƒoƒbƒtƒ@[‚Ìæ“¾
-        /// </summary>
-        /// <returns>ObjectInterface::Buffer ƒoƒbƒtƒ@[</returns>
-        ObjectInterface::Buffer* GetBuffer();
-
-        /// <summary>
-        /// ƒeƒNƒXƒ`ƒƒ‚Ìæ“¾
-        /// </summary>
-        /// <returns>ObjectInterface::Texture ƒeƒNƒXƒ`ƒƒ</returns>
-        ObjectInterface::Texture* GetTexture();
-
-        /// <summary>
-        /// •`‰æŠJn
-        /// </summary>
-        void Begin();
-
-        /// <summary>
-        /// •`‰æI—¹
-        /// </summary>
-        void End();
-
-        /// <summary>
-        /// I—¹ˆ—
+        /// çµ‚äº†å‡¦ç† <br/>
+        /// GPUã®å®Œäº†ã‚’å¾…ã£ã¦ã‹ã‚‰ã€Device ã‚’æœ€å¾Œã«ã—ã¦ç ´æ£„ã™ã‚‹ã€‚2å›å‘¼ã‚“ã§ã‚‚å•é¡Œãªã„
         /// </summary>
         void CleanUp();
 
+        /// <summary>
+        /// å…¨ã¦ã®åˆæœŸåŒ–ã«æˆåŠŸã—ã¦ã„ã‚‹ã‹
+        /// </summary>
+        bool IsInitialized()const { return _isInitialized; }
+
+        /// <summary>
+        /// ãƒ†ã‚¯ã‚¹ãƒãƒ£ã®ãƒ­ãƒ¼ãƒ‰ <br/>
+        /// å®šæ•°ãƒãƒƒãƒ•ã‚¡ã«è»¢é€ã™ã‚‹ã¾ã§...
+        /// </summary>
+        void Test_LoadTexture();
+
+        /// <summary>
+        /// ãƒ¢ãƒ‡ãƒ«ã®ãƒ­ãƒ¼ãƒ‰ <br/>
+        /// objãƒ•ã‚¡ã‚¤ãƒ«ã®ãƒ­ãƒ¼ãƒ‰ <br/>
+        /// ãƒ†ã‚¯ã‚¹ãƒãƒ£ä½œæˆã¾ã§
+        /// </summary>
+        void Test_LoadModel(float cameraPosX, float cameraPosY, float cameraPosZ);
+
         void TestRender();
 
-    public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+        // ãƒ‡ãƒãƒƒã‚°ç”¨å‡¦ç†ç¢ºèª
+        void DebugExecute();
+
+    public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-    private:         /*---ƒƒ“ƒo•Ï”---*/
+    private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
         std::unique_ptr<ObjectInterface::Device>         _device;
         std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
         std::unique_ptr<ObjectInterface::Buffer>         _buffer;
         std::unique_ptr<ObjectInterface::Texture>        _texture;
         std::unique_ptr<ObjectInterface::Pipeline>       _pipeline;
 
-        // ƒŒƒ“ƒ_[ƒ^[ƒQƒbƒg‚Ìì¬
+        RenderQueue  _renderQueue;
+        RenderObject _renderObj;
+
+        bool _isInitialized = false;     // åˆæœŸåŒ–ãŒæœ€å¾Œã¾ã§æˆåŠŸã—ãŸã‹
+
+        // ãƒ¬ãƒ³ãƒ€ãƒ¼ã‚¿ãƒ¼ã‚²ãƒƒãƒˆã®ä½œæˆ
         bool makeRenderTarget() { return false; }
 
     };

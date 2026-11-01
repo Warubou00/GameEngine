@@ -1,4 +1,4 @@
-
+ï»¿
 /***********************************************************************************
 * @file    IPipeline.h
 * @brief   RHI interface pipeline
@@ -43,6 +43,8 @@ namespace RHI
 {
     namespace ObjectInterface
     {
+        class IDevice;
+
         class IPipeline : public IRHIObject
         {
 
@@ -56,18 +58,19 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             IPipeline() {};
             virtual ~IPipeline() = default;
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
+
+            virtual RHI_RESULT Initialize(RHI::ObjectInterface::IDevice* device) = 0;
+
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
-
-
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
 
         };

@@ -112,7 +112,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -142,6 +142,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Source\common.h" />
+    <ClInclude Include="Source\File\file.h" />
     <ClInclude Include="Source\Log\logger.h" />
     <ClInclude Include="Source\Math\Float\float.h" />
     <ClInclude Include="Source\Math\Float\float2.h" />
@@ -149,14 +150,29 @@
     <ClInclude Include="Source\Math\Float\float4.h" />
     <ClInclude Include="Source\Math\hash.h" />
     <ClInclude Include="Source\Math\random.h" />
+    <ClInclude Include="Source\Math\Vector\color.h" />
+    <ClInclude Include="Source\Math\Vector\math\MyMath.h" />
+    <ClInclude Include="Source\Math\Vector\MyVector.h" />
+    <ClInclude Include="Source\Math\Vector\quaternion.h" />
+    <ClInclude Include="Source\Math\Vector\vector.h" />
+    <ClInclude Include="Source\Math\Vector\vector2.h" />
+    <ClInclude Include="Source\Math\Vector\vector3.h" />
+    <ClInclude Include="Source\Math\Vector\vector4.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\File\file.cpp" />
     <ClCompile Include="Source\Log\logger.cpp" />
     <ClCompile Include="Source\Math\Float\float2.cpp" />
     <ClCompile Include="Source\Math\Float\float3.cpp" />
     <ClCompile Include="Source\Math\Float\float4.cpp" />
     <ClCompile Include="Source\Math\hash.cpp" />
     <ClCompile Include="Source\Math\random.cpp" />
+    <ClCompile Include="Source\Math\Vector\color.cpp" />
+    <ClCompile Include="Source\Math\Vector\math\MyMath.cpp" />
+    <ClCompile Include="Source\Math\Vector\Myvector.cpp" />
+    <ClCompile Include="Source\Math\Vector\vector2.cpp" />
+    <ClCompile Include="Source\Math\Vector\vector3.cpp" />
+    <ClCompile Include="Source\Math\Vector\vector4.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_textureManager.h
-* @brief   DX12‚ÌƒeƒNƒXƒ`ƒƒŠ‡ŠÇ—
+* @brief   DX12ã®ãƒ†ã‚¯ã‚¹ãƒãƒ£æ‹¬ç®¡ç†
 * @details 
 *
 * @author  Keigo Onari
@@ -24,7 +24,12 @@
 #include "dx12_header.h"
 #include <vector>
 #include <string>
+#include <memory>
+#include <DirectXTex.h>
+
 #include "../TextureHandle.h"
+
+#pragma comment(lib, "DirectXTex.lib")
 
 /******************************************************************
 * Macro Definitions
@@ -46,7 +51,14 @@ namespace RHI
 {
     namespace DirectX12
     {
-        class TextureManager
+        class Device;
+        class GraphicsCommandList;
+        class DescriptorHeapManager;
+        class Fence;
+        class ResourceBuffer;
+        class CommandQueue;
+
+        class Texture
         {
 
             /******************************************************************
@@ -59,30 +71,49 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
-            TextureManager() {};
-            ~TextureManager() {};
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
+            Texture();
+            ~Texture();
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
+
             /***********************************************************************************
-             * @brief ¶¬ŠÖ”
-             * @details 
+             * @brief ç”»åƒãƒ•ã‚¡ã‚¤ãƒ«ã‹ã‚‰ãƒ†ã‚¯ã‚¹ãƒãƒ£ã‚’ä½œã‚‹
+             * @details ã‚³ãƒ”ãƒ¼å‘½ä»¤ã‚’ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã«ç©ã‚€ã ã‘ã€‚é€ä¿¡ã—ã¦å®Œäº†ã™ã‚‹ã¾ã§ outUploadBuffer ã‚’ç ´æ£„ã—ãªã„ã“ã¨
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] ID3D12CommandQueue* pCmdQueue ƒRƒ}ƒ“ƒhƒLƒ…[
-             * @param[in] HWND* hWnd ƒEƒCƒ“ƒhƒEƒnƒ“ƒhƒ‹‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] UINT width •
-             * @param[in] UINT height ‚‚³
-             * @return HRESULT ¬Œ÷‚Ì—L–³
+             * @return std::unique_ptr<ResourceBuffer> ãƒ†ã‚¯ã‚¹ãƒãƒ£ (å¤±æ•—æ™‚ã¯ nullptr)
              ************************************************************************************/
-            HRESULT Create(ID3D12Device* device);
+            std::unique_ptr<ResourceBuffer> LoadTextureFromFile(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::GraphicsCommandList* cmdList,
+                const std::wstring& filePath,
+                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
 
-            TextureHandle ReadTexture(const std::wstring& fileName);
+            /***********************************************************************************
+             * @brief å˜è‰² 1x1 ã®ãƒ†ã‚¯ã‚¹ãƒãƒ£ã‚’ä½œã‚‹ (ãƒ†ã‚¯ã‚¹ãƒãƒ£ç„¡ã—ãƒãƒ†ãƒªã‚¢ãƒ«ã‚„èª­ã¿è¾¼ã¿å¤±æ•—æ™‚ã®ä»£ã‚ã‚Š)
+             *
+             * @param[in] uint32_t rgba è‰² (0xRRGGBBAA)
+             * @return std::unique_ptr<ResourceBuffer> ãƒ†ã‚¯ã‚¹ãƒãƒ£ (å¤±æ•—æ™‚ã¯ nullptr)
+             ************************************************************************************/
+            std::unique_ptr<ResourceBuffer> CreateSolidColorTexture(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::GraphicsCommandList* cmdList,
+                uint32_t rgba,
+                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+            /***********************************************************************************
+             * @brief ãƒ¡ãƒ¢ãƒªä¸Šã®ç”»åƒã‹ã‚‰ãƒ†ã‚¯ã‚¹ãƒãƒ£ã‚’ä½œã‚‹ (ä¸Šã®2ã¤ã®å…±é€šå‡¦ç†)
+             ************************************************************************************/
+            std::unique_ptr<ResourceBuffer> CreateTextureFromImage(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::GraphicsCommandList* cmdList,
+                const ::DirectX::Image& image,
+                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
+
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
 
         };

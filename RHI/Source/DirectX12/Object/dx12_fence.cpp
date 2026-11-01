@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_fence.cpp
-* @brief   DX12‚ÌƒtƒFƒ“ƒX
+* @brief   DX12ã®ãƒ•ã‚§ãƒ³ã‚¹
 * @details
 *
 * @author  Keigo Onari
@@ -19,6 +19,8 @@
 * Include Headers
 ******************************************************************/
 #include "dx12_fence.h"
+
+#include "dx12_commandQueue.h"
 
 /******************************************************************
 * Macro Definitions
@@ -38,48 +40,111 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		Fence::Fence() {}
-		Fence::~Fence() {}
-
-		// ==============================================
-		// ƒtƒFƒ“ƒX‚Ìì¬
-		// ==============================================
-		HRESULT Fence::Create(ID3D12Device* device)
+		Fence::Fence() = default;
+		Fence::~Fence()
 		{
-			return device->CreateFence(_fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_pFence));
+			Release();
 		}
 
 		// ==============================================
-		// ƒtƒFƒ“ƒXƒIƒuƒWƒFƒNƒg‚ÌŽæ“¾
+		// ãƒ•ã‚§ãƒ³ã‚¹ã®ä½œæˆ
+		// ==============================================
+		HRESULT Fence::Create(ID3D12Device* device)
+		{
+			if (!device || _pFence)
+			{
+				return E_INVALIDARG;
+			}
+
+			RHI_RETURN_IF_FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_pFence)));
+			_nextValue = 1;
+
+			_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+			if (!_fenceEvent)
+			{
+				_pFence.Reset();
+				return HRESULT_FROM_WIN32(GetLastError());
+			}
+			return S_OK;
+		}
+
+		// ==============================================
+		// ãƒ•ã‚§ãƒ³ã‚¹ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã®å–å¾—
 		// ==============================================
 		ID3D12Fence* Fence::Get(void)const
 		{
 			return _pFence.Get();
 		}
 
-		// ==============================================
-		// ƒtƒFƒ“ƒX’l‚ÌŽæ“¾
-		// ==============================================
-		const UINT64 Fence::GetFenceValue(void)const
+		UINT64 Fence::Signal(ID3D12CommandQueue* cmdQueue)
 		{
-			return _fenceVal;
+			if (!cmdQueue || !_pFence)
+			{
+				return 0;
+			}
+
+			const UINT64 value = _nextValue;
+			if (FAILED(cmdQueue->Signal(_pFence.Get(), value)))
+			{
+				return 0;
+			}
+			_nextValue++;
+			return value;
+		}
+
+		bool Fence::IsCompleted(UINT64 value)const
+		{
+			return _pFence && _pFence->GetCompletedValue() >= value;
+		}
+
+		HRESULT Fence::WaitForValue(UINT64 value)
+		{
+			if (!_pFence || !_fenceEvent)
+			{
+				return E_FAIL;
+			}
+
+			if (_pFence->GetCompletedValue() >= value)
+			{
+				return S_OK;
+			}
+
+			RHI_RETURN_IF_FAILED(_pFence->SetEventOnCompletion(value, _fenceEvent));
+			WaitForSingleObject(_fenceEvent, INFINITE);
+			return S_OK;
+		}
+
+		HRESULT Fence::WaitForSignal(RHI::DirectX12::CommandQueue* cmdQueue)
+		{
+			if (!cmdQueue)
+			{
+				return E_INVALIDARG;
+			}
+
+			const UINT64 value = Signal(cmdQueue->Get());
+			if (value == 0)
+			{
+				return E_FAIL;
+			}
+			return WaitForValue(value);
+		}
+
+		UINT64 Fence::GetLastSignaledValue(void)const
+		{
+			return _nextValue - 1;
 		}
 
 		// ==============================================
-		// ƒtƒFƒ“ƒX’l‘‰Á
-		// ==============================================
-		void Fence::IncrementFenceValue(void)
-		{
-			_fenceVal++;
-		}
-
-		// ==============================================
-		// ‰ð•ú
+		// è§£æ”¾
 		// ==============================================
 		void Fence::Release(void)
 		{
-			// ComPtr‚Ì‚½‚ß–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pFence.Get())_pFence.Get()->Release();
+			if (_fenceEvent)
+			{
+				CloseHandle(_fenceEvent);
+				_fenceEvent = nullptr;
+			}
+			_pFence.Reset();
 		}
 	}
 }

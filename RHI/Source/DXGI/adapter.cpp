@@ -1,8 +1,8 @@
-
+ï»¿
 /***********************************************************************************
 * @file    adapter.cpp
-* @brief   Graphicsƒ{[ƒh‚ÌƒAƒ_ƒvƒ^[ƒNƒ‰ƒX
-* @details 
+* @brief   Graphicsãƒœãƒ¼ãƒ‰ã®ã‚¢ãƒ€ãƒ—ã‚¿ãƒ¼ã‚¯ãƒ©ã‚¹
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/02/02
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 
@@ -40,6 +40,16 @@ namespace RHI
 {
 	namespace DirectX
 	{
+		namespace
+		{
+			bool isSoftwareAdapter(IDXGIAdapter1* adapter)
+			{
+				DXGI_ADAPTER_DESC1 desc = {};
+				if (FAILED(adapter->GetDesc1(&desc))) return true;
+				return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+			}
+		}
+
 		Adapter::Adapter() = default;
 		Adapter::~Adapter() = default;
 
@@ -50,41 +60,56 @@ namespace RHI
 
 			Release();
 
-			// ƒAƒ_ƒvƒ^[‚Ì—ñ‹“
-			for (int i = 0; pFactory->EnumAdapters(i, &_pAdapter) != DXGI_ERROR_NOT_FOUND; ++i) {
-				_pAdapters.push_back(_pAdapter.Get());
-			}
+			// ã‚¢ãƒ€ãƒ—ã‚¿ãƒ¼ã®åˆ—æŒ™
+			// ä»¥å‰ã¯ ComPtr ã® operator& ã§æ¯å›ä¸­èº«ã‚’è§£æ”¾ã—ã¤ã¤ç”Ÿãƒã‚¤ãƒ³ã‚¿ã‚’ vector ã«æºœã‚ã€
+			// æœ€å¾Œã« vector å´ã§ã‚‚ Release ã—ã¦ã„ãŸãŸã‚äºŒé‡è§£æ”¾ã«ãªã£ã¦ã„ãŸ
+			Microsoft::WRL::ComPtr<IDXGIAdapter1> adpt;
+			for (UINT i = 0; pFactory->EnumAdapters1(i, adpt.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+			{
+				if (isSoftwareAdapter(adpt.Get())) continue;
 
-			// ƒAƒ_ƒvƒ^[‚Éˆø”‚Ì–¼‘O‚ª‚ ‚é‚©‘–¸
-			for (auto adpt : _pAdapters) {
-				DXGI_ADAPTER_DESC adesc = {};
-				adpt->GetDesc(&adesc);
+				// ã‚¢ãƒ€ãƒ—ã‚¿ãƒ¼ã«å¼•æ•°ã®åå‰ãŒã‚ã‚‹ã‹èµ°æŸ»
+				DXGI_ADAPTER_DESC1 adesc = {};
+				adpt->GetDesc1(&adesc);
 				std::wstring strDesc = adesc.Description;
-				if (strDesc.find(enumeratingGPU) != std::string::npos) {
+				if (strDesc.find(enumeratingGPU) != std::wstring::npos)
+				{
 					_pAdapter = adpt;
-					break;
+					return S_OK;
 				}
 			}
 
-			return S_OK;
+			return DXGI_ERROR_NOT_FOUND;
 		}
 
 		HRESULT Adapter::EnumerateAdapterFromHighPerformance(IDXGIFactory6* pFactory)
 		{
-			return pFactory->EnumAdapterByGpuPreference(
-				0,											// 0”Ô–Ú
-				DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,		// «”\‚Ì‚¢‚¢‚â‚Â
-				IID_PPV_ARGS(&_pAdapter)
-			);
+			if (!pFactory)return E_INVALIDARG;
+
+			Release();
+
+			Microsoft::WRL::ComPtr<IDXGIAdapter1> adpt;
+			for (UINT i = 0;
+				pFactory->EnumAdapterByGpuPreference(
+					i,
+					DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,		// æ€§èƒ½ã®ã„ã„ã‚„ã¤é †
+					IID_PPV_ARGS(adpt.ReleaseAndGetAddressOf())) != DXGI_ERROR_NOT_FOUND;
+				++i)
+			{
+				if (isSoftwareAdapter(adpt.Get())) continue;
+
+				_pAdapter = adpt;
+				return S_OK;
+			}
+
+			return DXGI_ERROR_NOT_FOUND;
 		}
 
 		HRESULT Adapter::TryVersionUp()
 		{
 			if (!_pAdapter)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 			return asAdapter();
 		}
@@ -93,9 +118,7 @@ namespace RHI
 		{
 			if (!_pAdapter)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 			return asAdapter1();
 		}
@@ -104,12 +127,10 @@ namespace RHI
 		{
 			if (!_pAdapter)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 
-			// 1‚à‘O’ñ‚É...
+			// 1ã‚‚å‰æã«...
 			asAdapter1();
 			return asAdapter3();
 		}
@@ -129,45 +150,34 @@ namespace RHI
 			return _pAdapter3.Get();
 		}
 
-		WCHAR* Adapter::GetAdapterName(void)const
+		std::wstring Adapter::GetAdapterName(void)const
 		{
 			if (!_pAdapter)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return nullptr;
+				return std::wstring();
 			}
 
 			DXGI_ADAPTER_DESC adDesc = {};
-			_pAdapter->GetDesc(&adDesc);
-			return adDesc.Description;
+			if (FAILED(_pAdapter->GetDesc(&adDesc)))
+			{
+				return std::wstring();
+			}
+			return std::wstring(adDesc.Description);
 		}
 
 		void Adapter::Release(void)
 		{
-			// ComPtr‚Ì‚½‚ß–¾¦“I‚È‰ğ•ú‚Í”ğ‚¯‚é
-			//if (_pAdapter.Get())_pAdapter.Get()->Release();
-
-			if (_pAdapters.size() > 0)
-			{
-				for (auto adpt : _pAdapters)
-				{
-					adpt->Release();
-				}
-
-				_pAdapters.clear();
-			}
+			_pAdapter3.Reset();
+			_pAdapter1.Reset();
+			_pAdapter.Reset();
 		}
 
 		HRESULT Adapter::asAdapter()
 		{
-			// TODO : —áŠOˆ—
-
-			HRESULT hr = S_OK;
-
-			hr = asAdapter1();
-			hr = asAdapter3();
-
-			return hr;
+			// 1ãŒå–ã‚Œãªã‘ã‚Œã°3ã‚‚å–ã‚Œãªã„
+			HRESULT hr = asAdapter1();
+			if (FAILED(hr)) return hr;
+			return asAdapter3();
 		}
 
 		HRESULT Adapter::asAdapter1()

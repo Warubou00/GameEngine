@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_pipelineState.cpp
-* @brief   DX12‚ÌPSO
+* @brief   DX12ã®PSO
 * @details
 *
 * @author  Keigo Onari
@@ -38,20 +38,20 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		PipelineState::PipelineState(D3D12_GRAPHICS_PIPELINE_STATE_DESC* pPsoDesc) : _pPsoDesc(pPsoDesc) {}
+		PipelineState::PipelineState() = default;
 		PipelineState::~PipelineState() {}
 
 		// ==============================================
-		// PSO‚Ìì¬
+		// PSOã®ä½œæˆ
 		// ==============================================
-		HRESULT PipelineState::Create(ID3D12Device* device)
+		HRESULT PipelineState::Create(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc)
 		{
-			if (!device || !_pPsoDesc)
+			if (!device || _pPSO)
 			{
-				return E_NOTIMPL;
+				return E_INVALIDARG;
 			}
 
-			return device->CreateGraphicsPipelineState(_pPsoDesc, IID_PPV_ARGS(&_pPSO));
+			return device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pPSO));
 		}
 
 		ID3D12PipelineState* PipelineState::Get()const
@@ -60,16 +60,15 @@ namespace RHI
 		}
 
 		// ==============================================
-		// ‰ð•ú
+		// è§£æ”¾
 		// ==============================================
 		void PipelineState::Release(void)
 		{
-			// ComPtr‚Ì‚½‚ß–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pPSO.Get())_pPSO.Get()->Release();
+			_pPSO.Reset();
 		}
 	}
 }
 
 /************************************
 * End of file
-************************************/
+************************************/

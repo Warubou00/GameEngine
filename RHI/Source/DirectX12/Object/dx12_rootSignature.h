@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_rootSignature.h
-* @brief   DX12ƒ‹[ƒgƒVƒOƒlƒ`ƒƒ
+* @brief   DX12ãƒ«ãƒ¼ãƒˆã‚·ã‚°ãƒãƒãƒ£
 * @details 
 *
 * @author  Keigo Onari
@@ -56,34 +56,36 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             RootSignature();
             ~RootSignature();
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
             /***********************************************************************************
-             * @brief ¶¬ŠÖ”
+             * @brief ç”Ÿæˆé–¢æ•°
              * @details 
              *
-             * @param[in] ID3D12Device* device dx12ƒfƒoƒCƒX
-             * @param[in] const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc ƒ‹[ƒgƒVƒOƒlƒ`ƒƒ‚ÌƒfƒXƒNƒŠƒvƒ^İ’è
-             * @return HRESULT ¬Œ÷‚Ì—L–³
+             * @param[in] ID3D12Device* device dx12ãƒ‡ãƒã‚¤ã‚¹
+             * @param[in] const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc ãƒ«ãƒ¼ãƒˆã‚·ã‚°ãƒãƒãƒ£ã®ãƒ‡ã‚¹ã‚¯ãƒªãƒ—ã‚¿è¨­å®š
+             * @return HRESULT æˆåŠŸã®æœ‰ç„¡
              ************************************************************************************/
             HRESULT Create(ID3D12Device* device, const D3D12_ROOT_SIGNATURE_DESC& rootSignatureDesc);
 
             /***********************************************************************************
-             * @brief æ“¾ŠÖ”
+             * @brief å–å¾—é–¢æ•°
              * @details
              *
-             * @return ID3D12RootSignature* dx12ƒ‹[ƒgƒVƒOƒlƒ`ƒƒ
+             * @return ID3D12RootSignature* dx12ãƒ«ãƒ¼ãƒˆã‚·ã‚°ãƒãƒãƒ£
              ************************************************************************************/
             ID3D12RootSignature* Get()const;
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+            void Release(void);
+
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
             Microsoft::WRL::ComPtr<ID3D12RootSignature> _rootSignature;
 

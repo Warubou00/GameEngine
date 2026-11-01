@@ -34,9 +34,6 @@
     <Filter Include="ソース ファイル\Interface">
       <UniqueIdentifier>{e4e69ef1-d2d7-4032-b754-34cf33636130}</UniqueIdentifier>
     </Filter>
-    <Filter Include="ヘッダー ファイル\Interface">
-      <UniqueIdentifier>{d248824e-5244-44e4-82dc-95e9eb47749b}</UniqueIdentifier>
-    </Filter>
     <Filter Include="ヘッダー ファイル\DXGI">
       <UniqueIdentifier>{6ce1f72d-5faa-4d54-a766-34c0d92427e4}</UniqueIdentifier>
     </Filter>
@@ -48,9 +45,6 @@
     </Filter>
     <Filter Include="ソース ファイル\DirectX12\Manager">
       <UniqueIdentifier>{e705735c-3bb0-4544-8252-8b0e6ff899fd}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="ヘッダー ファイル\DirectX12\Handle">
-      <UniqueIdentifier>{7a12e3b7-a947-4dfb-ad5b-eff79340983c}</UniqueIdentifier>
     </Filter>
     <Filter Include="ヘッダー ファイル\DirectX12\Helper">
       <UniqueIdentifier>{ce1f4103-d67b-4ab2-be8c-2c59ab5e1610}</UniqueIdentifier>
@@ -72,6 +66,9 @@
     </Filter>
     <Filter Include="ソース ファイル\DirectX12\RHIObject">
       <UniqueIdentifier>{c40a2530-b1e2-43e6-9f64-5bb3920b96a0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\RHIObject\Handle">
+      <UniqueIdentifier>{fc1a34dc-27a1-4599-bad8-f770c6b9b6d6}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -105,7 +102,7 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_swapChain.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\adapter.h">
+    <ClInclude Include="Source\DXGI\adapter.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="Source\DXGI\dxgiFactory6.h">
@@ -129,17 +126,8 @@
     <ClInclude Include="Source\DirectX12\dx12_pipelineStateManager.h">
       <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
     </ClInclude>
-    <ClInclude Include="Source\DirectX12\dx12_resourceManager.h">
-      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
-    </ClInclude>
     <ClInclude Include="Source\DirectX12\dx12_descriptorHeapManager.h">
       <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\DirectX12\dx12_resourceHandle.h">
-      <Filter>ヘッダー ファイル\DirectX12\Handle</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\DirectX12\dx12_descriptorHandle.h">
-      <Filter>ヘッダー ファイル\DirectX12\Handle</Filter>
     </ClInclude>
     <ClInclude Include="Source\DirectX12\dx12_helperDescriptorRange.h">
       <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
@@ -147,7 +135,7 @@
     <ClInclude Include="Source\DirectX12\dx12_helperRootParameter.h">
       <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
     </ClInclude>
-    <ClInclude Include="Source\VertexBufferAllocator.h">
+    <ClInclude Include="Source\ResourceBufferAllocator.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="Source\common.h">
@@ -161,9 +149,6 @@
     </ClInclude>
     <ClInclude Include="Source\RHIObject\IRHIObject.h">
       <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Interface\IDevice.h">
-      <Filter>ヘッダー ファイル\Interface</Filter>
     </ClInclude>
     <ClInclude Include="Source\RHIObject\IDevice.h">
       <Filter>ヘッダー ファイル\RHIObject</Filter>
@@ -195,6 +180,18 @@
     <ClInclude Include="Source\RHIObject\ITexture.h">
       <Filter>ヘッダー ファイル\RHIObject</Filter>
     </ClInclude>
+    <ClInclude Include="Source\dataDefinition.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\IHandle.h">
+      <Filter>ヘッダー ファイル\RHIObject\Handle</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\RHIObject\TextureHandle.h">
+      <Filter>ヘッダー ファイル\RHIObject\Handle</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\DirectX12\Object\dx12_commandSignature.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\DirectX12\Object\dx12_device.cpp">
@@ -221,7 +218,7 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_swapChain.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
-    <ClCompile Include="Source\adapter.cpp">
+    <ClCompile Include="Source\DXGI\adapter.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
     <ClCompile Include="Source\DXGI\dxgiFactory6.cpp">
@@ -236,9 +233,6 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_rootSignature.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
-    <ClCompile Include="Source\DirectX12\dx12_resourceManager.cpp">
-      <Filter>ソース ファイル\DirectX12\Manager</Filter>
-    </ClCompile>
     <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp">
       <Filter>ソース ファイル\DirectX12\Manager</Filter>
     </ClCompile>
@@ -248,7 +242,7 @@
     <ClCompile Include="Source\DirectX12\dx12_pipelineStateManager.cpp">
       <Filter>ソース ファイル\DirectX12\Manager</Filter>
     </ClCompile>
-    <ClCompile Include="Source\VertexBufferAllocator.cpp">
+    <ClCompile Include="Source\ResourceBufferAllocator.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
     <ClCompile Include="Source\RHIDll.cpp">
@@ -274,6 +268,9 @@
     </ClCompile>
     <ClCompile Include="Source\DirectX12\RHIObject\Texture.cpp">
       <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\Object\dx12_commandSignature.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

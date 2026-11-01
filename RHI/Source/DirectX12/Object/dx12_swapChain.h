@@ -1,8 +1,8 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_swapChain.h
-* @brief   DX12‚ÌƒXƒƒbƒvƒ`ƒF[ƒ“
-* @details 
+* @brief   DX12ã®ã‚¹ãƒ¯ãƒƒãƒ—ãƒã‚§ãƒ¼ãƒ³
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/02/02
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
@@ -56,48 +56,86 @@ namespace RHI
             ******************************************************************/
 
 
-        public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             SwapChain();
             ~SwapChain();
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
+            static constexpr UINT BUFFER_COUNT = 2;
+            static constexpr DXGI_FORMAT FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
             /***********************************************************************************
-             * @brief ¶¬ŠÖ”
-             * @details 
+             * @brief ç”Ÿæˆé–¢æ•°
+             * @details
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] ID3D12CommandQueue* pCmdQueue ƒRƒ}ƒ“ƒhƒLƒ…[
-             * @param[in] HWND* hWnd ƒEƒCƒ“ƒhƒEƒnƒ“ƒhƒ‹‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] UINT width •
-             * @param[in] UINT height ‚‚³
-             * @return HRESULT ¬Œ÷‚Ì—L–³
+             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6ã®ãƒã‚¤ãƒ³ã‚¿
+             * @param[in] ID3D12CommandQueue* pCmdQueue ã‚³ãƒãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼
+             * @param[in] HWND* hWnd ã‚¦ã‚¤ãƒ³ãƒ‰ã‚¦ãƒãƒ³ãƒ‰ãƒ«ã®ãƒã‚¤ãƒ³ã‚¿
+             * @param[in] UINT width å¹…
+             * @param[in] UINT height é«˜ã•
+             * @return HRESULT æˆåŠŸã®æœ‰ç„¡
              ************************************************************************************/
             HRESULT Create(IDXGIFactory6* pDxgiFactory, ID3D12CommandQueue* pCmdQueue, HWND* hWnd, UINT width, UINT height);
 
             /***********************************************************************************
-             * @brief æ“¾ŠÖ”
+             * @brief ãƒãƒƒã‚¯ãƒãƒƒãƒ•ã‚¡ã®ã‚µã‚¤ã‚ºå¤‰æ›´
+             * @details å‘¼ã¶å‰ã«GPUã®å®Œäº†å¾…ã¡ã‚’ã—ã€å¤–éƒ¨ã§ä¿æŒã—ã¦ã„ã‚‹ãƒãƒƒã‚¯ãƒãƒƒãƒ•ã‚¡å‚ç…§(RTVç­‰)ã‚’ç ´æ£„ã—ã¦ãŠãã“ã¨
+             *          width / height ãŒ0(æœ€å°åŒ–ä¸­)ãªã‚‰ä½•ã‚‚ã—ãªã„
              *
-             * @return IDXGISwapChain4* ƒXƒƒbƒvƒ`ƒF[ƒ“‚Ìƒ|ƒCƒ“ƒ^
+             * @param[in] UINT width å¹…
+             * @param[in] UINT height é«˜ã•
+             * @return HRESULT æˆåŠŸã®æœ‰ç„¡
+             ************************************************************************************/
+            HRESULT Resize(UINT width, UINT height);
+
+            /***********************************************************************************
+             * @brief ç”»é¢ã¸ã®è¡¨ç¤º
+             *
+             * @param[in] UINT syncInterval 0:VSyncãªã— 1:VSyncã‚ã‚Š
+             * @return HRESULT æˆåŠŸã®æœ‰ç„¡ (DXGI_ERROR_DEVICE_REMOVED ç­‰ã‚‚ãã®ã¾ã¾è¿”ã™)
+             ************************************************************************************/
+            HRESULT Present(UINT syncInterval);
+
+            /***********************************************************************************
+             * @brief å–å¾—é–¢æ•°
+             *
+             * @return IDXGISwapChain4* ã‚¹ãƒ¯ãƒƒãƒ—ãƒã‚§ãƒ¼ãƒ³ã®ãƒã‚¤ãƒ³ã‚¿
              ************************************************************************************/
             IDXGISwapChain4* Get(void)const;
 
+            UINT GetCurrentBackBufferIndex(void)const;
+
             /***********************************************************************************
-             * @brief ‰ğ•úŠÖ”
-             * @details ComPtr‚Í–¾¦“I‚È‰ğ•ú‚ğ‚µ‚È‚¢
-             * 
+             * @brief ãƒãƒƒã‚¯ãƒãƒƒãƒ•ã‚¡ã®å–å¾—
+             * @details ã‚¹ãƒ¯ãƒƒãƒ—ãƒã‚§ãƒ¼ãƒ³ãŒæ‰€æœ‰ã™ã‚‹å‚ç…§ã‚’è¿”ã™ã€‚å‚ç…§ã‚«ã‚¦ãƒ³ãƒˆã¯å¢—ãˆãªã„ã®ã§Releaseã—ãªã„ã“ã¨
+             ************************************************************************************/
+            ID3D12Resource* GetBufferFromIndex(UINT index)const;
+            ID3D12Resource* GetBackBuffer(void)const;
+
+            UINT GetBufferCount(void)const;
+            UINT GetWidth(void)const  { return _width; }
+            UINT GetHeight(void)const { return _height; }
+
+            /***********************************************************************************
+             * @brief è§£æ”¾é–¢æ•°
+             *
              ************************************************************************************/
             void Release(void);
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
-            Microsoft::WRL::ComPtr<IDXGISwapChain4> _pSwapChain ;
+            Microsoft::WRL::ComPtr<IDXGISwapChain4> _pSwapChain;
+            Microsoft::WRL::ComPtr<ID3D12Resource>  _backBuffers[BUFFER_COUNT];
+            UINT                                    _width  = 0;
+            UINT                                    _height = 0;
 
+            HRESULT acquireBackBuffers();
+            void    releaseBackBuffers();
         };
     }
 }

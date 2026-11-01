@@ -1,8 +1,8 @@
-
+ï»¿
 /***********************************************************************************
 * @file    CommandContext.cpp
 * @brief   RHI CommandContext
-* @details 
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/4/27
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 
@@ -19,12 +19,16 @@
 * Include Headers
 ******************************************************************/
 #include "CommandContext.h"
+
+// å¿…è¦ãªã‚¯ãƒ©ã‚¹ã‚’ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰
+// ========================================
 #include "Device.h"
 #include "Pipeline.h"
 #include "Buffer.h"
+// ========================================
 
-// TODO : íœ•ûj
-// –Ú•W : Factory‰»‚µA‚±‚ê‚ç‚ğƒCƒ“ƒNƒ‹[ƒh‚µ‚È‚¢•ûŒü‚Ås‚­
+// DirectX12 APIã®ãƒ©ãƒƒãƒ‘ãƒ¼ã‚’ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰
+// ========================================
 #include "../../DXGI/dxgiFactory6.h"
 #include "../Object/dx12_device.h"
 #include "../Object/dx12_graphicsCommandList.h"
@@ -32,12 +36,17 @@
 #include "../Object/dx12_commandAllocator.h"
 #include "../Object/dx12_swapChain.h"
 #include "../Object/dx12_resourceBuffer.h"
-#include "../Object/dx12_rootSignature.h"
 #include "../dx12_descriptorHeapManager.h"
+#include "../Object/dx12_fence.h"
+// ========================================
 
 #include <d3d12.h>
+#include <string>
 
+// å¤–éƒ¨ã‚¯ãƒ©ã‚¹ã‚’ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰
+// ========================================
 #include "../../Core/Source/Log/logger.h"
+// ========================================
 
 /******************************************************************
 * Macro Definitions
@@ -59,201 +68,309 @@ namespace RHI
 {
 	namespace ObjectInterface
 	{
-		CommandContext::CommandContext() = default;
-		CommandContext::~CommandContext() = default;
-
-		RHI_RESULT CommandContext::Initialize()
+		namespace
 		{
-			return RHI_SUCCEEDED;
+			// é·ç§»ãƒãƒªã‚¢ã‚’1ã¤ä½œã‚‹ (åŒã˜è¨­å®šã‚’ä½•åº¦ã‚‚æ›¸ã‹ãªã„ãŸã‚ã®ãƒ˜ãƒ«ãƒ‘ãƒ¼)
+			D3D12_RESOURCE_BARRIER makeTransitionBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
+			{
+				D3D12_RESOURCE_BARRIER barrier = {};
+				barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+				barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+				barrier.Transition.pResource   = resource;
+				barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+				barrier.Transition.StateBefore = before;
+				barrier.Transition.StateAfter  = after;
+				return barrier;
+			}
+
+			// HRESULTã‚’ãƒ­ã‚°ã«å‡ºã™ (å¤±æ•—ç®‡æ‰€ã‚’è¿½ãˆã‚‹ã‚ˆã†ã«)
+			void logFailed(const char* what, HRESULT hr)
+			{
+				std::string message = std::string("[CommandContext] ") + what + " failed. HRESULT = 0x";
+				char code[16] = {};
+				sprintf_s(code, "%08X", static_cast<unsigned int>(hr));
+				message += code;
+				Core::Logger::Log(message.c_str());
+			}
 		}
 
-		RHI_RESULT CommandContext::Initialize(Device* device, ObjectInfo* info)
+		CommandContext::CommandContext() = default;
+		CommandContext::~CommandContext()
 		{
-			if (!device)
+			// GPUãŒä½¿ç”¨ä¸­ã®ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆã‚’ç ´æ£„ã—ãªã„ã‚ˆã†ã€å¿µã®ãŸã‚å¾…ã¤
+			Dispose();
+		}
+
+		RHI_RESULT CommandContext::Initialize(RHI::ObjectInterface::IDevice* iDevice, ObjectInfo* info)
+		{
+			if (!iDevice || !info)
 			{
 				return RHI_FAILED_INVALID_ARGUMENT;
 			}
+
+			// TODO : Phase 3 ã§æŠ½è±¡åŒ–ã‚’è¦‹ç›´ã™ã¾ã§ã¯å…·è±¡å‹ã¸ã®ã‚­ãƒ£ã‚¹ãƒˆã§æ‰±ã†
+			auto device = static_cast<RHI::ObjectInterface::Device*>(iDevice);
+			if (!device->GetDevice() || !device->GetDevice()->GetDevice())
+			{
+				// Device ã®åˆæœŸåŒ–ã«å¤±æ•—ã—ã¦ã„ã‚‹
+				return RHI_FAILED_INVALID_ARGUMENT;
+			}
+			_device = device;
 
 			_commandQueue        = std::make_unique<DirectX12::CommandQueue>();
 			_commandAllocator    = std::make_unique<DirectX12::CommandAllocator>();
 			_graphicsCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
 			_swapChain           = std::make_unique<DirectX12::SwapChain>();
+			_fence               = std::make_unique<DirectX12::Fence>();
 
 			ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
+
+			// ä»¥å‰ã¯ HRESULT ã‚’å…¨ã¦ç„¡è¦–ã—ã¦å¸¸ã«æˆåŠŸã‚’è¿”ã—ã¦ã„ãŸ (1-15)
 			HRESULT hr = _commandQueue->Create(dx12Device);
-			hr         = _commandAllocator->Create(dx12Device);
-			hr         = _graphicsCommandList->Create(dx12Device, _commandAllocator->Get());
+			if (FAILED(hr)) { logFailed("CreateCommandQueue", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			hr = _commandAllocator->Create(dx12Device);
+			if (FAILED(hr)) { logFailed("CreateCommandAllocator", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			// ç”Ÿæˆç›´å¾Œã®ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã¯è¨˜éŒ²ä¸­ã®çŠ¶æ…‹ (åˆæœŸåŒ–ä¸­ã®ã‚¢ãƒƒãƒ—ãƒ­ãƒ¼ãƒ‰ã‚’ãã®ã¾ã¾ç©ã‚ã‚‹ã‚ˆã†ã«ã—ã¦ã„ã‚‹)
+			hr = _graphicsCommandList->Create(dx12Device, _commandAllocator->Get());
+			if (FAILED(hr)) { logFailed("CreateCommandList", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
 			HWND hWnd   = static_cast<HWND>(info->HWnd);
 			UINT width  = static_cast<UINT>(info->Width);
 			UINT height = static_cast<UINT>(info->Height);
-			hr         = _swapChain->Create(device->GetDxgiFactory()->Get(), _commandQueue->Get(), &hWnd, width, height);
+			hr = _swapChain->Create(device->GetDxgiFactory()->Get(), _commandQueue->Get(), &hWnd, width, height);
+			if (FAILED(hr)) { logFailed("CreateSwapChain", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
-			// ==============================================================
-			// ƒtƒFƒ“ƒX‚ÆƒCƒxƒ“ƒg‚Ì‰Šú‰»
-			// ==============================================================
-			hr = dx12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
-			_fenceValue = 1;
-			_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+			hr = _fence->Create(dx12Device);
+			if (FAILED(hr)) { logFailed("CreateFence", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
-			// Å‰‚ÌƒtƒŒ[ƒ€ƒCƒ“ƒfƒbƒNƒX‚ğæ“¾
-			_frameBufferIndex = _swapChain->Get()->GetCurrentBackBufferIndex();
-
-#ifdef CONSOLE_DEBUG
-			Core::Logger::Log("**************************************************");
-			Core::Logger::Log("Succeeded Initialize CommandContext From C++");
-			std::cout << "Succeeded Initialize CommandContext From C++" << std::endl;
-			std::cout << "Width  : " << width  << std::endl;
-			std::cout << "Height : " << height << std::endl;
-			Core::Logger::Log("**************************************************");
-#endif
+			// VSyncè¨­å®š (ä»¥å‰ã¯ç„¡è¦–ã—ã¦å¸¸ã« Present(1, 0) ã ã£ãŸ : 2-5)
+			_syncInterval = info->EnabledVSync ? 1 : 0;
 
 			return RHI_SUCCEEDED;
 		}
 
-		void CommandContext::RenderStart(Pipeline* pipeline, Buffer* buffer)
+		bool CommandContext::BeginRecording()
 		{
-			// 1. ƒRƒ}ƒ“ƒhƒŠƒXƒg‚ÆƒAƒƒP[ƒ^‚ÌƒŠƒZƒbƒg
-			_commandAllocator->Get()->Reset();
-			_graphicsCommandList->GetCmdList()->Reset(_commandAllocator->Get(), pipeline->GetPipelineState());
+			if (!_graphicsCommandList || !_commandAllocator)
+			{
+				return false;
+			}
 
-			// 2. ƒrƒ…[ƒ|[ƒg‚ÆƒVƒU[‹éŒ`‚Ìİ’è (‰æ–ÊƒTƒCƒY‚É‰‚¶‚½İ’è)
-			UINT width = 1280;          // ‰¼
-			UINT height = 720;          // ‰¼
+			// è¨˜éŒ²ä¸­ãªã‚‰ãã®ã¾ã¾ç©ã¿è¶³ã™
+			if (_graphicsCommandList->IsRecording())
+			{
+				return true;
+			}
+
+			// ä»¥å‰ã¯è¨˜éŒ²ä¸­ã®ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆãŒã‚ã‚‹çŠ¶æ…‹ã§ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼ã‚’ãƒªã‚»ãƒƒãƒˆã—ã¦ã„ãŸ (1-10)
+			// â†’ Closeæ¸ˆã¿ã§ã‚ã‚‹ã“ã¨ã‚’ç¢ºèªã—ã¦ã‹ã‚‰ã€ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼ â†’ ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®é †ã§ãƒªã‚»ãƒƒãƒˆã™ã‚‹
+			HRESULT hr = _commandAllocator->Reset();
+			if (FAILED(hr)) { logFailed("CommandAllocator::Reset", hr); return false; }
+
+			hr = _graphicsCommandList->Reset(_commandAllocator->Get(), nullptr);
+			if (FAILED(hr)) { logFailed("CommandList::Reset", hr); return false; }
+
+			return true;
+		}
+
+		bool CommandContext::RenderStart(Pipeline* pipeline, Buffer* buffer)
+		{
+			if (!pipeline || !buffer || !_swapChain || !_swapChain->Get())
+			{
+				return false;
+			}
+
+			// 1. è¨˜éŒ²ã®é–‹å§‹ (ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ã¨ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ãƒªã‚»ãƒƒãƒˆ)
+			if (!BeginRecording())
+			{
+				return false;
+			}
+			auto cmdList = _graphicsCommandList->GetCmdList();
+			cmdList->SetPipelineState(pipeline->GetPipelineState());
+
+			// 2. ãƒ“ãƒ¥ãƒ¼ãƒãƒ¼ãƒˆã¨ã‚·ã‚¶ãƒ¼çŸ©å½¢ã®è¨­å®š (ã‚¹ãƒ¯ãƒƒãƒ—ãƒã‚§ãƒ¼ãƒ³ã®ã‚µã‚¤ã‚ºã«åˆã‚ã›ã‚‹ã€‚ä»¥å‰ã¯1280x720å›ºå®šã ã£ãŸ)
+			const UINT width  = _swapChain->GetWidth();
+			const UINT height = _swapChain->GetHeight();
 			D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
-			D3D12_RECT scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-			_graphicsCommandList->GetCmdList()->RSSetViewports(1, &viewport);
-			_graphicsCommandList->GetCmdList()->RSSetScissorRects(1, &scissorRect);
+			D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+			cmdList->RSSetViewports(1, &viewport);
+			cmdList->RSSetScissorRects(1, &scissorRect);
 
-			// 3. ƒŠƒ\[ƒXƒoƒŠƒA (Present -> RenderTarget)
-			_swapChain->Get()->GetBuffer(_frameBufferIndex, IID_PPV_ARGS(&_backBuffer));
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = _backBuffer;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			_graphicsCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
+			// 3. ãƒªã‚½ãƒ¼ã‚¹ãƒãƒªã‚¢ (Present -> RenderTarget)
+			const uint32_t frameBufferIndex = _swapChain->GetCurrentBackBufferIndex();
+			_currentBackBuffer = _swapChain->GetBackBuffer();
+			if (!_currentBackBuffer)
+			{
+				return false;
+			}
+			const auto toRenderTarget = makeTransitionBarrier(_currentBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			cmdList->ResourceBarrier(1, &toRenderTarget);
 
-			// 4. RTV‚Ìİ’è‚Æ‰æ–ÊƒNƒŠƒA
-			auto rtvHandle = buffer->GetDescHeapManager()->GetRtvCpuHandle(_frameBufferIndex); //
-			_graphicsCommandList->GetCmdList()->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+			// 4. RTVã®è¨­å®šã¨ç”»é¢ã‚¯ãƒªã‚¢
+			auto rtvHandle = buffer->GetDescHeapManager()->GetRtvCpuHandle(frameBufferIndex);
+			cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 			const float clearColor[] = { 0.1f, 0.2f, 0.4f, 1.0f };
-			_graphicsCommandList->GetCmdList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+			cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
 			// ==============================================================
-			// 5. ƒ‹[ƒgƒVƒOƒlƒ`ƒƒ‚Æƒq[ƒv‚ÌƒZƒbƒg
+			// 5. ãƒ«ãƒ¼ãƒˆã‚·ã‚°ãƒãƒãƒ£ã¨ãƒ’ãƒ¼ãƒ—ã®ã‚»ãƒƒãƒˆ
 			// ==============================================================
-			_graphicsCommandList->GetCmdList()->SetGraphicsRootSignature(pipeline->GetRootSignature()); //[cite: 7]
+			cmdList->SetGraphicsRootSignature(pipeline->GetRootSignature());
 
-			// ƒƒKVB—p‚ÌSRV‚ª“o˜^‚³‚ê‚Ä‚¢‚éƒq[ƒv‚ğƒZƒbƒg[cite: 4, 7]
-			ID3D12DescriptorHeap* heaps[] = { buffer->GetDescHeapManager()->GetSrvHeap() };
-			_graphicsCommandList->GetCmdList()->SetDescriptorHeaps(1, heaps);
+			// ãƒ¡ã‚¬VBã‚„ãƒ†ã‚¯ã‚¹ãƒãƒ£ã®SRVãŒç™»éŒ²ã•ã‚Œã¦ã„ã‚‹ãƒ’ãƒ¼ãƒ—ã‚’ã‚»ãƒƒãƒˆ
+			auto heapManager = buffer->GetDescHeapManager();
+			ID3D12DescriptorHeap* heaps[] = { heapManager->GetSrvHeap() };
+			cmdList->SetDescriptorHeaps(1, heaps);
 
-			// [ƒpƒ‰ƒ[ƒ^1]: ƒƒKVB‚ÌSRVƒe[ƒuƒ‹ (t0) ‚ğƒZƒbƒg[cite: 7]
-			_graphicsCommandList->GetCmdList()->SetGraphicsRootDescriptorTable(1, buffer->GetDescHeapManager()->GetSrvGpuHandle(1));
+			// ãƒ¡ã‚¬VBã®SRVãƒ†ãƒ¼ãƒ–ãƒ« (t0)
+			cmdList->SetGraphicsRootDescriptorTable(Pipeline::ROOT_PARAM_VERTEX_BUFFER_TABLE, heapManager->GetSrvGpuHandle(Buffer::SRV_INDEX_SCENE_VB));
 
-			// [ƒpƒ‰ƒ[ƒ^2]: Global’è”ƒoƒbƒtƒ@ (b1) ‚ğ Root CBV ‚Æ‚µ‚ÄƒZƒbƒg[cite: 7]
-			D3D12_GPU_VIRTUAL_ADDRESS globalCbAddress = buffer->GetGlobalCB()->Get()->GetGPUVirtualAddress();
-			_graphicsCommandList->GetCmdList()->SetGraphicsRootConstantBufferView(2, globalCbAddress);
+			// Globalå®šæ•°ãƒãƒƒãƒ•ã‚¡ (b1) ã‚’ Root CBV ã¨ã—ã¦ã‚»ãƒƒãƒˆ (View / Projection è¡Œåˆ—)
+			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->GetCommonCB()->GetGPUVirtualAddress());
 
-			// ==============================================================
-			// 6. ƒIƒuƒWƒFƒNƒg’PˆÊ‚Ì•`‰æƒ‹[ƒv
-			// ==============================================================
-			_graphicsCommandList->GetCmdList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			// ãƒã‚¤ãƒ³ãƒ‰ãƒ¬ã‚¹ãƒ»ãƒ†ã‚¯ã‚¹ãƒãƒ£é…åˆ— (t1)
+			// ãƒ†ãƒ¼ãƒ–ãƒ«ã®å…ˆé ­ = ãƒ†ã‚¯ã‚¹ãƒãƒ£ã®0ç•ªã€‚ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼å´ã® g_TextureID ã¯ã“ã“ã‹ã‚‰ã®ç›¸å¯¾ç•ªå·ã«ãªã‚‹
+			cmdList->SetGraphicsRootDescriptorTable(Pipeline::ROOT_PARAM_TEXTURE_TABLE, heapManager->GetSrvGpuHandle(Buffer::SRV_INDEX_TEXTURE_BEGIN));
+
+			// ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ãƒãƒƒãƒ•ã‚¡ã‚’ä½¿ç”¨
+			cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			D3D12_INDEX_BUFFER_VIEW ibView = {};
+			ibView.BufferLocation = buffer->GetSceneIB()->GetGPUVirtualAddress();
+			ibView.SizeInBytes    = static_cast<UINT>(buffer->GetSceneIndexBufferSize());
+			ibView.Format         = DXGI_FORMAT_R32_UINT;
+			cmdList->IASetIndexBuffer(&ibView);
+
+			return true;
 		}
 
-		void CommandContext::RenderEnd()
+		bool CommandContext::RenderEnd()
 		{
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource = _backBuffer;
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-			barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-
-			_graphicsCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
-
-			// 8. ƒRƒ}ƒ“ƒhƒŠƒXƒg‚ÌƒNƒ[ƒY‚ÆÀs
-			_graphicsCommandList->GetCmdList()->Close();
-			ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
-			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists); //[cite: 5]
-
-			// 9. ‰æ–Ê‚Ö‚Ì•\¦‚ÆƒCƒ“ƒfƒbƒNƒXXV
-			_swapChain->Get()->Present(1, 0); //[cite: 5]
-
-			// ==============================================================
-			// ƒtƒFƒ“ƒX‚ğ—p‚¢‚½GPU‘Ò‹@‚Ì“¯Šúˆ—
-			// ==============================================================
-			const uint64_t currentFenceValue = _fenceValue;
-			_commandQueue->Get()->Signal(_fence, currentFenceValue);
-			_fenceValue++;
-
-			if (_fence->GetCompletedValue() < currentFenceValue)
+			if (!_currentBackBuffer || !_graphicsCommandList->IsRecording())
 			{
-				_fence->SetEventOnCompletion(currentFenceValue, _fenceEvent);
-				WaitForSingleObject(_fenceEvent, INFINITE);
+				// RenderStart ãŒå¤±æ•—ã—ã¦ã„ã‚‹
+				return false;
 			}
 
-			// (¦‚±‚±‚ÉƒtƒFƒ“ƒX‚ğ—p‚¢‚½GPU‘Ò‹@‚Ì“¯Šúˆ—‚ª“ü‚è‚Ü‚·)
-			_frameBufferIndex = _swapChain->Get()->GetCurrentBackBufferIndex();
+			// 6. ãƒªã‚½ãƒ¼ã‚¹ãƒãƒªã‚¢ (RenderTarget -> Present)
+			const auto toPresent = makeTransitionBarrier(_currentBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+			_graphicsCommandList->GetCmdList()->ResourceBarrier(1, &toPresent);
+			_currentBackBuffer = nullptr;
 
-			// COMƒIƒuƒWƒFƒNƒg‚ÌQÆƒJƒEƒ“ƒg‚ğ‰º‚°‚é
-			if (_backBuffer)
-			{
-				_backBuffer->Release();
-				_backBuffer = nullptr;
-			}
-		}
+			// 7. ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ã‚¯ãƒ­ãƒ¼ã‚ºã¨å®Ÿè¡Œ
+			HRESULT hr = _graphicsCommandList->Close();
+			if (FAILED(hr)) { logFailed("CommandList::Close", hr); return false; }
 
-		void CommandContext::Render(Buffer* buffer, const std::vector<RenderObj>& renderQueue)
-		{
-			for (const auto& renderObj : renderQueue)
-			{
-				// [ƒpƒ‰ƒ[ƒ^0]: ’¸“_ƒIƒtƒZƒbƒg (b0)[cite: 7]
-				UINT baseVertexIndex = renderObj.VertexOffset;
-				_graphicsCommandList->GetCmdList()->SetGraphicsRoot32BitConstants(0, 1, &baseVertexIndex, 0);
-
-				// [ƒpƒ‰ƒ[ƒ^3]: Scene(Object)’è”ƒoƒbƒtƒ@ (b2)[cite: 7]
-				D3D12_GPU_VIRTUAL_ADDRESS objectCbAddress = buffer->GetSceneCB()->Get()->GetGPUVirtualAddress() + renderObj.CbOffset;
-				_graphicsCommandList->GetCmdList()->SetGraphicsRootConstantBufferView(3, objectCbAddress);
-
-				// ’¸“_ƒoƒbƒtƒ@(IA)‚ÍƒoƒCƒ“ƒh‚¹‚¸’¼Ú•`‰æ
-				_graphicsCommandList->GetCmdList()->DrawInstanced(renderObj.VertexCount, 1, renderObj.VertexOffset, 0);
-			}
-		}
-
-		void CommandContext::ExecuteAndSync()
-		{
-			// 1. ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ì‹L˜^‚ğI—¹‚·‚é
-			_graphicsCommandList->GetCmdList()->Close();
-
-			// 2. ƒRƒ}ƒ“ƒhƒŠƒXƒg‚ğƒLƒ…[‚É‘—M‚µ‚ÄÀs
 			ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
 			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
 
-			// 3. ÀsŠ®—¹‚Ì–ÚˆóiƒtƒFƒ“ƒX’lj‚ğƒLƒ…[‚ÉƒZƒbƒg
-			const uint64_t currentFenceValue = _fenceValue;
-			_commandQueue->Get()->Signal(_fence, currentFenceValue);
-			_fenceValue++;
-
-			// 4. GPU‚ªæ‚Ù‚ÇƒZƒbƒg‚µ‚½–Úˆó‚É“’B‚·‚é‚Ü‚ÅACPU‚ğƒXƒŠ[ƒv‚³‚¹‚Ä‘Ò‹@
-			if (_fence->GetCompletedValue() < currentFenceValue)
+			// 8. ç”»é¢ã¸ã®è¡¨ç¤º
+			hr = _swapChain->Present(_syncInterval);
+			if (FAILED(hr))
 			{
-				_fence->SetEventOnCompletion(currentFenceValue, _fenceEvent);
-				WaitForSingleObject(_fenceEvent, INFINITE);
+				logDeviceRemovedReason(hr);
+				return false;
 			}
 
 			// ==============================================================
-			// 5. Ÿ‚ÌƒRƒ}ƒ“ƒh‹L˜^‚ÉŒü‚¯‚½ƒŠƒZƒbƒgˆ—
+			// 9. ãƒ•ã‚§ãƒ³ã‚¹ã‚’ç”¨ã„ãŸGPUå¾…æ©Ÿã®åŒæœŸå‡¦ç†
+			// â€»æ¯ãƒ•ãƒ¬ãƒ¼ãƒ GPUã®å®Œäº†ã‚’å¾…ã£ã¦ã„ã‚‹ã®ã§CPUã¨GPUãŒä¸¦è¡Œã—ã¦å‹•ã‘ãªã„ã€‚Phase 1 ã§æ”¹å–„ã™ã‚‹
 			// ==============================================================
-			// GPU‚ªŠmÀ‚Éˆ—‚ğI‚¦‚½i‘Ò‹@‚ğ”²‚¯‚½j‚½‚ßAƒAƒƒP[ƒ^‚ğˆÀ‘S‚ÉƒŠƒZƒbƒg‰Â”\
-			_commandAllocator->Get()->Reset();
+			hr = _fence->WaitForSignal(_commandQueue.get());
+			if (FAILED(hr)) { logFailed("Fence::WaitForSignal", hr); return false; }
 
-			// ƒRƒ}ƒ“ƒhƒŠƒXƒg‚à‰Šúó‘Ô‚É–ß‚·i‚±‚Ì’iŠK‚Å‚Í“Á’è‚ÌPSO‚ÉˆË‘¶‚µ‚È‚¢‚½‚ß nullptr ‚ğw’èj
-			_graphicsCommandList->GetCmdList()->Reset(_commandAllocator->Get(), nullptr);
+			return true;
+		}
+
+		void CommandContext::Render(Buffer* buffer, const RenderQueue& renderQueue)
+		{
+			if (!buffer || !_graphicsCommandList->IsRecording())
+			{
+				return;
+			}
+
+			auto cmdList = _graphicsCommandList->GetCmdList();
+			const D3D12_GPU_VIRTUAL_ADDRESS sceneCbBase = buffer->GetSceneCB()->GetGPUVirtualAddress();
+
+			for (const auto& renderObj : renderQueue.RenderObjects)
+			{
+				// é ‚ç‚¹ã‚ªãƒ•ã‚»ãƒƒãƒˆ (b0)
+				// ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼ã¯ g_MegaVB[g_BaseVertexIndex + SV_VertexID] ã§é ‚ç‚¹ã‚’èª­ã‚€
+				UINT baseVertexIndex = renderObj.VertexOffset;
+				cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_BASE_VERTEX, 1, &baseVertexIndex, 0);
+
+				// Scene(Object)å®šæ•°ãƒãƒƒãƒ•ã‚¡ (b2)
+				// CbOffset ã¯ Root CBV ã®åˆ¶ç´„ã§ 256 ã®å€æ•°ã§ã‚ã‚‹ã“ã¨ (Buffer::SCENE_CB_STRIDE å˜ä½ã§æŒ‡å®šã™ã‚‹)
+				cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_OBJECT_CBV, sceneCbBase + renderObj.CbOffset);
+
+				// ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ãƒãƒƒãƒ•ã‚¡ã‚’ä½¿ç”¨
+				// BaseVertexLocation(ç¬¬4å¼•æ•°)ã¯ SV_VertexID ã«åŠ ç®—ã•ã‚Œãªã„ã€‚
+				// é ‚ç‚¹ã®é–‹å§‹ä½ç½®ã¯ãƒ«ãƒ¼ãƒˆå®šæ•°ã§æ¸¡ã—ã¦ã„ã‚‹ã®ã§ã€ã“ã“ã¯ 0 ã«ã—ã¦ãŠã (2-9 : ä»¥å‰ã¯äºŒé‡ã«æŒ‡å®šã—ã¦ã„ãŸ)
+				cmdList->DrawIndexedInstanced(
+					renderObj.IndexCount,
+					1,
+					renderObj.IndexOffset,
+					0,
+					0
+				);
+			}
+		}
+
+		bool CommandContext::ExecuteAndSync()
+		{
+			if (!_graphicsCommandList || !_graphicsCommandList->IsRecording())
+			{
+				// ä½•ã‚‚è¨˜éŒ²ã—ã¦ã„ãªã„
+				return true;
+			}
+
+			// 1. ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®è¨˜éŒ²ã‚’çµ‚äº†ã™ã‚‹
+			HRESULT hr = _graphicsCommandList->Close();
+			if (FAILED(hr)) { logFailed("CommandList::Close", hr); return false; }
+
+			// 2. ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆã‚’ã‚­ãƒ¥ãƒ¼ã«é€ä¿¡ã—ã¦å®Ÿè¡Œ
+			ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
+			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
+
+			// 3. å®Ÿè¡Œå®Œäº†ã¾ã§å¾…æ©Ÿã™ã‚‹
+			hr = _fence->WaitForSignal(_commandQueue.get());
+			if (FAILED(hr)) { logFailed("Fence::WaitForSignal", hr); return false; }
+
+			// ä»¥å‰ã¯ã“ã“ã§ãƒªã‚»ãƒƒãƒˆã—ã¦ã€Œè¨˜éŒ²ä¸­ã€ã®ã¾ã¾è¿”ã—ã¦ã„ãŸãŸã‚ã€
+			// æ¬¡ã® RenderStart ã§è¨˜éŒ²ä¸­ã®ãƒªã‚¹ãƒˆãŒã‚ã‚‹ã®ã«ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼ã‚’ãƒªã‚»ãƒƒãƒˆã—ã¦ã—ã¾ã£ã¦ã„ãŸ (1-10)
+			// â†’ Closeæ¸ˆã¿ã®ã¾ã¾è¿”ã—ã€æ¬¡ã«ç©ã‚€å´ãŒ BeginRecording() ã‚’å‘¼ã¶
+			return true;
+		}
+
+		void CommandContext::WaitForGpu()
+		{
+			if (_fence && _fence->Get() && _commandQueue && _commandQueue->Get())
+			{
+				_fence->WaitForSignal(_commandQueue.get());
+			}
+		}
+
+		void CommandContext::Dispose()
+		{
+			// ä»¥å‰ã¯ä½•ã‚‚ã—ã¦ãŠã‚‰ãšã€GPUãŒä½¿ç”¨ä¸­ã®ã¾ã¾ç ´æ£„ã•ã‚Œã¦ã„ãŸ (2-11)
+			WaitForGpu();
+
+			// è¨˜éŒ²ä¸­ã®ã¾ã¾ç ´æ£„ã—ãªã„ã‚ˆã†ã«é–‰ã˜ã¦ãŠã
+			if (_graphicsCommandList)
+			{
+				_graphicsCommandList->Close();
+			}
+
+			// ã‚¹ãƒ¯ãƒƒãƒ—ãƒã‚§ãƒ¼ãƒ³ â†’ ã‚³ãƒãƒ³ãƒ‰ãƒªã‚¹ãƒˆ â†’ ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼ â†’ ã‚­ãƒ¥ãƒ¼ ã®é †ã«ç ´æ£„
+			_currentBackBuffer = nullptr;
+			_swapChain.reset();
+			_graphicsCommandList.reset();
+			_commandAllocator.reset();
+			_fence.reset();
+			_commandQueue.reset();
+			_device = nullptr;
 		}
 
 		RHI::DirectX12::GraphicsCommandList* CommandContext::GetGraphicsCommandList()const
@@ -271,6 +388,31 @@ namespace RHI
 		RHI::DirectX12::SwapChain* CommandContext::GetSwapChain()const
 		{
 			return _swapChain.get();
+		}
+
+		uint32_t CommandContext::GetWidth()const
+		{
+			return _swapChain ? _swapChain->GetWidth() : 0;
+		}
+
+		uint32_t CommandContext::GetHeight()const
+		{
+			return _swapChain ? _swapChain->GetHeight() : 0;
+		}
+
+		void CommandContext::logDeviceRemovedReason(HRESULT presentResult)
+		{
+			logFailed("SwapChain::Present", presentResult);
+
+			// ãƒ‡ãƒã‚¤ã‚¹ãƒ­ã‚¹ãƒˆã®å ´åˆã¯åŸå› ã‚’å–å¾—ã—ã¦å‡ºã™ (ãƒ‰ãƒ©ã‚¤ãƒãƒ¼ã®ã‚¯ãƒ©ãƒƒã‚·ãƒ¥ / TDR / ä¸æ­£ãªã‚³ãƒãƒ³ãƒ‰ ç­‰)
+			if (presentResult == DXGI_ERROR_DEVICE_REMOVED || presentResult == DXGI_ERROR_DEVICE_RESET)
+			{
+				if (_device && _device->GetDevice() && _device->GetDevice()->GetDevice())
+				{
+					HRESULT reason = _device->GetDevice()->GetDevice()->GetDeviceRemovedReason();
+					logFailed("Device removed. Reason", reason);
+				}
+			}
 		}
 	}
 }

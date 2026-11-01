@@ -30,6 +30,7 @@ public class RHI : IDisposable
         public int InitializedCommandContext;
         public int InitializedBuffer;
         public int InitializedTexture;
+        public int InitializedPipeline;
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -50,7 +51,16 @@ public class RHI : IDisposable
     private static extern void RHI_Initialize(out RHIInitializedInfo info, RHIInfo rHIInfo);
 
     [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void RHI_CleanUp();
+
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern void RHI_TestRender();
+
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void RHI_TestLoadModel(float posX, float posY, float posZ);
+
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void RHI_DebugExecute();
 
     public void Initialize(out RHIInitializedInfo info)
     {
@@ -70,6 +80,11 @@ public class RHI : IDisposable
         return;
     }
 
+    public void Test_LoadModel(float posX, float posY, float posZ)
+    {
+        RHI_TestLoadModel(posX, posY, posZ);
+    }
+
     public void Render()
     {
         RHI_TestRender();
@@ -77,15 +92,22 @@ public class RHI : IDisposable
 
     public void Dispose()
     {
+        RHI_CleanUp();
+    }
 
+    public void DebugExecute()
+    {
+        RHI_DebugExecute();
     }
 
     private enum RHI_RESULT
     {
-        SUCCEEDED               = 1,
-        FAILED                  = -1,
-        FAILED_INITIALIZED      = -2,
-        FAILED_INVALID_ARGUMENT = -3,
+        SUCCEEDED                = 1,
+        FAILED                   = -1,
+        FAILED_INITIALIZED       = -2,
+        FAILED_INVALID_ARGUMENT  = -3,
+        FAILED_CREATE_ANY_OBJECT = -4,
+        FAILED_COMPILED_SHADER   = -5,
     }
 
     public string CheckRHIResult(int id)
@@ -100,9 +122,26 @@ public class RHI : IDisposable
                 return "RHI_RESULT_FAILED_INITIALIZED";
             case (int)RHI_RESULT.FAILED_INVALID_ARGUMENT:
                 return "RHI_RESULT_FAILED_INVALID_ARGUMENT";
+            case (int)RHI_RESULT.FAILED_CREATE_ANY_OBJECT:
+                return "RHI_RESULT_FAILED_CREATE_ANY_OBJECT";
+            case (int)RHI_RESULT.FAILED_COMPILED_SHADER:
+                return "RHI_RESULT_FAILED_COMPILED_SHADER";
             default:
                 return "NULL";
         }
+    }
+
+    public bool isAllInitialized(RHIInitializedInfo info)
+    {
+        if (info.InitializedDevice         == 1 &&
+            info.InitializedCommandContext == 1 &&
+            info.InitializedBuffer         == 1 &&
+            info.InitializedTexture        == 1 &&
+            info.InitializedPipeline       == 1
+            )
+            return true;
+
+        return false;
     }
 
     private void Log(string message)
@@ -115,6 +154,8 @@ public class RHI : IDisposable
         RHI_RESULT.SUCCEEDED,
         RHI_RESULT.FAILED,
         RHI_RESULT.FAILED_INITIALIZED,
-        RHI_RESULT.FAILED_INVALID_ARGUMENT
+        RHI_RESULT.FAILED_INVALID_ARGUMENT,
+        RHI_RESULT.FAILED_CREATE_ANY_OBJECT,
+        RHI_RESULT.FAILED_COMPILED_SHADER
     };
 }
