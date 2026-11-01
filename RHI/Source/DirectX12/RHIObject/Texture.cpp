@@ -111,7 +111,8 @@ namespace RHI
             std::vector<::DirectX::ScratchImage> images(filePaths.size());
             std::vector<HRESULT>                 results(filePaths.size(), E_FAIL);
             {
-                Core::ScopedTimer decodeTimer(" Texture decode (parallel)");
+                // 読み込み (DDS キャッシュがあれば読むだけ、無ければデコード + 圧縮) を並列に行う
+                Core::ScopedTimer decodeTimer(" Texture load (parallel)");
 
                 // WIC のファクトリーはメインスレッドで先に作っておく
                 // (ワーカースレッドで初めて作ると、そのスレッドの終了と一緒に使えなくなる恐れがある)
@@ -133,7 +134,7 @@ namespace RHI
                         const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
                         for (size_t i = worker; i < filePaths.size(); i += workerCount)
                         {
-                            results[i] = RHI::DirectX12::Texture::DecodeImageFile(filePaths[i], images[i]);
+                            results[i] = RHI::DirectX12::Texture::LoadImageFile(filePaths[i], images[i]);
                         }
                         if (SUCCEEDED(coInit))
                         {
@@ -161,13 +162,8 @@ namespace RHI
                     continue;
                 }
 
-                const ::DirectX::Image* img = images[i].GetImage(0, 0, 0);
-                if (!img)
-                {
-                    continue;
-                }
-
-                auto newBuffer = textureManager->CreateTextureFromImage(device->GetDevice(), commandContext->GetUploadManager(), *img);
+                // ミップマップ全段をまとめてアップロードする
+                auto newBuffer = textureManager->CreateTextureFromScratchImage(device->GetDevice(), commandContext->GetUploadManager(), images[i]);
                 if (!newBuffer)
                 {
                     continue;
@@ -289,7 +285,8 @@ namespace RHI
             // 渡されたバッファからフォーマットを取得する
             srvDesc.Format = targetBuffer->Get()->GetDesc().Format;
             srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            srvDesc.Texture2D.MipLevels = 1;
+            // ミップマップは全段使う (以前は 1 段固定。ミップマップがあると遠くの描画が速く、ちらつきも減る)
+            srvDesc.Texture2D.MipLevels = targetBuffer->Get()->GetDesc().MipLevels;
 
             device->GetDevice()->GetDevice()->CreateShaderResourceView(
                 targetBuffer->Get(),
