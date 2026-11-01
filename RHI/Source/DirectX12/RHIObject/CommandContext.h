@@ -40,7 +40,7 @@
 
 
 #include "../../RHIObject/ICommandContext.h"
-#include "../../dataDefinition.h"
+#include "../../Public/rhiTypes.h"     // DrawItem
 
 /******************************************************************
 * Macro Definitions
@@ -136,7 +136,11 @@ namespace RHI
              ************************************************************************************/
             bool RenderEnd();
 
-            void Render(Buffer* buffer, const RenderQueue& renderQueue);
+            /***********************************************************************************
+             * @brief 描画命令を積む (RenderStart と RenderEnd の間で呼ぶ)
+             * @details 同じ値のルート引数は設定し直さない。DrawItem を頂点の開始位置ごとに並べておくと効率が良い
+             ************************************************************************************/
+            void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
 
             /***********************************************************************************
              * @brief 積んであるアップロードを送信し、描画キューがその完了を GPU 上で待つようにする

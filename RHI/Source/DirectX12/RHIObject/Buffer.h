@@ -43,12 +43,6 @@
 * Structure Declarations
 ******************************************************************/
 
-namespace Renderer
-{
-    class ObjLoader;
-    struct Mesh;    // Renderer側の定義は struct なので合わせる (C4099 警告の回避)
-}
-
 namespace RHI
 {
     class ResourceBufferAllocator;
@@ -96,13 +90,16 @@ namespace RHI
             // Root CBV のアドレスは 256byte の倍数でなければならない
             static constexpr uint64_t CONSTANT_BUFFER_ALIGNMENT = 256;
 
-            // Scene定数バッファの 1オブジェクト分の間隔 (ConstantPerRenderObject を 256 に切り上げたもの)
-            // 以前は sizeof(ConstantPerRenderObject) = 80byte 間隔で詰めていたため、2つ目以降のアドレスが不正だった (1-9)
-            static constexpr uint64_t AlignConstantBufferSize(uint64_t size)
-            {
-                return (size + CONSTANT_BUFFER_ALIGNMENT - 1) & ~(CONSTANT_BUFFER_ALIGNMENT - 1);
-            }
-            static const uint64_t SCENE_CB_STRIDE;
+            // Scene定数バッファの 1オブジェクト分の間隔 (ObjectConstants を 256 に切り上げたもの)
+            // 以前は 80byte 間隔で詰めていたため、2つ目以降のアドレスが不正だった (1-9)
+            static constexpr uint64_t SCENE_CB_STRIDE =
+                (sizeof(RHI::ObjectConstants) + CONSTANT_BUFFER_ALIGNMENT - 1) & ~(CONSTANT_BUFFER_ALIGNMENT - 1);
+
+            // Scene定数バッファの容量 (フレームの数で等分して使う)
+            static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
+            static constexpr uint64_t SCENE_CB_FRAME_SIZE  = SCENE_CB_SIZE / CommandContext::FRAME_COUNT;
+            // 1 フレームで扱えるオブジェクトの最大数
+            static constexpr uint32_t MAX_OBJECTS          = static_cast<uint32_t>(SCENE_CB_FRAME_SIZE / SCENE_CB_STRIDE);
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Buffer();
@@ -116,29 +113,51 @@ namespace RHI
                 RHI::ObjectInterface::ICommandContext* iCommandContext
             )override;
 
-            bool UploadVertexData(
+            // 頂点をメガ頂点バッファへ (転送は UploadManager に積むだけ)
+            RHI::VertexRange UploadVertexData(
                 RHI::ObjectInterface::IDevice* iDevice,
                 RHI::ObjectInterface::ICommandContext* iCommandContext,
-                const std::vector<Renderer::Vertex>& vertices
+                const RHI::Vertex* vertices,
+                uint32_t count
             )override;
 
-            bool UploadIndexData(
+            // インデックスをメガインデックスバッファへ
+            RHI::IndexRange UploadIndexData(
                 RHI::ObjectInterface::IDevice* iDevice,
                 RHI::ObjectInterface::ICommandContext* iCommandContext,
-                const std::vector<uint32_t>& indecies
+                const uint32_t* indices,
+                uint32_t count
             )override;
 
             /***********************************************************************************
-             * @brief カメラの設定 (View / Projection 行列を作り直す)
-             * @details 行列は CPU 側に保持しておき、毎フレーム WriteFrameConstants でそのフレームの領域へ書く
+             * @brief カメラの行列を設定する
+             * @details 転置して CPU 側に保持しておき、毎フレーム WriteFrameConstants でそのフレームの領域へ書く
+             *          (以前は Camera を受け取って RHI の中で行列を作っていた。行列を作るのは Renderer の仕事)
              ************************************************************************************/
-            void UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type)override;
+            void SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)override;
 
             /***********************************************************************************
-             * @brief 描画先のサイズを設定する (初期化・リサイズ時に呼ぶ)
-             * @details Projection 行列のアスペクト比に使う (以前は 1280x720 固定だった : 2-4)
+             * @brief 描画オブジェクト (ワールド行列 / テクスチャの置き場) を作る
+             * @return ObjectHandle 満杯なら IsValid() == false
              ************************************************************************************/
-            void SetViewportSize(uint32_t width, uint32_t height);
+            RHI::ObjectHandle CreateObject();
+
+            /***********************************************************************************
+             * @brief オブジェクトの定数を更新する
+             * @details CPU 側の値だけを書き換え、GPU へは WriteObjectConstants でフレームごとの領域に書く。
+             *          GPU が前のフレームで読んでいる最中の値を上書きしないので、毎フレーム呼んでもよい
+             ************************************************************************************/
+            void UpdateObject(RHI::ObjectHandle object, const RHI::ObjectConstants& constants);
+
+            /***********************************************************************************
+             * @brief オブジェクトの定数をこのフレームの領域へ書き込み、その先頭アドレスを返す
+             * @details 前回このフレームの領域に書いてから変わったオブジェクトだけ書く
+             *          オブジェクト i の Root CBV アドレス = 戻り値 + i * SCENE_CB_STRIDE
+             ************************************************************************************/
+            D3D12_GPU_VIRTUAL_ADDRESS WriteObjectConstants(uint32_t frameIndex);
+
+            // テクスチャの読み込み口 (既定テクスチャを作ったものと同じものを使う)
+            RHI::ObjectInterface::Texture* GetTexture()const { return _texture.get(); }
 
             /***********************************************************************************
              * @brief フレームごとの定数 (View / Projection) を書き込み、その GPU アドレスを返す
@@ -190,26 +209,26 @@ namespace RHI
             const uint64_t _GLOBAL_VB_SIZE = 16ull * 1024ull * 1024ull;
             const uint64_t _SCENE_VB_SIZE  = 64ull * 1024ull * 1024ull;
             const uint64_t _GLOBAL_CB_SIZE = 4ull  * 1024ull * 1024ull;
-            const uint64_t _SCENE_CB_SIZE  = 16ull * 1024ull * 1024ull;
+            const uint64_t _SCENE_CB_SIZE  = SCENE_CB_SIZE;
             // フレームごとの定数 (View / Projection) : 1 フレーム 256byte × フレーム数
             const uint64_t _COMMON_CB_SIZE = CONSTANT_BUFFER_ALIGNMENT * CommandContext::FRAME_COUNT;
             const uint64_t _GLOBAL_IB_SIZE = 16ull * 1024ull * 1024ull;
             const uint64_t _SCENE_IB_SIZE  = 64ull * 1024ull * 1024ull;
 
             // ---------- フレームごとの定数の元データ (CPU 側) ----------
-            // 行列はカメラ・画面サイズが変わった時だけ作り直し、毎フレームは書き写すだけにする
-            Renderer::Camera                    _camera         = {};
-            Renderer::Projection::ProjectionType _projectionType = Renderer::Projection::ProjectionType::PROJECTION_TYPE_3D;
+            // 行列はカメラが変わった時だけ更新し、毎フレームは書き写すだけにする (シェーダー用に転置済み)
             ::DirectX::XMFLOAT4X4               _viewMatrix     = {};
             ::DirectX::XMFLOAT4X4               _projMatrix     = {};
-            uint32_t                            _viewportWidth  = 1280;
-            uint32_t                            _viewportHeight = 720;
-            bool                                _hasCamera      = false;
             // 行列を更新した回数。各フレームの領域に書いた時の値と比べて、変わっていなければ書き込みを省く
             uint64_t                            _frameConstantsVersion = 1;
             uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT] = {};
 
-            void rebuildViewProjection();
+            // ---------- オブジェクトごとの定数 (CPU 側) ----------
+            std::vector<RHI::ObjectConstants>   _objects;                                   // シェーダー用に転置済み
+            std::vector<uint64_t>               _objectVersion;                             // オブジェクトごとの更新回数
+            std::vector<uint64_t>               _objectWritten[CommandContext::FRAME_COUNT]; // フレームの領域に書いた時の更新回数
+            uint64_t                            _objectsVersion = 1;                        // どれかが更新されたら増える
+            uint64_t                            _objectsWrittenVersion[CommandContext::FRAME_COUNT] = {};
             bool nullCheckManager();
 
             bool makeCommonBuffer(RHI::ObjectInterface::Device* device);                                                                                               // Resource Bufferの作成
@@ -246,11 +265,6 @@ namespace RHI
             bool makeCBView(RHI::ObjectInterface::Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, uint32_t cbOffset);            // 未使用 RootCBVを採用
 #endif
 
-        public:
-            Renderer::Mesh* LoadModel(
-                RHI::ObjectInterface::IDevice* iDevice,
-                RHI::ObjectInterface::ICommandContext* iCommandContext, 
-                const std::wstring& filePath);
         };
     }
 }

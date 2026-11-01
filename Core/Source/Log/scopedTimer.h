@@ -5,7 +5,7 @@
 * @details スコープを抜けた時に経過時間を Logger に出す
 *
 *            {
-*                RHI::ScopedTimer timer("LoadModel");
+*                Core::ScopedTimer timer("LoadModel");
 *                ...                                   // ← この区間の時間を計る
 *            }                                         // → "[Time] LoadModel : 12.345 ms"
 *
@@ -20,8 +20,8 @@
 ************************************************************************************/
 
 #pragma once
-#ifndef RHI_SCOPED_TIMER_H_
-#define RHI_SCOPED_TIMER_H_
+#ifndef CORE_SCOPED_TIMER_H_
+#define CORE_SCOPED_TIMER_H_
 
 /******************************************************************
 * Include Headers
@@ -29,9 +29,9 @@
 #include <chrono>
 #include <cstdio>
 
-#include "../../Core/Source/Log/logger.h"
+#include "logger.h"
 
-namespace RHI
+namespace Core
 {
 	class ScopedTimer
 	{
@@ -61,4 +61,4 @@ namespace RHI
 	};
 }
 
-#endif // RHI_SCOPED_TIMER_H_
+#endif // CORE_SCOPED_TIMER_H_

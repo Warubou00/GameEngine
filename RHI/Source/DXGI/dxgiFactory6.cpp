@@ -38,7 +38,7 @@
 
 namespace RHI
 {
-	namespace DirectX
+	namespace DXGI
 	{
 		DXGIFactory6::DXGIFactory6() = default;
 		DXGIFactory6::~DXGIFactory6() = default;

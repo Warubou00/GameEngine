@@ -26,7 +26,7 @@
 #include "dx12_uploadManager.h"
 
 #include "../../Core/Source/Log/logger.h"
-#include "../scopedTimer.h"
+#include "../../../Core/Source/Log/scopedTimer.h"
 
 /******************************************************************
 * Macro Definitions
@@ -58,7 +58,7 @@ namespace RHI
                 return E_INVALIDARG;
             }
 
-            RHI::ScopedTimer timer("  Texture decode (WIC)");
+            Core::ScopedTimer timer("  Texture decode (WIC)");
             ::DirectX::TexMetadata metadata;
             return ::DirectX::LoadFromWICFile(filePath.c_str(), ::DirectX::WIC_FLAGS_NONE, &metadata, outImage);
         }

@@ -27,7 +27,6 @@
 #include <memory>
 #include <DirectXTex.h>
 
-#include "../TextureHandle.h"
 
 #pragma comment(lib, "DirectXTex.lib")
 

@@ -38,7 +38,7 @@
 
 namespace RHI
 {
-	namespace DirectX
+	namespace DXGI
 	{
 		namespace
 		{

@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    common.h
-* @brief  �ėp�w�b�_�[
+* @brief  汎用ヘッダー
 * @details
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ���̑�
+* @note    その他
 ************************************************************************************/
 
 #pragma once
@@ -26,14 +26,20 @@
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
+// Core プロジェクトでは CORE_EXPORTS を定義してビルドする (dllexport)。使う側では dllimport になる
+// (以前は常に dllexport で、Core のヘッダーを読んだ RHI.dll なども Core のクラスを export し直していた : 3-8)
+#ifdef CORE_EXPORTS
 #define CORE_API_CLASS __declspec(dllexport)
+#else
+#define CORE_API_CLASS __declspec(dllimport)
+#endif
 #define CORE_API extern "C" CORE_API_CLASS
 
 #define CORE_RESULT int
-#define CORE_SUCCEEDED	            (1)	 // ����
-#define CORE_FAILED		            (-1) // �ėp�I�Ȏ��s
-//#define CORE_FAILED_INITIALIZED      (-2) // ���s_������
-//#define CORE_FAILED_INVALID_ARGUMENT (-3) // ���s_�s�K�Ȉ���
+#define CORE_SUCCEEDED	            (1)	 // 成功
+#define CORE_FAILED		            (-1) // 汎用的な失敗
+//#define CORE_FAILED_INITIALIZED      (-2) // 失敗_初期化
+//#define CORE_FAILED_INVALID_ARGUMENT (-3) // 失敗_不適な引数
 
 /******************************************************************
 * Enumeration Definitions

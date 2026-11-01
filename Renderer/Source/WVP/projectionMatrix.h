@@ -1,4 +1,4 @@
-
+﻿
 /***********************************************************************************
 * @file    projectionMatrix.h
 * @brief   Renderer projection matrix
@@ -64,7 +64,7 @@ namespace Renderer
             ProjectionType type
         )
         {
-            // ���ʗp�ϐ��錾
+            // 結果用変数宣言
             DirectX::XMMATRIX result;
 
             if (type == ProjectionType::PROJECTION_TYPE_2D)
@@ -73,9 +73,10 @@ namespace Renderer
                 result = DirectX::XMMatrixPerspectiveFovLH(1.0f, width / height, nearZ, farZ);
                 //result = DirectX::XMMatrixPerspectiveFovLH(DirectX::XM_PIDIV4, width / height, nearZ, farZ);
 
-            result = DirectX::XMMatrixTranspose(result);
+            // 転置はしない (RHI に渡すと RHI の中でシェーダー用に転置される)
+            // 以前はここで転置していたが、行列をシェーダーへ渡す時の都合は RHI の中の話なので RHI に任せた
 
-            // ���ʂ�ԋp
+            // 結果を返却
             return result;
         }
     };

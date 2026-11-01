@@ -98,8 +98,8 @@ namespace RHI
 		RHI_RESULT Device::Initialize()
 		{
 			// オブジェクトの作成
-			_dxgiFactory = std::make_unique<DirectX::DXGIFactory6>();
-			_adapter     = std::make_unique<DirectX::Adapter>();
+			_dxgiFactory = std::make_unique<DXGI::DXGIFactory6>();
+			_adapter     = std::make_unique<DXGI::Adapter>();
 			_dx12Device  = std::make_unique<DirectX12::Device>();
 
 			// 1. DXGIファクトリー
@@ -205,12 +205,12 @@ namespace RHI
 			_debugCallbackCookie = 0;
 		}
 
-		DirectX::DXGIFactory6* Device::GetDxgiFactory()const
+		DXGI::DXGIFactory6* Device::GetDxgiFactory()const
 		{
 			return _dxgiFactory.get();
 		}
 
-		DirectX::Adapter* Device::GetAdapter()const
+		DXGI::Adapter* Device::GetAdapter()const
 		{
 			return _adapter.get();
 		}

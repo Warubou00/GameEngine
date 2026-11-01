@@ -14,7 +14,7 @@
 // 構造体定義 (C++側のデータ構造と一致させる)
 // ==============================================================
 
-// Renderer/Source/vertex.h の Renderer::Vertex と同じ並び・同じサイズ(56byte)にすること
+// RHI/Source/Public/rhiTypes.h の RHI::Vertex と同じ並び・同じサイズ(56byte)にすること
 // StructuredBuffer は 16byte 境界に詰め直さないので、C++ 側と同じパディングを明示的に入れる
 // (以前は Position / Color / UV の 36byte しか無く、2頂点目以降の読み取り位置がずれていた : 1-7)
 struct Vertex
@@ -66,7 +66,7 @@ cbuffer GlobalData : register(b1)
 };
 
 // [ROOT_PARAM_OBJECT_CBV]: Scene定数バッファ (Root CBV) - オブジェクト行列等
-// Renderer::ConstantPerRenderObject と同じ並び (matrix 64byte + uint)
+// RHI::ObjectConstants (Public/rhiTypes.h) と同じ並び (matrix 64byte + uint)
 cbuffer ObjectData : register(b2)
 {
     matrix g_WorldMatrix;

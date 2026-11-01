@@ -2,7 +2,8 @@
 /***********************************************************************************
 * @file    RenderHardwareInterface.h
 * @brief   RHI構造
-* @details 
+* @details 公開インターフェイス IRenderHardwareInterface (Public/rhi.h) の DirectX12 実装。
+*          このクラス自体は RHI.dll の外には出さない (RHI_CreateRenderHardwareInterface で生成する)
 *
 * @author  Keigo Onari
 * @date    2026/1/13
@@ -11,7 +12,8 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    その他
+* @note    以前はモデルの読み込みやカメラ (Renderer の型) もここで扱っていたため、RHI が Renderer に依存していた。
+*          それらは Renderer::SceneRenderer に移し、ここは GPU の仕事だけにした (Phase 3)
 ************************************************************************************/
 
 #pragma once
@@ -22,23 +24,11 @@
 * Include Headers
 ******************************************************************/
 #include <memory>
-#include "dataDefinition.h"
-
-/******************************************************************
-* Macro Definitions
-******************************************************************/
-
-
-/******************************************************************
-* Enumeration Definitions
-******************************************************************/
-
+#include "Public/rhi.h"
 
 /******************************************************************
 * Structure Declarations
 ******************************************************************/
-
-
 
 namespace RHI
 {
@@ -48,104 +38,46 @@ namespace RHI
         class Device;
         class CommandContext;
         class Buffer;
-        class Texture;
         class Pipeline;
-        struct ObjectInfo;
     }
 
-    class RenderHardwareInterface
+    class RenderHardwareInterface final : public IRenderHardwareInterface
     {
-
-        /******************************************************************
-        * Internal Enumeration Declarations
-        ******************************************************************/
-
-
-        /******************************************************************
-        * Internal Structure Declarations
-        ******************************************************************/
-    public:        
-        struct RHIInitializeInfo
-        {
-            uint32_t InitializedDevice         = -1;
-            uint32_t InitializedCommandContext = -1;
-            uint32_t InitializedBuffer         = -1;
-            uint32_t InitializedTexture        = -1;
-            uint32_t InitializedPipeline       = -1;
-        };
-
     public:          /*---コンストラクタ・デストラクタ---*/
         RenderHardwareInterface();
-        ~RenderHardwareInterface();
+        ~RenderHardwareInterface()override;
 
+        RenderHardwareInterface(const RenderHardwareInterface&) = delete;
+        RenderHardwareInterface& operator=(const RenderHardwareInterface&) = delete;
 
-    public:          /*---クラスメソッド---*/
+    public:          /*---IRenderHardwareInterface---*/
 
-        void Initialize(RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objectInfo);
+        bool Initialize(const InitializeDesc& desc, InitializeResult* outResult)override;
+        void Shutdown()override;
+        bool IsInitialized()const override { return _isInitialized; }
 
-        /// <summary>
-        /// 描画開始 (失敗したら false。その場合は End を呼ばないこと)
-        /// </summary>
-        bool Begin();
+        bool     Resize(uint32_t width, uint32_t height)override;
+        uint32_t GetWidth()const override;
+        uint32_t GetHeight()const override;
 
-        /// <summary>
-        /// 描画終了
-        /// </summary>
-        bool End();
+        VertexRange  UploadVertices(const Vertex* vertices, uint32_t count)override;
+        IndexRange   UploadIndices(const uint32_t* indices, uint32_t count)override;
+        void         LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles)override;
+        ObjectHandle CreateObject()override;
+        void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;
+        void         SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)override;
 
-        /// <summary>
-        /// 終了処理 <br/>
-        /// GPUの完了を待ってから、Device を最後にして破棄する。2回呼んでも問題ない
-        /// </summary>
-        void CleanUp();
-
-        /// <summary>
-        /// 描画先のサイズ変更 (ウィンドウのクライアント領域のサイズを渡す) <br/>
-        /// 0 (最小化中) の場合は何もしない
-        /// </summary>
-        bool Resize(uint32_t width, uint32_t height);
-
-        /// <summary>
-        /// 全ての初期化に成功しているか
-        /// </summary>
-        bool IsInitialized()const { return _isInitialized; }
-
-        /// <summary>
-        /// テクスチャのロード <br/>
-        /// 定数バッファに転送するまで...
-        /// </summary>
-        void Test_LoadTexture();
-
-        /// <summary>
-        /// モデルのロード <br/>
-        /// objファイルのロード <br/>
-        /// テクスチャ作成まで
-        /// </summary>
-        void Test_LoadModel(float cameraPosX, float cameraPosY, float cameraPosZ);
-
-        void TestRender();
-
-        // デバッグ用処理確認
-        void DebugExecute();
-
-    public:          /*---アクセッサー関数群---*/
-
+        bool Render(const DrawItem* items, uint32_t count)override;
+        void WaitForGpu()override;
 
     private:         /*---メンバ変数---*/
+        // 破棄は Shutdown で「GPU 完了待ち → Pipeline / Buffer / CommandContext → Device」の順に行う
         std::unique_ptr<ObjectInterface::Device>         _device;
         std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
         std::unique_ptr<ObjectInterface::Buffer>         _buffer;
-        std::unique_ptr<ObjectInterface::Texture>        _texture;
         std::unique_ptr<ObjectInterface::Pipeline>       _pipeline;
 
-        RenderQueue  _renderQueue;
-        RenderObject _renderObj;
-
         bool _isInitialized = false;     // 初期化が最後まで成功したか
-
-        // レンダーターゲットの作成
-        bool makeRenderTarget() { return false; }
-
     };
 
 }

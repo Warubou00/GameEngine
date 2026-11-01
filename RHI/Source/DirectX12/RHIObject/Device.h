@@ -42,7 +42,7 @@
 
 namespace RHI
 {
-    namespace DirectX
+    namespace DXGI
     {
         class Adapter;
         class DXGIFactory6;
@@ -85,8 +85,8 @@ namespace RHI
 
         public:          /*---アクセッサー関数群---*/
 
-            DirectX::DXGIFactory6* GetDxgiFactory()const;
-            DirectX::Adapter*      GetAdapter()const;
+            DXGI::DXGIFactory6* GetDxgiFactory()const;
+            DXGI::Adapter*      GetAdapter()const;
             DirectX12::Device*     GetDevice()const;
 
 
@@ -94,9 +94,9 @@ namespace RHI
         private:         /*---メンバ変数---*/
 
             // DXGIファクトリー
-            std::unique_ptr<DirectX::DXGIFactory6> _dxgiFactory;
+            std::unique_ptr<DXGI::DXGIFactory6> _dxgiFactory;
             // アダプター
-            std::unique_ptr<DirectX::Adapter> _adapter;
+            std::unique_ptr<DXGI::Adapter> _adapter;
             // DirectX12のデバイス
             std::unique_ptr<DirectX12::Device> _dx12Device;
             // デバッグメッセージのコールバック登録ID (0なら未登録)

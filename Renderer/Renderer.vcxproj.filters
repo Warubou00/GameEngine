@@ -24,6 +24,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\sceneRenderer.h" />
     <ClInclude Include="Source\mesh.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
@@ -60,11 +61,10 @@
     <ClInclude Include="Source\WVP\projectionMatrix.h">
       <Filter>ヘッダー ファイル\WVP</Filter>
     </ClInclude>
-    <ClInclude Include="Source\constant.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\rendererDll.cpp" />
+    <ClCompile Include="Source\sceneRenderer.cpp" />
     <ClCompile Include="Source\Loader\objLoader.cpp">
       <Filter>ソース ファイル\Loader</Filter>
     </ClCompile>

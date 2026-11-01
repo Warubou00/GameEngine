@@ -2,7 +2,7 @@
 /***********************************************************************************
 * @file    RenderHardwareInterface.cpp
 * @brief   RHI構造
-* @details 
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/1/13
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 
@@ -19,7 +19,6 @@
 * Include Headers
 ******************************************************************/
 #include "RenderHardwareInterface.h"
-#include "dataDefinition.h"
 
 // DirectX12
 // ========================================
@@ -32,40 +31,21 @@
 // ========================================
 
 #include "../../Core/Source/Log/logger.h"
-#include "scopedTimer.h"
-#include "../../Renderer/Source/camera.h"
-#include "../../Renderer/Source/WVP/projectionMatrix.h"
-#include "../../Renderer/Source/mesh.h"
-#include "../../Renderer/Source/constant.h"
-
-/******************************************************************
-* Macro Definitions
-******************************************************************/
-#define VERTEX_OFFSET_X_1 (-0.2f)
-#define VERTEX_OFFSET_X_2 (0.2f)
-
-/******************************************************************
-* Enumeration Definitions
-******************************************************************/
-
-
-/******************************************************************
-* Structure Declarations
-******************************************************************/
-
-
 
 namespace RHI
 {
     RenderHardwareInterface::RenderHardwareInterface() = default;
     RenderHardwareInterface::~RenderHardwareInterface()
     {
-        // CleanUp を呼び忘れても、GPUの完了を待ってから正しい順番で破棄されるようにする
-        CleanUp();
+        // Shutdown を呼び忘れても、GPUの完了を待ってから正しい順番で破棄されるようにする
+        Shutdown();
     }
-    
-    void RenderHardwareInterface::Initialize(RHI::RenderHardwareInterface::RHIInitializeInfo* info, ObjectInterface::ObjectInfo* objInfo)
+
+    bool RenderHardwareInterface::Initialize(const InitializeDesc& desc, InitializeResult* outResult)
     {
+        InitializeResult result;
+        _isInitialized = false;
+
 #ifdef _DEBUG
         RHI::DirectX12::EnableDebugLayer();
 #endif
@@ -73,108 +53,53 @@ namespace RHI
         _device         = std::make_unique<ObjectInterface::Device>();
         _commandContext = std::make_unique<ObjectInterface::CommandContext>();
         _buffer         = std::make_unique<ObjectInterface::Buffer>();
-        _texture        = std::make_unique<ObjectInterface::Texture>();
         _pipeline       = std::make_unique<ObjectInterface::Pipeline>();
 
-        _isInitialized = false;
+        // 公開用の設定を内部用の形に詰め替える
+        ObjectInterface::ObjectInfo objInfo = {};
+        objInfo.HWnd         = desc.WindowHandle;
+        objInfo.Width        = desc.Width;
+        objInfo.Height       = desc.Height;
+        objInfo.EnabledVSync = desc.EnableVSync ? 1u : 0u;
 
-        // 以前は前の段階が失敗していても次へ進み、壊れたデバイスで初期化を続けていた
-        // → 失敗した段階で止める (それ以降の項目は -1 のまま = 未初期化)
-        info->InitializedDevice = _device->Initialize();
-        if (info->InitializedDevice != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Device."); return; }
-
-        info->InitializedCommandContext = _commandContext->Initialize(_device.get(), objInfo);
-        if (info->InitializedCommandContext != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize CommandContext."); return; }
-
-        info->InitializedBuffer = _buffer->Initialize(_device.get(), _commandContext.get());
-        if (info->InitializedBuffer != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Buffer."); return; }
-
-        info->InitializedTexture = RHI_SUCCEEDED;
-
-        info->InitializedPipeline = _pipeline->Initialize(_device.get());
-        if (info->InitializedPipeline != RHI_SUCCEEDED) { Core::Logger::Log("[RHI] Failed initialize Pipeline."); return; }
-
-        _isInitialized = true;
-
-
-        //// TODO : 何かしらのモデルの読み込みがあった場合としての仮
-        //// モデル1
-        //std::vector<Renderer::Vertex> quadVertices1 = {
-        //    // 1つ目の三角形 (左上, 右上, 左下)
-        //    { {-0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f} }, // 左上 (赤)
-        //    { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // 右上 (緑)
-        //    { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // 左下 (青)
-
-        //    // 2つ目の三角形 (左下, 右上, 右下)
-        //    { {-0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // 左下 (青)
-        //    { { 0.25f + VERTEX_OFFSET_X_1,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // 右上 (緑)
-        //    { { 0.25f + VERTEX_OFFSET_X_1, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f} }  // 右下 (白)
-        //};
-
-        //// モデル2
-        //std::vector<Renderer::Vertex> quadVertices2 = {
-        //    // 1つ目の三角形 (左上, 右上, 左下)
-        //    { {-0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f} }, // 左上 (赤)
-        //    { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // 右上 (緑)
-        //    { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f},{0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f} }, // 左下 (青)
-
-        //    // 2つ目の三角形 (左下, 右上, 右下)
-        //    { {-0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f}, { 0.0f, 0.0f, 1.0f, 1.0f }, {0.0f, 1.0f} }, // 左下 (青)
-        //    { { 0.25f + VERTEX_OFFSET_X_2,  0.5f, 0.0f}, {0.0f,0.0f,0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f} }, // 右上 (緑)
-        //    { { 0.25f + VERTEX_OFFSET_X_2, -0.5f, 0.0f}, {0.0f,0.0f,0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f} }  // 右下 (白)
-        //};
-
-        ////// バッファへ転送
-        //_buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices1);
-        //_buffer->UploadVertexData(_device.get(), _commandContext.get(), quadVertices2);
-
-        //Test_LoadTexture();
-
-        return;
-    }
-
-
-    bool RenderHardwareInterface::Begin()
-    {
-        if (!_isInitialized) return false;
-        return _commandContext->RenderStart(_pipeline.get(), _buffer.get());
-    }
-
-    bool RenderHardwareInterface::End()
-    {
-        if (!_isInitialized) return false;
-        return _commandContext->RenderEnd();
-    }
-
-    bool RenderHardwareInterface::Resize(uint32_t width, uint32_t height)
-    {
-        if (!_isInitialized) return false;
-
-        // スワップチェーン・RTV・深度バッファを作り直してから、Projection のアスペクト比を合わせる
-        if (!_commandContext->Resize(width, height))
+        // 失敗した段階で止める (それ以降の項目は NotInitialized のまま)
+        auto finish = [&](bool succeeded)
         {
-            Core::Logger::Log("[RHI] Failed resize.");
-            return false;
-        }
-        _buffer->SetViewportSize(_commandContext->GetWidth(), _commandContext->GetHeight());
-        return true;
+            if (outResult) *outResult = result;
+            _isInitialized = succeeded;
+            return succeeded;
+        };
+
+        result.Device = _device->Initialize();
+        if (result.Device != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Device."); return finish(false); }
+
+        result.CommandContext = _commandContext->Initialize(_device.get(), &objInfo);
+        if (result.CommandContext != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize CommandContext."); return finish(false); }
+
+        result.Buffer = _buffer->Initialize(_device.get(), _commandContext.get());
+        if (result.Buffer != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Buffer."); return finish(false); }
+
+        // テクスチャは Buffer の初期化で既定テクスチャまで作ってある
+        result.Texture = Result::Succeeded;
+
+        result.Pipeline = _pipeline->Initialize(_device.get());
+        if (result.Pipeline != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Pipeline."); return finish(false); }
+
+        return finish(true);
     }
 
-    void RenderHardwareInterface::CleanUp()
+    void RenderHardwareInterface::Shutdown()
     {
         // 破棄の順番が重要:
         //   1. CommandContext で GPU の完了を待つ (使用中のリソースを消さないため)
         //   2. GPU リソースを持つオブジェクトを破棄
         //   3. 最後に Device
-        // 以前は Device を最初に Dispose していた (2-11)
         if (_commandContext) _commandContext->WaitForGpu();
 
-        if (_texture)  _texture->Dispose();
-        if (_pipeline) _pipeline->Dispose();
-        if (_buffer)   _buffer->Dispose();
+        if (_pipeline)       _pipeline->Dispose();
+        if (_buffer)         _buffer->Dispose();
         if (_commandContext) _commandContext->Dispose();
 
-        _texture.reset();
         _pipeline.reset();
         _buffer.reset();
         _commandContext.reset();
@@ -182,86 +107,102 @@ namespace RHI
         if (_device) _device->Dispose();
         _device.reset();
 
-        _renderQueue.RenderObjects.clear();
         _isInitialized = false;
     }
 
-    void RenderHardwareInterface::Test_LoadTexture()
+    bool RenderHardwareInterface::Resize(uint32_t width, uint32_t height)
+    {
+        if (!_isInitialized) return false;
+
+        // スワップチェーン・RTV・深度バッファを作り直す
+        // (Projection 行列のアスペクト比は、行列を作る側 (Renderer) が GetWidth / GetHeight を見て作り直す)
+        if (!_commandContext->Resize(width, height))
+        {
+            Core::Logger::Log("[RHI] Failed resize.");
+            return false;
+        }
+        return true;
+    }
+
+    uint32_t RenderHardwareInterface::GetWidth()const
+    {
+        return _commandContext ? _commandContext->GetWidth() : 0;
+    }
+
+    uint32_t RenderHardwareInterface::GetHeight()const
+    {
+        return _commandContext ? _commandContext->GetHeight() : 0;
+    }
+
+    VertexRange RenderHardwareInterface::UploadVertices(const Vertex* vertices, uint32_t count)
+    {
+        if (!_isInitialized) return VertexRange();
+        return _buffer->UploadVertexData(_device.get(), _commandContext.get(), vertices, count);
+    }
+
+    IndexRange RenderHardwareInterface::UploadIndices(const uint32_t* indices, uint32_t count)
+    {
+        if (!_isInitialized) return IndexRange();
+        return _buffer->UploadIndexData(_device.get(), _commandContext.get(), indices, count);
+    }
+
+    void RenderHardwareInterface::LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles)
+    {
+        if (!outHandles) return;
+
+        // 失敗時はどれも既定テクスチャ
+        for (uint32_t i = 0; i < count; ++i) outHandles[i] = TextureHandle();
+        if (!_isInitialized || !filePaths || count == 0) return;
+
+        std::vector<std::wstring> paths;
+        paths.reserve(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            paths.emplace_back(filePaths[i] ? filePaths[i] : L"");
+        }
+
+        // 既定テクスチャを作ったものと同じ Texture を使う (TextureID の通し番号を共有するため)
+        auto handles = _buffer->GetTexture()->LoadTexturesFromFiles(_device.get(), _commandContext.get(), _buffer.get(), paths);
+        for (uint32_t i = 0; i < count && i < handles.size(); ++i)
+        {
+            outHandles[i].Index = handles[i].TextureID;
+        }
+    }
+
+    ObjectHandle RenderHardwareInterface::CreateObject()
+    {
+        if (!_isInitialized) return ObjectHandle();
+        return _buffer->CreateObject();
+    }
+
+    void RenderHardwareInterface::UpdateObject(ObjectHandle object, const ObjectConstants& constants)
     {
         if (!_isInitialized) return;
-        _texture->LoadTextureFromFile(_device.get(), _commandContext.get(), _buffer.get(), L"../Image/image.png");
+        _buffer->UpdateObject(object, constants);
     }
 
-    void RenderHardwareInterface::Test_LoadModel(float cameraPosX, float cameraPosY, float cameraPosZ)
+    void RenderHardwareInterface::SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)
     {
         if (!_isInitialized) return;
-
-        Core::Logger::Log("call Test_LoadModel()");
-        Renderer::Mesh* mesh = nullptr;
-        {
-            // 高速化の効果確認用 : 読み込み開始 → GPU へのアップロード完了までの時間
-            RHI::ScopedTimer timer("Test_LoadModel (until GPU upload complete)");
-            mesh = _buffer->LoadModel(_device.get(), _commandContext.get(), L"../Model/box.obj");
-            _commandContext->WaitForGpu();
-        }
-        if (!mesh)
-        {
-            // 以前は読み込み失敗時に nullptr を参照していた
-            Core::Logger::Log("[RHI] Failed load model.");
-            return;
-        }
-
-        uint32_t offset = 0;
-        uint32_t idx = 0;
-        for (const auto& index : mesh->Indecies)
-        {
-            _renderObj.VertexOffset = 0;
-            _renderObj.IndexOffset  = offset;
-            _renderObj.VertexCount  = static_cast<uint32_t>(mesh->Vertices.size());
-            _renderObj.IndexCount   = static_cast<uint32_t>(index.size());
-            // Root CBV は 256byte 境界が必須。Buffer::LoadModel が書き込む間隔と同じ値を使う (1-9)
-            _renderObj.CbOffset     = static_cast<uint32_t>(idx * ObjectInterface::Buffer::SCENE_CB_STRIDE);
-            _renderQueue.RenderObjects.emplace_back(_renderObj);
-            offset += static_cast<uint32_t>(index.size());
-            idx++;
-        }
-
-        Core::Logger::Log("called Test_LoadModel()");
-
-        Renderer::Camera camera;
-        camera.Position = Core::Vector3(cameraPosX, cameraPosY, cameraPosZ);
-        camera.Target   = Core::Vector3(0.0f, 0.0f, 0.0f);
-        camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
-        Core::Logger::Log("call UpdateViewProjection()");
-        _buffer->UpdateViewProjection(camera, Renderer::Projection::ProjectionType::PROJECTION_TYPE_3D);
-        Core::Logger::Log("called UpdateViewProjection()");
+        _buffer->SetViewProjection(view, projection);
     }
 
-    void RenderHardwareInterface::TestRender()
+    bool RenderHardwareInterface::Render(const DrawItem* items, uint32_t count)
     {
-        //RenderQueue renderQueue;
-        //RenderObject renderObj1 = {}, renderObj2 = {};
-        //renderObj1.VertexCount  = 6;
-        //renderObj1.CbOffset     = 0;
-        //renderObj1.VertexOffset = 0;
-        //renderObj2.VertexCount  = 6;
-        //renderObj2.CbOffset     = 0;
-        //renderObj2.VertexOffset = 6;
+        if (!_isInitialized) return false;
 
-        //renderQueue.RenderObjects.push_back(renderObj1);
-        //renderQueue.RenderObjects.push_back(renderObj2);
-
-        if (!Begin()) return;
-        _commandContext->Render(_buffer.get(), _renderQueue);
-        End();
+        if (!_commandContext->RenderStart(_pipeline.get(), _buffer.get()))
+        {
+            return false;
+        }
+        _commandContext->Render(_buffer.get(), items, count);
+        return _commandContext->RenderEnd();
     }
 
-    void RenderHardwareInterface::DebugExecute()
+    void RenderHardwareInterface::WaitForGpu()
     {
-        if (!_isInitialized) return;
-        _pipeline->InitCommandSignature(_device.get());
+        if (_commandContext) _commandContext->WaitForGpu();
     }
-
 }
 
 /************************************
