@@ -321,41 +321,52 @@ namespace RHI
 			return true;
 		}
 
-		void CommandContext::Render(Buffer* buffer, const RenderQueue& renderQueue)
+		void CommandContext::Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count)
 		{
-			if (!buffer || !_frameCommandList->IsRecording())
+			if (!buffer || !_frameCommandList->IsRecording() || (!items && count > 0))
 			{
 				return;
 			}
 
 			auto cmdList = _frameCommandList->GetCmdList();
-			const D3D12_GPU_VIRTUAL_ADDRESS sceneCbBase = buffer->GetSceneCB()->GetGPUVirtualAddress();
+
+			// オブジェクトの定数を、このフレーム用の領域に書いてからその先頭アドレスを得る
+			// (変わったオブジェクトだけ書く。GPU が前のフレームで読んでいる領域には触らない)
+			const D3D12_GPU_VIRTUAL_ADDRESS objectCbBase = buffer->WriteObjectConstants(_frameIndex);
 
 			// 同じ値を何度もセットしないように前回の値を覚えておく (ルート引数の変更は描画ごとのコストになる)
-			UINT lastBaseVertex = UINT_MAX;
+			UINT     lastBaseVertex = UINT_MAX;
+			uint32_t lastObject     = RHI::INVALID_HANDLE_INDEX;
 
-			for (const auto& renderObj : renderQueue.RenderObjects)
+			for (uint32_t i = 0; i < count; ++i)
 			{
+				const RHI::DrawItem& item = items[i];
+				if (!item.Object.IsValid() || item.IndexCount == 0) continue;
+
 				// 頂点オフセット (b0)
 				// シェーダーは g_MegaVB[g_BaseVertexIndex + SV_VertexID] で頂点を読む
-				if (renderObj.VertexOffset != lastBaseVertex)
+				if (item.BaseVertex != lastBaseVertex)
 				{
-					UINT baseVertexIndex = renderObj.VertexOffset;
+					UINT baseVertexIndex = item.BaseVertex;
 					cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_BASE_VERTEX, 1, &baseVertexIndex, 0);
 					lastBaseVertex = baseVertexIndex;
 				}
 
-				// Scene(Object)定数バッファ (b2)
-				// CbOffset は Root CBV の制約で 256 の倍数であること (Buffer::SCENE_CB_STRIDE 単位で指定する)
-				cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_OBJECT_CBV, sceneCbBase + renderObj.CbOffset);
+				// オブジェクトの定数バッファ (b2) : Root CBV は 256 の倍数のアドレスが必須 (SCENE_CB_STRIDE 間隔)
+				if (item.Object.Index != lastObject)
+				{
+					cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_OBJECT_CBV,
+						objectCbBase + Buffer::SCENE_CB_STRIDE * item.Object.Index);
+					lastObject = item.Object.Index;
+				}
 
 				// インデックスバッファを使用
 				// BaseVertexLocation(第4引数)は SV_VertexID に加算されない。
 				// 頂点の開始位置はルート定数で渡しているので、ここは 0 にしておく (2-9)
 				cmdList->DrawIndexedInstanced(
-					renderObj.IndexCount,
+					item.IndexCount,
 					1,
-					renderObj.IndexOffset,
+					item.FirstIndex,
 					0,
 					0
 				);

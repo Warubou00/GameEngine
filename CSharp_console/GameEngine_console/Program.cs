@@ -22,8 +22,6 @@ namespace GameEngine_console
             Console.WriteLine($"Texture        : {rhi.CheckRHIResult(info.InitializedTexture)}");
             Console.WriteLine($"Pipeline       : {rhi.CheckRHIResult(info.InitializedPipeline)}");
 
-            //rhi.DebugExecute();
-
             rhi.Test_LoadModel(0.0f, 5.0f, -10.0f);
 
             // ウィンドウが閉じられたらループを抜けて終了処理を呼ぶ

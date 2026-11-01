@@ -1,4 +1,4 @@
-
+ï»¿
 /***********************************************************************************
 * @file    common.h
 * @brief   Renderer common
@@ -25,14 +25,19 @@
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
+// Renderer ãƒ—ãƒ­ã‚¸ã‚§ã‚¯ãƒˆã§ã¯ RENDERER_EXPORTS ã‚’å®šç¾©ã—ã¦ãƒ“ãƒ«ãƒ‰ã™ã‚‹ (dllexport)ã€‚ä½¿ã†å´ã§ã¯ dllimport ã«ãªã‚‹ (3-8)
+#ifdef RENDERER_EXPORTS
 #define RENDERER_API_CLASS __declspec(dllexport)
+#else
+#define RENDERER_API_CLASS __declspec(dllimport)
+#endif
 #define RENDERER_API extern "C" RENDERER_API_CLASS
 
 #define RENDERER_RESULT int
-#define RENDERER_SUCCEEDED	            (1)	 // ¬Œ÷
-#define RENDERER_FAILED		            (-1) // ”Ä—p“I‚È¸”s
-//#define CORE_FAILED_INITIALIZED      (-2) // ¸”s_‰Šú‰»
-//#define CORE_FAILED_INVALID_ARGUMENT (-3) // ¸”s_•s“K‚Èˆø”
+#define RENDERER_SUCCEEDED	            (1)	 // æˆåŠŸ
+#define RENDERER_FAILED		            (-1) // æ±ç”¨çš„ãªå¤±æ•—
+//#define CORE_FAILED_INITIALIZED      (-2) // å¤±æ•—_åˆæœŸåŒ–
+//#define CORE_FAILED_INVALID_ARGUMENT (-3) // å¤±æ•—_ä¸é©ãªå¼•æ•°
 
 /******************************************************************
 * Enumeration Definitions

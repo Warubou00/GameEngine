@@ -51,6 +51,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\Log\scopedTimer.h" />
     <ClInclude Include="Source\Math\Float\float4.h">
       <Filter>ヘッダー ファイル\Math\Float</Filter>
     </ClInclude>

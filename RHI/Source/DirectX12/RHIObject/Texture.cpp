@@ -31,7 +31,7 @@
 #include "../dx12_descriptorHeapManager.h"
 
 #include "../../Core/Source/Log/logger.h"
-#include "../../scopedTimer.h"
+#include "../../../../Core/Source/Log/scopedTimer.h"
 
 #include <algorithm>
 #include <future>
@@ -103,7 +103,7 @@ namespace RHI
             auto buffer         = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
             auto textureManager = getTextureManager();
 
-            RHI::ScopedTimer timer(" Texture load total");
+            Core::ScopedTimer timer(" Texture load total");
 
             // ==========================================================
             // 1. デコードを並列に行う (CPU だけの処理なので複数スレッドで同時にできる)
@@ -111,7 +111,7 @@ namespace RHI
             std::vector<::DirectX::ScratchImage> images(filePaths.size());
             std::vector<HRESULT>                 results(filePaths.size(), E_FAIL);
             {
-                RHI::ScopedTimer decodeTimer(" Texture decode (parallel)");
+                Core::ScopedTimer decodeTimer(" Texture decode (parallel)");
 
                 // WIC のファクトリーはメインスレッドで先に作っておく
                 // (ワーカースレッドで初めて作ると、そのスレッドの終了と一緒に使えなくなる恐れがある)

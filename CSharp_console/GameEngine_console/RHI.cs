@@ -55,30 +55,34 @@ public class RHI : IDisposable
     private static LogCallbackDelegate _logCallback;
     private static WLogCallbackDelegate _wLogCallback;
 
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void RHI_SetLogCallback(LogCallbackDelegate callback, WLogCallbackDelegate wcallback);
+    // ------------------------------------------------------------------
+    // C# から呼ぶのは Renderer.dll だけ (Phase 3 で RHI.dll から入口を移した)
+    //   C# → Renderer.dll (モデル / カメラ / 描画リスト) → RHI.dll (GPU) → Core.dll
+    // RHI.dll / Core.dll は Renderer.dll が読み込むので、出力フォルダに置いておくだけでよい
+    // ------------------------------------------------------------------
+    private const string EngineDll = "Renderer.dll";
 
-    // C++ 側は ObjectInfo* (ポインタ) で受けるので ref で渡す
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetLogCallback(LogCallbackDelegate callback, WLogCallbackDelegate wcallback);
+
+    // C++ 側はポインタで受けるので ref で渡す
     // (以前は値渡しで、x64 の呼び出し規約がたまたま参照渡しにしていたため動いていた : 2-12)
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_Initialize(out RHIInitializedInfo info, ref RHIInfo rHIInfo);
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_Initialize(out RHIInitializedInfo info, ref RHIInfo rHIInfo);
 
     // C++ の bool は 1 バイトなので I1 で受ける (既定の 4 バイト BOOL だと上位バイトのゴミを拾う)
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
-    private static extern bool RHI_Resize(uint width, uint height);
+    private static extern bool Renderer_Resize(uint width, uint height);
 
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_CleanUp();
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_CleanUp();
 
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_TestRender();
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_Render();
 
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_TestLoadModel(float posX, float posY, float posZ);
-
-    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_DebugExecute();
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_TestLoadModel(float posX, float posY, float posZ);
 
     public void Initialize(out RHIInitializedInfo info)
     {
@@ -95,7 +99,7 @@ public class RHI : IDisposable
         {
             if (!isInitialized || window.WindowState == FormWindowState.Minimized) return;
             if (window.ClientSize.Width <= 0 || window.ClientSize.Height <= 0) return;
-            RHI_Resize((uint)window.ClientSize.Width, (uint)window.ClientSize.Height);
+            Renderer_Resize((uint)window.ClientSize.Width, (uint)window.ClientSize.Height);
         };
 
         window.Show();
@@ -103,9 +107,9 @@ public class RHI : IDisposable
         _logCallback  = new LogCallbackDelegate(Log);
         _wLogCallback = new WLogCallbackDelegate(Log);
 
-        RHI_SetLogCallback(_logCallback, _wLogCallback);
+        Renderer_SetLogCallback(_logCallback, _wLogCallback);
 
-        RHI_Initialize(out info, ref rhiInfo);
+        Renderer_Initialize(out info, ref rhiInfo);
         isInitialized = isAllInitialized(info);
 
         fpsTimer.Start();
@@ -117,7 +121,7 @@ public class RHI : IDisposable
 
     public void Test_LoadModel(float posX, float posY, float posZ)
     {
-        RHI_TestLoadModel(posX, posY, posZ);
+        Renderer_TestLoadModel(posX, posY, posZ);
     }
 
     public void Render()
@@ -129,7 +133,7 @@ public class RHI : IDisposable
             return;
         }
 
-        RHI_TestRender();
+        Renderer_Render();
         updateFps();
     }
 
@@ -139,7 +143,7 @@ public class RHI : IDisposable
         if (isDisposed) return;
         isDisposed = true;
 
-        RHI_CleanUp();
+        Renderer_CleanUp();
         if (!window.IsDisposed) window.Dispose();
     }
 
@@ -155,11 +159,6 @@ public class RHI : IDisposable
 
         fpsFrameCount = 0;
         fpsTimer.Restart();
-    }
-
-    public void DebugExecute()
-    {
-        RHI_DebugExecute();
     }
 
     private enum RHI_RESULT

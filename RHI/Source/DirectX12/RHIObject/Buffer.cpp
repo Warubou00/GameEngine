@@ -46,9 +46,7 @@
 // 外部クラスをインクルード
 // ========================================
 #include "../../Core/Source/Log/logger.h"
-#include "../../Renderer/Source/Loader/objLoader.h"
-#include "../../Renderer/Source/mesh.h"
-#include "../../Renderer/Source/constant.h"
+// ※以前は Renderer のヘッダー (objLoader / mesh / constant) を読んでいた。モデルの読み込みは Renderer に移した
 // ========================================
 
 
@@ -70,8 +68,16 @@ namespace RHI
 {
 	namespace ObjectInterface
 	{
-		// 1オブジェクト分の定数を 256byte 境界に揃えた間隔
-		const uint64_t Buffer::SCENE_CB_STRIDE = Buffer::AlignConstantBufferSize(sizeof(Renderer::ConstantPerRenderObject));
+		namespace
+		{
+			// DirectXMath の行列を、シェーダー (mul(ベクトル, 行列) / column_major) 用に転置して保存する
+			::DirectX::XMFLOAT4X4 transposeForShader(const ::DirectX::XMFLOAT4X4& m)
+			{
+				::DirectX::XMFLOAT4X4 result;
+				::DirectX::XMStoreFloat4x4(&result, ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&m)));
+				return result;
+			}
+		}
 
 		Buffer::Buffer() {}
 		Buffer::~Buffer()
@@ -100,9 +106,6 @@ namespace RHI
 			}
 
 			// ※レンダーターゲットビュー(RTV)は CommandContext が作る (リサイズ時に作り直すため)
-
-			// 描画先のサイズを覚えておく (Projection 行列のアスペクト比に使う)
-			SetViewportSize(cmdContext->GetWidth(), cmdContext->GetHeight());
 
 			if (!makeCommonBuffer(device))
 			{
@@ -142,53 +145,70 @@ namespace RHI
 			return RHI_SUCCEEDED;
 		}
 
-		bool Buffer::UploadVertexData(
+		RHI::VertexRange Buffer::UploadVertexData(
 			RHI::ObjectInterface::IDevice* iDevice,
 			RHI::ObjectInterface::ICommandContext* iCommandContext,
-			const std::vector<Renderer::Vertex>& vertices
+			const RHI::Vertex* vertices,
+			uint32_t count
 		)
 		{
-			if (!iDevice || !iCommandContext)return false;
-			if (vertices.empty()) return false;
+			RHI::VertexRange range;
+			if (!iDevice || !iCommandContext || !vertices || count == 0) return range;
 
 			auto device     = static_cast<RHI::ObjectInterface::Device*>(iDevice);
 			auto cmdContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
 
 			// リソースのメモリ位置を取得
-			auto memoryAllocation = _sceneVBAllocator->Allocate(static_cast<uint32_t>(vertices.size()), sizeof(Renderer::Vertex));
+			auto memoryAllocation = _sceneVBAllocator->Allocate(count, sizeof(RHI::Vertex));
 			if (!memoryAllocation.IsValid)
 			{
 				// 以前は容量オーバーでもオフセット0が返り、既存の頂点を上書きしていた (2-2)
 				Core::Logger::Log("[Buffer] Scene vertex buffer is full.");
-				return false;
+				return range;
 			}
 
-			const uint64_t dataSize = vertices.size() * sizeof(Renderer::Vertex);
-			return uploadToDefaultBuffer(device, cmdContext, _sceneVB.get(), memoryAllocation.ByteOffset, vertices.data(), dataSize);
+			const uint64_t dataSize = static_cast<uint64_t>(count) * sizeof(RHI::Vertex);
+			if (!uploadToDefaultBuffer(device, cmdContext, _sceneVB.get(), memoryAllocation.ByteOffset, vertices, dataSize))
+			{
+				return range;
+			}
+
+			// シェーダーは g_MegaVB[BaseVertex + インデックスの値] で読む
+			range.BaseVertex = memoryAllocation.StrideOffset;
+			range.Count      = count;
+			return range;
 		}
 
-		bool Buffer::UploadIndexData(
+		RHI::IndexRange Buffer::UploadIndexData(
 			RHI::ObjectInterface::IDevice* iDevice,
 			RHI::ObjectInterface::ICommandContext* iCommandContext,
-			const std::vector<uint32_t>& indecies
+			const uint32_t* indices,
+			uint32_t count
 		)
 		{
-			if (!iDevice || !iCommandContext)return false;
-			if (indecies.empty()) return false;
+			RHI::IndexRange range;
+			if (!iDevice || !iCommandContext || !indices || count == 0) return range;
 
 			auto device     = static_cast<RHI::ObjectInterface::Device*>(iDevice);
 			auto cmdContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
 
 			// リソースのメモリ位置を取得
-			auto memoryAllocation = _sceneIBAllocator->Allocate(static_cast<uint32_t>(indecies.size()), sizeof(uint32_t));
+			auto memoryAllocation = _sceneIBAllocator->Allocate(count, sizeof(uint32_t));
 			if (!memoryAllocation.IsValid)
 			{
 				Core::Logger::Log("[Buffer] Scene index buffer is full.");
-				return false;
+				return range;
 			}
 
-			const uint64_t dataSize = indecies.size() * sizeof(uint32_t);
-			return uploadToDefaultBuffer(device, cmdContext, _sceneIB.get(), memoryAllocation.ByteOffset, indecies.data(), dataSize);
+			const uint64_t dataSize = static_cast<uint64_t>(count) * sizeof(uint32_t);
+			if (!uploadToDefaultBuffer(device, cmdContext, _sceneIB.get(), memoryAllocation.ByteOffset, indices, dataSize))
+			{
+				return range;
+			}
+
+			range.FirstIndex = memoryAllocation.StrideOffset;   // DrawIndexedInstanced の StartIndexLocation
+			range.Count      = count;
+			return range;
 		}
 
 		bool Buffer::uploadToDefaultBuffer(
@@ -236,43 +256,86 @@ namespace RHI
 			return true;
 		}
 
-		void Buffer::UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type)
+		void Buffer::SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)
 		{
-			// 以前はここで定数バッファへ直接書いていた。
-			// GPU が複数フレームを並行して処理するようになったので、ここでは CPU 側の行列だけ更新し、
+			// GPU が複数フレームを並行して処理するので、ここでは CPU 側の行列だけ更新し、
 			// GPU へは WriteFrameConstants でフレームごとの領域に書く
-			_camera         = camera;
-			_projectionType = type;
-			_hasCamera      = true;
-			rebuildViewProjection();
-		}
-
-		void Buffer::SetViewportSize(uint32_t width, uint32_t height)
-		{
-			// 最小化中は 0 が来る。アスペクト比が壊れるので前の値のままにする
-			if (width == 0 || height == 0) return;
-			if (width == _viewportWidth && height == _viewportHeight) return;
-
-			_viewportWidth  = width;
-			_viewportHeight = height;
-			if (_hasCamera)
-			{
-				rebuildViewProjection();
-			}
-		}
-
-		void Buffer::rebuildViewProjection()
-		{
-			Renderer::View       view;
-			Renderer::Projection projection;
-
-			// どちらも転置済みの行列が返る (シェーダーは mul(ベクトル, 行列) で掛ける)
-			::DirectX::XMStoreFloat4x4(&_viewMatrix, view.GetViewMatrix(_camera));
-			::DirectX::XMStoreFloat4x4(&_projMatrix, projection.GetProjectionMatrix(
-				static_cast<float>(_viewportWidth), static_cast<float>(_viewportHeight), 1.0f, 10000.0f, _projectionType));
+			_viewMatrix = transposeForShader(view);
+			_projMatrix = transposeForShader(projection);
 
 			// 全フレームの領域に書き直しが必要になる
 			_frameConstantsVersion++;
+		}
+
+		RHI::ObjectHandle Buffer::CreateObject()
+		{
+			RHI::ObjectHandle handle;
+			if (_objects.size() >= MAX_OBJECTS)
+			{
+				Core::Logger::Log("[Buffer] Too many objects.");
+				return handle;
+			}
+
+			handle.Index = static_cast<uint32_t>(_objects.size());
+
+			// 初期値 : 原点に置いて既定テクスチャ(白)
+			RHI::ObjectConstants initial;
+			::DirectX::XMStoreFloat4x4(&initial.World, ::DirectX::XMMatrixIdentity());
+			initial.TextureIndex = RHI::TextureHandle::DEFAULT;
+
+			_objects.push_back(initial);                 // 単位行列は転置しても同じ
+			_objectVersion.push_back(_objectsVersion);
+			for (auto& written : _objectWritten)
+			{
+				written.push_back(0);                    // どのフレームの領域にもまだ書いていない
+			}
+			_objectsVersion++;
+			return handle;
+		}
+
+		void Buffer::UpdateObject(RHI::ObjectHandle object, const RHI::ObjectConstants& constants)
+		{
+			if (!object.IsValid() || object.Index >= _objects.size())
+			{
+				return;
+			}
+
+			RHI::ObjectConstants stored = constants;
+			stored.World = transposeForShader(constants.World);
+			_objects[object.Index] = stored;
+
+			_objectsVersion++;
+			_objectVersion[object.Index] = _objectsVersion;
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteObjectConstants(uint32_t frameIndex)
+		{
+			if (!_sceneCB || frameIndex >= CommandContext::FRAME_COUNT)
+			{
+				return 0;
+			}
+
+			// このフレーム用の領域の先頭
+			const uint64_t frameOffset = SCENE_CB_FRAME_SIZE * frameIndex;
+
+			// 前回このフレームの領域に書いてから何も変わっていなければ、ループごと省く
+			if (_objectsWrittenVersion[frameIndex] != _objectsVersion)
+			{
+				auto& written = _objectWritten[frameIndex];
+				for (size_t i = 0; i < _objects.size(); ++i)
+				{
+					// 変わったオブジェクトだけ書く (UPLOAD ヒープへの書き込みは遅いので最小限に)
+					if (written[i] == _objectVersion[i]) continue;
+
+					if (_sceneCB->WriteData(frameOffset + SCENE_CB_STRIDE * i, &_objects[i], sizeof(RHI::ObjectConstants)))
+					{
+						written[i] = _objectVersion[i];
+					}
+				}
+				_objectsWrittenVersion[frameIndex] = _objectsVersion;
+			}
+
+			return _sceneCB->GetGPUVirtualAddress() + frameOffset;
 		}
 
 		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteFrameConstants(uint32_t frameIndex)
@@ -522,7 +585,7 @@ namespace RHI
 				device,
 				_globalVB.get(),
 				_GLOBAL_VB_SIZE,
-				sizeof(Renderer::Vertex),
+				sizeof(RHI::Vertex),
 				SRV_INDEX_GLOBAL_VB
 			);
 		}
@@ -536,7 +599,7 @@ namespace RHI
 				device,
 				_sceneVB.get(),
 				_SCENE_VB_SIZE,
-				sizeof(Renderer::Vertex),
+				sizeof(RHI::Vertex),
 				SRV_INDEX_SCENE_VB
 			);
 		}
@@ -582,103 +645,6 @@ namespace RHI
 			device->GetDevice()->GetDevice()->CreateShaderResourceView(resourceBuffer->Get(), &srvDesc, cpuHandle);
 
 			return true;
-		}
-
-		Renderer::Mesh* Buffer::LoadModel(
-			RHI::ObjectInterface::IDevice* iDevice,
-			RHI::ObjectInterface::ICommandContext* iCommandContext,
-			const std::wstring& filePath)
-		{
-			// 以前は読み込み失敗時に objLoader が delete されずリークしていた
-			auto objLoader = std::make_unique<Renderer::ObjLoader>();
-			Core::Logger::Log("Instanced ObjLoader");
-
-			Renderer::Mesh* mesh = objLoader->LoadModel(filePath);
-			if (mesh)
-			{
-				Core::Logger::Log("Success Loaded Mesh");
-			}
-			else
-			{
-				Core::Logger::Log("Failed Loaded Mesh");
-				return nullptr;
-			}
-
-			// 以前は呼ぶたびに作り直しており、前に読み込んだテクスチャ(と既定テクスチャ)が破棄されていた
-			if (!_texture)
-			{
-				_texture = std::make_unique<RHI::ObjectInterface::Texture>();
-			}
-
-			// テクスチャを使うマテリアルのパスを集めて、まとめて読み込む (デコードが並列になる)
-			// (以前はマテリアルごとに 1 枚ずつ「デコード → アップロード → GPU 完了待ち」をしていた)
-			std::vector<std::wstring> texturePaths;
-			std::vector<size_t>       textureOwner;     // texturePaths[i] が何番目のマテリアルのものか
-			for (size_t m = 0; m < mesh->Materials.size(); ++m)
-			{
-				auto material = mesh->Materials[m];
-				// テクスチャを使わないマテリアルは既定テクスチャ(白)にする
-				// (以前は UseTexture を見ずに空のパスでも読み込もうとしていた : 1-11)
-				if (material && material->UseTexture)
-				{
-					Core::Logger::Log(material->TexturePath.c_str());
-					texturePaths.push_back(material->TexturePath);
-					textureOwner.push_back(m);
-				}
-			}
-
-			std::vector<TextureHandle> materialHandles(mesh->Materials.size());
-			if (!texturePaths.empty())
-			{
-				auto loaded = _texture->LoadTexturesFromFiles(iDevice, iCommandContext, this, texturePaths);
-				for (size_t i = 0; i < loaded.size(); ++i)
-				{
-					materialHandles[textureOwner[i]] = loaded[i];
-				}
-			}
-
-			// TODO : 今は Scene定数バッファを先頭から使っている。複数モデルを読む場合は _sceneCBAllocator で確保する
-			uint64_t idx = 0;
-			for (size_t m = 0; m < mesh->Materials.size(); ++m)
-			{
-				auto material = mesh->Materials[m];
-				const TextureHandle& handle = materialHandles[m];
-
-				if (material)
-				{
-					material->TextureIndex = handle.TextureID;
-				}
-
-				Renderer::ConstantPerRenderObject cObj = {};
-				// ワールド行列 (今は原点に置くだけ)
-				// View / Projection と同じく、シェーダーへは転置して渡す (シェーダーは mul(ベクトル, 行列) で掛ける)
-				// ※ :: は RHI::DirectX と区別するため
-				cObj.WorldMatrix = ::DirectX::XMMatrixTranspose(::DirectX::XMMatrixIdentity());
-				cObj.TextureID   = handle.TextureID;
-
-				// 256byte 間隔で書き込む (RenderHardwareInterface 側の CbOffset と同じ間隔にすること)
-				if (!_sceneCB->WriteData(SCENE_CB_STRIDE * idx, &cObj, sizeof(Renderer::ConstantPerRenderObject)))
-				{
-					Core::Logger::Log("[Buffer] Scene constant buffer is full.");
-					break;
-				}
-				idx++;
-			}
-
-			if (!UploadVertexData(iDevice, iCommandContext, mesh->Vertices))
-			{
-				Core::Logger::Log("[Buffer] Failed upload vertices.");
-			}
-
-			for (const auto& index : mesh->Indecies)
-			{
-				if (!UploadIndexData(iDevice, iCommandContext, index))
-				{
-					Core::Logger::Log("[Buffer] Failed upload indices.");
-				}
-			}
-
-			return mesh;
 		}
 	}
 }

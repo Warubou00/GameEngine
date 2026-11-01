@@ -1,0 +1,123 @@
+================================================================================
+ RHI Phase 3 : 依存の向きの整理 (Core ← RHI ← Renderer) と公開インターフェイス / ハンドル化
+ 日付   : 2026-11-01
+ ブランチ: feature/rhi-phase3 (develop から作成)
+ 参照   : RHI_DesignReview_2026-11-01.txt の 3-1 / 3-2 / 3-8 / 4章
+================================================================================
+
+■ 構成 (ユーザーの選択 : C# の入口を Renderer.dll に集約)
+
+    以前                                   今回
+    C# ──▶ RHI.dll ──▶ Renderer.dll        C# ──▶ Renderer.dll ──▶ RHI.dll ──▶ Core.dll
+              │           │                        (モデル / カメラ /    (GPU のみ)
+              └──▶ Core ◀─┘                         描画リスト)
+    (GPU 層が上の層に依存する逆向き)
+
+  dumpbin で確認 (Debug):
+    - RHI.dll      : 依存 = Core.dll のみ (Renderer.dll への依存が消えた)
+                     export = RHI_CreateRenderHardwareInterface / RHI_DestroyRenderHardwareInterface の 2 つだけ
+    - Renderer.dll : 依存 = RHI.dll, Core.dll
+                     C# 向け export = Renderer_SetLogCallback / Initialize / Render / Resize / TestLoadModel / CleanUp
+
+■ 確認
+  - Core / RHI / Renderer : Debug|x64, Release|x64 ビルド成功 (RHI / Renderer 側の警告なし)
+  - C# ホストで 起動 → モデル読み込み → リサイズ → 最小化/復帰 → 正常終了 を自動テスト。全て成功
+  - D3D12 デバッグメッセージの転送が有効な状態で、エラー/警告 0 件
+  - モデル読み込み (GPU 転送完了まで) 約 87 ms (Phase 2 と同等) / 約 1,200〜1,600 FPS
+  - 見た目 : ユーザーが目視で確認済み (2026-11-01)
+
+
+--------------------------------------------------------------------------------
+1. RHI の公開インターフェイス (新規 : RHI/Source/Public/)  [3-1]
+--------------------------------------------------------------------------------
+  rhi.h      : 抽象クラス RHI::IRenderHardwareInterface と、生成 / 破棄の 2 関数だけを export
+               - 具象クラス (DirectX12 の実装) は DLL の外に出ない
+               - 仮想関数の呼び出しだけなので、クラス自体を dllexport しない
+                 (STL メンバーを持つクラスを export した時の C4251 警告や ABI の問題を避けられる)
+               - 生成した DLL の中で delete する (DLL をまたいだ new / delete の混在を避ける)
+  rhiTypes.h : RHI を使う側と共有する型 (DirectX12 の型は含まない)
+               - Vertex          : シェーダーと対になる頂点型 (Renderer から RHI に移した。static_assert 付き)
+               - ObjectConstants : オブジェクトごとの定数 (ワールド行列 + テクスチャ番号)
+               - ハンドル        : TextureHandle / ObjectHandle (番号で指す。ポインタを外に出さない)
+               - 範囲            : VertexRange / IndexRange (メガバッファ内の位置)
+               - DrawItem        : 描画 1 回分 (頂点の開始位置 / インデックス範囲 / オブジェクト)
+               - InitializeDesc / InitializeResult
+  rhiExport.h: RHI_API (RHI_EXPORTS が定義されていれば dllexport、無ければ dllimport)
+
+  行列の約束
+    - RHI に渡す行列は DirectXMath の普通の行列 (転置しない)
+    - シェーダー用の転置は RHI の中 (Buffer::SetViewProjection / UpdateObject) で行う
+    - これに合わせて Renderer の View / Projection / WorldMatrix は転置をやめた
+
+
+--------------------------------------------------------------------------------
+2. RHI の内部から Renderer への依存を除去  [3-2]
+--------------------------------------------------------------------------------
+  - IBuffer / Buffer : Renderer::Vertex / Camera / Projection / ConstantPerRenderObject を使わないようにした
+      UploadVertexData / UploadIndexData は (ポインタ, 個数) を受け取り、VertexRange / IndexRange を返す
+      UpdateViewProjection(Camera) → SetViewProjection(行列)  (行列を作るのは Renderer の仕事)
+      LoadModel (OBJ の読み込み) は Renderer::SceneRenderer に移した
+  - RenderHardwareInterface : IRenderHardwareInterface の実装に書き換え
+      Test_LoadModel / TestRender / DebugExecute / Begin / End を削除
+  - RHIDll.cpp : C# 向けの関数を削除し、生成 / 破棄の 2 関数だけに
+  - dataDefinition.h (RenderQueue / RenderObject) を削除 → DrawItem に置き換え
+  - RHI.vcxproj : Renderer へのプロジェクト参照を削除、RHI_EXPORTS を定義
+
+  オブジェクトごとの定数もフレームごとの領域に分けた (Phase 1 で View/Projection に行ったのと同じ方式)
+    - CreateObject でオブジェクトを作り、UpdateObject で CPU 側の値を更新
+    - 毎フレーム、変わったオブジェクトだけをそのフレームの領域へ書く
+    - GPU が前のフレームで読んでいる値を上書きしないので、UpdateObject は毎フレーム呼んでもよい
+      (Phase 2 まではロード時に 1 回書くだけだったので問題が表に出ていなかった)
+    - Scene 定数バッファ 16MB をフレーム数で等分 → 1 フレーム 32,768 オブジェクトまで
+  - 描画ループでは、オブジェクトの Root CBV も前回と同じなら設定し直さない
+
+
+--------------------------------------------------------------------------------
+3. Renderer 側 (新規 : sceneRenderer.h/.cpp, rendererDll.cpp)
+--------------------------------------------------------------------------------
+  Renderer::SceneRenderer
+    - RHI の生成 / 初期化 / 破棄
+    - LoadModel : OBJ 読み込み → 頂点を登録 → テクスチャをまとめて登録 (並列デコード)
+                  → サブメッシュごとにインデックス登録 + オブジェクト作成 + DrawItem 作成
+                  読み込み後、CPU 側のメッシュとマテリアルを解放する (以前はリークしていた : 2-11)
+    - SetCamera / Resize : View / Projection 行列を作って RHI に渡す (アスペクト比は RHI の描画サイズ)
+    - Render : DrawItem のリストを RHI に渡す
+  rendererDll.cpp : C# 向けの export (構造体の並びは C# 側と一致。static_assert で検査)
+  - Renderer::Vertex は RHI::Vertex の別名にした (using)
+  - constant.h (ConstantPerRenderObject) を削除 → RHI::ObjectConstants
+  - Renderer.vcxproj : RHI へのプロジェクト参照を追加、RENDERER_EXPORTS を定義
+
+
+--------------------------------------------------------------------------------
+4. export マクロの整理  [3-8]
+--------------------------------------------------------------------------------
+  RHI_API / CORE_API_CLASS / RENDERER_API_CLASS を「自分のプロジェクトでは dllexport、使う側では dllimport」に。
+    以前は全て常に dllexport だったため、Core のヘッダーを読んだ RHI.dll が Core のクラス
+    (Color / Vector など 33 個) を export し直していた。今は RHI.dll の export は 2 個だけ。
+  各プロジェクトに CORE_EXPORTS / RHI_EXPORTS / RENDERER_EXPORTS を定義した。
+
+
+--------------------------------------------------------------------------------
+5. その他
+--------------------------------------------------------------------------------
+  - 名前空間 RHI::DirectX → RHI::DXGI (DXGI のラッパー)
+      DirectXMath / DirectXTex の ::DirectX と衝突していた (Phase 0 で ::DirectX:: と書いて回避していたもの)
+  - 未使用の重複ファイル RHI/Source/TextureHandle.h を削除 (レビュー 3-8)
+  - ScopedTimer (計測用) を RHI 内部から Core に移した (Core/Source/Log/scopedTimer.h)。Renderer でも使う
+  - WorldMatrix : オイラー角を XMMatrixRotationQuaternion に渡していたのを
+                  XMMatrixRotationRollPitchYaw に修正 (レビュー 4章)。角度はラジアン
+  - C# : DllImport を Renderer.dll に変更。DebugExecute (ExecuteIndirect の下書きのテスト) は削除
+
+
+--------------------------------------------------------------------------------
+6. 残っていること
+--------------------------------------------------------------------------------
+  - RHI 内部の ObjectInterface 層 (IDevice / ICommandContext / IBuffer ...) は、まだ具象型への
+    static_cast で互いを使っている。外 (Renderer) からは見えなくなったので影響は RHI 内部に閉じた。
+    内部を整理するなら、ObjectInterface の I* を廃止して具象クラスを直接持つのが素直
+    (DX12 以外の実装を作る予定が無ければ、内部の抽象化は不要)
+  - Pipeline::InitCommandSignature (ExecuteIndirect の下書き) は未使用のまま残っている (Phase 4 で使う)
+  - Engine プロジェクト (exe) は元々ビルドが通らない。使う場合は Renderer.dll の API に合わせて作り直す
+  - Model / Image のアセットが bin にしか無い問題は未対応
+
+================================================================================

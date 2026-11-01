@@ -25,10 +25,8 @@
 
 #include <vector>
 
-#include "../../Renderer/Source/vertex.h"
-#include "../../Renderer/Source/camera.h"
-#include "../../Renderer/Source/WVP/viewMatrix.h"
-#include "../../Renderer/Source/WVP/projectionMatrix.h"
+// 頂点などの型は RHI の公開型を使う (以前は Renderer のヘッダーを読んでいて、RHI が Renderer に依存していた)
+#include "../Public/rhiTypes.h"
 
 /******************************************************************
 * Macro Definitions
@@ -72,9 +70,10 @@ namespace RHI
         public:          /*---クラスメソッド---*/
 
             virtual RHI_RESULT Initialize(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext) = 0;
-            virtual bool UploadVertexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const std::vector<Renderer::Vertex>& vertices) = 0;
-            virtual bool UploadIndexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const std::vector<uint32_t>& indecies) = 0;
-            virtual void UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type) = 0;
+            virtual RHI::VertexRange UploadVertexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const RHI::Vertex* vertices, uint32_t count) = 0;
+            virtual RHI::IndexRange  UploadIndexData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext, const uint32_t* indices, uint32_t count) = 0;
+            // カメラの行列 (DirectXMath の普通の行列。転置は中で行う)
+            virtual void SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection) = 0;
         public:          /*---アクセッサー関数群---*/
 
 

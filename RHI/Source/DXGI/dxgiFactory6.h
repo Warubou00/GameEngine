@@ -41,7 +41,7 @@
 
 namespace RHI
 {
-    namespace DirectX
+    namespace DXGI
     {
         class DXGIFactory6
         {

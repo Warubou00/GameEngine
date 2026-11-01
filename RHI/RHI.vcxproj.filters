@@ -72,6 +72,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\Public\rhiExport.h" />
+    <ClInclude Include="Source\Public\rhiTypes.h" />
+    <ClInclude Include="Source\Public\rhi.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_descriptorHeap.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
@@ -120,9 +123,6 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_rootSignature.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
-    <ClInclude Include="Source\TextureHandle.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
     <ClInclude Include="Source\DirectX12\dx12_textureManager.h">
       <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
     </ClInclude>
@@ -142,9 +142,6 @@
       <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
     </ClInclude>
     <ClInclude Include="Source\ResourceBufferAllocator.h">
-      <Filter>ヘッダー ファイル</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\scopedTimer.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="Source\common.h">
@@ -188,9 +185,6 @@
     </ClInclude>
     <ClInclude Include="Source\RHIObject\ITexture.h">
       <Filter>ヘッダー ファイル\RHIObject</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\dataDefinition.h">
-      <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="Source\RHIObject\IHandle.h">
       <Filter>ヘッダー ファイル\RHIObject\Handle</Filter>

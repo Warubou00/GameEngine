@@ -28,7 +28,8 @@
 /******************************************************************
 * Macro Definitions
 ******************************************************************/
-#define RHI_API __declspec(dllexport)
+// RHI_API (dllexport / dllimport の切り替え) は公開ヘッダー側で定義する
+#include "Public/rhiExport.h"
 
 #define RHI_RESULT int
 #define RHI_SUCCEEDED	             (1)  // 成功

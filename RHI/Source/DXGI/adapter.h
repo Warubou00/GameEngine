@@ -46,7 +46,7 @@
 
 namespace RHI
 {
-    namespace DirectX
+    namespace DXGI
     {
         class Adapter
         {

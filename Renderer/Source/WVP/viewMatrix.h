@@ -1,4 +1,4 @@
-
+﻿
 /***********************************************************************************
 * @file    viewMatrix.h
 * @brief   Renderer view matrix
@@ -55,20 +55,21 @@ namespace Renderer
             const Camera& camera
         )
         {
-            // ���ʗp�ϐ��錾
+            // 結果用変数宣言
             DirectX::XMMATRIX result;
 
-            // �l���Z�b�g
+            // 値をセット
             DirectX::XMVECTOR pos    = DirectX::XMVectorSet(camera.Position._x, camera.Position._y, camera.Position._z, 1.0f);
             DirectX::XMVECTOR target = DirectX::XMVectorSet(camera.Target._x,   camera.Target._y,   camera.Target._z,   1.0f);
             DirectX::XMVECTOR up     = DirectX::XMVectorSet(camera.Up._x,       camera.Up._y,       camera.Up._z,       0.0f);
 
-            // �}�g���N�X����
+            // マトリクス生成
             result = DirectX::XMMatrixLookAtLH(pos, target, up);
 
-            result = DirectX::XMMatrixTranspose(result);
+            // 転置はしない (RHI に渡すと RHI の中でシェーダー用に転置される)
+            // 以前はここで転置していたが、行列をシェーダーへ渡す時の都合は RHI の中の話なので RHI に任せた
 
-            // ���ʂ�ԋp
+            // 結果を返却
             return result;
         }
     };
