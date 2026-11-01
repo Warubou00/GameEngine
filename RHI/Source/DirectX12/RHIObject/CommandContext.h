@@ -177,6 +177,16 @@ namespace RHI
             void SetGpuCullingEnabled(bool enabled) { _useGpuCulling = enabled; }
             bool IsGpuCullingEnabled()const         { return _useGpuCulling; }
 
+            /***********************************************************************************
+             * @brief オクルージョンカリングをするか (既定 : true)
+             * @details シーンを描き終えた深度から Hi-Z (深度の縮小ピラミッド) を作っておき、
+             *          次のフレームの GPU カリングで、手前の物に完全に隠れている物を除く。
+             *          GPU カリングが前提 (GPU カリングが OFF の時は行わない)。
+             *          前のフレームの深度を使うので、カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+             ************************************************************************************/
+            void SetOcclusionCullingEnabled(bool enabled) { _useOcclusion = enabled; }
+            bool IsOcclusionCullingEnabled()const         { return _useOcclusion; }
+
             // インスタンシングで 1 回の描画にまとめる最大数
             // 全部を 1 回にまとめると、メッシュ A を画面全体に描いてからメッシュ B を描く順番になり、
             // 同じモデルの部品を続けて描く元の順番より GPU が遅くなった (画面上の近い場所を続けて描かなくなるため。
@@ -301,6 +311,11 @@ namespace RHI
                 uint32_t InstanceCount;
                 uint32_t DrawCount;
                 uint32_t CounterOffset;
+                uint32_t Padding;            // HLSL の matrix は 16byte 境界から始まるので詰め物を入れる
+                float    HiZViewProj[16];    // Hi-Z を作った時の View × Projection (転置済み)
+                uint32_t HiZWidth;
+                uint32_t HiZHeight;
+                uint32_t HiZLevels;          // 0 ならオクルージョンカリングしない
             };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
@@ -336,6 +351,23 @@ namespace RHI
             bool                                                 _useIndirectDraw = true;
             bool                                                 _useInstancing   = true;
             bool                                                 _useGpuCulling   = true;
+            bool                                                 _useOcclusion    = true;
+
+            // ---------- オクルージョンカリング (Hi-Z) ----------
+            //   _depthCopy : 深度バッファの写し (バッファにするとルート SRV で読める)
+            //   _hiZ       : 深度の縮小ピラミッド。段 0 = 画面の半分 (切り上げ)、最後の段 = 1x1 を 1 本に詰めて並べる
+            //   どちらも 1 個だけ持つ (同じキューで順番に実行されるので、前のフレームのカリングが読み終わってから作り直される)
+            static constexpr uint32_t MAX_HIZ_LEVELS = 16;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthCopy;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _hiZ;
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT                   _depthFootprint = {};
+            uint32_t                                             _hiZLevels = 0;
+            uint32_t                                             _hiZMipWidth[MAX_HIZ_LEVELS]  = {};
+            uint32_t                                             _hiZMipHeight[MAX_HIZ_LEVELS] = {};
+            uint32_t                                             _hiZMipOffset[MAX_HIZ_LEVELS] = {};   // 要素 (float) の位置
+            ::DirectX::XMFLOAT4X4                                _hiZViewProj = {};       // Hi-Z を作った時のカメラ (転置済み)
+            bool                                                 _hiZValid    = false;    // 前のフレームで Hi-Z を作ったか
+            D3D12_RESOURCE_STATES                                _hiZState    = D3D12_RESOURCE_STATE_COMMON;   // このフレームでの _hiZ の状態
             bool                                                 _warnedTooManyDraws = false;
 
             // インスタンシングでまとめる時の作業用 (毎回確保し直さないようメンバーに持つ)
@@ -380,6 +412,11 @@ namespace RHI
 
             // GPU カリングを記録する (Culled に映ったものだけの DrawData と引数ができる)
             void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData);
+
+            // オクルージョンカリング : 深度の写しと Hi-Z を作る (リサイズ時) / 描き終えた深度から Hi-Z を作る (毎フレーム)
+            bool createHiZ(uint32_t width, uint32_t height);
+            void buildHiZ(Buffer* buffer);
+            void transitionHiZ(D3D12_RESOURCE_STATES after);
             void     warnTooManyDraws();
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)

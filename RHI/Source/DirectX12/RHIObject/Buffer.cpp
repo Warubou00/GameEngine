@@ -400,8 +400,10 @@ namespace RHI
 			// 保持している行列はシェーダー用に転置済みなので戻してから掛ける (行ベクトル : clip = p * View * Proj)
 			const ::DirectX::XMMATRIX view = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_viewMatrix));
 			const ::DirectX::XMMATRIX proj = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_projMatrix));
+			const ::DirectX::XMMATRIX viewProj = ::DirectX::XMMatrixMultiply(view, proj);
 			::DirectX::XMFLOAT4X4 m;
-			::DirectX::XMStoreFloat4x4(&m, ::DirectX::XMMatrixMultiply(view, proj));
+			::DirectX::XMStoreFloat4x4(&m, viewProj);
+			::DirectX::XMStoreFloat4x4(&_viewProjForShader, ::DirectX::XMMatrixTranspose(viewProj));
 
 			// 列ベクトル c0〜c3 から平面を作る (Gribb / Hartmann の方法。深度は D3D の 0〜1)
 			//   左 = c3 + c0 / 右 = c3 - c0 / 下 = c3 + c1 / 上 = c3 - c1 / 手前 = c2 / 奥 = c3 - c2

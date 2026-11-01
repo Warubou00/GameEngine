@@ -41,6 +41,7 @@ namespace RHI
 		uint32_t Instances     = 0;     // 描いたオブジェクトの数 (インスタンシングでまとめる前の数)
 		bool     Instancing    = false; // 同じメッシュを 1 回の描画にまとめたか
 		bool     GpuCulling    = false; // GPU カリングをしたか
+		bool     OcclusionCulling = false; // オクルージョンカリング (Hi-Z) もしたか
 		uint32_t VisibleInstances = 0;  // GPU カリングで映った数 (FRAME_COUNT フレーム前の値)
 		uint32_t VisibleDraws  = 0;     // GPU カリングで詰め直した後の描画数 (FRAME_COUNT フレーム前の値)
 		bool     VisibleValid  = false;

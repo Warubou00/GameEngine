@@ -256,7 +256,9 @@ namespace RHI
             bool indirect   = _commandContext->IsIndirectDrawEnabled();
             bool instancing = _commandContext->IsInstancingEnabled();
             bool culling    = _commandContext->IsGpuCullingEnabled();
-            _profiler.Draw(&indirect, &instancing, &culling);
+            bool occlusion  = _commandContext->IsOcclusionCullingEnabled();
+            _profiler.Draw(&indirect, &instancing, &culling, &occlusion);
+            _commandContext->SetOcclusionCullingEnabled(occlusion);
             _commandContext->SetIndirectDrawEnabled(indirect);
             _commandContext->SetInstancingEnabled(instancing);
             _commandContext->SetGpuCullingEnabled(culling);
@@ -305,6 +307,16 @@ namespace RHI
     bool RenderHardwareInterface::IsGpuCullingEnabled()const
     {
         return _commandContext ? _commandContext->IsGpuCullingEnabled() : false;
+    }
+
+    void RenderHardwareInterface::SetOcclusionCullingEnabled(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetOcclusionCullingEnabled(enabled);
+    }
+
+    bool RenderHardwareInterface::IsOcclusionCullingEnabled()const
+    {
+        return _commandContext ? _commandContext->IsOcclusionCullingEnabled() : false;
     }
 
     void RenderHardwareInterface::WaitForGpu()

@@ -94,6 +94,7 @@ namespace RHI
 			_lastInstancing = stats.Instancing;
 			_lastInstances  = stats.Instances;
 			_lastCulling    = stats.GpuCulling;
+			_lastOcclusion  = stats.OcclusionCulling;
 			if (stats.VisibleValid) { _lastVisible = stats.VisibleInstances; _lastVisibleDraws = stats.VisibleDraws; }
 		}
 
@@ -147,11 +148,12 @@ namespace RHI
 		const double n = static_cast<double>(_totalFrames);
 		char message[320] = {};
 		sprintf_s(message,
-			"[Profiler] Summary (%llu frames) : %.1f FPS / frame %.3f ms / record scene %.3f ms / UI %.3f ms / GPU %.3f ms / draws %u, objects %u, visible %u (%s%s%s)",
+			"[Profiler] Summary (%llu frames) : %.1f FPS / frame %.3f ms / record scene %.3f ms / UI %.3f ms / GPU %.3f ms / draws %u, objects %u, visible %u (%s%s%s%s)",
 			_totalFrames, 1000.0 / (_totalFrameMs / n), _totalFrameMs / n, _totalRecordMs / n, _totalUiMs / n,
 			_totalGpuFrames ? _totalGpuMs / static_cast<double>(_totalGpuFrames) : 0.0,
 			_lastCulling ? _lastVisibleDraws : _lastDrawCalls, _lastInstances, _lastCulling ? _lastVisible : _lastInstances,
-			_lastIndirect ? "ExecuteIndirect" : "direct", _lastInstancing ? " + instancing" : "", _lastCulling ? " + GPU culling" : "");
+			_lastIndirect ? "ExecuteIndirect" : "direct", _lastInstancing ? " + instancing" : "", _lastCulling ? " + GPU culling" : "",
+			_lastOcclusion ? " + occlusion" : "");
 		Core::Logger::Log(message);
 	}
 
@@ -178,7 +180,7 @@ namespace RHI
 		}
 	}
 
-	void Profiler::Draw(bool* indirectDraw, bool* instancing, bool* gpuCulling)
+	void Profiler::Draw(bool* indirectDraw, bool* instancing, bool* gpuCulling, bool* occlusion)
 	{
 		ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowBgAlpha(0.85f);
@@ -267,6 +269,13 @@ namespace RHI
 			ImGui::Checkbox("GPU culling", gpuCulling);
 			if (s.GpuCulling)      { ImGui::SameLine(); ImGui::TextDisabled("(frustum)"); }
 			else if (*gpuCulling)  { ImGui::SameLine(); ImGui::TextDisabled("(needs ExecuteIndirect)"); }
+		}
+		if (drawOpen && occlusion)
+		{
+			// オクルージョンカリングの ON / OFF (GPU カリングの時だけ効く。前のフレームの深度 (Hi-Z) を使う)
+			ImGui::Checkbox("Occlusion (Hi-Z)", occlusion);
+			if (s.OcclusionCulling)                 { ImGui::SameLine(); ImGui::TextDisabled("(previous frame depth)"); }
+			else if (*occlusion && !s.GpuCulling)   { ImGui::SameLine(); ImGui::TextDisabled("(needs GPU culling)"); }
 		}
 		if (drawOpen && ImGui::BeginTable("draw", 2, tableFlags))
 		{

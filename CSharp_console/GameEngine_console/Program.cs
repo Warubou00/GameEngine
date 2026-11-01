@@ -29,7 +29,8 @@ namespace GameEngine_console
             //   --draw direct|indirect  : 描画の方法 (既定は indirect = ExecuteIndirect)
             //   --instancing on|off     : 同じメッシュを 1 回の描画にまとめるか (既定は on)
             //   --culling on|off        : GPU カリング (既定は on。ExecuteIndirect の時だけ効く)
-            //   --view inside           : 格子の中から前を見るカメラ (--stress の後に書く。カリングの効果を測る)
+            //   --view inside|ground    : 格子の中から前を見る / 地面すれすれから見るカメラ (--stress の後に書く。カリングの効果を測る)
+            //   --occlusion on|off      : オクルージョンカリング (既定は on。GPU カリングの時だけ効く)
             for (int i = 0; i + 1 < args.Length; i++)
             {
                 if (args[i] == "--stress" && uint.TryParse(args[i + 1], out uint count))
@@ -51,6 +52,14 @@ namespace GameEngine_console
                 else if (args[i] == "--view" && args[i + 1] == "inside")
                 {
                     rhi.Test_InsideView();
+                }
+                else if (args[i] == "--view" && args[i + 1] == "ground")
+                {
+                    rhi.Test_GroundView();
+                }
+                else if (args[i] == "--occlusion")
+                {
+                    rhi.SetOcclusionCulling(args[i + 1] != "off");
                 }
             }
 

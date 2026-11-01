@@ -79,6 +79,8 @@ namespace RHI
         bool IsInstancingEnabled()const override;
         void SetGpuCullingEnabled(bool enabled)override;
         bool IsGpuCullingEnabled()const override;
+        void SetOcclusionCullingEnabled(bool enabled)override;
+        bool IsOcclusionCullingEnabled()const override;
 
         void SetProfilerVisible(bool visible)override { _debugUI.SetVisible(visible); }
         bool IsProfilerVisible()const override         { return _debugUI.IsVisible(); }

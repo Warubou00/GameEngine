@@ -44,12 +44,19 @@ cbuffer CullConstants : register(b0)
     uint   g_InstanceCount;    // オブジェクトの数
     uint   g_DrawCount;        // 描画 (引数) の数
     uint   g_CounterOffset;    // g_OutArgs 内のカウンターの位置 (byte)。+0 : 映ったオブジェクトの数 / +4 : 詰めた描画の数 (Count バッファ)
+
+    // ---------- オクルージョンカリング (Hi-Z) ----------
+    matrix g_HiZViewProj;      // Hi-Z を作った時 (前のフレーム) の View × Projection (シェーダー用に転置済み)
+    uint   g_HiZWidth;         // Hi-Z の段 0 の大きさ (画面の半分、切り上げ)
+    uint   g_HiZHeight;
+    uint   g_HiZLevels;        // 段の数。0 ならオクルージョンカリングをしない
 };
 
 StructuredBuffer<ObjectData>   g_Objects  : register(t0);   // このフレームのオブジェクトの定数
 StructuredBuffer<DrawData>     g_InDraws  : register(t1);   // CPU が並べた DrawData (全オブジェクト)
 StructuredBuffer<CullInstance> g_Cull     : register(t2);   // 各オブジェクトの境界球と描画の番号
 ByteAddressBuffer              g_InArgs   : register(t3);   // CPU が並べた引数 (D3D12_DRAW_INDEXED_ARGUMENTS : 20byte)
+StructuredBuffer<float>        g_HiZ      : register(t4);   // Hi-Z (全段を詰めて並べたもの。hiZ.shader が作る)
 
 RWStructuredBuffer<DrawData>   g_OutDraws : register(u0);   // 映ったものだけの DrawData (描画ごとの範囲の前から詰める)
 RWByteAddressBuffer            g_OutArgs  : register(u1);   // 描画ごとの引数 (映らなかった描画は InstanceCount = 0) + 末尾にカウンター
@@ -79,7 +86,73 @@ void CSClear(uint3 id : SV_DispatchThreadID)
 }
 
 // ==============================================================
-// 視錐台カリング
+// オクルージョンカリング : 前のフレームの深度 (Hi-Z) に完全に隠れているか
+//   1. ワールド座標の箱 (球を囲む立方体) の 8 頂点を、Hi-Z を作った時のカメラで画面に投影し、
+//      画面上の四角形と一番手前の深度を求める (カメラの後ろにかかる時は判定しない = 描く)
+//   2. 四角形が 2x2 texel 以内に収まる段を選び、その 4 texel の「一番奥」を読む
+//   3. 物の一番手前がそれより奥なら、その範囲の全部の物の後ろにある = 隠れている
+//   ※前のフレームの結果なので、カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+// ==============================================================
+bool isOccluded(float3 center, float radius)
+{
+    float2 minNdc = float2( 1e9,  1e9);
+    float2 maxNdc = float2(-1e9, -1e9);
+    float  nearestZ = 1.0f;
+
+    [unroll]
+    for (uint i = 0; i < 8; ++i)
+    {
+        const float3 corner = center + radius * float3((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
+        const float4 clip = mul(float4(corner, 1.0f), g_HiZViewProj);
+        if (clip.w <= 1e-4f) return false;   // カメラの後ろ (または真横) にかかる : 判定できないので描く
+        const float3 ndc = clip.xyz / clip.w;
+        minNdc   = min(minNdc, ndc.xy);
+        maxNdc   = max(maxNdc, ndc.xy);
+        nearestZ = min(nearestZ, ndc.z);
+    }
+    if (nearestZ <= 0.0f) return false;   // 手前のクリップ面にかかる
+
+    // NDC → Hi-Z の段 0 の texel 座標 (画面の上が y = 0)。段 0 の 1 texel = 画面の 2x2 ピクセル
+    const float2 size0 = float2(g_HiZWidth, g_HiZHeight);
+    float2 minUv = float2(minNdc.x * 0.5f + 0.5f, 0.5f - maxNdc.y * 0.5f);
+    float2 maxUv = float2(maxNdc.x * 0.5f + 0.5f, 0.5f - minNdc.y * 0.5f);
+    minUv = saturate(minUv);
+    maxUv = saturate(maxUv);
+    const float2 minTexel = minUv * size0;
+    const float2 maxTexel = maxUv * size0;
+
+    // 四角形が 2 texel 以内に収まる段 : 段 l の 1 texel = 段 0 の 2^l texel
+    const float extent = max(max(maxTexel.x - minTexel.x, maxTexel.y - minTexel.y), 1.0f);
+    uint level = (uint)ceil(log2(extent));
+    level = min(level, g_HiZLevels - 1);
+
+    // その段の大きさと、バッファの中の先頭 (段 0 から順に詰めてある)
+    uint width = g_HiZWidth, height = g_HiZHeight, offset = 0;
+    for (uint l = 0; l < level; ++l)
+    {
+        offset += width * height;
+        width  = max(1, (width  + 1) / 2);
+        height = max(1, (height + 1) / 2);
+    }
+
+    const float scale = 1.0f / (float)(1u << level);
+    const uint2 t0 = min((uint2)(minTexel * scale), uint2(width - 1, height - 1));
+    const uint2 t1 = min((uint2)(maxTexel * scale), uint2(width - 1, height - 1));
+
+    // 四角形にかかる texel (最大 2x2) の一番奥
+    float farthest = 0.0f;
+    for (uint y = t0.y; y <= t1.y; ++y)
+    {
+        for (uint x = t0.x; x <= t1.x; ++x)
+        {
+            farthest = max(farthest, g_HiZ[offset + y * width + x]);
+        }
+    }
+    return nearestZ > farthest;
+}
+
+// ==============================================================
+// 視錐台カリング (+ オクルージョンカリング)
 // ==============================================================
 // プロファイラー用の「映った数」は、グループの中で数えてから 1 回だけ全体のカウンターに足す
 // (1 個ずつ全体のカウンターに足すと、同じ場所への atomic が集中して遅くなるため)
@@ -119,6 +192,9 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             {
                 if (dot(g_Planes[i].xyz, center) + g_Planes[i].w < -radius) visible = false;
             }
+
+            // 視錐台の中にあるものだけ、前のフレームの深度に隠れていないかを見る
+            if (visible && g_HiZLevels > 0 && isOccluded(center, radius)) visible = false;
         }
     }
 

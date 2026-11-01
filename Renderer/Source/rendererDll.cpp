@@ -145,6 +145,24 @@ extern "C"
 		g_renderer->SetGpuCullingEnabled(enabled);
 	}
 
+	// オクルージョンカリングするか (GPU カリングの時だけ効く)
+	RENDERER_API void Renderer_SetOcclusionCulling(bool enabled)
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetOcclusionCullingEnabled(enabled);
+	}
+
+	// 負荷テスト用 : 地面すれすれから格子を見るカメラ (オクルージョンカリングの効果を測る)
+	RENDERER_API void Renderer_TestGroundView()
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetTestGroundView();
+	}
+
 	// 負荷テスト用 : 格子の中から前を見るカメラ (カリングの効果を測る)
 	RENDERER_API void Renderer_TestInsideView()
 	{
