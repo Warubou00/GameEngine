@@ -24,6 +24,21 @@ namespace GameEngine_console
 
             rhi.Test_LoadModel(0.0f, 5.0f, -10.0f);
 
+            // コマンドライン引数 (計測用)
+            //   --stress N              : 読み込んだモデルを N 個並べる (描画数を増やす負荷テスト)
+            //   --draw direct|indirect  : 描画の方法 (既定は indirect = ExecuteIndirect)
+            for (int i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i] == "--stress" && uint.TryParse(args[i + 1], out uint count))
+                {
+                    rhi.Test_SpawnGrid(count);
+                }
+                else if (args[i] == "--draw")
+                {
+                    rhi.SetIndirectDraw(args[i + 1] != "direct");
+                }
+            }
+
             // ウィンドウが閉じられたらループを抜けて終了処理を呼ぶ
             // (以前は while(true) だったため、閉じても RHI_CleanUp が呼ばれなかった)
             while (rhi.IsOpen)

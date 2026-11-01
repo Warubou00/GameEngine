@@ -57,8 +57,17 @@ namespace RHI
 		// 任意の値を表示に加える (同じ名前なら上書き)
 		void SetValue(const char* name, double value);
 
-		// ImGui のウィンドウを作る (DebugUI::BeginFrame と EndFrame の間で呼ぶ)
-		void Draw();
+		// 起動から今までの平均をログに出す (終了時に呼ぶ。最初の 1 秒は値が安定しないので除く)
+		void LogSummary()const;
+
+		// 文字列の情報を表示に加える (同じ名前なら上書き)。例 : "Pipeline" → "DXC / SM 6_6 / ..."
+		void SetInfo(const char* name, const std::string& text);
+
+		/***********************************************************************************
+		 * @brief ImGui のウィンドウを作る (DebugUI::BeginFrame と EndFrame の間で呼ぶ)
+		 * @param[in,out] bool* indirectDraw ExecuteIndirect の ON / OFF のチェックボックス (nullptr なら出さない)
+		 ************************************************************************************/
+		void Draw(bool* indirectDraw = nullptr);
 
 	private:
 		void updateVideoMemory();
@@ -84,11 +93,23 @@ namespace RHI
 		double         _minFrameMs     = 0.0;
 		double         _maxFrameMs     = 0.0;
 
+		// 起動からの合計 (LogSummary 用)
+		std::chrono::steady_clock::time_point _startTime;
+		uint64_t       _totalFrames    = 0;
+		double         _totalFrameMs   = 0.0;
+		double         _totalRecordMs  = 0.0;
+		double         _totalUiMs      = 0.0;
+		double         _totalGpuMs     = 0.0;
+		uint64_t       _totalGpuFrames = 0;
+		uint32_t       _lastDrawCalls  = 0;
+		bool           _lastIndirect   = false;
+
 		// VRAM (0.5 秒ごとに更新)
 		uint64_t       _vramUsage  = 0;
 		uint64_t       _vramBudget = 0;
 
-		std::vector<std::pair<std::string, double>> _values;
+		std::vector<std::pair<std::string, double>>      _values;
+		std::vector<std::pair<std::string, std::string>> _infos;
 	};
 }
 

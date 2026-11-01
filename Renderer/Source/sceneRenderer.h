@@ -69,6 +69,16 @@ namespace Renderer
 		 ************************************************************************************/
 		bool LoadModel(const std::wstring& filePath);
 
+		/***********************************************************************************
+		 * @brief 負荷テスト : 最後に読み込んだモデルを格子状に count 個並べる
+		 * @details 頂点 / インデックスは共有し、オブジェクト (ワールド行列) だけを増やす。
+		 *          全体が見えるようにカメラも引く
+		 ************************************************************************************/
+		void SpawnTestGrid(uint32_t count, float spacing = 3.0f);
+
+		// ExecuteIndirect で描くか (RHI に渡すだけ)
+		void SetIndirectDrawEnabled(bool enabled);
+
 		// カメラの設定 (View / Projection 行列を作って RHI に渡す)
 		void SetCamera(const Camera& camera, Projection::ProjectionType type = Projection::ProjectionType::PROJECTION_TYPE_3D);
 
@@ -89,6 +99,10 @@ namespace Renderer
 
 		RHI::IRenderHardwareInterface* _rhi = nullptr;          // RHI_CreateRenderHardwareInterface で作り、Shutdown で破棄する
 		std::vector<RHI::DrawItem>     _drawItems;              // 毎フレーム RHI に渡す描画リスト
+
+		// 最後に読み込んだモデルの描画 (負荷テストで複製する元)
+		std::vector<RHI::DrawItem>     _modelItems;
+		std::vector<uint32_t>          _modelTextures;          // _modelItems[i] のテクスチャ番号
 
 		Camera                         _camera         = {};
 		Projection::ProjectionType     _projectionType = Projection::ProjectionType::PROJECTION_TYPE_3D;

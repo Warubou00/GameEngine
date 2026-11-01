@@ -99,6 +99,11 @@ namespace RHI
 		// GPU の処理 (描画 + 転送) が全て終わるまで待つ (計測・終了処理用)
 		virtual void WaitForGpu() = 0;
 
+		// ExecuteIndirect で描くか (既定 : true)。false なら描画ごとに DrawIndexedInstanced を呼ぶ
+		// 描画数が多いほど ExecuteIndirect の方が CPU が軽い。使えない環境では自動で通常の描画になる
+		virtual void SetIndirectDrawEnabled(bool enabled) = 0;
+		virtual bool IsIndirectDrawEnabled()const = 0;
+
 		// ======================================================================
 		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
 		// ======================================================================

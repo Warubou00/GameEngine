@@ -109,6 +109,24 @@ extern "C"
 		g_renderer->SetCamera(camera);
 	}
 
+	// テスト用 : 読み込んだモデルを格子状に count 個並べる (描画数を増やして CPU / GPU の負荷を見る)
+	RENDERER_API void Renderer_TestSpawnGrid(uint32_t count)
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SpawnTestGrid(count);
+	}
+
+	// ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)
+	RENDERER_API void Renderer_SetIndirectDraw(bool enabled)
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetIndirectDrawEnabled(enabled);
+	}
+
 	RENDERER_API void Renderer_CleanUp()
 	{
 		if (g_renderer == nullptr)

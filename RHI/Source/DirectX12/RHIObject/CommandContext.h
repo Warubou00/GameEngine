@@ -144,6 +144,18 @@ namespace RHI
              ************************************************************************************/
             void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
 
+            /***********************************************************************************
+             * @brief ExecuteIndirect で描くか (false なら 1 個ずつ DrawIndexedInstanced)
+             * @details ExecuteIndirect : 描画の引数をバッファに並べ、1 回の命令で全部描く。
+             *          描画ごとの API 呼び出し (ルート引数の設定 + Draw) が無くなるので、描画数が多いほど CPU が軽くなる。
+             *          コマンドシグネチャが作れなかった環境では自動で通常の描画になる
+             ************************************************************************************/
+            void SetIndirectDrawEnabled(bool enabled) { _useIndirectDraw = enabled; }
+            bool IsIndirectDrawEnabled()const         { return _useIndirectDraw; }
+
+            // ExecuteIndirect 1 回で描ける最大数 (フレームごとの引数バッファの大きさ)
+            static constexpr uint32_t MAX_INDIRECT_DRAWS = 32768;
+
             // ==========================================================
             // プロファイラー / ImGui 用 (RenderStart と RenderEnd の間で使う)
             // ==========================================================
@@ -222,6 +234,33 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _rtvHeap;       // バックバッファの数だけ
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _dsvHeap;       // 1 つ
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthBuffer;
+
+            // ---------- ExecuteIndirect ----------
+            // フレームごとの引数バッファ (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
+            //   Staging : UPLOAD ヒープ。CPU が書き込む
+            //   Gpu     : DEFAULT ヒープ (VRAM)。GPU はこちらを読む
+            //             描画リストが変わった時だけ Staging からコピーする。
+            //             (UPLOAD ヒープを直接読ませると、GPU が毎フレーム PCIe 越しにメインメモリを読むので遅かった)
+            struct IndirectFrame
+            {
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Staging;
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Gpu;
+                uint8_t*                  Cpu              = nullptr;   // Staging を Map したままのアドレス
+                // 前回このフレームの引数バッファに書いた内容。描画リストが同じなら書き込みを省く
+                std::vector<RHI::DrawItem> LastItems;
+                D3D12_GPU_VIRTUAL_ADDRESS LastObjectCbBase = 0;
+                uint32_t                  Written          = 0;         // 引数バッファに書いた数
+                uint32_t                  Consumed         = 0;         // そのために読んだ DrawItem の数
+                uint64_t                  Triangles        = 0;
+                bool                      Valid            = false;
+            };
+            IndirectFrame                                        _indirect[FRAME_COUNT];
+            bool                                                 _useIndirectDraw = true;
+            Pipeline*                                            _currentPipeline = nullptr;   // RenderStart で受け取ったもの (所有しない)
+
+            // ExecuteIndirect で描く。戻り値 = 処理した DrawItem の数 (残りは通常の描画で描く)
+            uint32_t renderIndirect(const RHI::DrawItem* items, uint32_t count, D3D12_GPU_VIRTUAL_ADDRESS objectCbBase,
+                                    uint32_t& outDrawCalls, uint64_t& outTriangles);
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)
             std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;

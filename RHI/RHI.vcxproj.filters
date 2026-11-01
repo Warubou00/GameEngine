@@ -72,6 +72,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\DirectX12\dx12_pipelineCache.h" />
+    <ClInclude Include="Source\Shader\shaderCompiler.h" />
     <ClInclude Include="..\ImGui\imgui_impl_dx12.h" />
     <ClInclude Include="..\ImGui\imgui_impl_win32.h" />
     <ClInclude Include="..\ImGui\imgui.h" />
@@ -204,6 +206,8 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\DirectX12\dx12_pipelineCache.cpp" />
+    <ClCompile Include="Source\Shader\shaderCompiler.cpp" />
     <ClCompile Include="..\ImGui\imgui_impl_dx12.cpp" />
     <ClCompile Include="..\ImGui\imgui_impl_win32.cpp" />
     <ClCompile Include="..\ImGui\imgui_widgets.cpp" />
