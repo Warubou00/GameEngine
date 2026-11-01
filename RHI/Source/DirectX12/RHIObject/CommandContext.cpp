@@ -38,6 +38,7 @@
 #include "../Object/dx12_resourceBuffer.h"
 #include "../Object/dx12_descriptorHeap.h"
 #include "../dx12_descriptorHeapManager.h"
+#include "../dx12_uploadManager.h"
 #include "../Object/dx12_fence.h"
 // ========================================
 
@@ -146,15 +147,11 @@ namespace RHI
 			// 生成直後は記録中なので閉じておく (RenderStart で Reset するため)
 			_frameCommandList->Close();
 
-			// ---------- 即時用 (アップロード) ----------
-			_immediateAllocator = std::make_unique<DirectX12::CommandAllocator>();
-			hr = _immediateAllocator->Create(dx12Device);
-			if (FAILED(hr)) { logFailed("CreateCommandAllocator(Immediate)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
-
-			// 生成直後の記録中状態のまま残しておく (初期化中のアップロードをそのまま積めるように)
-			_immediateCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
-			hr = _immediateCommandList->Create(dx12Device, _immediateAllocator->Get());
-			if (FAILED(hr)) { logFailed("CreateCommandList(Immediate)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+			// ---------- アップロード (COPY キュー + リングバッファ) ----------
+			_uploadManager = std::make_unique<DirectX12::UploadManager>();
+			hr = _uploadManager->Initialize(dx12Device);
+			if (FAILED(hr)) { logFailed("UploadManager::Initialize", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+			_uploadFenceWaited = 0;
 
 			// ---------- スワップチェーン ----------
 			HWND hWnd   = static_cast<HWND>(info->HWnd);
@@ -300,6 +297,10 @@ namespace RHI
 			HRESULT hr = _frameCommandList->Close();
 			if (FAILED(hr)) { logFailed("CommandList::Close(Frame)", hr); return false; }
 
+			// このフレームで使うデータのアップロードを送信し、描画キューに GPU 上で完了を待たせる
+			// (CPU は待たない。COPY キューと描画キューは並行して動く)
+			SubmitUploads();
+
 			ID3D12CommandList* ppCommandLists[] = { _frameCommandList->GetCmdList() };
 			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
 
@@ -362,55 +363,25 @@ namespace RHI
 		}
 
 		// ==============================================================
-		// 即時コマンド (アップロード用)
+		// アップロード
 		// ==============================================================
 
-		bool CommandContext::BeginRecording()
+		void CommandContext::SubmitUploads()
 		{
-			if (!_immediateCommandList || !_immediateAllocator)
+			if (!_uploadManager || !_commandQueue)
 			{
-				return false;
+				return;
 			}
 
-			// 記録中ならそのまま積み足す
-			if (_immediateCommandList->IsRecording())
+			const UINT64 uploadFence = _uploadManager->Flush();
+
+			// まだ描画キューに待たせていない転送があれば、GPU 上で待たせる
+			// (ID3D12CommandQueue::Wait は GPU 側の待機。CPU はすぐに戻る)
+			if (uploadFence > _uploadFenceWaited)
 			{
-				return true;
+				_commandQueue->Get()->Wait(_uploadManager->GetFence(), uploadFence);
+				_uploadFenceWaited = uploadFence;
 			}
-
-			// Close済みであることを確認してから、アロケーター → コマンドリストの順でリセットする (1-10)
-			HRESULT hr = _immediateAllocator->Reset();
-			if (FAILED(hr)) { logFailed("CommandAllocator::Reset(Immediate)", hr); return false; }
-
-			hr = _immediateCommandList->Reset(_immediateAllocator->Get(), nullptr);
-			if (FAILED(hr)) { logFailed("CommandList::Reset(Immediate)", hr); return false; }
-
-			return true;
-		}
-
-		bool CommandContext::ExecuteAndSync()
-		{
-			if (!_immediateCommandList || !_immediateCommandList->IsRecording())
-			{
-				// 何も記録していない
-				return true;
-			}
-
-			// 1. コマンドリストの記録を終了する
-			HRESULT hr = _immediateCommandList->Close();
-			if (FAILED(hr)) { logFailed("CommandList::Close(Immediate)", hr); return false; }
-
-			// 2. コマンドリストをキューに送信して実行
-			ID3D12CommandList* ppCommandLists[] = { _immediateCommandList->GetCmdList() };
-			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
-
-			// 3. 実行完了まで待機する (アップロード元のバッファをすぐ破棄できるように)
-			//    TODO : Phase 2 で COPY キュー + アップロード用リングバッファにして待たないようにする
-			hr = _fence->WaitForSignal(_commandQueue.get());
-			if (FAILED(hr)) { logFailed("Fence::WaitForSignal", hr); return false; }
-
-			// Close済みのまま返し、次に積む側が BeginRecording() を呼ぶ
-			return true;
 		}
 
 		// ==============================================================
@@ -453,9 +424,17 @@ namespace RHI
 
 		void CommandContext::WaitForGpu()
 		{
+			// アップロードを送信して描画キューに待たせてから、描画キューの完了を待つ
+			// → 描画キューが終われば、その前のアップロードも終わっている
+			SubmitUploads();
+
 			if (_fence && _fence->Get() && _commandQueue && _commandQueue->Get())
 			{
 				_fence->WaitForSignal(_commandQueue.get());
+			}
+			if (_uploadManager)
+			{
+				_uploadManager->WaitIdle();
 			}
 		}
 
@@ -466,7 +445,6 @@ namespace RHI
 
 			// 記録中のまま破棄しないように閉じておく
 			if (_frameCommandList)     _frameCommandList->Close();
-			if (_immediateCommandList) _immediateCommandList->Close();
 
 			// 描画先 → スワップチェーン → コマンドリスト → アロケーター → フェンス → キュー の順に破棄
 			_currentBackBuffer = nullptr;
@@ -475,21 +453,21 @@ namespace RHI
 			_rtvHeap.reset();
 			_swapChain.reset();
 			_frameCommandList.reset();
-			_immediateCommandList.reset();
+			_uploadManager.reset();
+			_uploadFenceWaited = 0;
 			for (auto& frame : _frames)
 			{
 				frame.Allocator.reset();
 				frame.FenceValue = 0;
 			}
-			_immediateAllocator.reset();
 			_fence.reset();
 			_commandQueue.reset();
 			_device = nullptr;
 		}
 
-		RHI::DirectX12::GraphicsCommandList* CommandContext::GetGraphicsCommandList()const
+		RHI::DirectX12::UploadManager* CommandContext::GetUploadManager()const
 		{
-			return _immediateCommandList.get();
+			return _uploadManager.get();
 		}
 		RHI::DirectX12::CommandQueue* CommandContext::GetCommandQueue()const
 		{

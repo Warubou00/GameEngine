@@ -32,6 +32,7 @@
 // ========================================
 
 #include "../../Core/Source/Log/logger.h"
+#include "scopedTimer.h"
 #include "../../Renderer/Source/camera.h"
 #include "../../Renderer/Source/WVP/projectionMatrix.h"
 #include "../../Renderer/Source/mesh.h"
@@ -196,7 +197,13 @@ namespace RHI
         if (!_isInitialized) return;
 
         Core::Logger::Log("call Test_LoadModel()");
-        auto mesh = _buffer->LoadModel(_device.get(), _commandContext.get(), L"../Model/box.obj");
+        Renderer::Mesh* mesh = nullptr;
+        {
+            // 高速化の効果確認用 : 読み込み開始 → GPU へのアップロード完了までの時間
+            RHI::ScopedTimer timer("Test_LoadModel (until GPU upload complete)");
+            mesh = _buffer->LoadModel(_device.get(), _commandContext.get(), L"../Model/box.obj");
+            _commandContext->WaitForGpu();
+        }
         if (!mesh)
         {
             // 以前は読み込み失敗時に nullptr を参照していた

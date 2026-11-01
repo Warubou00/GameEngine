@@ -92,6 +92,20 @@ namespace RHI
                 const wchar_t* filePath)override;
 
             /***********************************************************************************
+             * @brief 複数の画像ファイルをまとめて読み込む (デコードを並列に行う)
+             * @details 1. 全ファイルのデコード (WIC) をワーカースレッドで同時に行う  ← 一番時間がかかる部分
+             *          2. GPU へのアップロード登録はメインスレッドで順番に行う (UploadManager はスレッドセーフではない)
+             *          読み込みに失敗したものは既定テクスチャ(白)のハンドルになる
+             *
+             * @return std::vector<TextureHandle> filePaths と同じ順番のハンドル
+             ************************************************************************************/
+            std::vector<TextureHandle> LoadTexturesFromFiles(
+                RHI::ObjectInterface::IDevice* iDevice,
+                RHI::ObjectInterface::ICommandContext* iCommandContext,
+                RHI::ObjectInterface::IBuffer* iBuffer,
+                const std::vector<std::wstring>& filePaths);
+
+            /***********************************************************************************
              * @brief 既定テクスチャ(白 1x1)を作る
              * @details 必ず他のテクスチャより先に呼ぶこと (TextureID = 0 になるようにするため)
              *          テクスチャを使わないマテリアルは、白を掛けることで頂点カラーそのままになる
@@ -119,14 +133,16 @@ namespace RHI
                 RHI::DirectX12::ResourceBuffer* targetBuffer,
                 uint32_t* outTextureID);
 
-            // 作成済みのテクスチャ(+アップロード)を送信してSRVを作る共通処理
+            // 作成済みのテクスチャのSRVを作って保持する共通処理
+            // (アップロードは UploadManager に積んである。送信と完了待ちは CommandContext が行う)
             bool registerTexture(
                 RHI::ObjectInterface::Device* device,
-                RHI::ObjectInterface::CommandContext* commandContext,
                 RHI::ObjectInterface::Buffer* buffer,
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> texture,
-                std::unique_ptr<RHI::DirectX12::ResourceBuffer> uploadBuffer,
                 uint32_t* outTextureID);
+
+            // _texture (DirectX12 側のテクスチャ管理) を必要なら作る
+            RHI::DirectX12::Texture* getTextureManager();
         };
     }
 }

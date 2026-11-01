@@ -23,8 +23,10 @@
 #include "Object/dx12_device.h"
 #include "Object/dx12_graphicsCommandList.h"
 #include "Object/dx12_resourceBuffer.h"
+#include "dx12_uploadManager.h"
 
 #include "../../Core/Source/Log/logger.h"
+#include "../scopedTimer.h"
 
 /******************************************************************
 * Macro Definitions
@@ -49,24 +51,31 @@ namespace RHI
         Texture::Texture() {}
         Texture::~Texture() {}
 
-        // テクスチャを読み込み、テクスチャ用バッファとアップロード用バッファを生成して返す
+        HRESULT Texture::DecodeImageFile(const std::wstring& filePath, ::DirectX::ScratchImage& outImage)
+        {
+            if (filePath.empty())
+            {
+                return E_INVALIDARG;
+            }
+
+            RHI::ScopedTimer timer("  Texture decode (WIC)");
+            ::DirectX::TexMetadata metadata;
+            return ::DirectX::LoadFromWICFile(filePath.c_str(), ::DirectX::WIC_FLAGS_NONE, &metadata, outImage);
+        }
+
         std::unique_ptr<ResourceBuffer> Texture::LoadTextureFromFile(
             RHI::DirectX12::Device* device,
-            RHI::DirectX12::GraphicsCommandList* cmdList,
-            const std::wstring& filePath,
-            std::unique_ptr<ResourceBuffer>& outUploadBuffer) // 実行完了まで破棄しないこと！
+            RHI::DirectX12::UploadManager* uploadManager,
+            const std::wstring& filePath)
         {
-            if (!device || !cmdList || filePath.empty())
+            if (!device || !uploadManager || filePath.empty())
             {// 例外処理nullptr / パスなし
                 return nullptr;
             }
 
-            ::DirectX::TexMetadata metadata;
-            ::DirectX::ScratchImage image;
-
             // 1. 画像のデコード (WIC)
-            HRESULT hr = ::DirectX::LoadFromWICFile(filePath.c_str(), ::DirectX::WIC_FLAGS_NONE, &metadata, image);
-            if (FAILED(hr))
+            ::DirectX::ScratchImage image;
+            if (FAILED(DecodeImageFile(filePath, image)))
             {
                 Core::Logger::Log(L"Failed Open Texture File.");
                 Core::Logger::Log(filePath.c_str());
@@ -78,14 +87,13 @@ namespace RHI
             {
                 return nullptr;
             }
-            return CreateTextureFromImage(device, cmdList, *img, outUploadBuffer);
+            return CreateTextureFromImage(device, uploadManager, *img);
         }
 
         std::unique_ptr<ResourceBuffer> Texture::CreateSolidColorTexture(
             RHI::DirectX12::Device* device,
-            RHI::DirectX12::GraphicsCommandList* cmdList,
-            uint32_t rgba,
-            std::unique_ptr<ResourceBuffer>& outUploadBuffer)
+            RHI::DirectX12::UploadManager* uploadManager,
+            uint32_t rgba)
         {
             // 1x1 ピクセルの画像を手で組み立てる (R8G8B8A8 なので 1ピクセル = 4byte)
             uint8_t pixel[4] = {
@@ -103,22 +111,21 @@ namespace RHI
             img.slicePitch = sizeof(pixel);
             img.pixels     = pixel;
 
-            // CreateTextureFromImage の中でアップロードバッファへコピーし終えるので、pixel はスタック上で問題ない
-            return CreateTextureFromImage(device, cmdList, img, outUploadBuffer);
+            // CreateTextureFromImage の中でアップロード用の領域へコピーし終えるので、pixel はスタック上で問題ない
+            return CreateTextureFromImage(device, uploadManager, img);
         }
 
         std::unique_ptr<ResourceBuffer> Texture::CreateTextureFromImage(
             RHI::DirectX12::Device* device,
-            RHI::DirectX12::GraphicsCommandList* cmdList,
-            const ::DirectX::Image& img,
-            std::unique_ptr<ResourceBuffer>& outUploadBuffer)
+            RHI::DirectX12::UploadManager* uploadManager,
+            const ::DirectX::Image& img)
         {
-            if (!device || !cmdList || !img.pixels)
+            if (!device || !uploadManager || !img.pixels)
             {
                 return nullptr;
             }
 
-            // 2. テクスチャ用リソース (DEFAULTヒープ) の作成
+            // 2. テクスチャ用リソース (DEFAULTヒープ) の作成 (COMMON 状態)
             auto textureBuffer = std::make_unique<ResourceBuffer>();
             HRESULT hr = textureBuffer->CreateTexture(
                 device->GetDevice(),
@@ -145,60 +152,65 @@ namespace RHI
                 &texDesc, 0, 1, 0,
                 &footprint, &numRows, &rowSizeInBytes, &totalUploadBufferSize);
 
-            // 4. 計算されたサイズでアップロード用バッファ (UPLOADヒープ) を作成
-            outUploadBuffer = std::make_unique<ResourceBuffer>();
-            hr = outUploadBuffer->Create(device->GetDevice(), totalUploadBufferSize, D3D12_HEAP_TYPE_UPLOAD);
-            if (FAILED(hr))
+            // 4. アップロード用の領域をリングバッファから確保 (以前はテクスチャごとに UPLOAD バッファを新規作成していた)
+            //    テクスチャのコピー元は 512byte 境界に置く必要がある
+            UploadManager::Allocation allocation;
+            if (!uploadManager->Allocate(totalUploadBufferSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, allocation))
             {
-                Core::Logger::Log("Failed Create Upload Buffer.");
+                Core::Logger::Log("Failed Allocate Upload Memory.");
                 return nullptr;
             }
 
             // 5. 256バイトアライメントを考慮した 1行ずつの手動コピー
-            void* mappedData = nullptr;
-            hr = outUploadBuffer->Get()->Map(0, nullptr, &mappedData);
-            if (FAILED(hr) || !mappedData)
+            //    行の長さが同じなら (隙間が無ければ) 1 回の memcpy で済ませる
+            uint8_t* destSubresource = allocation.Cpu + footprint.Offset;
+            if (footprint.Footprint.RowPitch == img.rowPitch && numRows > 0)
             {
-                Core::Logger::Log("Failed Map Upload Buffer.");
+                // 行の間隔が同じなので、最初の行の先頭から最後の行の終わりまでを一度にコピーする
+                const size_t copySize = static_cast<size_t>(img.rowPitch) * (numRows - 1) + static_cast<size_t>(rowSizeInBytes);
+                memcpy(destSubresource, img.pixels, copySize);
+            }
+            else
+            {
+                for (UINT y = 0; y < numRows; ++y)
+                {
+                    // コピー先: 256の倍数でアライメントされた行の先頭
+                    uint8_t* destRow = destSubresource + (y * footprint.Footprint.RowPitch);
+                    // コピー元: 実際の画像の行の先頭
+                    const uint8_t* srcRow = img.pixels + (y * img.rowPitch);
+
+                    // 実データ分だけコピー (隙間は無視)
+                    memcpy(destRow, srcRow, static_cast<size_t>(rowSizeInBytes));
+                }
+            }
+
+            // 6. COPY 用コマンドリストにコピー命令を積む (送信は CommandContext がまとめて行う)
+            auto cmdList = uploadManager->GetCommandList();
+            if (!cmdList)
+            {
                 return nullptr;
             }
 
-            uint8_t* destSubresource = static_cast<uint8_t*>(mappedData) + footprint.Offset;
-
-            for (UINT y = 0; y < numRows; ++y)
-            {
-                // コピー先: 256の倍数でアライメントされた行の先頭
-                uint8_t* destRow = destSubresource + (y * footprint.Footprint.RowPitch);
-                // コピー元: 実際の画像の行の先頭
-                const uint8_t* srcRow = img.pixels + (y * img.rowPitch);
-
-                // 実データ分だけコピー (隙間は無視)
-                memcpy(destRow, srcRow, static_cast<size_t>(rowSizeInBytes));
-            }
-            outUploadBuffer->Get()->Unmap(0, nullptr);
-
-            // 6. コマンドリストにコピー命令を積む
             D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
             dstLoc.pResource = textureBuffer->Get();
             dstLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
             dstLoc.SubresourceIndex = 0;
 
+            // フットプリントはリング内の位置からの相対なので、確保した位置を足す
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed = footprint;
+            placed.Offset += allocation.Offset;
+
             D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-            srcLoc.pResource = outUploadBuffer->Get(); // ID3D12Resource* を取得
+            srcLoc.pResource = allocation.Resource;
             srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            srcLoc.PlacedFootprint = footprint;
+            srcLoc.PlacedFootprint = placed;
 
-            cmdList->GetCmdList()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+            cmdList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
 
-            // 7. リソースバリア (COPY_DEST -> PIXEL_SHADER_RESOURCE)
-            D3D12_RESOURCE_BARRIER barrier = {};
-            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-            barrier.Transition.pResource = textureBuffer->Get();
-            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-            barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            cmdList->GetCmdList()->ResourceBarrier(1, &barrier);
+            // 7. バリアは張らない
+            //    COPY キューでは PIXEL_SHADER_RESOURCE へのバリアを張れない。
+            //    コピー後は COMMON に戻り、描画キューで読む時に PIXEL_SHADER_RESOURCE へ暗黙で昇格する
+            //    (Phase 1 までは描画キューで COPY_DEST → PIXEL_SHADER_RESOURCE のバリアを張っていた)
 
             // テクスチャのインスタンスを返す
             return textureBuffer;

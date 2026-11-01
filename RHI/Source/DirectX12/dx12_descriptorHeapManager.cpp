@@ -1,8 +1,8 @@
 ﻿
 /***********************************************************************************
-* @file    dx12_descriptorHeap.cpp
+* @file    dx12_descriptorHeapManager.cpp
 * @brief   DX12のデスクリプタヒープ一括管理
-* @details 
+* @details
 *
 * @author  Keigo Onari
 * @date    2026/04/22
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 
@@ -19,6 +19,7 @@
 * Include Headers
 ******************************************************************/
 #include "dx12_descriptorHeapManager.h"
+#include "Object/dx12_descriptorHeap.h"
 
 /******************************************************************
 * Macro Definitions
@@ -40,38 +41,25 @@ namespace RHI
 {
 	namespace DirectX12
 	{
+        DescriptorHeapManager::DescriptorHeapManager() = default;
+        DescriptorHeapManager::~DescriptorHeapManager() = default;
+
         HRESULT DescriptorHeapManager::Create(ID3D12Device* device)
         {
-            if (!device)
+            if (!device || _srvUavCbvHeap)
             {
-                // TODO : 例外処理 -> nullptr
                 return E_INVALIDARG;
             }
 
-            D3D12_DESCRIPTOR_HEAP_DESC descHeapDesc = {};
-            descHeapDesc.NumDescriptors = 2;
-            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;                      // シェーダーから隠す
-            descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;                       // RTV
-            descHeapDesc.NodeMask       = 0;
-            HRESULT hr = device->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_rtvHeap));
-            if (FAILED(hr))return hr;
+            // シェーダーから見えるヒープ (CBV/SRV/UAV)
+            _srvUavCbvHeap = std::make_unique<DescriptorHeap>();
+            RHI_RETURN_IF_FAILED(_srvUavCbvHeap->Create(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, MAX_SRV_COUNT, true));
 
-            _rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
-            descHeapDesc.NumDescriptors = _maxSrvCount;                                         // 最大ビュー数
-            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;            // シェーダーから見えるように
-            descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;               // CBV/SRV/UAV
-            hr = device ->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_srvUavCbvHeap));   // 生成
-            if (FAILED(hr))return hr;
-
-            _srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-            descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
-            descHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-
-            return hr;
+            _currentSrvIndex = 0;
+            _freeSrvIndices.clear();
+            return S_OK;
         }
-        
+
 		uint32_t DescriptorHeapManager::AllocateSrv()
         {
             if (!_freeSrvIndices.empty())
@@ -81,16 +69,13 @@ namespace RHI
                 _freeSrvIndices.pop_back();
                 return index;
             }
-            else 
-            {
-                if (_currentSrvIndex >= _maxSrvCount)
-                {// 許容オーバー
 
-                    return INVALID_INDEX;
-                }
-                // なければ新しい番号を発行
-                return _currentSrvIndex++;
+            if (_currentSrvIndex >= MAX_SRV_COUNT)
+            {// 許容オーバー
+                return INVALID_INDEX;
             }
+            // なければ新しい番号を発行
+            return _currentSrvIndex++;
         }
 
         void DescriptorHeapManager::FreeSrv(uint32_t index)
@@ -100,49 +85,19 @@ namespace RHI
             _freeSrvIndices.push_back(index);
         }
 
-        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvCpuHandle(UINT index)
+        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvCpuHandle(UINT index)const
         {
-            D3D12_CPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetCPUDescriptorHandleForHeapStart();
-            handle.ptr += static_cast<SIZE_T>(index) * _srvDescriptorSize;
-            return handle;
+            return _srvUavCbvHeap ? _srvUavCbvHeap->GetCpuHandle(index) : D3D12_CPU_DESCRIPTOR_HANDLE{};
         }
 
-        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvGpuHandle(UINT index)
+        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvGpuHandle(UINT index)const
         {
-            D3D12_GPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetGPUDescriptorHandleForHeapStart();
-            // ポインタの加算 (GPUアドレスはUINT64ベース)
-            handle.ptr += static_cast<UINT64>(index) * _srvDescriptorSize;
-            return handle;
+            return _srvUavCbvHeap ? _srvUavCbvHeap->GetGpuHandle(index) : D3D12_GPU_DESCRIPTOR_HANDLE{};
         }
 
-        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvCpuHandle(UINT index)
+        ID3D12DescriptorHeap* DescriptorHeapManager::GetSrvHeap()const
         {
-            D3D12_CPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetCPUDescriptorHandleForHeapStart();
-            handle.ptr += static_cast<SIZE_T>(index) * _rtvDescriptorSize;
-            return handle;
-        }
-
-        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvGpuHandle(UINT index)
-        {
-            D3D12_GPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetGPUDescriptorHandleForHeapStart();
-            // ポインタの加算 (GPUアドレスはUINT64ベース)
-            handle.ptr += static_cast<UINT64>(index) * _rtvDescriptorSize;
-            return handle;
-        }
-
-        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvCpuHandleStart()
-        {
-            return _rtvHeap->GetCPUDescriptorHandleForHeapStart();
-        }
-
-        UINT DescriptorHeapManager::GetSrvDescriptorSize()
-        {
-            return _srvDescriptorSize;
-        }
-
-        UINT DescriptorHeapManager::GetRtvDescriptorSize()
-        {
-            return _rtvDescriptorSize;
+            return _srvUavCbvHeap ? _srvUavCbvHeap->Get() : nullptr;
         }
 	}
 }

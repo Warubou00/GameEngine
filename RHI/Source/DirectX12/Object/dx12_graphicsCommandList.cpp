@@ -46,13 +46,19 @@ namespace RHI
 		// ==============================================
 		HRESULT GraphicsCommandList::Create(ID3D12Device* device, ID3D12CommandAllocator* cmdAllocator)
 		{
+			return Create(device, cmdAllocator, D3D12_COMMAND_LIST_TYPE_DIRECT);
+		}
+
+		HRESULT GraphicsCommandList::Create(ID3D12Device* device, ID3D12CommandAllocator* cmdAllocator, D3D12_COMMAND_LIST_TYPE type)
+		{
 			if (!device || !cmdAllocator || _pCmdList)
 			{
 				return E_INVALIDARG;
 			}
 
 			// CreateCommandList直後は記録中(Open)状態で返ってくる
-			RHI_RETURN_IF_FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cmdAllocator, nullptr, IID_PPV_ARGS(&_pCmdList)));
+			// type はアロケーターと同じ種類にすること (COPY キュー用なら COPY)
+			RHI_RETURN_IF_FAILED(device->CreateCommandList(0, type, cmdAllocator, nullptr, IID_PPV_ARGS(&_pCmdList)));
 			_isRecording = true;
 			return S_OK;
 		}

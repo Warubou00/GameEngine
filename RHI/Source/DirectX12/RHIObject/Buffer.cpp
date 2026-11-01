@@ -36,6 +36,9 @@
 #include "../Object/dx12_swapChain.h"
 #include "../Object/dx12_device.h"
 #include "../Object/dx12_graphicsCommandList.h"
+#include "../dx12_uploadManager.h"
+
+#include <cstring>
 // ========================================
 
 #include "../../ResourceBufferAllocator.h"
@@ -198,66 +201,39 @@ namespace RHI
 		{
 			if (!destBuffer || !destBuffer->Get() || !data || dataSize == 0) return false;
 
-			// 1. 一時的なUPLOADバッファを作成
-			auto uploadBuffer = std::make_unique<RHI::DirectX12::ResourceBuffer>();
-			if (FAILED(uploadBuffer->Create(device->GetDevice()->GetDevice(), dataSize, D3D12_HEAP_TYPE_UPLOAD)))
+			auto uploadManager = cmdContext->GetUploadManager();
+			if (!uploadManager) return false;
+
+			// 1. リングバッファから領域をもらって、CPU から直接書き込む
+			//    (以前は毎回 UPLOAD バッファを新規作成 → Map → Unmap していた)
+			RHI::DirectX12::UploadManager::Allocation allocation;
+			if (!uploadManager->Allocate(dataSize, 16, allocation))
+			{
+				return false;
+			}
+			std::memcpy(allocation.Cpu, data, static_cast<size_t>(dataSize));
+
+			// 2. COPY 用コマンドリストにコピー命令を積む
+			auto cmdList = uploadManager->GetCommandList();
+			if (!cmdList)
 			{
 				return false;
 			}
 
-			// 2. CPU側からUPLOADバッファへデータをコピー
-			if (FAILED(uploadBuffer->Map()))
-			{
-				return false;
-			}
-			const bool written = uploadBuffer->WriteData(0, data, static_cast<size_t>(dataSize));
-			uploadBuffer->Unmap();
-			if (!written)
-			{
-				return false;
-			}
-
-			// 3. CommandContext を使って GPU側に コピー命令 (CopyBufferRegion) を積む
-			if (!cmdContext->BeginRecording())
-			{
-				return false;
-			}
-			auto cmdList = cmdContext->GetGraphicsCommandList()->GetCmdList();
-
-			// DEFAULTヒープ(コピー先)の状態を COMMON -> COPY_DEST へ遷移
-			// バッファは ExecuteCommandLists の完了時に自動で COMMON に戻る(ステートの減衰)ため、
-			// 2回目以降のアップロードでも遷移前は COMMON になる。
-			// 以前のインデックスバッファは 2回目以降を GENERIC_READ としていたため、デバッグレイヤーでエラーになっていた (2-1)
-			D3D12_RESOURCE_BARRIER barrier = {};
-			barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-			barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-			barrier.Transition.pResource   = destBuffer->Get();
-			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
-			cmdList->ResourceBarrier(1, &barrier);
-
-			// UPLOADバッファ から DEFAULTバッファ へデータをコピー
+			// バリアは張らない:
+			//   COPY キューでは COMMON → COPY_DEST に暗黙で昇格し、完了後は COMMON に戻る(減衰)。
+			//   描画キューで読む時も COMMON → 頂点(SRV) / インデックスの状態に暗黙で昇格する。
+			//   (バッファはどの状態にも暗黙で昇格できる。Phase 1 まではここで明示的にバリアを張っていた)
 			cmdList->CopyBufferRegion(
 				destBuffer->Get(),             // コピー先 (VRAM)
 				destByteOffset,                // コピー先オフセット
-				uploadBuffer->Get(),           // コピー元 (共有メモリ)
-				0,                             // コピー元オフセット
+				allocation.Resource,           // コピー元 (リングバッファ)
+				allocation.Offset,             // コピー元オフセット
 				dataSize                       // コピーするサイズ
 			);
 
-			// DEFAULTヒープ(コピー先)の状態を COPY_DEST -> GENERIC_READ (シェーダーから読める状態) へ遷移
-			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_GENERIC_READ;
-			cmdList->ResourceBarrier(1, &barrier);
-
-			// GPUに送信して完了まで待機する (完了前にアップロードバッファを破棄してはいけない)
-			const bool executed = cmdContext->ExecuteAndSync();
-
-			// アップロードバッファーを破棄
-			uploadBuffer.reset();
-
-			return executed;
+			// 3. 送信はしない (RenderEnd でまとめて 1 回送信される)
+			return true;
 		}
 
 		void Buffer::UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type)
@@ -634,18 +610,39 @@ namespace RHI
 				_texture = std::make_unique<RHI::ObjectInterface::Texture>();
 			}
 
-			// TODO : 今は Scene定数バッファを先頭から使っている。複数モデルを読む場合は _sceneCBAllocator で確保する
-			uint64_t idx = 0;
-			for (auto material : mesh->Materials)
+			// テクスチャを使うマテリアルのパスを集めて、まとめて読み込む (デコードが並列になる)
+			// (以前はマテリアルごとに 1 枚ずつ「デコード → アップロード → GPU 完了待ち」をしていた)
+			std::vector<std::wstring> texturePaths;
+			std::vector<size_t>       textureOwner;     // texturePaths[i] が何番目のマテリアルのものか
+			for (size_t m = 0; m < mesh->Materials.size(); ++m)
 			{
+				auto material = mesh->Materials[m];
 				// テクスチャを使わないマテリアルは既定テクスチャ(白)にする
 				// (以前は UseTexture を見ずに空のパスでも読み込もうとしていた : 1-11)
-				TextureHandle handle;
 				if (material && material->UseTexture)
 				{
 					Core::Logger::Log(material->TexturePath.c_str());
-					handle = _texture->LoadTextureFromFile(iDevice, iCommandContext, this, material->TexturePath.c_str());
+					texturePaths.push_back(material->TexturePath);
+					textureOwner.push_back(m);
 				}
+			}
+
+			std::vector<TextureHandle> materialHandles(mesh->Materials.size());
+			if (!texturePaths.empty())
+			{
+				auto loaded = _texture->LoadTexturesFromFiles(iDevice, iCommandContext, this, texturePaths);
+				for (size_t i = 0; i < loaded.size(); ++i)
+				{
+					materialHandles[textureOwner[i]] = loaded[i];
+				}
+			}
+
+			// TODO : 今は Scene定数バッファを先頭から使っている。複数モデルを読む場合は _sceneCBAllocator で確保する
+			uint64_t idx = 0;
+			for (size_t m = 0; m < mesh->Materials.size(); ++m)
+			{
+				auto material = mesh->Materials[m];
+				const TextureHandle& handle = materialHandles[m];
 
 				if (material)
 				{

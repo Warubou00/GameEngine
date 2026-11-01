@@ -1,8 +1,9 @@
 ﻿
 /***********************************************************************************
-* @file    dx12_descriptorHeap.h
+* @file    dx12_descriptorHeapManager.h
 * @brief   DX12のデスクリプタヒープ一括管理
-* @details 
+* @details シェーダーから見える CBV/SRV/UAV ヒープと、その番号の空き管理
+*          (RTV / DSV は描画先と一緒に CommandContext が DescriptorHeap で持つ)
 *
 * @author  Keigo Onari
 * @date    2026/04/22
@@ -11,7 +12,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
@@ -22,6 +23,7 @@
 * Include Headers
 ******************************************************************/
 #include "dx12_header.h"
+#include <memory>
 #include <vector>
 
 /******************************************************************
@@ -44,6 +46,8 @@ namespace RHI
 {
     namespace DirectX12
     {
+        class DescriptorHeap;
+
         class DescriptorHeapManager
         {
 
@@ -57,79 +61,60 @@ namespace RHI
             ******************************************************************/
 
 
+        public:          /*---定数---*/
+
+            // 確保に失敗した時の値 (以前は 9999 を返していたが、9999番も正しい番号になり得るため最大値に変更)
+            static constexpr uint32_t INVALID_INDEX = 0xFFFFFFFFu;
+
+            // シェーダーから見えるヒープのディスクリプタ数
+            // 以前は 1,000,000 個 (約 32MB) 確保していた。シェーダーのテクスチャ配列は 4096 個なので、
+            // 頂点バッファ等を含めても十分な数に減らした (ヒープが小さいほど作成も速くメモリも少ない)
+            static constexpr uint32_t MAX_SRV_COUNT = 65536;
+
         public:          /*---コンストラクタ・デストラクタ---*/
-            DescriptorHeapManager() {};
-            ~DescriptorHeapManager() {};
+            DescriptorHeapManager();
+            ~DescriptorHeapManager();
 
         public:          /*---クラスメソッド---*/
 
             /***********************************************************************************
              * @brief 生成関数
-             * @details 
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6のポインタ
-             * @param[in] ID3D12CommandQueue* pCmdQueue コマンドキュー
-             * @param[in] HWND* hWnd ウインドウハンドルのポインタ
-             * @param[in] UINT width 幅
-             * @param[in] UINT height 高さ
+             * @param[in] ID3D12Device* device デバイス
              * @return HRESULT 成功の有無
              ************************************************************************************/
             HRESULT Create(ID3D12Device* device);
 
-            // 確保に失敗した時の値 (以前は 9999 を返していたが、9999番も正しい番号になり得るため最大値に変更)
-            static constexpr uint32_t INVALID_INDEX = 0xFFFFFFFFu;
-
             // テクスチャロード時などに呼ばれる：空いているインデックスを返す (満杯なら INVALID_INDEX)
             uint32_t AllocateSrv();
 
-
             // テクスチャ破棄時に呼ばれる：インデックスを空きリストに戻す
+            // ※GPU がまだ使っている可能性がある時は、完了を待ってから戻すこと
             void FreeSrv(uint32_t index);
 
             // 指定インデックスのCPUハンドル（実際の書き込み先アドレス）を取得する
-            D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index);
+            D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index)const;
 
-            // 指定インデックスのGPUハンドル（実際の書き込み先アドレス）を取得する
-            D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(UINT index);
+            // 指定インデックスのGPUハンドル（シェーダーから参照する時のアドレス）を取得する
+            D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(UINT index)const;
 
-            // 指定インデックスのCPUハンドルを取得(RTV)
-            D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandle(UINT index);
-
-            // 指定インデックスのGPUハンドルを取得(RTV)
-            D3D12_GPU_DESCRIPTOR_HANDLE GetRtvGpuHandle(UINT index);
-
-            // 基本2つなので先頭を返す
-            D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();
-
-            ID3D12DescriptorHeap* GetSrvHeap()const { return _srvUavCbvHeap.Get(); }
-
-            // サイズ取得
-            UINT GetSrvDescriptorSize();
-            UINT GetRtvDescriptorSize();
+            ID3D12DescriptorHeap* GetSrvHeap()const;
 
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
 
-            // DX12のヒープ実体
-            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _srvUavCbvHeap;
-            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _samplerHeap;
-            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _rtvHeap;
-            Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _dsvHeap;
+            // シェーダーから見える CBV/SRV/UAV ヒープ
+            // 先頭ハンドルとサイズはラッパーが覚えているので、毎回 API で取得しない (以前は呼ぶたびに取得していた)
+            // ※使われていなかった RTV / DSV / Sampler ヒープは削除した (RTV / DSV は CommandContext が持つ)
+            std::unique_ptr<DescriptorHeap> _srvUavCbvHeap;
 
             // --- SRVヒープのアロケータ（インデックス管理） ---
-            const uint32_t _maxSrvCount = 1000000; // 確保した最大数
             uint32_t _currentSrvIndex = 0;   // 現在未使用の先頭インデックス
 
             // 破棄されて再利用可能になったインデックスのリスト（FreeList）
             std::vector<uint32_t> _freeSrvIndices;
-
-            // 各ヒープのディスクリプタのサイズ（インデックスからアドレスを計算するのに必要）
-            UINT _srvDescriptorSize;
-
-            // rtvのヒープサイズ
-            UINT _rtvDescriptorSize;
 
         };
     }
