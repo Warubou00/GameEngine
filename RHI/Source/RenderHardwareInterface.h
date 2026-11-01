@@ -100,6 +100,12 @@ namespace RHI
         void CleanUp();
 
         /// <summary>
+        /// 描画先のサイズ変更 (ウィンドウのクライアント領域のサイズを渡す) <br/>
+        /// 0 (最小化中) の場合は何もしない
+        /// </summary>
+        bool Resize(uint32_t width, uint32_t height);
+
+        /// <summary>
         /// 全ての初期化に成功しているか
         /// </summary>
         bool IsInitialized()const { return _isInitialized; }

@@ -96,11 +96,10 @@ namespace RHI
 				return RHI_FAILED_INITIALIZED;
 			}
 
-			// レンダーターゲットビューの作成
-			if (!makeRtv(device, cmdContext))
-			{
-				return RHI_FAILED_INITIALIZED;
-			}
+			// ※レンダーターゲットビュー(RTV)は CommandContext が作る (リサイズ時に作り直すため)
+
+			// 描画先のサイズを覚えておく (Projection 行列のアスペクト比に使う)
+			SetViewportSize(cmdContext->GetWidth(), cmdContext->GetHeight());
 
 			if (!makeCommonBuffer(device))
 			{
@@ -263,21 +262,69 @@ namespace RHI
 
 		void Buffer::UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type)
 		{
-			if (!_commonCB) return;
+			// 以前はここで定数バッファへ直接書いていた。
+			// GPU が複数フレームを並行して処理するようになったので、ここでは CPU 側の行列だけ更新し、
+			// GPU へは WriteFrameConstants でフレームごとの領域に書く
+			_camera         = camera;
+			_projectionType = type;
+			_hasCamera      = true;
+			rebuildViewProjection();
+		}
 
+		void Buffer::SetViewportSize(uint32_t width, uint32_t height)
+		{
+			// 最小化中は 0 が来る。アスペクト比が壊れるので前の値のままにする
+			if (width == 0 || height == 0) return;
+			if (width == _viewportWidth && height == _viewportHeight) return;
+
+			_viewportWidth  = width;
+			_viewportHeight = height;
+			if (_hasCamera)
+			{
+				rebuildViewProjection();
+			}
+		}
+
+		void Buffer::rebuildViewProjection()
+		{
 			Renderer::View       view;
 			Renderer::Projection projection;
 
-			auto viewMat = view.GetViewMatrix(camera);
-			// TODO : 画面サイズが 1280x720 固定。Phase 1 (2-4) でスワップチェーンのサイズを使うようにする
-			auto projMat = projection.GetProjectionMatrix(1280.0f, 720.0f, 1.0f, 10000.0f, type);
+			// どちらも転置済みの行列が返る (シェーダーは mul(ベクトル, 行列) で掛ける)
+			::DirectX::XMStoreFloat4x4(&_viewMatrix, view.GetViewMatrix(_camera));
+			::DirectX::XMStoreFloat4x4(&_projMatrix, projection.GetProjectionMatrix(
+				static_cast<float>(_viewportWidth), static_cast<float>(_viewportHeight), 1.0f, 10000.0f, _projectionType));
 
-			// View行列 → Projection行列 の順に詰める (シェーダーの cbuffer GlobalData と同じ並び)
-			if (!_commonCB->WriteData(0, &viewMat, sizeof(viewMat)) ||
-				!_commonCB->WriteData(sizeof(viewMat), &projMat, sizeof(projMat)))
+			// 全フレームの領域に書き直しが必要になる
+			_frameConstantsVersion++;
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteFrameConstants(uint32_t frameIndex)
+		{
+			if (!_commonCB || frameIndex >= CommandContext::FRAME_COUNT)
 			{
-				Core::Logger::Log("[Buffer] Failed write view / projection matrix.");
+				return 0;
 			}
+
+			// フレームごとに 256byte ずつ領域を分けている (Root CBV は 256byte 境界が必須)
+			const uint64_t offset = CONSTANT_BUFFER_ALIGNMENT * frameIndex;
+
+			// 行列が変わっていなければ書き込みを省く (UPLOAD ヒープは書き込みが遅いメモリなので、無駄に書かない)
+			if (_writtenVersion[frameIndex] != _frameConstantsVersion)
+			{
+				// View行列 → Projection行列 の順に詰める (シェーダーの cbuffer GlobalData と同じ並び)
+				if (_commonCB->WriteData(offset, &_viewMatrix, sizeof(_viewMatrix)) &&
+					_commonCB->WriteData(offset + sizeof(_viewMatrix), &_projMatrix, sizeof(_projMatrix)))
+				{
+					_writtenVersion[frameIndex] = _frameConstantsVersion;
+				}
+				else
+				{
+					Core::Logger::Log("[Buffer] Failed write view / projection matrix.");
+				}
+			}
+
+			return _commonCB->GetGPUVirtualAddress() + offset;
 		}
 
 		void Buffer::Dispose()
@@ -334,37 +381,6 @@ namespace RHI
 		const uint64_t Buffer::GetSceneIndexBufferSize()const
 		{
 			return _SCENE_IB_SIZE;
-		}
-
-		bool Buffer::makeRtv(Device* device, CommandContext* cmdContext)
-		{
-			// Managerのnullチェック
-			if (!nullCheckManager())
-			{
-				return false;
-			}
-			// RTVのハンドル取得
-			auto rtvHandle = _descriptorHeapManager->GetRtvCpuHandleStart();
-
-			const uint32_t bufferCount = cmdContext->GetSwapChain()->GetBufferCount();
-
-			// rtvの作成 (バックバッファの数だけ)
-			for (uint32_t i = 0; i < bufferCount; i++)
-			{
-				// スワップチェーンが保持しているので参照カウントは増えない (Release不要)
-				ID3D12Resource* resource = cmdContext->GetSwapChain()->GetBufferFromIndex(i);
-				if (!resource)
-				{
-					return false;
-				}
-
-				device->GetDevice()->GetDevice()->CreateRenderTargetView(resource, nullptr, rtvHandle);
-
-				// サイズ分進める
-				rtvHandle.ptr += _descriptorHeapManager->GetRtvDescriptorSize();
-			}
-
-			return true;
 		}
 
 		bool Buffer::nullCheckManager()

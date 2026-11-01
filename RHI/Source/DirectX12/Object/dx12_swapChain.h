@@ -60,10 +60,16 @@ namespace RHI
             SwapChain();
             ~SwapChain();
 
+            // 待機用ハンドルを所有するのでコピー禁止
+            SwapChain(const SwapChain&) = delete;
+            SwapChain& operator=(const SwapChain&) = delete;
+
 
         public:          /*---クラスメソッド---*/
 
-            static constexpr UINT BUFFER_COUNT = 2;
+            // バックバッファの数
+            // 3枚にしておくと、GPUが1枚を表示中・1枚を描画中でも、CPUが次のフレームの準備に入れる
+            static constexpr UINT BUFFER_COUNT = 3;
             static constexpr DXGI_FORMAT FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
             /***********************************************************************************
@@ -75,9 +81,12 @@ namespace RHI
              * @param[in] HWND* hWnd ウインドウハンドルのポインタ
              * @param[in] UINT width 幅
              * @param[in] UINT height 高さ
+             * @param[in] bool allowTearing テアリングを許可するか (DXGIFactory6::IsTearingSupported の結果を渡す)
+             * @param[in] UINT maxFrameLatency CPUが先行できる最大フレーム数 (FrameContext の数と合わせる)
              * @return HRESULT 成功の有無
              ************************************************************************************/
-            HRESULT Create(IDXGIFactory6* pDxgiFactory, ID3D12CommandQueue* pCmdQueue, HWND* hWnd, UINT width, UINT height);
+            HRESULT Create(IDXGIFactory6* pDxgiFactory, ID3D12CommandQueue* pCmdQueue, HWND* hWnd, UINT width, UINT height,
+                           bool allowTearing, UINT maxFrameLatency);
 
             /***********************************************************************************
              * @brief バックバッファのサイズ変更
@@ -92,11 +101,22 @@ namespace RHI
 
             /***********************************************************************************
              * @brief 画面への表示
+             * @details syncInterval == 0 かつテアリング許可時は DXGI_PRESENT_ALLOW_TEARING を付ける
+             *          (付けないと VSync OFF でもリフレッシュレートで頭打ちになる環境がある)
              *
              * @param[in] UINT syncInterval 0:VSyncなし 1:VSyncあり
              * @return HRESULT 成功の有無 (DXGI_ERROR_DEVICE_REMOVED 等もそのまま返す)
              ************************************************************************************/
             HRESULT Present(UINT syncInterval);
+
+            /***********************************************************************************
+             * @brief 次のフレームを描き始めてよくなるまで待つ
+             * @details Frame Latency Waitable Object を使う。
+             *          CPUが GPU / 表示より先行しすぎて入力遅延が増えるのを防ぐ (先行は maxFrameLatency フレームまで)
+             *
+             * @param[in] DWORD timeoutMs タイムアウト(ミリ秒)
+             ************************************************************************************/
+            void WaitForNextFrame(DWORD timeoutMs = 1000)const;
 
             /***********************************************************************************
              * @brief 取得関数
@@ -117,6 +137,7 @@ namespace RHI
             UINT GetBufferCount(void)const;
             UINT GetWidth(void)const  { return _width; }
             UINT GetHeight(void)const { return _height; }
+            bool IsTearingAllowed(void)const { return _allowTearing; }
 
             /***********************************************************************************
              * @brief 解放関数
@@ -131,8 +152,11 @@ namespace RHI
 
             Microsoft::WRL::ComPtr<IDXGISwapChain4> _pSwapChain;
             Microsoft::WRL::ComPtr<ID3D12Resource>  _backBuffers[BUFFER_COUNT];
-            UINT                                    _width  = 0;
-            UINT                                    _height = 0;
+            UINT                                    _width              = 0;
+            UINT                                    _height             = 0;
+            UINT                                    _flags              = 0;        // 生成時のフラグ (ResizeBuffers にも同じ値を渡す必要がある)
+            bool                                    _allowTearing       = false;
+            HANDLE                                  _frameLatencyWaitable = nullptr; // 自分で CloseHandle する必要がある
 
             HRESULT acquireBackBuffers();
             void    releaseBackBuffers();

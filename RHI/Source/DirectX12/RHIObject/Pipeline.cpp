@@ -23,6 +23,7 @@
 // 必要なクラスをインクルード
 // ========================================
 #include "Device.h"
+#include "CommandContext.h"     // DEPTH_FORMAT
 // ========================================
 
 // DirectX12 APIのラッパーをインクルード
@@ -264,7 +265,10 @@ namespace RHI
             // ==============================================================
             D3D12_RASTERIZER_DESC rasterizerDesc = {};
             rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID; // ポリゴンを塗りつぶす (ワイヤーフレームなら D3D12_FILL_MODE_WIREFRAME)
-            rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;  // カリングしない (両面とも描画する)
+            // カリングしない (両面とも描画する)
+            // TODO(高速化) : 閉じたメッシュなら BACK にするとピクセルシェーダーの実行が約半分になる。
+            //               OBJ(右手系) と DirectXMath(左手系) で面の向きが逆になるため、ローダー側で揃えてから有効にする
+            rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
             rasterizerDesc.FrontCounterClockwise = TRUE;      // 反時計回りを表面とする
             rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
             rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
@@ -300,8 +304,15 @@ namespace RHI
 
             psoDesc.RasterizerState = rasterizerDesc;
             psoDesc.BlendState = blendDesc;
-            psoDesc.DepthStencilState.DepthEnable = FALSE;
-            psoDesc.DepthStencilState.StencilEnable = FALSE;
+            // ==============================================================
+            // 深度ステンシルステート (以前は深度バッファが無く、奥の面が手前に描かれていた : 2-6)
+            // ==============================================================
+            psoDesc.DepthStencilState.DepthEnable    = TRUE;
+            psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+            psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;  // 手前(値が小さい)ものが残る。クリア値は 1.0
+            psoDesc.DepthStencilState.StencilEnable  = FALSE;
+            psoDesc.DSVFormat = CommandContext::DEPTH_FORMAT;                     // 深度バッファと必ず一致させる
+
             psoDesc.SampleMask = UINT_MAX;
             psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             psoDesc.NumRenderTargets = 1;

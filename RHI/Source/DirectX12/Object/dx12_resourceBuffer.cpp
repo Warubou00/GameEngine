@@ -136,6 +136,53 @@ namespace RHI
             return S_OK;
         }
 
+        HRESULT ResourceBuffer::CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth)
+        {
+            if (!device || _resourceBuffer || width == 0 || height == 0)
+            {
+                return E_INVALIDARG;
+            }
+
+            D3D12_HEAP_PROPERTIES heapProps = {};
+            heapProps.Type                  = D3D12_HEAP_TYPE_DEFAULT;
+            heapProps.CPUPageProperty       = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+            heapProps.MemoryPoolPreference  = D3D12_MEMORY_POOL_UNKNOWN;
+            heapProps.CreationNodeMask      = 1;
+            heapProps.VisibleNodeMask       = 1;
+
+            D3D12_RESOURCE_DESC desc = {};
+            desc.Dimension                  = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            desc.Alignment                  = 0;
+            desc.Width                      = width;
+            desc.Height                     = height;
+            desc.DepthOrArraySize           = 1;
+            desc.MipLevels                  = 1;
+            desc.Format                     = format;
+            desc.SampleDesc.Count           = 1;
+            desc.SampleDesc.Quality         = 0;
+            desc.Layout                     = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            // DENY_SHADER_RESOURCE : シェーダーから読まないことを伝えると、ドライバーが深度圧縮を最適化できる
+            desc.Flags                      = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
+
+            // 最適化クリア値 : ClearDepthStencilView で同じ値を使うと高速クリアになる
+            D3D12_CLEAR_VALUE clearValue = {};
+            clearValue.Format               = format;
+            clearValue.DepthStencil.Depth   = clearDepth;
+            clearValue.DepthStencil.Stencil = 0;
+
+            RHI_RETURN_IF_FAILED(device->CreateCommittedResource(
+                &heapProps,
+                D3D12_HEAP_FLAG_NONE,
+                &desc,
+                D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                &clearValue,
+                IID_PPV_ARGS(&_resourceBuffer)
+            ));
+
+            _capacity = 0;
+            return S_OK;
+        }
+
         void ResourceBuffer::Regist(ID3D12Resource* resource)
         {
             // 以前のリソースをMapしたまま差し替えないようにする

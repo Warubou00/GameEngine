@@ -72,6 +72,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Source\DirectX12\Object\dx12_descriptorHeap.h">
+      <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
+    </ClInclude>
     <ClInclude Include="Source\DirectX12\Object\dx12_device.h">
       <Filter>ヘッダー ファイル\DirectX12\Object</Filter>
     </ClInclude>
@@ -194,6 +197,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Source\DirectX12\Object\dx12_descriptorHeap.cpp">
+      <Filter>ソース ファイル\DirectX12\Object</Filter>
+    </ClCompile>
     <ClCompile Include="Source\DirectX12\Object\dx12_device.cpp">
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>

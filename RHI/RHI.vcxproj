@@ -161,6 +161,7 @@
     <ClInclude Include="Source\DirectX12\Object\dx12_commandQueue.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_commandSignature.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_computeCommandList.h" />
+    <ClInclude Include="Source\DirectX12\Object\dx12_descriptorHeap.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_device.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_fence.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_graphicsCommandList.h" />
@@ -197,6 +198,7 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_commandQueue.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_commandSignature.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_computeCommandList.cpp" />
+    <ClCompile Include="Source\DirectX12\Object\dx12_descriptorHeap.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_device.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_fence.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_graphicsCommandList.cpp" />

@@ -9,12 +9,23 @@ public class RHI : IDisposable
     private RHIInitializedInfo info;
     private RHIInfo            rhiInfo;
 
+    private const string WindowTitle = "C# DirectX12 Engine";
+
+    // Width / Height は枠とタイトルバーを含んだサイズなので、描画領域(ClientSize)で指定する
+    // (以前は外枠のサイズを渡していたため、スワップチェーンが実際の描画領域より大きかった : 2-4)
     private Form window = new Form
     {
-        Width = 1280,
-        Height = 720,
-        Text = "C# DirectX12 Engine"
+        ClientSize = new System.Drawing.Size(1280, 720),
+        Text = WindowTitle
     };
+
+    private bool isInitialized = false;
+    private bool isClosed      = false;
+    private bool isDisposed    = false;
+
+    // FPS 計測 (高速化の効果を確認するため、タイトルバーに表示する)
+    private readonly Stopwatch fpsTimer = new Stopwatch();
+    private int fpsFrameCount = 0;
 
     public struct RHIInfo
     {
@@ -47,8 +58,15 @@ public class RHI : IDisposable
     [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void RHI_SetLogCallback(LogCallbackDelegate callback, WLogCallbackDelegate wcallback);
 
+    // C++ 側は ObjectInfo* (ポインタ) で受けるので ref で渡す
+    // (以前は値渡しで、x64 の呼び出し規約がたまたま参照渡しにしていたため動いていた : 2-12)
     [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
-    private static extern void RHI_Initialize(out RHIInitializedInfo info, RHIInfo rHIInfo);
+    private static extern void RHI_Initialize(out RHIInitializedInfo info, ref RHIInfo rHIInfo);
+
+    // C++ の bool は 1 バイトなので I1 で受ける (既定の 4 バイト BOOL だと上位バイトのゴミを拾う)
+    [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool RHI_Resize(uint width, uint height);
 
     [DllImport("RHI.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern void RHI_CleanUp();
@@ -65,9 +83,21 @@ public class RHI : IDisposable
     public void Initialize(out RHIInitializedInfo info)
     {
         rhiInfo.hwnd        = window.Handle;
-        rhiInfo.width       = window.Width;
-        rhiInfo.height      = window.Height;
-        rhiInfo.enableVSync = 0;
+        rhiInfo.width       = window.ClientSize.Width;
+        rhiInfo.height      = window.ClientSize.Height;
+        rhiInfo.enableVSync = 0;   // 0 : VSync OFF (対応環境ではテアリングを許可して上限なしで描画する)
+
+        // ウィンドウを閉じたらメインループを抜ける (以前は while(true) で終了処理が呼ばれなかった)
+        window.FormClosed += (sender, e) => isClosed = true;
+
+        // 描画領域のサイズが変わったらスワップチェーンを作り直す (最小化中は 0 になるので送らない)
+        window.ClientSizeChanged += (sender, e) =>
+        {
+            if (!isInitialized || window.WindowState == FormWindowState.Minimized) return;
+            if (window.ClientSize.Width <= 0 || window.ClientSize.Height <= 0) return;
+            RHI_Resize((uint)window.ClientSize.Width, (uint)window.ClientSize.Height);
+        };
+
         window.Show();
 
         _logCallback  = new LogCallbackDelegate(Log);
@@ -75,10 +105,15 @@ public class RHI : IDisposable
 
         RHI_SetLogCallback(_logCallback, _wLogCallback);
 
-        RHI_Initialize(out info, rhiInfo);
+        RHI_Initialize(out info, ref rhiInfo);
+        isInitialized = isAllInitialized(info);
 
+        fpsTimer.Start();
         return;
     }
+
+    // ウィンドウが開いている間 true (メインループの条件に使う)
+    public bool IsOpen => !isClosed && !window.IsDisposed;
 
     public void Test_LoadModel(float posX, float posY, float posZ)
     {
@@ -87,12 +122,39 @@ public class RHI : IDisposable
 
     public void Render()
     {
+        // 最小化中は描画しても見えないので、CPU / GPU を休ませる
+        if (window.WindowState == FormWindowState.Minimized)
+        {
+            System.Threading.Thread.Sleep(16);
+            return;
+        }
+
         RHI_TestRender();
+        updateFps();
     }
 
     public void Dispose()
     {
+        // 2 回呼ばれても C++ 側を 2 回解放しないようにする
+        if (isDisposed) return;
+        isDisposed = true;
+
         RHI_CleanUp();
+        if (!window.IsDisposed) window.Dispose();
+    }
+
+    // 0.5 秒ごとに FPS と 1 フレームの時間をタイトルバーに出す
+    private void updateFps()
+    {
+        fpsFrameCount++;
+        double elapsed = fpsTimer.Elapsed.TotalSeconds;
+        if (elapsed < 0.5) return;
+
+        double fps = fpsFrameCount / elapsed;
+        window.Text = $"{WindowTitle}  |  {fps:F1} FPS  ({1000.0 / fps:F2} ms)  |  {window.ClientSize.Width}x{window.ClientSize.Height}";
+
+        fpsFrameCount = 0;
+        fpsTimer.Restart();
     }
 
     public void DebugExecute()

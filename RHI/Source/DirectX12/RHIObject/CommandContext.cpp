@@ -36,6 +36,7 @@
 #include "../Object/dx12_commandAllocator.h"
 #include "../Object/dx12_swapChain.h"
 #include "../Object/dx12_resourceBuffer.h"
+#include "../Object/dx12_descriptorHeap.h"
 #include "../dx12_descriptorHeapManager.h"
 #include "../Object/dx12_fence.h"
 // ========================================
@@ -86,12 +87,13 @@ namespace RHI
 			// HRESULTをログに出す (失敗箇所を追えるように)
 			void logFailed(const char* what, HRESULT hr)
 			{
-				std::string message = std::string("[CommandContext] ") + what + " failed. HRESULT = 0x";
-				char code[16] = {};
-				sprintf_s(code, "%08X", static_cast<unsigned int>(hr));
-				message += code;
-				Core::Logger::Log(message.c_str());
+				char message[256] = {};
+				sprintf_s(message, "[CommandContext] %s failed. HRESULT = 0x%08X", what, static_cast<unsigned int>(hr));
+				Core::Logger::Log(message);
 			}
+
+			// 画面クリア色
+			constexpr float CLEAR_COLOR[] = { 0.1f, 0.2f, 0.4f, 1.0f };
 		}
 
 		CommandContext::CommandContext() = default;
@@ -116,64 +118,84 @@ namespace RHI
 				return RHI_FAILED_INVALID_ARGUMENT;
 			}
 			_device = device;
-
-			_commandQueue        = std::make_unique<DirectX12::CommandQueue>();
-			_commandAllocator    = std::make_unique<DirectX12::CommandAllocator>();
-			_graphicsCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
-			_swapChain           = std::make_unique<DirectX12::SwapChain>();
-			_fence               = std::make_unique<DirectX12::Fence>();
-
 			ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
 
-			// 以前は HRESULT を全て無視して常に成功を返していた (1-15)
+			// ---------- キューとフェンス ----------
+			_commandQueue = std::make_unique<DirectX12::CommandQueue>();
 			HRESULT hr = _commandQueue->Create(dx12Device);
 			if (FAILED(hr)) { logFailed("CreateCommandQueue", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
-			hr = _commandAllocator->Create(dx12Device);
-			if (FAILED(hr)) { logFailed("CreateCommandAllocator", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+			_fence = std::make_unique<DirectX12::Fence>();
+			hr = _fence->Create(dx12Device);
+			if (FAILED(hr)) { logFailed("CreateFence", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
-			// 生成直後のコマンドリストは記録中の状態 (初期化中のアップロードをそのまま積めるようにしている)
-			hr = _graphicsCommandList->Create(dx12Device, _commandAllocator->Get());
-			if (FAILED(hr)) { logFailed("CreateCommandList", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+			// ---------- フレーム用 : アロケーターはフレームの数だけ、コマンドリストは 1 本 ----------
+			// (コマンドリストは ExecuteCommandLists の直後に別のアロケーターでリセットして使い回せる)
+			for (auto& frame : _frames)
+			{
+				frame.Allocator = std::make_unique<DirectX12::CommandAllocator>();
+				hr = frame.Allocator->Create(dx12Device);
+				if (FAILED(hr)) { logFailed("CreateCommandAllocator(Frame)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+				frame.FenceValue = 0;
+			}
 
+			_frameCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
+			hr = _frameCommandList->Create(dx12Device, _frames[0].Allocator->Get());
+			if (FAILED(hr)) { logFailed("CreateCommandList(Frame)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			// 生成直後は記録中なので閉じておく (RenderStart で Reset するため)
+			_frameCommandList->Close();
+
+			// ---------- 即時用 (アップロード) ----------
+			_immediateAllocator = std::make_unique<DirectX12::CommandAllocator>();
+			hr = _immediateAllocator->Create(dx12Device);
+			if (FAILED(hr)) { logFailed("CreateCommandAllocator(Immediate)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			// 生成直後の記録中状態のまま残しておく (初期化中のアップロードをそのまま積めるように)
+			_immediateCommandList = std::make_unique<DirectX12::GraphicsCommandList>();
+			hr = _immediateCommandList->Create(dx12Device, _immediateAllocator->Get());
+			if (FAILED(hr)) { logFailed("CreateCommandList(Immediate)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			// ---------- スワップチェーン ----------
 			HWND hWnd   = static_cast<HWND>(info->HWnd);
 			UINT width  = static_cast<UINT>(info->Width);
 			UINT height = static_cast<UINT>(info->Height);
-			hr = _swapChain->Create(device->GetDxgiFactory()->Get(), _commandQueue->Get(), &hWnd, width, height);
-			if (FAILED(hr)) { logFailed("CreateSwapChain", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
-
-			hr = _fence->Create(dx12Device);
-			if (FAILED(hr)) { logFailed("CreateFence", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
 			// VSync設定 (以前は無視して常に Present(1, 0) だった : 2-5)
 			_syncInterval = info->EnabledVSync ? 1 : 0;
 
+			// テアリングは対応環境でのみ有効にする (VSync OFF 時にフレームレートの上限が外れる)
+			const bool allowTearing = device->GetDxgiFactory()->IsTearingSupported();
+
+			_swapChain = std::make_unique<DirectX12::SwapChain>();
+			hr = _swapChain->Create(device->GetDxgiFactory()->Get(), _commandQueue->Get(), &hWnd, width, height, allowTearing, FRAME_COUNT);
+			if (FAILED(hr)) { logFailed("CreateSwapChain", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			// ---------- 描画先 (RTV / DSV) ----------
+			_rtvHeap = std::make_unique<DirectX12::DescriptorHeap>();
+			hr = _rtvHeap->Create(dx12Device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, DirectX12::SwapChain::BUFFER_COUNT);
+			if (FAILED(hr)) { logFailed("CreateDescriptorHeap(RTV)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			_dsvHeap = std::make_unique<DirectX12::DescriptorHeap>();
+			hr = _dsvHeap->Create(dx12Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
+			if (FAILED(hr)) { logFailed("CreateDescriptorHeap(DSV)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
+
+			if (!createRenderTargetViews())     return RHI_FAILED_CREATE_ANY_OBJECT;
+			if (!createDepthBuffer(width, height)) return RHI_FAILED_CREATE_ANY_OBJECT;
+
+#ifdef CONSOLE_DEBUG
+			char message[128] = {};
+			sprintf_s(message, "[CommandContext] %ux%u, VSync %s, Tearing %s, Frames in flight %u",
+				width, height, _syncInterval ? "ON" : "OFF", allowTearing ? "Supported" : "Not Supported", FRAME_COUNT);
+			Core::Logger::Log(message);
+#endif
+
 			return RHI_SUCCEEDED;
 		}
 
-		bool CommandContext::BeginRecording()
-		{
-			if (!_graphicsCommandList || !_commandAllocator)
-			{
-				return false;
-			}
-
-			// 記録中ならそのまま積み足す
-			if (_graphicsCommandList->IsRecording())
-			{
-				return true;
-			}
-
-			// 以前は記録中のコマンドリストがある状態でアロケーターをリセットしていた (1-10)
-			// → Close済みであることを確認してから、アロケーター → コマンドリストの順でリセットする
-			HRESULT hr = _commandAllocator->Reset();
-			if (FAILED(hr)) { logFailed("CommandAllocator::Reset", hr); return false; }
-
-			hr = _graphicsCommandList->Reset(_commandAllocator->Get(), nullptr);
-			if (FAILED(hr)) { logFailed("CommandList::Reset", hr); return false; }
-
-			return true;
-		}
+		// ==============================================================
+		// フレーム描画
+		// ==============================================================
 
 		bool CommandContext::RenderStart(Pipeline* pipeline, Buffer* buffer)
 		{
@@ -182,40 +204,54 @@ namespace RHI
 				return false;
 			}
 
-			// 1. 記録の開始 (アロケータとコマンドリストのリセット)
-			if (!BeginRecording())
-			{
-				return false;
-			}
-			auto cmdList = _graphicsCommandList->GetCmdList();
-			cmdList->SetPipelineState(pipeline->GetPipelineState());
+			// 1. CPU が先行しすぎていれば待つ (表示待ちのフレームが FRAME_COUNT 個を超えないように)
+			_swapChain->WaitForNextFrame();
 
-			// 2. ビューポートとシザー矩形の設定 (スワップチェーンのサイズに合わせる。以前は1280x720固定だった)
+			// 2. このフレームの FrameContext を GPU が使い終わるまで待つ
+			//    FRAME_COUNT フレーム前の処理なので、通常はすでに終わっていて待たない
+			FrameContext& frame = _frames[_frameIndex];
+			HRESULT hr = _fence->WaitForValue(frame.FenceValue);
+			if (FAILED(hr)) { logFailed("Fence::WaitForValue", hr); return false; }
+
+			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
+			hr = frame.Allocator->Reset();
+			if (FAILED(hr)) { logFailed("CommandAllocator::Reset(Frame)", hr); return false; }
+
+			hr = _frameCommandList->Reset(frame.Allocator->Get(), pipeline->GetPipelineState());
+			if (FAILED(hr)) { logFailed("CommandList::Reset(Frame)", hr); return false; }
+
+			auto cmdList = _frameCommandList->GetCmdList();
+
+			// 4. ビューポートとシザー矩形の設定 (スワップチェーンのサイズに合わせる)
 			const UINT width  = _swapChain->GetWidth();
 			const UINT height = _swapChain->GetHeight();
-			D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
-			D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
+			const D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 			cmdList->RSSetViewports(1, &viewport);
 			cmdList->RSSetScissorRects(1, &scissorRect);
 
-			// 3. リソースバリア (Present -> RenderTarget)
-			const uint32_t frameBufferIndex = _swapChain->GetCurrentBackBufferIndex();
-			_currentBackBuffer = _swapChain->GetBackBuffer();
+			// 5. リソースバリア (Present -> RenderTarget)
+			const uint32_t backBufferIndex = _swapChain->GetCurrentBackBufferIndex();
+			_currentBackBuffer = _swapChain->GetBufferFromIndex(backBufferIndex);
 			if (!_currentBackBuffer)
 			{
+				// コマンドリストは記録中のまま。閉じておかないと次の Reset が失敗する
+				_frameCommandList->Close();
 				return false;
 			}
 			const auto toRenderTarget = makeTransitionBarrier(_currentBackBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 			cmdList->ResourceBarrier(1, &toRenderTarget);
 
-			// 4. RTVの設定と画面クリア
-			auto rtvHandle = buffer->GetDescHeapManager()->GetRtvCpuHandle(frameBufferIndex);
-			cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
-			const float clearColor[] = { 0.1f, 0.2f, 0.4f, 1.0f };
-			cmdList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+			// 6. 描画先の設定とクリア (色 + 深度)
+			const auto rtvHandle = _rtvHeap->GetCpuHandle(backBufferIndex);
+			const auto dsvHandle = _dsvHeap->GetCpuHandle(0);
+			cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+			cmdList->ClearRenderTargetView(rtvHandle, CLEAR_COLOR, 0, nullptr);
+			// 深度は生成時の最適化クリア値と同じ値でクリアする (違うと高速クリアが効かない)
+			cmdList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, DEPTH_CLEAR_VALUE, 0, 0, nullptr);
 
 			// ==============================================================
-			// 5. ルートシグネチャとヒープのセット
+			// 7. ルートシグネチャとヒープのセット
 			// ==============================================================
 			cmdList->SetGraphicsRootSignature(pipeline->GetRootSignature());
 
@@ -227,8 +263,9 @@ namespace RHI
 			// メガVBのSRVテーブル (t0)
 			cmdList->SetGraphicsRootDescriptorTable(Pipeline::ROOT_PARAM_VERTEX_BUFFER_TABLE, heapManager->GetSrvGpuHandle(Buffer::SRV_INDEX_SCENE_VB));
 
-			// Global定数バッファ (b1) を Root CBV としてセット (View / Projection 行列)
-			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->GetCommonCB()->GetGPUVirtualAddress());
+			// Global定数バッファ (b1) : このフレーム専用の領域に View / Projection を書いてからセットする
+			// (GPU が前のフレームで読んでいる領域を CPU が上書きしないよう、フレームごとに領域を分けている)
+			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->WriteFrameConstants(_frameIndex));
 
 			// バインドレス・テクスチャ配列 (t1)
 			// テーブルの先頭 = テクスチャの0番。シェーダー側の g_TextureID はここからの相対番号になる
@@ -248,25 +285,26 @@ namespace RHI
 
 		bool CommandContext::RenderEnd()
 		{
-			if (!_currentBackBuffer || !_graphicsCommandList->IsRecording())
+			if (!_currentBackBuffer || !_frameCommandList->IsRecording())
 			{
 				// RenderStart が失敗している
 				return false;
 			}
 
-			// 6. リソースバリア (RenderTarget -> Present)
+			// 8. リソースバリア (RenderTarget -> Present)
 			const auto toPresent = makeTransitionBarrier(_currentBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-			_graphicsCommandList->GetCmdList()->ResourceBarrier(1, &toPresent);
+			_frameCommandList->GetCmdList()->ResourceBarrier(1, &toPresent);
 			_currentBackBuffer = nullptr;
 
-			// 7. コマンドリストのクローズと実行
-			HRESULT hr = _graphicsCommandList->Close();
-			if (FAILED(hr)) { logFailed("CommandList::Close", hr); return false; }
+			// 9. コマンドリストのクローズと実行
+			HRESULT hr = _frameCommandList->Close();
+			if (FAILED(hr)) { logFailed("CommandList::Close(Frame)", hr); return false; }
 
-			ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
+			ID3D12CommandList* ppCommandLists[] = { _frameCommandList->GetCmdList() };
 			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
 
-			// 8. 画面への表示
+			// 10. 画面への表示
+			// 最小化中などは DXGI_STATUS_OCCLUDED (成功コード) が返る
 			hr = _swapChain->Present(_syncInterval);
 			if (FAILED(hr))
 			{
@@ -274,32 +312,37 @@ namespace RHI
 				return false;
 			}
 
-			// ==============================================================
-			// 9. フェンスを用いたGPU待機の同期処理
-			// ※毎フレームGPUの完了を待っているのでCPUとGPUが並行して動けない。Phase 1 で改善する
-			// ==============================================================
-			hr = _fence->WaitForSignal(_commandQueue.get());
-			if (FAILED(hr)) { logFailed("Fence::WaitForSignal", hr); return false; }
+			// 11. このフレームの完了の目印をシグナルして、次のフレームへ
+			//     ここでは待たない (Phase 0 までは毎フレーム GPU の完了を待っていた : 2-3)
+			_frames[_frameIndex].FenceValue = _fence->Signal(_commandQueue->Get());
+			_frameIndex = (_frameIndex + 1) % FRAME_COUNT;
 
 			return true;
 		}
 
 		void CommandContext::Render(Buffer* buffer, const RenderQueue& renderQueue)
 		{
-			if (!buffer || !_graphicsCommandList->IsRecording())
+			if (!buffer || !_frameCommandList->IsRecording())
 			{
 				return;
 			}
 
-			auto cmdList = _graphicsCommandList->GetCmdList();
+			auto cmdList = _frameCommandList->GetCmdList();
 			const D3D12_GPU_VIRTUAL_ADDRESS sceneCbBase = buffer->GetSceneCB()->GetGPUVirtualAddress();
+
+			// 同じ値を何度もセットしないように前回の値を覚えておく (ルート引数の変更は描画ごとのコストになる)
+			UINT lastBaseVertex = UINT_MAX;
 
 			for (const auto& renderObj : renderQueue.RenderObjects)
 			{
 				// 頂点オフセット (b0)
 				// シェーダーは g_MegaVB[g_BaseVertexIndex + SV_VertexID] で頂点を読む
-				UINT baseVertexIndex = renderObj.VertexOffset;
-				cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_BASE_VERTEX, 1, &baseVertexIndex, 0);
+				if (renderObj.VertexOffset != lastBaseVertex)
+				{
+					UINT baseVertexIndex = renderObj.VertexOffset;
+					cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_BASE_VERTEX, 1, &baseVertexIndex, 0);
+					lastBaseVertex = baseVertexIndex;
+				}
 
 				// Scene(Object)定数バッファ (b2)
 				// CbOffset は Root CBV の制約で 256 の倍数であること (Buffer::SCENE_CB_STRIDE 単位で指定する)
@@ -307,7 +350,7 @@ namespace RHI
 
 				// インデックスバッファを使用
 				// BaseVertexLocation(第4引数)は SV_VertexID に加算されない。
-				// 頂点の開始位置はルート定数で渡しているので、ここは 0 にしておく (2-9 : 以前は二重に指定していた)
+				// 頂点の開始位置はルート定数で渡しているので、ここは 0 にしておく (2-9)
 				cmdList->DrawIndexedInstanced(
 					renderObj.IndexCount,
 					1,
@@ -318,29 +361,93 @@ namespace RHI
 			}
 		}
 
+		// ==============================================================
+		// 即時コマンド (アップロード用)
+		// ==============================================================
+
+		bool CommandContext::BeginRecording()
+		{
+			if (!_immediateCommandList || !_immediateAllocator)
+			{
+				return false;
+			}
+
+			// 記録中ならそのまま積み足す
+			if (_immediateCommandList->IsRecording())
+			{
+				return true;
+			}
+
+			// Close済みであることを確認してから、アロケーター → コマンドリストの順でリセットする (1-10)
+			HRESULT hr = _immediateAllocator->Reset();
+			if (FAILED(hr)) { logFailed("CommandAllocator::Reset(Immediate)", hr); return false; }
+
+			hr = _immediateCommandList->Reset(_immediateAllocator->Get(), nullptr);
+			if (FAILED(hr)) { logFailed("CommandList::Reset(Immediate)", hr); return false; }
+
+			return true;
+		}
+
 		bool CommandContext::ExecuteAndSync()
 		{
-			if (!_graphicsCommandList || !_graphicsCommandList->IsRecording())
+			if (!_immediateCommandList || !_immediateCommandList->IsRecording())
 			{
 				// 何も記録していない
 				return true;
 			}
 
 			// 1. コマンドリストの記録を終了する
-			HRESULT hr = _graphicsCommandList->Close();
-			if (FAILED(hr)) { logFailed("CommandList::Close", hr); return false; }
+			HRESULT hr = _immediateCommandList->Close();
+			if (FAILED(hr)) { logFailed("CommandList::Close(Immediate)", hr); return false; }
 
 			// 2. コマンドリストをキューに送信して実行
-			ID3D12CommandList* ppCommandLists[] = { _graphicsCommandList->GetCmdList() };
+			ID3D12CommandList* ppCommandLists[] = { _immediateCommandList->GetCmdList() };
 			_commandQueue->Get()->ExecuteCommandLists(1, ppCommandLists);
 
-			// 3. 実行完了まで待機する
+			// 3. 実行完了まで待機する (アップロード元のバッファをすぐ破棄できるように)
+			//    TODO : Phase 2 で COPY キュー + アップロード用リングバッファにして待たないようにする
 			hr = _fence->WaitForSignal(_commandQueue.get());
 			if (FAILED(hr)) { logFailed("Fence::WaitForSignal", hr); return false; }
 
-			// 以前はここでリセットして「記録中」のまま返していたため、
-			// 次の RenderStart で記録中のリストがあるのにアロケーターをリセットしてしまっていた (1-10)
-			// → Close済みのまま返し、次に積む側が BeginRecording() を呼ぶ
+			// Close済みのまま返し、次に積む側が BeginRecording() を呼ぶ
+			return true;
+		}
+
+		// ==============================================================
+		// その他
+		// ==============================================================
+
+		bool CommandContext::Resize(uint32_t width, uint32_t height)
+		{
+			if (!_swapChain || !_swapChain->Get())
+			{
+				return false;
+			}
+
+			// 最小化中はサイズ 0 が来る。作り直さずにそのまま (表示は止まる)
+			if (width == 0 || height == 0)
+			{
+				return true;
+			}
+			if (width == _swapChain->GetWidth() && height == _swapChain->GetHeight())
+			{
+				return true;
+			}
+
+			// 1. GPU が古いバックバッファ・深度バッファを使い終わるまで待つ
+			WaitForGpu();
+
+			// 2. バックバッファへの参照を手放す (残っていると ResizeBuffers が失敗する)
+			_currentBackBuffer = nullptr;
+			_depthBuffer.reset();
+
+			// 3. スワップチェーンを作り直して、RTV と深度バッファも作り直す
+			HRESULT hr = _swapChain->Resize(width, height);
+			if (FAILED(hr)) { logFailed("SwapChain::Resize", hr); return false; }
+
+			if (!createRenderTargetViews())        return false;
+			if (!createDepthBuffer(width, height)) return false;
+
 			return true;
 		}
 
@@ -358,16 +465,23 @@ namespace RHI
 			WaitForGpu();
 
 			// 記録中のまま破棄しないように閉じておく
-			if (_graphicsCommandList)
-			{
-				_graphicsCommandList->Close();
-			}
+			if (_frameCommandList)     _frameCommandList->Close();
+			if (_immediateCommandList) _immediateCommandList->Close();
 
-			// スワップチェーン → コマンドリスト → アロケーター → キュー の順に破棄
+			// 描画先 → スワップチェーン → コマンドリスト → アロケーター → フェンス → キュー の順に破棄
 			_currentBackBuffer = nullptr;
+			_depthBuffer.reset();
+			_dsvHeap.reset();
+			_rtvHeap.reset();
 			_swapChain.reset();
-			_graphicsCommandList.reset();
-			_commandAllocator.reset();
+			_frameCommandList.reset();
+			_immediateCommandList.reset();
+			for (auto& frame : _frames)
+			{
+				frame.Allocator.reset();
+				frame.FenceValue = 0;
+			}
+			_immediateAllocator.reset();
 			_fence.reset();
 			_commandQueue.reset();
 			_device = nullptr;
@@ -375,15 +489,11 @@ namespace RHI
 
 		RHI::DirectX12::GraphicsCommandList* CommandContext::GetGraphicsCommandList()const
 		{
-			return _graphicsCommandList.get();
+			return _immediateCommandList.get();
 		}
 		RHI::DirectX12::CommandQueue* CommandContext::GetCommandQueue()const
 		{
 			return _commandQueue.get();
-		}
-		RHI::DirectX12::CommandAllocator* CommandContext::GetCommandAllocator()const
-		{
-			return _commandAllocator.get();
 		}
 		RHI::DirectX12::SwapChain* CommandContext::GetSwapChain()const
 		{
@@ -398,6 +508,41 @@ namespace RHI
 		uint32_t CommandContext::GetHeight()const
 		{
 			return _swapChain ? _swapChain->GetHeight() : 0;
+		}
+
+		bool CommandContext::createRenderTargetViews()
+		{
+			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
+
+			// バックバッファの数だけ RTV を作る (以前は Buffer 側で作っていた)
+			for (UINT i = 0; i < DirectX12::SwapChain::BUFFER_COUNT; ++i)
+			{
+				// スワップチェーンが保持しているので参照カウントは増えない (Release不要)
+				ID3D12Resource* backBuffer = _swapChain->GetBufferFromIndex(i);
+				if (!backBuffer)
+				{
+					Core::Logger::Log("[CommandContext] Back buffer is null.");
+					return false;
+				}
+				dx12Device->CreateRenderTargetView(backBuffer, nullptr, _rtvHeap->GetCpuHandle(i));
+			}
+			return true;
+		}
+
+		bool CommandContext::createDepthBuffer(uint32_t width, uint32_t height)
+		{
+			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
+
+			_depthBuffer = std::make_unique<DirectX12::ResourceBuffer>();
+			HRESULT hr = _depthBuffer->CreateDepthStencil(dx12Device, width, height, DEPTH_FORMAT, DEPTH_CLEAR_VALUE);
+			if (FAILED(hr)) { logFailed("CreateDepthStencil", hr); return false; }
+
+			D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+			dsvDesc.Format        = DEPTH_FORMAT;
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+			dsvDesc.Flags         = D3D12_DSV_FLAG_NONE;
+			dx12Device->CreateDepthStencilView(_depthBuffer->Get(), &dsvDesc, _dsvHeap->GetCpuHandle(0));
+			return true;
 		}
 
 		void CommandContext::logDeviceRemovedReason(HRESULT presentResult)

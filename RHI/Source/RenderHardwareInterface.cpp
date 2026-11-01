@@ -145,6 +145,20 @@ namespace RHI
         return _commandContext->RenderEnd();
     }
 
+    bool RenderHardwareInterface::Resize(uint32_t width, uint32_t height)
+    {
+        if (!_isInitialized) return false;
+
+        // スワップチェーン・RTV・深度バッファを作り直してから、Projection のアスペクト比を合わせる
+        if (!_commandContext->Resize(width, height))
+        {
+            Core::Logger::Log("[RHI] Failed resize.");
+            return false;
+        }
+        _buffer->SetViewportSize(_commandContext->GetWidth(), _commandContext->GetHeight());
+        return true;
+    }
+
     void RenderHardwareInterface::CleanUp()
     {
         // 破棄の順番が重要:
