@@ -34,6 +34,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <unordered_map>
 #include <vector>
 #include <memory>
 #include <d3d12.h>
@@ -140,8 +141,9 @@ namespace RHI
 
             /***********************************************************************************
              * @brief 描画命令を積む (RenderStart と RenderEnd の間で、1 フレームに 1 回呼ぶ)
-             * @details 描画ごとのルート引数は設定しない。描画 i は StartInstanceLocation = i で描き、
-             *          シェーダーが DrawData[i] (頂点の開始位置 / オブジェクトの番号) を読む。
+             * @details 描画ごとのルート引数は設定しない。DrawData を並べ、各描画は StartInstanceLocation = その先頭の番号で描き、
+             *          シェーダーが DrawData[DRAWID] (頂点の開始位置 / オブジェクトの番号) を読む。
+             *          インスタンシングが有効なら、同じメッシュを最大 INSTANCE_BATCH_SIZE 個ずつ 1 回の描画にまとめる。
              *          描画リストが前回このフレームで描いたものと同じなら、DrawData と引数の書き込みも省く
              ************************************************************************************/
             void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
@@ -155,7 +157,24 @@ namespace RHI
             void SetIndirectDrawEnabled(bool enabled) { _useIndirectDraw = enabled; }
             bool IsIndirectDrawEnabled()const         { return _useIndirectDraw; }
 
-            // 1 フレームで描ける最大数 (DrawData / 引数バッファ / 描画番号バッファの大きさ)
+            /***********************************************************************************
+             * @brief インスタンシングするか (既定 : true)
+             * @details 同じメッシュ (頂点の開始位置 / インデックスの範囲が同じ) の DrawItem を
+             *          1 回の描画 (InstanceCount = 個数) にまとめる。オブジェクトごとの行列やテクスチャは
+             *          DrawData でインスタンスごとに引くので、違っていてよい。
+             *          描画リストが変わった時だけまとめ直す (同じなら前回の結果を使う)
+             ************************************************************************************/
+            void SetInstancingEnabled(bool enabled) { _useInstancing = enabled; }
+            bool IsInstancingEnabled()const         { return _useInstancing; }
+
+            // インスタンシングで 1 回の描画にまとめる最大数
+            // 全部を 1 回にまとめると、メッシュ A を画面全体に描いてからメッシュ B を描く順番になり、
+            // 同じモデルの部品を続けて描く元の順番より GPU が遅くなった (画面上の近い場所を続けて描かなくなるため。
+            // RTX 2070 / 20002 描画 : 元の順番 0.28 ms → メッシュ順 0.35 ms)。
+            // そこで「同じメッシュが続く K 個」ずつまとめ、まとまりは元の順番に近い順で描く
+            static constexpr uint32_t INSTANCE_BATCH_SIZE = 16;
+
+            // 1 フレームで描けるオブジェクト (インスタンス) の最大数 (DrawData / 引数バッファ / 描画番号バッファの大きさ)
             // 以前は ExecuteIndirect だけの上限 (32768) で、超えた分は 1 個ずつ描いていた
             static constexpr uint32_t MAX_DRAWS = 65536;
 
@@ -263,19 +282,57 @@ namespace RHI
                 std::vector<RHI::DrawItem> LastItems;
                 // 描画の引数の CPU 側の控え (1 個ずつ描く時に使う。UPLOAD ヒープは CPU から読むと非常に遅いため)
                 std::vector<D3D12_DRAW_INDEXED_ARGUMENTS> Args;
-                uint32_t                   Written   = 0;           // 描く数
+                uint32_t                   Written   = 0;           // 描画の数 (引数の数)
+                uint32_t                   Instances = 0;           // 描くオブジェクトの数 (DrawData の数)
                 uint64_t                   Triangles = 0;
+                bool                       Instanced = false;       // インスタンシングでまとめて書いたか
                 bool                       Valid     = false;
             };
             DrawFrame                                            _draws[FRAME_COUNT];
             // 描画番号バッファ (0, 1, 2, ... MAX_DRAWS-1)。インスタンス単位の入力 DRAWID として 1 回だけ設定する
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _drawIdBuffer;
             bool                                                 _useIndirectDraw = true;
+            bool                                                 _useInstancing   = true;
             bool                                                 _warnedTooManyDraws = false;
+
+            // インスタンシングでまとめる時の作業用 (毎回確保し直さないようメンバーに持つ)
+            struct MeshKey
+            {
+                uint32_t BaseVertex;
+                uint32_t FirstIndex;
+                uint32_t IndexCount;
+                bool operator==(const MeshKey& o)const { return BaseVertex == o.BaseVertex && FirstIndex == o.FirstIndex && IndexCount == o.IndexCount; }
+            };
+            struct MeshKeyHash
+            {
+                size_t operator()(const MeshKey& k)const
+                {
+                    uint64_t h = 14695981039346656037ull;
+                    h = (h ^ k.BaseVertex) * 1099511628211ull;
+                    h = (h ^ k.FirstIndex) * 1099511628211ull;
+                    h = (h ^ k.IndexCount) * 1099511628211ull;
+                    return static_cast<size_t>(h);
+                }
+            };
+            // 1 回の描画 (インスタンスのまとまり)。DrawData の Start から Count 個を使う
+            struct InstanceBatch
+            {
+                MeshKey  Key;
+                uint32_t Count;      // = InstanceCount
+                uint32_t Start;      // = StartInstanceLocation
+                uint32_t Cursor;     // 書き込み中の位置
+            };
+            std::unordered_map<MeshKey, uint32_t, MeshKeyHash>   _openBatch;        // メッシュ → 書き込み中の _batches の番号
+            std::vector<InstanceBatch>                           _batches;
+            std::vector<uint32_t>                                _itemBatch;        // DrawItem ごとの _batches の番号
             Pipeline*                                            _currentPipeline = nullptr;   // RenderStart で受け取ったもの (所有しない)
 
             // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
+            // (書き込みは writeDrawsDirect / writeDrawsInstanced。戻り値 = 書いた DrawData の数)
             bool updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
+            uint32_t writeDrawsDirect(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
+            uint32_t writeDrawsInstanced(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
+            void     warnTooManyDraws();
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)
             std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;

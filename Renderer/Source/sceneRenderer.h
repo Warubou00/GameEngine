@@ -79,6 +79,9 @@ namespace Renderer
 		// ExecuteIndirect で描くか (RHI に渡すだけ)
 		void SetIndirectDrawEnabled(bool enabled);
 
+		// インスタンシングするか (RHI に渡すだけ)
+		void SetInstancingEnabled(bool enabled);
+
 		// カメラの設定 (View / Projection 行列を作って RHI に渡す)
 		void SetCamera(const Camera& camera, Projection::ProjectionType type = Projection::ProjectionType::PROJECTION_TYPE_3D);
 

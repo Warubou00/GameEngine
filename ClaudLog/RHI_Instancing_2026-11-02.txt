@@ -1,0 +1,79 @@
+====================================================================
+ インスタンシング (同じメッシュを 1 回の描画にまとめる)
+ 日付   : 2026-11-02
+ ブランチ : feature/instancing
+====================================================================
+
+■ 概要
+  同じメッシュ (頂点の開始位置 / インデックスの範囲が同じ) の DrawItem を、
+  最大 16 個 (INSTANCE_BATCH_SIZE) ずつ 1 回の描画 (InstanceCount = 個数) にまとめる。
+  オブジェクトごとの行列・テクスチャはインスタンスごとに DrawData から引くので、違っていてよい。
+  RHI の中で自動でまとめるので、Renderer 側 (DrawItem の作り方) は変更なし。シェーダーも変更なし。
+
+■ 仕組み
+  前回の DrawID 方式をそのまま使う。
+    - 描画番号バッファは 0, 1, 2, ... なので、StartInstanceLocation = S、InstanceCount = N の描画では
+      インスタンス j に DRAWID = S + j が届く。
+    - そこで DrawData[S] 〜 DrawData[S + N - 1] に、そのまとまりの N 個のオブジェクトを並べておけば、
+      シェーダーは今までどおり DrawData[DRAWID] を読むだけでよい。
+
+  CommandContext::writeDrawsInstanced (描画リストが変わった時だけ実行。同じなら前回の結果を使う)
+    1. DrawItem を前から順に見て、そのメッシュの書き込み中のまとまりに入れる
+       (まとまりが無い / 16 個たまったら新しく作る)。ここでは数えるだけ
+    2. まとまりを作られた順に並べ、DrawData の連続した範囲を割り当てる
+    3. 各 DrawItem の DrawData を、自分のまとまりの範囲に書く
+    4. 描画の引数はまとまりごとに 1 個 (InstanceCount = 個数, StartInstanceLocation = 範囲の先頭)
+    ※ 最初は「まとまりを作る時に 16 個分の場所を先に確保する」方法にしたが、埋まらなかった分が無駄になり、
+      違うメッシュが多いと上限 (65536) に届いてしまうので、数えてから割り当てる方法に直した。
+
+■ まとめる数を 16 個にした理由 (実験)
+  RTX 2070 / Release / --stress 10000 (20002 オブジェクト、メッシュは 2 種類) / ExecuteIndirect
+    まとめ方                                    描画数   GPU
+    --------------------------------------------------------------
+    まとめない                                   20002   0.27〜0.31 ms
+    メッシュごとに全部まとめる                       2   0.31〜0.36 ms
+    メッシュ順に並べ替えて 1 個ずつ描く (実験)   20002   0.35〜0.36 ms
+    16 個ずつ                                     1252   0.27〜0.30 ms
+    64 個ずつ                                      314   0.30 ms
+    256 個ずつ                                      80   0.32〜0.33 ms
+
+  - 全部まとめると GPU が遅くなった。実験で、原因はインスタンシングそのものではなく
+    「描く順番」だと分かった (メッシュ順に並べ替えただけで 1 個ずつ描いても同じように遅い)。
+    メッシュ A を画面全体に描いてからメッシュ B を描くと、同じモデルの部品を続けて描く元の順番と比べて
+    画面上の近い場所を続けて描かなくなり、深度・色のキャッシュが効きにくくなると考えられる。
+  - 少しずつまとめて元の順番に近い順で描けば、この問題は出ない。16 個が一番良かった。
+
+■ 計測結果 (RTX 2070 / 1280x720 / --stress 10000)
+                                   描画数   記録(CPU)       GPU            FPS
+    Release ExecuteIndirect  なし   20002   0.046〜0.049 ms 0.27〜0.28 ms  893〜930
+    Release ExecuteIndirect  あり    1252   0.045〜0.060 ms 0.27〜0.30 ms  829〜925
+    Release direct           なし   20002   0.242〜0.247 ms 0.28 ms        834〜859
+    Release direct           あり    1252   0.057〜0.062 ms 0.26〜0.28 ms  893〜929
+    Debug   ExecuteIndirect  あり    1252   0.063 ms        0.25 ms        820
+    Debug   direct           あり    1252   3.87 ms         0.52 ms        204   (なしは 53.9 ms / 17.9 FPS)
+
+  正直なまとめ :
+    - GPU 時間は誤差の範囲で変わらない。前回の DrawID 方式で、描画ごとの GPU の負担がすでに小さくなっていたため。
+    - 効果は CPU 側 : direct で記録が 約 1/4 (0.245 → 0.06 ms)、Debug の direct は 約 14 倍速い。
+      ExecuteIndirect の引数も 20002 個 → 1252 個 (約 400 KB → 25 KB) になり、描画リストが変わった時の書き込みとコピーが減る。
+    - 実際のゲームでは同じメッシュ (木・岩・弾など) が多いほど効果が大きい。違うメッシュばかりならまとまらないだけで損はない。
+    - D3D12 デバッグレイヤーのエラー・警告なし。ExecuteIndirect / direct のどちらでも、インスタンシングの有無で見た目が同じことを画面で確認した。
+
+■ 切り替え
+  - プロファイラー (F1) の Draw 欄に「Instancing」チェックボックス。Draw calls と Instances (描いたオブジェクトの数) を表示。
+  - rhi.h : SetInstancingEnabled / IsInstancingEnabled (既定 : 有効)
+  - Renderer.dll : Renderer_SetInstancing(bool)、SceneRenderer::SetInstancingEnabled
+  - C# : rhi.SetInstancing(bool)、起動引数 --instancing on|off
+  - 終了時のサマリーログに objects と "+ instancing" を追加。
+
+■ 変更ファイル
+  RHI/Source/DirectX12/RHIObject/CommandContext.h/.cpp   (まとめる処理 / 切り替え / 統計)
+  RHI/Source/Profiler/frameStats.h, profiler.h/.cpp      (Instances / Instancing の表示とチェックボックス)
+  RHI/Source/Public/rhi.h, RenderHardwareInterface.h/.cpp
+  Renderer/Source/sceneRenderer.h/.cpp, rendererDll.cpp
+  CSharp_console/GameEngine_console/RHI.cs, Program.cs
+
+■ 注意
+  - 描く順番は DrawItem の順から少し変わる (同じメッシュ 16 個ずつ)。今は不透明の描画だけなので見た目は同じ。
+    半透明 (奥から順に描く必要があるもの) を入れる時は、そのパスではインスタンシングを切るか、並べ替えた後にまとめること。
+  - まとめる数 (16) は今回のテストシーンと RTX 2070 で決めた値。シーンや GPU によって最適な値は変わり得る。

@@ -127,6 +127,15 @@ extern "C"
 		g_renderer->SetIndirectDrawEnabled(enabled);
 	}
 
+	// インスタンシングするか (同じメッシュを 1 回の描画にまとめる)
+	RENDERER_API void Renderer_SetInstancing(bool enabled)
+	{
+		if (g_renderer == nullptr)
+			return;
+
+		g_renderer->SetInstancingEnabled(enabled);
+	}
+
 	RENDERER_API void Renderer_CleanUp()
 	{
 		if (g_renderer == nullptr)

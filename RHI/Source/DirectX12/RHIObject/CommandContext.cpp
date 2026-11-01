@@ -462,7 +462,7 @@ namespace RHI
 					// BaseVertexLocation (第4引数) は SV_VertexID に加算されないので 0。頂点の開始位置は DrawData で渡す (2-9)
 					for (const auto& args : frame.Args)
 					{
-						cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, 1, args.StartIndexLocation, 0, args.StartInstanceLocation);
+						cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, args.InstanceCount, args.StartIndexLocation, 0, args.StartInstanceLocation);
 					}
 				}
 			}
@@ -470,37 +470,64 @@ namespace RHI
 			_stats.IndirectDraw       = indirect;
 			_stats.IndirectArgsReused = reused;
 			_stats.DrawCalls          = frame.Written;
+			_stats.Instances          = frame.Instances;
+			_stats.Instancing         = frame.Instanced;
 			_stats.Triangles          = frame.Triangles;
 		}
 
 		bool CommandContext::updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
 		{
-			// 描画リストが前回このフレームで書いたものと同じなら、書き込みもコピーも省く
+			// 描画リスト (とインスタンシングの ON / OFF) が前回このフレームで書いたものと同じなら、書き込みもコピーも省く
 			// (止まっているシーンでは毎フレーム同じなので、UPLOAD ヒープにも触らず、コピーも走らない)
-			if (frame.Valid && frame.LastItems.size() == count &&
+			if (frame.Valid && frame.Instanced == _useInstancing && frame.LastItems.size() == count &&
 				(count == 0 || std::memcmp(frame.LastItems.data(), items, sizeof(RHI::DrawItem) * count) == 0))
 			{
 				return true;
 			}
 
-			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
-			auto* commands = reinterpret_cast<IndirectDrawCommand*>(frame.Cpu + DRAW_ARGS_OFFSET);
 			frame.Args.clear();
-			uint32_t written   = 0;
-			uint64_t triangles = 0;
+			frame.Triangles = 0;
+			const uint32_t instances = _useInstancing ? writeDrawsInstanced(frame, items, count) : writeDrawsDirect(frame, items, count);
+			const uint32_t written   = static_cast<uint32_t>(frame.Args.size());
+
+			// 引数はまとめて書く (UPLOAD ヒープは書き込み結合メモリなので、連続で書くのが速い)
+			if (written > 0)
+			{
+				std::memcpy(frame.Cpu + DRAW_ARGS_OFFSET, frame.Args.data(), sizeof(IndirectDrawCommand) * written);
+			}
+
+			frame.LastItems.assign(items, items + count);
+			frame.Written   = written;
+			frame.Instances = instances;
+			frame.Instanced = _useInstancing;
+			frame.Valid     = true;
+
+			// VRAM 側へコピーする (書き直した時だけ。使った分だけ)
+			//   バッファは毎フレーム COMMON に戻る (ExecuteCommandLists の完了で減衰する) ので、
+			//   コピーでは COMMON → COPY_DEST に暗黙で昇格する。コピー後はシェーダーと ExecuteIndirect が読む状態へ明示的に移す
+			if (written > 0)
+			{
+				auto cmdList = _frameCommandList->GetCmdList();
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * instances);
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
+					sizeof(IndirectDrawCommand) * written);
+				const auto toRead = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+				cmdList->ResourceBarrier(1, &toRead);
+			}
+			return false;
+		}
+
+		uint32_t CommandContext::writeDrawsDirect(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		{
+			// DrawItem 1 個 = 描画 1 回 (InstanceCount = 1)
+			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
+			uint32_t written = 0;
 			for (uint32_t i = 0; i < count; ++i)
 			{
 				const RHI::DrawItem& item = items[i];
 				if (!item.Object.IsValid() || item.IndexCount == 0) continue;
-				if (written >= MAX_DRAWS)
-				{
-					if (!_warnedTooManyDraws)
-					{
-						Core::Logger::Log("[CommandContext] Too many draws. Draws over MAX_DRAWS are skipped.");
-						_warnedTooManyDraws = true;
-					}
-					break;
-				}
+				if (written >= MAX_DRAWS) { warnTooManyDraws(); break; }
 
 				// 描画番号 written の描画 : シェーダーは DrawData[written] を読む
 				drawData[written] = { item.Object.Index, item.BaseVertex };
@@ -514,33 +541,96 @@ namespace RHI
 				frame.Args.push_back(args);
 
 				++written;
-				triangles += item.IndexCount / 3;
+				frame.Triangles += item.IndexCount / 3;
 			}
-			// 引数はまとめて書く (UPLOAD ヒープは書き込み結合メモリなので、連続で書くのが速い)
-			if (written > 0)
+			return written;
+		}
+
+		uint32_t CommandContext::writeDrawsInstanced(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		{
+			// ==============================================================
+			// インスタンシング : 同じメッシュの DrawItem を、最大 INSTANCE_BATCH_SIZE 個ずつ 1 回の描画にまとめる
+			//   1. DrawItem を前から順に見て、そのメッシュの書き込み中のまとまりに入れる
+			//      (まとまりが無い / いっぱいなら新しく作る)。ここでは数えるだけ
+			//   2. まとまりを作られた順 (= 元の DrawItem の順番に近い) に並べ、DrawData の連続した範囲を割り当てる
+			//   3. 各 DrawItem の DrawData を、自分のまとまりの範囲に詰めて書く
+			//   4. 描画の引数はまとまりごとに 1 個 : InstanceCount = 個数, StartInstanceLocation = 範囲の先頭
+			// 描画番号バッファは 0, 1, 2, ... なので、インスタンス j には DRAWID = Start + j が届き、
+			// シェーダーはそのまま DrawData[Start + j] (= j 個目のオブジェクト) を読める。シェーダーの変更は不要
+			// 不透明なので、描く順番が少し変わっても見た目は同じ
+			// (先に場所を確保する方法だと、埋まらなかったまとまりの分だけ DrawData が無駄になり、
+			//  違うメッシュが多いと上限に届いてしまうので、数えてから割り当てる)
+			// ==============================================================
+			_openBatch.clear();
+			_batches.clear();
+			_itemBatch.resize(count);
+
+			// 1. まとまりに分ける
+			for (uint32_t i = 0; i < count; ++i)
 			{
-				std::memcpy(commands, frame.Args.data(), sizeof(IndirectDrawCommand) * written);
+				const RHI::DrawItem& item = items[i];
+				if (!item.Object.IsValid() || item.IndexCount == 0) { _itemBatch[i] = UINT32_MAX; continue; }
+
+				const MeshKey key = { item.BaseVertex, item.FirstIndex, item.IndexCount };
+				auto open = _openBatch.find(key);
+				if (open == _openBatch.end() || _batches[open->second].Count >= INSTANCE_BATCH_SIZE)
+				{
+					const uint32_t index = static_cast<uint32_t>(_batches.size());
+					_batches.push_back({ key, 0, 0, 0 });
+					if (open == _openBatch.end()) open = _openBatch.emplace(key, index).first;
+					else                          open->second = index;
+				}
+				_batches[open->second].Count++;
+				_itemBatch[i] = open->second;
 			}
 
-			frame.LastItems.assign(items, items + count);
-			frame.Written   = written;
-			frame.Triangles = triangles;
-			frame.Valid     = true;
-
-			// VRAM 側へコピーする (書き直した時だけ。使った分だけ)
-			//   バッファは毎フレーム COMMON に戻る (ExecuteCommandLists の完了で減衰する) ので、
-			//   コピーでは COMMON → COPY_DEST に暗黙で昇格する。コピー後はシェーダーと ExecuteIndirect が読む状態へ明示的に移す
-			if (written > 0)
+			// 2. 範囲を割り当てる (入りきらない分は削る)
+			uint32_t slot = 0;
+			for (auto& batch : _batches)
 			{
-				auto cmdList = _frameCommandList->GetCmdList();
-				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * written);
-				cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
-					sizeof(IndirectDrawCommand) * written);
-				const auto toRead = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-				cmdList->ResourceBarrier(1, &toRead);
+				if (slot + batch.Count > MAX_DRAWS)
+				{
+					warnTooManyDraws();
+					batch.Count = MAX_DRAWS - slot;
+				}
+				batch.Start  = slot;
+				batch.Cursor = slot;
+				slot += batch.Count;
 			}
-			return false;
+
+			// 3. DrawData を書く
+			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				if (_itemBatch[i] == UINT32_MAX) continue;
+				InstanceBatch& batch = _batches[_itemBatch[i]];
+				if (batch.Cursor >= batch.Start + batch.Count) continue;   // 入りきらなかった分
+				drawData[batch.Cursor++] = { items[i].Object.Index, items[i].BaseVertex };
+			}
+
+			// 4. 描画の引数 (まとまりごとに 1 個)
+			for (const auto& batch : _batches)
+			{
+				if (batch.Count == 0) continue;
+				D3D12_DRAW_INDEXED_ARGUMENTS args;
+				args.IndexCountPerInstance = batch.Key.IndexCount;
+				args.InstanceCount         = batch.Count;
+				args.StartIndexLocation    = batch.Key.FirstIndex;
+				args.BaseVertexLocation    = 0;             // SV_VertexID に加算されないので 0 (2-9)
+				args.StartInstanceLocation = batch.Start;   // インスタンス j の DRAWID = Start + j
+				frame.Args.push_back(args);
+				frame.Triangles += static_cast<uint64_t>(batch.Key.IndexCount / 3) * batch.Count;
+			}
+			return slot;
+		}
+
+		void CommandContext::warnTooManyDraws()
+		{
+			if (!_warnedTooManyDraws)
+			{
+				Core::Logger::Log("[CommandContext] Too many draws. Draws over MAX_DRAWS are skipped.");
+				_warnedTooManyDraws = true;
+			}
 		}
 
 		ID3D12GraphicsCommandList* CommandContext::GetFrameCommandList()const

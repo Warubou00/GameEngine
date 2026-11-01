@@ -90,6 +90,9 @@ public class RHI : IDisposable
     [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void Renderer_SetIndirectDraw([MarshalAs(UnmanagedType.I1)] bool enabled);
 
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_SetInstancing([MarshalAs(UnmanagedType.I1)] bool enabled);
+
     public void Initialize(out RHIInitializedInfo info)
     {
         rhiInfo.hwnd        = window.Handle;
@@ -139,6 +142,12 @@ public class RHI : IDisposable
     public void SetIndirectDraw(bool enabled)
     {
         Renderer_SetIndirectDraw(enabled);
+    }
+
+    // インスタンシングの ON / OFF (プロファイラーのチェックボックスでも切り替えられる)
+    public void SetInstancing(bool enabled)
+    {
+        Renderer_SetInstancing(enabled);
     }
 
     public void Render()
