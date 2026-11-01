@@ -23,6 +23,7 @@
 ******************************************************************/
 
 #include "../../RHIObject/IBuffer.h"
+#include "CommandContext.h"     // FRAME_COUNT
 #include <vector>
 
 // 仮置き
@@ -127,7 +128,28 @@ namespace RHI
                 const std::vector<uint32_t>& indecies
             )override;
 
+            /***********************************************************************************
+             * @brief カメラの設定 (View / Projection 行列を作り直す)
+             * @details 行列は CPU 側に保持しておき、毎フレーム WriteFrameConstants でそのフレームの領域へ書く
+             ************************************************************************************/
             void UpdateViewProjection(const Renderer::Camera& camera, Renderer::Projection::ProjectionType type)override;
+
+            /***********************************************************************************
+             * @brief 描画先のサイズを設定する (初期化・リサイズ時に呼ぶ)
+             * @details Projection 行列のアスペクト比に使う (以前は 1280x720 固定だった : 2-4)
+             ************************************************************************************/
+            void SetViewportSize(uint32_t width, uint32_t height);
+
+            /***********************************************************************************
+             * @brief フレームごとの定数 (View / Projection) を書き込み、その GPU アドレスを返す
+             * @details 定数バッファはフレームの数だけ領域を分けてある。
+             *          GPU が前のフレームで読んでいる領域を、CPU が次のフレームのために上書きしないようにするため
+             *          (FrameContext の完了待ちの後に呼ぶこと)
+             *
+             * @param[in] uint32_t frameIndex CommandContext::GetFrameIndex()
+             * @return D3D12_GPU_VIRTUAL_ADDRESS Root CBV に渡すアドレス
+             ************************************************************************************/
+            D3D12_GPU_VIRTUAL_ADDRESS WriteFrameConstants(uint32_t frameIndex);
 
             void Dispose()override;
 
@@ -169,11 +191,25 @@ namespace RHI
             const uint64_t _SCENE_VB_SIZE  = 64ull * 1024ull * 1024ull;
             const uint64_t _GLOBAL_CB_SIZE = 4ull  * 1024ull * 1024ull;
             const uint64_t _SCENE_CB_SIZE  = 16ull * 1024ull * 1024ull;
-            const uint64_t _COMMON_CB_SIZE = 256ull;                    // 256bytes
+            // フレームごとの定数 (View / Projection) : 1 フレーム 256byte × フレーム数
+            const uint64_t _COMMON_CB_SIZE = CONSTANT_BUFFER_ALIGNMENT * CommandContext::FRAME_COUNT;
             const uint64_t _GLOBAL_IB_SIZE = 16ull * 1024ull * 1024ull;
             const uint64_t _SCENE_IB_SIZE  = 64ull * 1024ull * 1024ull;
 
-            bool makeRtv(RHI::ObjectInterface::Device* device, RHI::ObjectInterface::CommandContext* commandContext);
+            // ---------- フレームごとの定数の元データ (CPU 側) ----------
+            // 行列はカメラ・画面サイズが変わった時だけ作り直し、毎フレームは書き写すだけにする
+            Renderer::Camera                    _camera         = {};
+            Renderer::Projection::ProjectionType _projectionType = Renderer::Projection::ProjectionType::PROJECTION_TYPE_3D;
+            ::DirectX::XMFLOAT4X4               _viewMatrix     = {};
+            ::DirectX::XMFLOAT4X4               _projMatrix     = {};
+            uint32_t                            _viewportWidth  = 1280;
+            uint32_t                            _viewportHeight = 720;
+            bool                                _hasCamera      = false;
+            // 行列を更新した回数。各フレームの領域に書いた時の値と比べて、変わっていなければ書き込みを省く
+            uint64_t                            _frameConstantsVersion = 1;
+            uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT] = {};
+
+            void rebuildViewProjection();
             bool nullCheckManager();
 
             bool makeCommonBuffer(RHI::ObjectInterface::Device* device);                                                                                               // Resource Bufferの作成

@@ -71,6 +71,19 @@ namespace RHI
 			return _pDxgi6Factory.GetAddressOf();
 		}
 
+		bool DXGIFactory6::IsTearingSupported(void)const
+		{
+			if (!_pDxgi6Factory) return false;
+
+			// IDXGIFactory5 以降の CheckFeatureSupport で確認する (古いOS/ドライバーでは FALSE)
+			BOOL allowTearing = FALSE;
+			if (FAILED(_pDxgi6Factory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing))))
+			{
+				return false;
+			}
+			return allowTearing == TRUE;
+		}
+
 		void DXGIFactory6::Release(void)
 		{
 			_pDxgi6Factory.Reset();

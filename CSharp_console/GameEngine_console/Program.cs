@@ -26,13 +26,18 @@ namespace GameEngine_console
 
             rhi.Test_LoadModel(0.0f, 5.0f, -10.0f);
 
-            while(true)
+            // ウィンドウが閉じられたらループを抜けて終了処理を呼ぶ
+            // (以前は while(true) だったため、閉じても RHI_CleanUp が呼ばれなかった)
+            while (rhi.IsOpen)
             {
                 System.Windows.Forms.Application.DoEvents();
 
-                if (rhi.isAllInitialized(info))
+                if (rhi.IsOpen && rhi.isAllInitialized(info))
                     rhi.Render();
             }
+
+            // GPU の完了を待ってから C++ 側を解放する
+            rhi.Dispose();
         }
     }
 }

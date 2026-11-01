@@ -79,6 +79,20 @@ namespace RHI
 			HRESULT CreateTexture(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, UINT16 mipLevels, UINT16 arraySize);
 
 			/***********************************************************************************
+			 * @brief 深度バッファの作成
+			 * @details 初期状態は DEPTH_WRITE。最適化クリア値を指定するので、
+			 *          ClearDepthStencilView には同じ値 (clearDepth) を渡すこと (違うと高速クリアが効かない)
+			 *
+			 * @param[in] ID3D12Device* デバイス
+			 * @param[in] UINT64 width 幅
+			 * @param[in] UINT height 高さ
+			 * @param[in] DXGI_FORMAT format 深度フォーマット (例: DXGI_FORMAT_D32_FLOAT)
+			 * @param[in] float clearDepth クリアする深度値
+			 * @return HRESULT 成功の有無
+			 ************************************************************************************/
+			HRESULT CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth);
+
+			/***********************************************************************************
 			 * @brief バッファーの登録
 			 * @details Createと対照的に直接外部からのResourceを登録する (参照カウントは+1される)
 			 *

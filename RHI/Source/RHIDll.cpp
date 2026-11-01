@@ -98,6 +98,15 @@ extern "C"
 
 	}
 
+	// ウィンドウのクライアント領域のサイズが変わった時に呼ぶ (最小化中の 0 は無視される)
+	RHI_API bool RHI_Resize(uint32_t width, uint32_t height)
+	{
+		if (g_pRhi == nullptr)
+			return false;
+
+		return g_pRhi->Resize(width, height);
+	}
+
 	RHI_API void RHI_CleanUp()
 	{
 		if (g_pRhi == nullptr)
