@@ -90,13 +90,17 @@ extern "C"
 		if (g_renderer == nullptr)
 			return;
 
+		double loadMs = 0.0;
 		{
 			// 高速化の効果確認用 : 読み込み開始 → GPU へのアップロード完了までの時間
 			// (計測のために GPU の完了を待っている。通常の読み込みでは待たない)
 			Core::ScopedTimer timer("LoadModel (until GPU upload complete)");
 			g_renderer->LoadModel(L"../Model/box.obj");
 			g_renderer->WaitForGpu();
+			loadMs = timer.ElapsedMs();
 		}
+		// ログだけでなくプロファイラーにも出す
+		g_renderer->ReportProfilerValue("LoadModel (ms)", loadMs);
 
 		Renderer::Camera camera;
 		camera.Position = Core::Vector3(cameraPosX, cameraPosY, cameraPosZ);

@@ -23,8 +23,11 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <chrono>
 #include <memory>
 #include "Public/rhi.h"
+#include "Profiler/debugUI.h"
+#include "Profiler/profiler.h"
 
 /******************************************************************
 * Structure Declarations
@@ -70,12 +73,22 @@ namespace RHI
         bool Render(const DrawItem* items, uint32_t count)override;
         void WaitForGpu()override;
 
+        void SetProfilerVisible(bool visible)override { _debugUI.SetVisible(visible); }
+        bool IsProfilerVisible()const override         { return _debugUI.IsVisible(); }
+        void ReportProfilerValue(const char* name, double value)override { _profiler.SetValue(name, value); }
+
     private:         /*---メンバ変数---*/
         // 破棄は Shutdown で「GPU 完了待ち → Pipeline / Buffer / CommandContext → Device」の順に行う
         std::unique_ptr<ObjectInterface::Device>         _device;
         std::unique_ptr<ObjectInterface::CommandContext> _commandContext;
         std::unique_ptr<ObjectInterface::Buffer>         _buffer;
         std::unique_ptr<ObjectInterface::Pipeline>       _pipeline;
+
+        // プロファイラー (ImGui)
+        DebugUI  _debugUI;
+        Profiler _profiler;
+        std::chrono::steady_clock::time_point _lastFrameStart;
+        bool     _hasLastFrame = false;
 
         bool _isInitialized = false;     // 初期化が最後まで成功したか
     };

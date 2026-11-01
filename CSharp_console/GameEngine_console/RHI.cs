@@ -23,9 +23,8 @@ public class RHI : IDisposable
     private bool isClosed      = false;
     private bool isDisposed    = false;
 
-    // FPS 計測 (高速化の効果を確認するため、タイトルバーに表示する)
-    private readonly Stopwatch fpsTimer = new Stopwatch();
-    private int fpsFrameCount = 0;
+    // ※FPS などの計測値は ImGui のプロファイラーウィンドウに表示する (F1 で表示 / 非表示)
+    //   以前はここで計測してタイトルバーに出していた
 
     public struct RHIInfo
     {
@@ -112,7 +111,6 @@ public class RHI : IDisposable
         Renderer_Initialize(out info, ref rhiInfo);
         isInitialized = isAllInitialized(info);
 
-        fpsTimer.Start();
         return;
     }
 
@@ -134,7 +132,6 @@ public class RHI : IDisposable
         }
 
         Renderer_Render();
-        updateFps();
     }
 
     public void Dispose()
@@ -145,20 +142,6 @@ public class RHI : IDisposable
 
         Renderer_CleanUp();
         if (!window.IsDisposed) window.Dispose();
-    }
-
-    // 0.5 秒ごとに FPS と 1 フレームの時間をタイトルバーに出す
-    private void updateFps()
-    {
-        fpsFrameCount++;
-        double elapsed = fpsTimer.Elapsed.TotalSeconds;
-        if (elapsed < 0.5) return;
-
-        double fps = fpsFrameCount / elapsed;
-        window.Text = $"{WindowTitle}  |  {fps:F1} FPS  ({1000.0 / fps:F2} ms)  |  {window.ClientSize.Width}x{window.ClientSize.Height}";
-
-        fpsFrameCount = 0;
-        fpsTimer.Restart();
     }
 
     private enum RHI_RESULT

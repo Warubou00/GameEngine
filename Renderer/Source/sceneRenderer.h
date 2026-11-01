@@ -78,6 +78,9 @@ namespace Renderer
 		// GPU の処理が全て終わるまで待つ (計測用)
 		void WaitForGpu();
 
+		// プロファイラー (RHI の ImGui ウィンドウ) に値を表示する
+		void ReportProfilerValue(const char* name, double value);
+
 		bool IsInitialized()const { return _rhi && _rhi->IsInitialized(); }
 
 	private:

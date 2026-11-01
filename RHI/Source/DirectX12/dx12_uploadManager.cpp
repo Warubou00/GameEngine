@@ -113,6 +113,7 @@ namespace RHI
 					out.Resource = _ring->Get();
 					out.Offset   = offset;
 					_currentHasAllocations = true;
+					_pendingBytes += size;
 					return true;
 				}
 
@@ -142,6 +143,8 @@ namespace RHI
 		{
 			if (!HasPendingWork())
 			{
+				// このフレームは何も送っていない (プロファイラーに前回の量が残らないように 0 にする)
+				_lastFlushBytes = 0;
 				return _lastSubmittedFence;
 			}
 
@@ -174,6 +177,8 @@ namespace RHI
 			_currentTempBuffers.clear();
 			_currentHasAllocations = false;
 			_lastSubmittedFence    = fenceValue;
+			_lastFlushBytes        = _pendingBytes;
+			_pendingBytes          = 0;
 			return fenceValue;
 		}
 
@@ -189,6 +194,13 @@ namespace RHI
 				_fence->WaitForValue(value);
 			}
 			retireCompleted();
+		}
+
+		UINT64 UploadManager::GetRingUsedBytes()const
+		{
+			if (_submissions.empty() && !_currentHasAllocations) return 0;
+			// 折り返していなければ [_tail, _head)、折り返していれば [_tail, 末尾) + [0, _head)
+			return (_head >= _tail) ? (_head - _tail) : (_ringSize - _tail + _head);
 		}
 
 		ID3D12Fence* UploadManager::GetFence()const
@@ -282,6 +294,7 @@ namespace RHI
 			// 送信して GPU が使い終わるまで保持する
 			_currentTempBuffers.push_back(std::move(buffer));
 			_currentHasAllocations = true;
+			_pendingBytes += size;
 			return true;
 		}
 

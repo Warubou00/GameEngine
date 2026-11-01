@@ -28,6 +28,10 @@
 #include "DirectX12/RHIObject/Texture.h"
 #include "DirectX12/RHIObject/Pipeline.h"
 #include "DirectX12/debugLayer.h"
+#include "DirectX12/Object/dx12_device.h"
+#include "DirectX12/Object/dx12_swapChain.h"
+#include "DirectX12/dx12_descriptorHeapManager.h"
+#include "DXGI/adapter.h"
 // ========================================
 
 #include "../../Core/Source/Log/logger.h"
@@ -85,6 +89,16 @@ namespace RHI
         result.Pipeline = _pipeline->Initialize(_device.get());
         if (result.Pipeline != Result::Succeeded) { Core::Logger::Log("[RHI] Failed initialize Pipeline."); return finish(false); }
 
+        // プロファイラー (ImGui)。失敗しても描画は続けられるので、初期化の失敗にはしない
+        if (!_debugUI.Initialize(static_cast<HWND>(desc.WindowHandle), _device->GetDevice()->GetDevice(),
+                                 _buffer->GetDescHeapManager(), ObjectInterface::CommandContext::FRAME_COUNT,
+                                 DirectX12::SwapChain::FORMAT))
+        {
+            Core::Logger::Log("[RHI] Profiler (ImGui) is not available.");
+        }
+        _profiler.Initialize(_device->GetAdapter()->GetAdapter3(), _device->GetAdapter()->GetAdapterName());
+        _hasLastFrame = false;
+
         return finish(true);
     }
 
@@ -95,6 +109,9 @@ namespace RHI
         //   2. GPU リソースを持つオブジェクトを破棄
         //   3. 最後に Device
         if (_commandContext) _commandContext->WaitForGpu();
+
+        // ImGui は SRV ヒープ (Buffer が持つ) とデバイスを使うので、それらより先に破棄する
+        _debugUI.Shutdown();
 
         if (_pipeline)       _pipeline->Dispose();
         if (_buffer)         _buffer->Dispose();
@@ -191,11 +208,43 @@ namespace RHI
     {
         if (!_isInitialized) return false;
 
+        // フレーム時間 = 前のフレームの開始からこのフレームの開始まで
+        const auto frameStart = std::chrono::steady_clock::now();
+        const double frameMs = _hasLastFrame ? std::chrono::duration<double, std::milli>(frameStart - _lastFrameStart).count() : 0.0;
+        _lastFrameStart = frameStart;
+        _hasLastFrame   = true;
+
         if (!_commandContext->RenderStart(_pipeline.get(), _buffer.get()))
         {
             return false;
         }
+
+        // シーン
+        const auto sceneStart = std::chrono::steady_clock::now();
         _commandContext->Render(_buffer.get(), items, count);
+        _commandContext->MarkGpuSceneEnd();
+        const double sceneMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - sceneStart).count();
+
+        // プロファイラー (非表示の時は ImGui の処理を丸ごと省く)
+        const auto uiStart = std::chrono::steady_clock::now();
+        if (_debugUI.IsVisible())
+        {
+            _debugUI.BeginFrame();
+            _profiler.Draw();
+            // ImGui の PSO は深度無しで作られているので、描画先をバックバッファだけにしてから積む
+            _commandContext->BindBackBufferWithoutDepth();
+            _debugUI.EndFrame(_commandContext->GetFrameCommandList());
+        }
+        const double uiMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - uiStart).count();
+
+        // 計測値をまとめる (GPU / Present / 待ち時間は CommandContext が測ったもの。表示は 1 フレーム遅れ)
+        FrameStats stats    = _commandContext->GetStats();
+        stats.FrameMs       = frameMs;
+        stats.SceneRecordMs = sceneMs;
+        stats.UiMs          = uiMs;
+        stats.Objects       = _buffer->GetObjectCount();
+        if (frameMs > 0.0) _profiler.AddFrame(stats);
+
         return _commandContext->RenderEnd();
     }
 

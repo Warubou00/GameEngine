@@ -146,6 +146,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="..\ImGui\imgui_impl_dx12.h" />
+    <ClInclude Include="..\ImGui\imgui_impl_win32.h" />
+    <ClInclude Include="..\ImGui\imgui.h" />
+    <ClInclude Include="Source\DirectX12\Object\dx12_gpuTimer.h" />
+    <ClInclude Include="Source\Profiler\profiler.h" />
+    <ClInclude Include="Source\Profiler\debugUI.h" />
+    <ClInclude Include="Source\Profiler\frameStats.h" />
     <ClInclude Include="Source\Public\rhiExport.h" />
     <ClInclude Include="Source\Public\rhiTypes.h" />
     <ClInclude Include="Source\Public\rhi.h" />
@@ -191,6 +198,15 @@
     <ClInclude Include="Source\ResourceBufferAllocator.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\ImGui\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\ImGui\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\ImGui\imgui_widgets.cpp" />
+    <ClCompile Include="..\ImGui\imgui_tables.cpp" />
+    <ClCompile Include="..\ImGui\imgui_draw.cpp" />
+    <ClCompile Include="..\ImGui\imgui.cpp" />
+    <ClCompile Include="Source\DirectX12\Object\dx12_gpuTimer.cpp" />
+    <ClCompile Include="Source\Profiler\profiler.cpp" />
+    <ClCompile Include="Source\Profiler\debugUI.cpp" />
     <ClCompile Include="Source\DXGI\adapter.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_descriptorHeapManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp" />

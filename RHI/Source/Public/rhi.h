@@ -98,6 +98,16 @@ namespace RHI
 
 		// GPU の処理 (描画 + 転送) が全て終わるまで待つ (計測・終了処理用)
 		virtual void WaitForGpu() = 0;
+
+		// ======================================================================
+		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
+		// ======================================================================
+
+		virtual void SetProfilerVisible(bool visible) = 0;
+		virtual bool IsProfilerVisible()const = 0;
+
+		// 任意の値をプロファイラーに表示する (例: "LoadModel (ms)")。同じ名前なら上書き
+		virtual void ReportProfilerValue(const char* name, double value) = 0;
 	};
 }
 

@@ -40,9 +40,11 @@
 #include "../dx12_descriptorHeapManager.h"
 #include "../dx12_uploadManager.h"
 #include "../Object/dx12_fence.h"
+#include "../Object/dx12_gpuTimer.h"
 // ========================================
 
 #include <d3d12.h>
+#include <chrono>
 #include <string>
 
 // 外部クラスをインクルード
@@ -95,6 +97,17 @@ namespace RHI
 
 			// 画面クリア色
 			constexpr float CLEAR_COLOR[] = { 0.1f, 0.2f, 0.4f, 1.0f };
+
+			// GPU のタイムスタンプの番号
+			constexpr UINT TIMESTAMP_FRAME_BEGIN = 0;
+			constexpr UINT TIMESTAMP_SCENE_END   = 1;
+			constexpr UINT TIMESTAMP_FRAME_END   = 2;
+			constexpr UINT TIMESTAMP_COUNT       = 3;
+
+			double elapsedMs(std::chrono::steady_clock::time_point from)
+			{
+				return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - from).count();
+			}
 		}
 
 		CommandContext::CommandContext() = default;
@@ -180,6 +193,16 @@ namespace RHI
 			if (!createRenderTargetViews())     return RHI_FAILED_CREATE_ANY_OBJECT;
 			if (!createDepthBuffer(width, height)) return RHI_FAILED_CREATE_ANY_OBJECT;
 
+			// ---------- GPU の時間の計測 (失敗してもプロファイラーの GPU 欄が出ないだけ) ----------
+			_gpuTimer = std::make_unique<DirectX12::GpuTimer>();
+			hr = _gpuTimer->Initialize(dx12Device, _commandQueue->Get(), FRAME_COUNT);
+			if (FAILED(hr)) { logFailed("GpuTimer::Initialize", hr); _gpuTimer.reset(); }
+
+			_allowTearing        = allowTearing;
+			_stats.VSync          = _syncInterval != 0;
+			_stats.Tearing        = allowTearing && _syncInterval == 0;
+			_stats.FramesInFlight = FRAME_COUNT;
+
 #ifdef CONSOLE_DEBUG
 			char message[128] = {};
 			sprintf_s(message, "[CommandContext] %ux%u, VSync %s, Tearing %s, Frames in flight %u",
@@ -201,6 +224,8 @@ namespace RHI
 				return false;
 			}
 
+			const auto waitStart = std::chrono::steady_clock::now();
+
 			// 1. CPU が先行しすぎていれば待つ (表示待ちのフレームが FRAME_COUNT 個を超えないように)
 			_swapChain->WaitForNextFrame();
 
@@ -209,6 +234,22 @@ namespace RHI
 			FrameContext& frame = _frames[_frameIndex];
 			HRESULT hr = _fence->WaitForValue(frame.FenceValue);
 			if (FAILED(hr)) { logFailed("Fence::WaitForValue", hr); return false; }
+			_stats.WaitMs = elapsedMs(waitStart);
+
+			// GPU が使い終わったので、FRAME_COUNT フレーム前に計測した GPU の時間を読める
+			if (_gpuTimer)
+			{
+				double intervals[TIMESTAMP_COUNT - 1] = {};
+				if (_gpuTimer->ReadIntervals(_frameIndex, TIMESTAMP_COUNT - 1, intervals))
+				{
+					_stats.GpuValid   = true;
+					_stats.GpuSceneMs = intervals[0];
+					_stats.GpuUiMs    = intervals[1];
+					_stats.GpuTotalMs = intervals[0] + intervals[1];
+				}
+			}
+			_stats.Width  = _swapChain->GetWidth();
+			_stats.Height = _swapChain->GetHeight();
 
 			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
 			hr = frame.Allocator->Reset();
@@ -218,6 +259,9 @@ namespace RHI
 			if (FAILED(hr)) { logFailed("CommandList::Reset(Frame)", hr); return false; }
 
 			auto cmdList = _frameCommandList->GetCmdList();
+
+			// GPU のタイムスタンプ : フレームの開始
+			if (_gpuTimer) _gpuTimer->Timestamp(cmdList, _frameIndex, TIMESTAMP_FRAME_BEGIN);
 
 			// 4. ビューポートとシザー矩形の設定 (スワップチェーンのサイズに合わせる)
 			const UINT width  = _swapChain->GetWidth();
@@ -288,6 +332,13 @@ namespace RHI
 				return false;
 			}
 
+			// GPU のタイムスタンプ : フレームの終わり → 読み戻し用バッファへ移す
+			if (_gpuTimer)
+			{
+				_gpuTimer->Timestamp(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_FRAME_END);
+				_gpuTimer->Resolve(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_COUNT);
+			}
+
 			// 8. リソースバリア (RenderTarget -> Present)
 			const auto toPresent = makeTransitionBarrier(_currentBackBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 			_frameCommandList->GetCmdList()->ResourceBarrier(1, &toPresent);
@@ -306,7 +357,9 @@ namespace RHI
 
 			// 10. 画面への表示
 			// 最小化中などは DXGI_STATUS_OCCLUDED (成功コード) が返る
+			const auto presentStart = std::chrono::steady_clock::now();
 			hr = _swapChain->Present(_syncInterval);
+			_stats.PresentMs = elapsedMs(presentStart);
 			if (FAILED(hr))
 			{
 				logDeviceRemovedReason(hr);
@@ -337,6 +390,10 @@ namespace RHI
 			// 同じ値を何度もセットしないように前回の値を覚えておく (ルート引数の変更は描画ごとのコストになる)
 			UINT     lastBaseVertex = UINT_MAX;
 			uint32_t lastObject     = RHI::INVALID_HANDLE_INDEX;
+
+			// プロファイラー用の数
+			uint32_t drawCalls = 0;
+			uint64_t triangles = 0;
 
 			for (uint32_t i = 0; i < count; ++i)
 			{
@@ -370,6 +427,32 @@ namespace RHI
 					0,
 					0
 				);
+				drawCalls++;
+				triangles += item.IndexCount / 3;
+			}
+
+			_stats.DrawCalls = drawCalls;
+			_stats.Triangles = triangles;
+		}
+
+		ID3D12GraphicsCommandList* CommandContext::GetFrameCommandList()const
+		{
+			return (_frameCommandList && _frameCommandList->IsRecording()) ? _frameCommandList->GetCmdList() : nullptr;
+		}
+
+		void CommandContext::BindBackBufferWithoutDepth()
+		{
+			if (!_frameCommandList || !_frameCommandList->IsRecording() || !_currentBackBuffer) return;
+
+			const auto rtvHandle = _rtvHeap->GetCpuHandle(_swapChain->GetCurrentBackBufferIndex());
+			_frameCommandList->GetCmdList()->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+		}
+
+		void CommandContext::MarkGpuSceneEnd()
+		{
+			if (_gpuTimer && _frameCommandList && _frameCommandList->IsRecording())
+			{
+				_gpuTimer->Timestamp(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_SCENE_END);
 			}
 		}
 
@@ -385,6 +468,9 @@ namespace RHI
 			}
 
 			const UINT64 uploadFence = _uploadManager->Flush();
+			_stats.UploadBytes    = _uploadManager->GetLastFlushBytes();
+			_stats.UploadRingUsed = _uploadManager->GetRingUsedBytes();
+			_stats.UploadRingSize = _uploadManager->GetRingSize();
 
 			// まだ描画キューに待たせていない転送があれば、GPU 上で待たせる
 			// (ID3D12CommandQueue::Wait は GPU 側の待機。CPU はすぐに戻る)
@@ -459,6 +545,7 @@ namespace RHI
 
 			// 描画先 → スワップチェーン → コマンドリスト → アロケーター → フェンス → キュー の順に破棄
 			_currentBackBuffer = nullptr;
+			_gpuTimer.reset();
 			_depthBuffer.reset();
 			_dsvHeap.reset();
 			_rtvHeap.reset();
