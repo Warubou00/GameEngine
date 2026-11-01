@@ -156,6 +156,9 @@ namespace RHI
              ************************************************************************************/
             D3D12_GPU_VIRTUAL_ADDRESS WriteObjectConstants(uint32_t frameIndex);
 
+            // 登録されている描画オブジェクトの数 (プロファイラー用)
+            uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size()); }
+
             // テクスチャの読み込み口 (既定テクスチャを作ったものと同じものを使う)
             RHI::ObjectInterface::Texture* GetTexture()const { return _texture.get(); }
 

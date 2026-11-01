@@ -41,6 +41,7 @@
 
 #include "../../RHIObject/ICommandContext.h"
 #include "../../Public/rhiTypes.h"     // DrawItem
+#include "../../Profiler/frameStats.h"
 
 /******************************************************************
 * Macro Definitions
@@ -68,6 +69,7 @@ namespace RHI
         class DescriptorHeap;
         class ResourceBuffer;
         class UploadManager;
+        class GpuTimer;
     }
 
     namespace ObjectInterface
@@ -142,6 +144,22 @@ namespace RHI
              ************************************************************************************/
             void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
 
+            // ==========================================================
+            // プロファイラー / ImGui 用 (RenderStart と RenderEnd の間で使う)
+            // ==========================================================
+
+            // 記録中のフレーム用コマンドリスト (ImGui の描画命令を積むのに使う)
+            ID3D12GraphicsCommandList* GetFrameCommandList()const;
+
+            // 描画先をバックバッファだけにする (深度を外す。ImGui の PSO は深度無しで作られているため)
+            void BindBackBufferWithoutDepth();
+
+            // GPU のタイムスタンプ : シーンの描画がここまで (ここから先は UI)
+            void MarkGpuSceneEnd();
+
+            // このフレームまでの計測値 (CPU の待ち / Present / 描画数 / GPU 時間 など)
+            const RHI::FrameStats& GetStats()const { return _stats; }
+
             /***********************************************************************************
              * @brief 積んであるアップロードを送信し、描画キューがその完了を GPU 上で待つようにする
              * @details RenderEnd で毎フレーム自動で呼ばれる。ロード直後に描画せず使う場合に明示的に呼ぶ
@@ -204,6 +222,11 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _rtvHeap;       // バックバッファの数だけ
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _dsvHeap;       // 1 つ
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthBuffer;
+
+            // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)
+            std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;
+            RHI::FrameStats                                      _stats;
+            bool                                                 _allowTearing = false;
 
             Device*         _device            = nullptr;   // 所有しない (デバイスロストの原因取得・作り直しに使う)
             ID3D12Resource* _currentBackBuffer = nullptr;   // 所有しない (スワップチェーンが保持している)

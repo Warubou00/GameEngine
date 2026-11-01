@@ -121,6 +121,13 @@ namespace RHI
 			// 未送信のコピー命令・確保があるか
 			bool HasPendingWork()const { return _isRecording || _currentHasAllocations; }
 
+			// ---------- プロファイラー用 ----------
+			// 直前の Flush で送った量 (byte)
+			UINT64 GetLastFlushBytes()const { return _lastFlushBytes; }
+			// リングバッファのうち、まだ GPU の転送が終わっていない (再利用できない) 量
+			UINT64 GetRingUsedBytes()const;
+			UINT64 GetRingSize()const { return _ringSize; }
+
 			void Release();
 
 		private:
@@ -158,6 +165,8 @@ namespace RHI
 			std::deque<Submission>                       _submissions;         // 送信済みで完了待ちのもの (古い順)
 			std::vector<std::unique_ptr<ResourceBuffer>> _currentTempBuffers;  // 未送信の一時バッファ
 			UINT64                                       _lastSubmittedFence = 0;
+			UINT64                                       _pendingBytes       = 0;   // 未送信の確保量 (プロファイラー用)
+			UINT64                                       _lastFlushBytes     = 0;
 
 			void retireCompleted();
 			bool tryAllocateFromRing(UINT64 size, UINT64 alignment, UINT64& outOffset);

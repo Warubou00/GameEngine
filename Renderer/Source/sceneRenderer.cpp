@@ -182,6 +182,9 @@ namespace Renderer
 			_drawItems.push_back(item);
 		}
 
+		// プロファイラーに表示 (描画リストの数)
+		_rhi->ReportProfilerValue("Draw items", static_cast<double>(_drawItems.size()));
+
 		// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
 		return true;
 	}
@@ -203,6 +206,11 @@ namespace Renderer
 	void SceneRenderer::WaitForGpu()
 	{
 		if (_rhi) _rhi->WaitForGpu();
+	}
+
+	void SceneRenderer::ReportProfilerValue(const char* name, double value)
+	{
+		if (_rhi) _rhi->ReportProfilerValue(name, value);
 	}
 
 	void SceneRenderer::updateViewProjection()
