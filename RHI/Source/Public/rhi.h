@@ -104,6 +104,11 @@ namespace RHI
 		virtual void SetIndirectDrawEnabled(bool enabled) = 0;
 		virtual bool IsIndirectDrawEnabled()const = 0;
 
+		// インスタンシングするか (既定 : true)。同じメッシュ (頂点 / インデックスの範囲が同じ) の DrawItem を
+		// 1 回の描画にまとめる。オブジェクトごとの行列・テクスチャは違っていてよい
+		virtual void SetInstancingEnabled(bool enabled) = 0;
+		virtual bool IsInstancingEnabled()const = 0;
+
 		// ======================================================================
 		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
 		// ======================================================================

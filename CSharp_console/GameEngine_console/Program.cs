@@ -27,6 +27,7 @@ namespace GameEngine_console
             // コマンドライン引数 (計測用)
             //   --stress N              : 読み込んだモデルを N 個並べる (描画数を増やす負荷テスト)
             //   --draw direct|indirect  : 描画の方法 (既定は indirect = ExecuteIndirect)
+            //   --instancing on|off     : 同じメッシュを 1 回の描画にまとめるか (既定は on)
             for (int i = 0; i + 1 < args.Length; i++)
             {
                 if (args[i] == "--stress" && uint.TryParse(args[i + 1], out uint count))
@@ -36,6 +37,10 @@ namespace GameEngine_console
                 else if (args[i] == "--draw")
                 {
                     rhi.SetIndirectDraw(args[i + 1] != "direct");
+                }
+                else if (args[i] == "--instancing")
+                {
+                    rhi.SetInstancing(args[i + 1] != "off");
                 }
             }
 

@@ -252,9 +252,12 @@ namespace RHI
         {
             _debugUI.BeginFrame();
             // プロファイラーから ExecuteIndirect の ON / OFF を切り替えられる (効果をその場で比べるため)
-            bool indirect = _commandContext->IsIndirectDrawEnabled();
-            _profiler.Draw(&indirect);
+            // インスタンシングも同じように切り替えられる
+            bool indirect   = _commandContext->IsIndirectDrawEnabled();
+            bool instancing = _commandContext->IsInstancingEnabled();
+            _profiler.Draw(&indirect, &instancing);
             _commandContext->SetIndirectDrawEnabled(indirect);
+            _commandContext->SetInstancingEnabled(instancing);
             // ImGui の PSO は深度無しで作られているので、描画先をバックバッファだけにしてから積む
             _commandContext->BindBackBufferWithoutDepth();
             _debugUI.EndFrame(_commandContext->GetFrameCommandList());
@@ -280,6 +283,16 @@ namespace RHI
     bool RenderHardwareInterface::IsIndirectDrawEnabled()const
     {
         return _commandContext ? _commandContext->IsIndirectDrawEnabled() : false;
+    }
+
+    void RenderHardwareInterface::SetInstancingEnabled(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetInstancingEnabled(enabled);
+    }
+
+    bool RenderHardwareInterface::IsInstancingEnabled()const
+    {
+        return _commandContext ? _commandContext->IsInstancingEnabled() : false;
     }
 
     void RenderHardwareInterface::WaitForGpu()

@@ -250,6 +250,11 @@ namespace Renderer
 		if (_rhi) _rhi->SetIndirectDrawEnabled(enabled);
 	}
 
+	void SceneRenderer::SetInstancingEnabled(bool enabled)
+	{
+		if (_rhi) _rhi->SetInstancingEnabled(enabled);
+	}
+
 	void SceneRenderer::SetCamera(const Camera& camera, Projection::ProjectionType type)
 	{
 		_camera         = camera;
