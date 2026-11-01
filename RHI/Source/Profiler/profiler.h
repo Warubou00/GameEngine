@@ -109,6 +109,7 @@ namespace RHI
 		uint32_t       _lastInstances  = 0;
 		bool           _lastCulling    = false;
 		uint32_t       _lastVisible    = 0;
+		uint32_t       _lastVisibleDraws = 0;
 
 		// VRAM (0.5 秒ごとに更新)
 		uint64_t       _vramUsage  = 0;

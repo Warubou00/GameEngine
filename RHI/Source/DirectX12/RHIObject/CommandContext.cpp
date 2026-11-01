@@ -203,7 +203,7 @@ namespace RHI
 			{
 				static_assert(sizeof(IndirectDrawCommand) == sizeof(D3D12_DRAW_INDEXED_ARGUMENTS), "IndirectDrawCommand must be DRAW_INDEXED_ARGUMENTS only");
 				const UINT64 size       = CULL_DATA_OFFSET + static_cast<UINT64>(MAX_DRAWS) * sizeof(CullInstance);
-				const UINT64 culledSize = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE + 16;   // + 映った数のカウンター
+				const UINT64 culledSize = COMPACT_ARGS_OFFSET + DRAW_ARGS_SIZE;     // カウンターと詰めた引数を含む
 				for (auto& frame : _draws)
 				{
 					frame = DrawFrame();
@@ -315,10 +315,12 @@ namespace RHI
 				if (draws.CullRecorded && draws.Readback)
 				{
 					void* mapped = nullptr;
-					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) };
+					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) * 2 };
 					if (SUCCEEDED(draws.Readback->Get()->Map(0, &readRange, &mapped)))
 					{
-						_stats.VisibleInstances = *static_cast<const uint32_t*>(mapped);
+						const uint32_t* counters = static_cast<const uint32_t*>(mapped);
+						_stats.VisibleInstances = counters[0];
+						_stats.VisibleDraws     = counters[1];
 						_stats.VisibleValid     = true;
 						const D3D12_RANGE noWrite = { 0, 0 };
 						draws.Readback->Get()->Unmap(0, &noWrite);
@@ -500,8 +502,18 @@ namespace RHI
 				{
 					// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く。GPU は描画の引数を読むだけ (ルート引数は変えない)
 					// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
-					// カリングした時は、映らなかった描画は InstanceCount = 0 になっている (GPU はほぼ何もしない)
-					cmdList->ExecuteIndirect(signature, frame.Written, drawSource, DRAW_ARGS_OFFSET, nullptr, 0);
+					if (culling)
+					{
+						// カリングした時は、映った描画だけを詰めた引数を、GPU が数えた数 (Count バッファ) だけ描く
+						// frame.Written は上限 (詰めた数がこれを超えることは無い)
+						// (以前は映らなかった描画も InstanceCount = 0 のまま全部渡していて、GPU が 1 個ずつ読み飛ばしていた)
+						cmdList->ExecuteIndirect(signature, frame.Written, drawSource, COMPACT_ARGS_OFFSET,
+							drawSource, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET + sizeof(uint32_t));
+					}
+					else
+					{
+						cmdList->ExecuteIndirect(signature, frame.Written, drawSource, DRAW_ARGS_OFFSET, nullptr, 0);
+					}
 				}
 				else
 				{
@@ -690,7 +702,8 @@ namespace RHI
 			//   1. CSClear : CPU が並べた引数を Culled に写し、InstanceCount を 0 にする
 			//   2. CSCull  : オブジェクトごとに境界球と視錐台を比べ、映るものだけ
 			//                自分の描画の InstanceCount を増やして、その場所に DrawData を書く
-			//   3. Culled を ExecuteIndirect と頂点シェーダーが読む状態にする (映った数は読み戻し用にコピー)
+			//   3. CSCompact : 1 個でも映った描画の引数だけを前から詰めて並べ、その数を Count バッファに数える
+			//   4. Culled を ExecuteIndirect と頂点シェーダーが読む状態にする (映った数・描画数は読み戻し用にコピー)
 			// CPU は結果を待たない (同じフレームの ExecuteIndirect がそのまま使う)
 			// ==============================================================
 			auto cmdList = _frameCommandList->GetCmdList();
@@ -722,6 +735,7 @@ namespace RHI
 			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_IN_ARGS,   input + DRAW_ARGS_OFFSET);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_DRAWS, output);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_ARGS,  output + DRAW_ARGS_OFFSET);
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_COMPACT, output + COMPACT_ARGS_OFFSET);
 
 			const UINT group = Pipeline::CULL_THREAD_GROUP;
 
@@ -739,11 +753,18 @@ namespace RHI
 			cmdList->SetPipelineState(_currentPipeline->GetCullPipeline());
 			cmdList->Dispatch((frame.Instances + group - 1) / group, 1, 1);
 
-			// 3. 描画が読む状態へ (読み戻しのコピー元にもする)
+			// 3. 描画数の詰め直し (CSCull の数え終わりを待ってから、映った描画の引数だけを前から並べる)
+			//    RTX 2070 / インスタンシングなし / 格子の中から : 20002 描画 → 4996 描画、GPU 0.137 → 0.115 ms
+			//    (インスタンシングありでは空の描画が元々少なく、差はほぼ無い。全部映る場面でも負担は測れない程度)
+			cmdList->ResourceBarrier(1, &uavBarrier);
+			cmdList->SetPipelineState(_currentPipeline->GetCullCompactPipeline());
+			cmdList->Dispatch((frame.Written + group - 1) / group, 1, 1);
+
+			// 4. 描画が読む状態へ (Count バッファ / 読み戻しのコピー元にもする)
 			const auto toRead = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE);
 			cmdList->ResourceBarrier(1, &toRead);
-			cmdList->CopyBufferRegion(frame.Readback->Get(), 0, culled, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t));
+			cmdList->CopyBufferRegion(frame.Readback->Get(), 0, culled, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 2);
 			frame.CullRecorded = true;
 
 			// 描画用の PSO に戻す (ルートシグネチャはグラフィックス用とコンピュート用で別なので、描画側の設定はそのまま)

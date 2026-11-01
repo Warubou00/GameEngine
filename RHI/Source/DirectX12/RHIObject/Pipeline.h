@@ -113,6 +113,7 @@ namespace RHI
                 CULL_PARAM_IN_ARGS     = 4,  // t3 : CPU が並べた引数 (Root SRV)
                 CULL_PARAM_OUT_DRAWS   = 5,  // u0 : 映ったものの DrawData (Root UAV)
                 CULL_PARAM_OUT_ARGS    = 6,  // u1 : 映ったものの引数 + カウンター (Root UAV)
+                CULL_PARAM_OUT_COMPACT = 7,  // u2 : 映った描画だけを詰めた引数 (Root UAV)
                 CULL_PARAM_COUNT
             };
             static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 3;   // float4 ×6 + uint ×3
@@ -153,6 +154,7 @@ namespace RHI
             ID3D12RootSignature* GetCullRootSignature()const;
             ID3D12PipelineState* GetCullClearPipeline()const;   // CSClear
             ID3D12PipelineState* GetCullPipeline()const;        // CSCull
+            ID3D12PipelineState* GetCullCompactPipeline()const; // CSCompact
 
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
@@ -164,6 +166,7 @@ namespace RHI
             std::unique_ptr<DirectX12::RootSignature>    _cullRootSignature;       // GPU カリング用
             std::unique_ptr<DirectX12::PipelineState>    _cullClearPipeline;
             std::unique_ptr<DirectX12::PipelineState>    _cullPipeline;
+            std::unique_ptr<DirectX12::PipelineState>    _cullCompactPipeline;
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;

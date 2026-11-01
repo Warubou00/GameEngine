@@ -96,6 +96,7 @@ namespace RHI
 			_pipelineCache.reset();
 			_shaderCompiler.reset();
 			_indirectDrawSignature.reset();
+			_cullCompactPipeline.reset();
 			_cullPipeline.reset();
 			_cullClearPipeline.reset();
 			_cullRootSignature.reset();
@@ -152,7 +153,7 @@ namespace RHI
 
         bool Pipeline::IsGpuCullingAvailable()const
         {
-            return _cullRootSignature && _cullClearPipeline && _cullPipeline;
+            return _cullRootSignature && _cullClearPipeline && _cullPipeline && _cullCompactPipeline;
         }
 
         ID3D12RootSignature* Pipeline::GetCullRootSignature()const
@@ -168,6 +169,11 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetCullPipeline()const
         {
             return _cullPipeline ? _cullPipeline->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetCullCompactPipeline()const
+        {
+            return _cullCompactPipeline ? _cullCompactPipeline->Get() : nullptr;
         }
 
         RHI_RESULT Pipeline::makeRootSignature(Device* device)
@@ -449,8 +455,8 @@ namespace RHI
                 param.Descriptor.ShaderRegister = i;
                 param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             }
-            // 書き込むもの (u0, u1)。atomic で書き換えるので DATA_VOLATILE
-            const CullRootParameterIndex uavs[] = { CULL_PARAM_OUT_DRAWS, CULL_PARAM_OUT_ARGS };
+            // 書き込むもの (u0〜u2)。atomic で書き換えるので DATA_VOLATILE
+            const CullRootParameterIndex uavs[] = { CULL_PARAM_OUT_DRAWS, CULL_PARAM_OUT_ARGS, CULL_PARAM_OUT_COMPACT };
             for (UINT i = 0; i < _countof(uavs); ++i)
             {
                 auto& param = params[uavs[i]];
@@ -495,8 +501,8 @@ namespace RHI
                 return true;
             };
 
-            std::unique_ptr<DirectX12::PipelineState> clearPso, cullPso;
-            if (!makePso("CSClear", clearPso) || !makePso("CSCull", cullPso))
+            std::unique_ptr<DirectX12::PipelineState> clearPso, cullPso, compactPso;
+            if (!makePso("CSClear", clearPso) || !makePso("CSCull", cullPso) || !makePso("CSCompact", compactPso))
             {
                 Core::Logger::Log("[Pipeline] Failed create culling pipeline. GPU culling disabled.");
                 return;
@@ -504,6 +510,7 @@ namespace RHI
             _cullRootSignature = std::move(rootSignature);
             _cullClearPipeline = std::move(clearPso);
             _cullPipeline      = std::move(cullPso);
+            _cullCompactPipeline = std::move(compactPso);
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)
