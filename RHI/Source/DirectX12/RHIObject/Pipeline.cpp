@@ -72,6 +72,7 @@ namespace RHI
 			// シェーダーのパス (実行ファイルからの相対パス)
 			constexpr const wchar_t* DEFAULT_SHADER_PATH = L"../Shader/hlslTemplate.shader";
 			constexpr const wchar_t* CULLING_SHADER_PATH = L"../Shader/gpuCulling.shader";
+			constexpr const wchar_t* HIZ_SHADER_PATH     = L"../Shader/hiZ.shader";
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -96,6 +97,8 @@ namespace RHI
 			_pipelineCache.reset();
 			_shaderCompiler.reset();
 			_indirectDrawSignature.reset();
+			_hiZPipeline.reset();
+			_hiZRootSignature.reset();
 			_cullCompactPipeline.reset();
 			_cullPipeline.reset();
 			_cullClearPipeline.reset();
@@ -133,6 +136,8 @@ namespace RHI
 
             // GPU カリング用 (ExecuteIndirect が前提。作れなくてもカリングせずに続けられる)
             if (_indirectDrawSignature) makeCullingPipeline(device);
+            // オクルージョンカリング用の Hi-Z (GPU カリングが前提)
+            if (IsGpuCullingAvailable()) makeHiZPipeline(device);
             return RHI_SUCCEEDED;
 		}
 
@@ -174,6 +179,21 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetCullCompactPipeline()const
         {
             return _cullCompactPipeline ? _cullCompactPipeline->Get() : nullptr;
+        }
+
+        bool Pipeline::IsHiZAvailable()const
+        {
+            return _hiZRootSignature && _hiZPipeline;
+        }
+
+        ID3D12RootSignature* Pipeline::GetHiZRootSignature()const
+        {
+            return _hiZRootSignature ? _hiZRootSignature->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetHiZPipeline()const
+        {
+            return _hiZPipeline ? _hiZPipeline->Get() : nullptr;
         }
 
         RHI_RESULT Pipeline::makeRootSignature(Device* device)
@@ -447,7 +467,7 @@ namespace RHI
             params[CULL_PARAM_CONSTANTS].Constants.Num32BitValues = CULL_CONSTANT_COUNT;
 
             // 読むだけのもの (t0〜t3)。カリングの間に中身は変わらない
-            const CullRootParameterIndex srvs[] = { CULL_PARAM_OBJECTS, CULL_PARAM_IN_DRAWS, CULL_PARAM_CULL_DATA, CULL_PARAM_IN_ARGS };
+            const CullRootParameterIndex srvs[] = { CULL_PARAM_OBJECTS, CULL_PARAM_IN_DRAWS, CULL_PARAM_CULL_DATA, CULL_PARAM_IN_ARGS, CULL_PARAM_HIZ };
             for (UINT i = 0; i < _countof(srvs); ++i)
             {
                 auto& param = params[srvs[i]];
@@ -511,6 +531,64 @@ namespace RHI
             _cullClearPipeline = std::move(clearPso);
             _cullPipeline      = std::move(cullPso);
             _cullCompactPipeline = std::move(compactPso);
+        }
+
+        void Pipeline::makeHiZPipeline(Device* device)
+        {
+            // ==============================================================
+            // Hi-Z (深度の縮小ピラミッド) を作るコンピュートのルートシグネチャと PSO
+            //   深度の写しもHi-Z もバッファなので、ルート SRV / UAV だけで組む (ディスクリプタヒープ不要)
+            // ==============================================================
+            D3D12_ROOT_PARAMETER1 params[HIZ_PARAM_COUNT] = {};
+            params[HIZ_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            params[HIZ_PARAM_CONSTANTS].Constants.ShaderRegister = 0;
+            params[HIZ_PARAM_CONSTANTS].Constants.Num32BitValues = HIZ_CONSTANT_COUNT;
+            params[HIZ_PARAM_DEPTH].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[HIZ_PARAM_DEPTH].Descriptor.ShaderRegister = 0;
+            params[HIZ_PARAM_DEPTH].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            params[HIZ_PARAM_HIZ].ParameterType               = D3D12_ROOT_PARAMETER_TYPE_UAV;
+            params[HIZ_PARAM_HIZ].Descriptor.ShaderRegister   = 0;
+            params[HIZ_PARAM_HIZ].Descriptor.Flags            = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+            for (auto& param : params) param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC desc = {};
+            desc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            desc.Desc_1_1.NumParameters = HIZ_PARAM_COUNT;
+            desc.Desc_1_1.pParameters   = params;
+
+            auto rootSignature = std::make_unique<DirectX12::RootSignature>();
+            if (FAILED(rootSignature->Create(device->GetDevice()->GetDevice(), desc)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create Hi-Z root signature. Occlusion culling disabled.");
+                return;
+            }
+
+            Shader::CompiledShader cs;
+            if (!_shaderCompiler->Compile(HIZ_SHADER_PATH, "CSDownsample", Shader::Stage::Compute, cs))
+            {
+                Core::Logger::Log("[Pipeline] Failed compile Hi-Z shader. Occlusion culling disabled.");
+                return;
+            }
+
+            D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+            psoDesc.pRootSignature = rootSignature->Get();
+            psoDesc.CS             = cs.View();
+
+            const uint64_t rootSignatureHash = rootSignature->GetHash();
+            uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+            hash = fnv1a(cs.Bytecode.data(), cs.Bytecode.size(), hash);
+            wchar_t psoName[64] = {};
+            swprintf_s(psoName, L"HiZ_%016llx", hash);
+
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+            if (FAILED(_pipelineCache->GetOrCreateComputePipeline(psoName, psoDesc, pso)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create Hi-Z pipeline. Occlusion culling disabled.");
+                return;
+            }
+            _hiZRootSignature = std::move(rootSignature);
+            _hiZPipeline      = std::make_unique<DirectX12::PipelineState>();
+            _hiZPipeline->Attach(pso);
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)

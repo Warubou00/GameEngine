@@ -68,8 +68,9 @@ namespace RHI
 		 * @param[in,out] bool* indirectDraw ExecuteIndirect の ON / OFF のチェックボックス (nullptr なら出さない)
 		 * @param[in,out] bool* instancing   インスタンシングの ON / OFF のチェックボックス (nullptr なら出さない)
 		 * @param[in,out] bool* gpuCulling   GPU カリングの ON / OFF のチェックボックス (nullptr なら出さない)
+		 * @param[in,out] bool* occlusion    オクルージョンカリングの ON / OFF のチェックボックス (nullptr なら出さない)
 		 ************************************************************************************/
-		void Draw(bool* indirectDraw = nullptr, bool* instancing = nullptr, bool* gpuCulling = nullptr);
+		void Draw(bool* indirectDraw = nullptr, bool* instancing = nullptr, bool* gpuCulling = nullptr, bool* occlusion = nullptr);
 
 	private:
 		void updateVideoMemory();
@@ -108,6 +109,7 @@ namespace RHI
 		bool           _lastInstancing = false;
 		uint32_t       _lastInstances  = 0;
 		bool           _lastCulling    = false;
+		bool           _lastOcclusion  = false;
 		uint32_t       _lastVisible    = 0;
 		uint32_t       _lastVisibleDraws = 0;
 

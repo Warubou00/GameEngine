@@ -99,6 +99,12 @@ public class RHI : IDisposable
     [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
     private static extern void Renderer_TestInsideView();
 
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_SetOcclusionCulling([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+    [DllImport(EngineDll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern void Renderer_TestGroundView();
+
     public void Initialize(out RHIInitializedInfo info)
     {
         rhiInfo.hwnd        = window.Handle;
@@ -166,6 +172,18 @@ public class RHI : IDisposable
     public void Test_InsideView()
     {
         Renderer_TestInsideView();
+    }
+
+    // オクルージョンカリングの ON / OFF (プロファイラーのチェックボックスでも切り替えられる)
+    public void SetOcclusionCulling(bool enabled)
+    {
+        Renderer_SetOcclusionCulling(enabled);
+    }
+
+    // 負荷テスト用 : 地面すれすれから格子を見るカメラ
+    public void Test_GroundView()
+    {
+        Renderer_TestGroundView();
     }
 
     public void Render()

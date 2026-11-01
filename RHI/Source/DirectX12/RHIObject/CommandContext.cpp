@@ -44,6 +44,7 @@
 #include "../Object/dx12_commandSignature.h"
 
 #include <cstring>
+#include <algorithm>
 // ========================================
 
 #include <d3d12.h>
@@ -328,6 +329,8 @@ namespace RHI
 				}
 				draws.CullRecorded = false;
 			}
+			// バッファは前のフレームの ExecuteCommandLists の完了で COMMON に戻っている
+			_hiZState = D3D12_RESOURCE_STATE_COMMON;
 
 			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
 			hr = frame.Allocator->Reset();
@@ -526,6 +529,13 @@ namespace RHI
 				}
 			}
 
+			// オクルージョンカリング : 描き終えた深度から Hi-Z を作り、次のフレームのカリングで使う
+			// (GPU カリングをしなかったフレームは作らない。次にカリングする時は Hi-Z が古いので使わない)
+			const bool buildOcclusion = culling && _useOcclusion && _hiZ && _currentPipeline->IsHiZAvailable();
+			if (buildOcclusion) buildHiZ(buffer);
+			else                _hiZValid = false;
+			if (!culling) _stats.OcclusionCulling = false;
+
 			_stats.IndirectDraw       = indirect;
 			_stats.IndirectArgsReused = reused;
 			_stats.DrawCalls          = frame.Written;
@@ -721,6 +731,15 @@ namespace RHI
 			constants.InstanceCount = frame.Instances;
 			constants.DrawCount     = frame.Written;
 			constants.CounterOffset = static_cast<uint32_t>(CULL_COUNTER_OFFSET);
+
+			// オクルージョンカリング : 前のフレームで作った Hi-Z と、その時のカメラ
+			const bool occlusion = _useOcclusion && _hiZValid && _hiZ;
+			std::memcpy(constants.HiZViewProj, &_hiZViewProj, sizeof(constants.HiZViewProj));
+			constants.HiZWidth  = _hiZMipWidth[0];
+			constants.HiZHeight = _hiZMipHeight[0];
+			constants.HiZLevels = occlusion ? _hiZLevels : 0;
+			_stats.OcclusionCulling = occlusion;
+			if (occlusion) transitionHiZ(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 			static_assert(sizeof(CullConstants) == Pipeline::CULL_CONSTANT_COUNT * sizeof(uint32_t), "CullConstants size mismatch");
 
 			// Culled はフレームの始めには COMMON (前のフレームの ExecuteCommandLists の完了で戻っている)
@@ -736,6 +755,8 @@ namespace RHI
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_DRAWS, output);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_ARGS,  output + DRAW_ARGS_OFFSET);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_COMPACT, output + COMPACT_ARGS_OFFSET);
+			// Hi-Z が無い時もルート SRV には有効なアドレスを入れておく (シェーダーは HiZLevels = 0 なら読まない)
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_HIZ, occlusion ? _hiZ->GetGPUVirtualAddress() : input);
 
 			const UINT group = Pipeline::CULL_THREAD_GROUP;
 
@@ -768,6 +789,151 @@ namespace RHI
 			frame.CullRecorded = true;
 
 			// 描画用の PSO に戻す (ルートシグネチャはグラフィックス用とコンピュート用で別なので、描画側の設定はそのまま)
+			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
+		}
+
+		bool CommandContext::createHiZ(uint32_t width, uint32_t height)
+		{
+			_hiZValid  = false;
+			_hiZLevels = 0;
+			_depthCopy.reset();
+			_hiZ.reset();
+			if (!_depthBuffer || width == 0 || height == 0) return false;
+
+			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
+
+			// 深度の写し : CopyTextureRegion で写せる並び (1 行は 256byte 境界) をデバイスに聞く
+			const D3D12_RESOURCE_DESC depthDesc = _depthBuffer->Get()->GetDesc();
+			UINT64 copySize = 0;
+			dx12Device->GetCopyableFootprints(&depthDesc, 0, 1, 0, &_depthFootprint, nullptr, nullptr, &copySize);
+			_depthCopy = std::make_unique<DirectX12::ResourceBuffer>();
+			if (FAILED(_depthCopy->Create(dx12Device, copySize, D3D12_HEAP_TYPE_DEFAULT)))
+			{
+				_depthCopy.reset();
+				return false;
+			}
+
+			// Hi-Z の段 : 段 0 = 画面の半分 (切り上げ)、1x1 になるまで半分にしていく
+			uint32_t w = (width + 1) / 2, h = (height + 1) / 2, offset = 0;
+			while (_hiZLevels < MAX_HIZ_LEVELS)
+			{
+				_hiZMipWidth[_hiZLevels]  = w;
+				_hiZMipHeight[_hiZLevels] = h;
+				_hiZMipOffset[_hiZLevels] = offset;
+				offset += w * h;
+				_hiZLevels++;
+				if (w == 1 && h == 1) break;
+				w = (std::max)(1u, (w + 1) / 2);
+				h = (std::max)(1u, (h + 1) / 2);
+			}
+
+			_hiZ = std::make_unique<DirectX12::ResourceBuffer>();
+			if (FAILED(_hiZ->Create(dx12Device, static_cast<UINT64>(offset) * sizeof(float), D3D12_HEAP_TYPE_DEFAULT,
+				D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)))
+			{
+				_hiZ.reset();
+				_depthCopy.reset();
+				_hiZLevels = 0;
+				return false;
+			}
+			return true;
+		}
+
+		void CommandContext::transitionHiZ(D3D12_RESOURCE_STATES after)
+		{
+			if (!_hiZ || _hiZState == after) return;
+			const auto barrier = makeTransitionBarrier(_hiZ->Get(), _hiZState, after);
+			_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
+			_hiZState = after;
+		}
+
+		void CommandContext::buildHiZ(Buffer* buffer)
+		{
+			// ==============================================================
+			// Hi-Z を作る (シーンを描き終えた直後。UI は深度を使わないので、この時点の深度で完成している)
+			//   1. 深度バッファをバッファに写す (DEPTH_WRITE → COPY_SOURCE → 写す → DEPTH_WRITE に戻す)
+			//   2. 段 0 : 深度の写しの 2x2 の一番奥 / 段 1〜 : 前の段の 2x2 の一番奥 (段ごとに UAV バリア)
+			//   3. この時のカメラを覚えておく (次のフレームのカリングは、このカメラで物を投影して Hi-Z と比べる)
+			// ==============================================================
+			auto cmdList = _frameCommandList->GetCmdList();
+			ID3D12Resource* depth = _depthBuffer->Get();
+
+			// 1. 深度を写す
+			const auto toCopy = makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+			cmdList->ResourceBarrier(1, &toCopy);
+
+			D3D12_TEXTURE_COPY_LOCATION dst = {};
+			dst.pResource       = _depthCopy->Get();
+			dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+			dst.PlacedFootprint = _depthFootprint;
+			D3D12_TEXTURE_COPY_LOCATION src = {};
+			src.pResource        = depth;
+			src.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+			src.SubresourceIndex = 0;
+			cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+			// 深度は描画用に戻す / 写しはシェーダーが読む状態へ (コピーで COMMON → COPY_DEST に暗黙で昇格している)
+			D3D12_RESOURCE_BARRIER barriers[2] = {
+				makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE),
+				makeTransitionBarrier(_depthCopy->Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+			};
+			cmdList->ResourceBarrier(2, barriers);
+			transitionHiZ(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+			// 2. 段ごとに縮小する
+			cmdList->SetComputeRootSignature(_currentPipeline->GetHiZRootSignature());
+			cmdList->SetPipelineState(_currentPipeline->GetHiZPipeline());
+			cmdList->SetComputeRootShaderResourceView(Pipeline::HIZ_PARAM_DEPTH, _depthCopy->GetGPUVirtualAddress());
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::HIZ_PARAM_HIZ,  _hiZ->GetGPUVirtualAddress());
+
+			D3D12_RESOURCE_BARRIER uavBarrier = {};
+			uavBarrier.Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+			uavBarrier.UAV.pResource = _hiZ->Get();
+
+			// 1 回の Dispatch で最大 HIZ_LEVELS_PER_PASS 段を作る (グループの中で 16→8→4→2→1 と縮める)
+			// 以前は 1 段ごとに Dispatch + UAV バリアで、小さい段ほど GPU の待ちばかりだった
+			// (RTX 2070 / 1280x720 : 11 回で約 0.047 ms → 3 回)
+			const UINT group = Pipeline::HIZ_THREAD_GROUP;
+			for (uint32_t first = 0; first < _hiZLevels; first += Pipeline::HIZ_LEVELS_PER_PASS)
+			{
+				const uint32_t count = (std::min)(Pipeline::HIZ_LEVELS_PER_PASS, _hiZLevels - first);
+
+				// hiZ.shader の cbuffer HiZConstants と同じ並び
+				uint32_t constants[Pipeline::HIZ_CONSTANT_COUNT] = {};
+				if (first == 0)
+				{
+					constants[0] = _depthFootprint.Footprint.Width;              // 読む段 = 深度の写し
+					constants[1] = _depthFootprint.Footprint.Height;
+					constants[2] = 0;
+					constants[3] = _depthFootprint.Footprint.RowPitch / sizeof(float);
+					constants[4] = 1;                                            // 深度の写しから読む
+				}
+				else
+				{
+					constants[0] = _hiZMipWidth[first - 1];                      // 読む段 = 前の Dispatch で作った最後の段
+					constants[1] = _hiZMipHeight[first - 1];
+					constants[2] = _hiZMipOffset[first - 1];
+					constants[3] = _hiZMipWidth[first - 1];
+					constants[4] = 0;
+				}
+				constants[5] = count;
+				for (uint32_t i = 0; i < count; ++i)                             // 作る段 (uint4 ずつ)
+				{
+					constants[8 + i * 4 + 0] = _hiZMipWidth[first + i];
+					constants[8 + i * 4 + 1] = _hiZMipHeight[first + i];
+					constants[8 + i * 4 + 2] = _hiZMipOffset[first + i];
+				}
+
+				cmdList->SetComputeRoot32BitConstants(Pipeline::HIZ_PARAM_CONSTANTS, Pipeline::HIZ_CONSTANT_COUNT, constants, 0);
+				cmdList->Dispatch((_hiZMipWidth[first] + group - 1) / group, (_hiZMipHeight[first] + group - 1) / group, 1);
+				cmdList->ResourceBarrier(1, &uavBarrier);   // 次の Dispatch はこの Dispatch の最後の段を読む
+			}
+
+			// 3. この時のカメラを覚える
+			_hiZViewProj = buffer->GetViewProjectionForShader();
+			_hiZValid    = true;
+
+			// 描画用の PSO に戻す (この後 ImGui が自分の PSO を設定するが、念のため)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
 		}
 
@@ -970,6 +1136,12 @@ namespace RHI
 			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 			dsvDesc.Flags         = D3D12_DSV_FLAG_NONE;
 			dx12Device->CreateDepthStencilView(_depthBuffer->Get(), &dsvDesc, _dsvHeap->GetCpuHandle(0));
+
+			// オクルージョンカリング用 (深度の大きさが変わるので作り直す。作れなくてもオクルージョンカリングしないだけ)
+			if (!createHiZ(width, height))
+			{
+				Core::Logger::Log("[CommandContext] Failed create Hi-Z buffer. Occlusion culling disabled.");
+			}
 			return true;
 		}
 

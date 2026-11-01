@@ -114,6 +114,11 @@ namespace RHI
 		virtual void SetGpuCullingEnabled(bool enabled) = 0;
 		virtual bool IsGpuCullingEnabled()const = 0;
 
+		// オクルージョンカリングをするか (既定 : true)。前のフレームの深度で、手前の物に完全に隠れている物を除く
+		// GPU カリングの時だけ効く。カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+		virtual void SetOcclusionCullingEnabled(bool enabled) = 0;
+		virtual bool IsOcclusionCullingEnabled()const = 0;
+
 		// ======================================================================
 		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
 		// ======================================================================

@@ -114,10 +114,27 @@ namespace RHI
                 CULL_PARAM_OUT_DRAWS   = 5,  // u0 : 映ったものの DrawData (Root UAV)
                 CULL_PARAM_OUT_ARGS    = 6,  // u1 : 映ったものの引数 + カウンター (Root UAV)
                 CULL_PARAM_OUT_COMPACT = 7,  // u2 : 映った描画だけを詰めた引数 (Root UAV)
+                CULL_PARAM_HIZ         = 8,  // t4 : Hi-Z (オクルージョンカリング。Root SRV)
                 CULL_PARAM_COUNT
             };
-            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 3;   // float4 ×6 + uint ×3
+            // float4 ×6 + uint ×3 + 詰め物 1 (HLSL の matrix は 16byte 境界から) + matrix + uint ×3
+            // ルートシグネチャの上限は 64 DWORD : 47 + ルート SRV / UAV 8 個 × 2 = 63
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 3 + 1 + 16 + 3;
             static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
+
+            // ----------------------------------------------------------
+            // Hi-Z (オクルージョンカリング用の深度の縮小ピラミッド) を作るコンピュートのルートパラメータ (hiZ.shader と対応)
+            // ----------------------------------------------------------
+            enum HiZRootParameterIndex : unsigned int
+            {
+                HIZ_PARAM_CONSTANTS = 0,  // b0 : 読む段 / 書く段の大きさと位置 (ルート定数)
+                HIZ_PARAM_DEPTH     = 1,  // t0 : 深度バッファの写し (Root SRV)
+                HIZ_PARAM_HIZ       = 2,  // u0 : Hi-Z (Root UAV)
+                HIZ_PARAM_COUNT
+            };
+            static constexpr uint32_t HIZ_LEVELS_PER_PASS = 5;           // 1 回の Dispatch で作る段の数 (16→8→4→2→1)
+            static constexpr uint32_t HIZ_CONSTANT_COUNT  = 8 + 4 * HIZ_LEVELS_PER_PASS;   // uint ×8 + uint4 ×5
+            static constexpr uint32_t HIZ_THREAD_GROUP    = 16;          // numthreads(16, 16, 1)
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Pipeline();
@@ -156,6 +173,11 @@ namespace RHI
             ID3D12PipelineState* GetCullPipeline()const;        // CSCull
             ID3D12PipelineState* GetCullCompactPipeline()const; // CSCompact
 
+            // Hi-Z を作るコンピュート (作れなかった環境では nullptr = オクルージョンカリングしない)
+            bool                 IsHiZAvailable()const;
+            ID3D12RootSignature* GetHiZRootSignature()const;
+            ID3D12PipelineState* GetHiZPipeline()const;          // CSDownsample
+
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
 
@@ -167,6 +189,8 @@ namespace RHI
             std::unique_ptr<DirectX12::PipelineState>    _cullClearPipeline;
             std::unique_ptr<DirectX12::PipelineState>    _cullPipeline;
             std::unique_ptr<DirectX12::PipelineState>    _cullCompactPipeline;
+            std::unique_ptr<DirectX12::RootSignature>    _hiZRootSignature;        // Hi-Z 用
+            std::unique_ptr<DirectX12::PipelineState>    _hiZPipeline;
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;
@@ -176,6 +200,7 @@ namespace RHI
             RHI_RESULT makePipeline(Device* device);
             void       makeIndirectDrawSignature(Device* device);
             void       makeCullingPipeline(Device* device);
+            void       makeHiZPipeline(Device* device);
         };
 
     }

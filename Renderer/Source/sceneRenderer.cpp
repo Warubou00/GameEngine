@@ -260,6 +260,24 @@ namespace Renderer
 		if (_rhi) _rhi->SetGpuCullingEnabled(enabled);
 	}
 
+	void SceneRenderer::SetOcclusionCullingEnabled(bool enabled)
+	{
+		if (_rhi) _rhi->SetOcclusionCullingEnabled(enabled);
+	}
+
+	void SceneRenderer::SetTestGroundView()
+	{
+		if (!IsInitialized()) return;
+
+		// 格子の手前の端の外、箱 (高さ 2) の半分の高さから、格子の奥を斜めに見る
+		// 手前の数列の箱が壁になり、その奥の箱はほとんど隠れる
+		Camera camera;
+		camera.Position = Core::Vector3(0.0f, 1.0f, -152.0f);
+		camera.Target   = Core::Vector3(25.0f, 1.0f, 0.0f);
+		camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
+		SetCamera(camera);
+	}
+
 	void SceneRenderer::SetTestInsideView()
 	{
 		if (!IsInitialized()) return;
