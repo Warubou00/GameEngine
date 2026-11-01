@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_pipelineStateManager.cpp
-* @brief   PSOŠÇ—ƒNƒ‰ƒX
+* @brief   PSOç®¡ç†ã‚¯ãƒ©ã‚¹
 * @details 
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ‚»‚Ì‘¼
+* @note    ãã®ä»–
 ************************************************************************************/
 
 
@@ -44,29 +44,18 @@ namespace RHI
 		PipelineStateManager::PipelineStateManager() {}
 		PipelineStateManager::~PipelineStateManager() {}
 
-		PipelineStateManager* PipelineStateManager::getInstance()
-		{
-			if (!Instance)
-			{
-				Instance = new PipelineStateManager();
-				Instance->initialize();
-			}
-
-			return Instance;
-		}
-
 		int PipelineStateManager::Register(ID3D12PipelineState* state, const std::string& pipelineName)
 		{
 			int hashValue = _hash->HashIntegerForName(pipelineName.c_str(), pipelineName.size());
 
-			// hashValue‚É“–‚Ä‚Í‚ß‚é
+			// hashValueã«å½“ã¦ã¯ã‚ã‚‹
 			if (_states[hashValue])
 			{
-				// nullptr‚Å‚È‚¢ê‡AŸ‚Öi‚ß‚é
+				// nullptrã§ãªã„å ´åˆã€æ¬¡ã¸é€²ã‚ã‚‹
 				for (int i = hashValue + 1; i < PIPE_STATE_MAX_NUM ; i++)
 				{
-					// nulllptr‚È‚ç“ü‚ê‚é
-					// TODO : ÅŒã‚Ü‚Å‘–¸‚µ‚½ê‡‚Ì0‚©‚ç‚Ì‘–¸‚Í‚Ü‚½ì‚é
+					// nulllptrãªã‚‰å…¥ã‚Œã‚‹
+					// TODO : æœ€å¾Œã¾ã§èµ°æŸ»ã—ãŸå ´åˆã®0ã‹ã‚‰ã®èµ°æŸ»ã¯ã¾ãŸä½œã‚‹
 					if (!_states[i])
 					{
 						_states[i] = state;
@@ -95,16 +84,12 @@ namespace RHI
 
 		void PipelineStateManager::initialize(void)
 		{
-			// ƒpƒCƒvƒ‰ƒCƒ“Ši”[—p‚Ìƒoƒbƒtƒ@‚ğ—pˆÓ
+			// ãƒ‘ã‚¤ãƒ—ãƒ©ã‚¤ãƒ³æ ¼ç´ç”¨ã®ãƒãƒƒãƒ•ã‚¡ã‚’ç”¨æ„
 			_states.resize(PIPE_STATE_MAX_NUM);
 
 			_hash = new Core::Hash();
 			_hash->Initialize(PIPE_STATE_MAX_NUM - 1);
 		}
-
-
-		PipelineStateManager* PipelineStateManager::Instance = nullptr;
-
 	}
 }
 

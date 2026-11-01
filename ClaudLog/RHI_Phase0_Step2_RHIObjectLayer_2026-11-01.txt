@@ -1,0 +1,222 @@
+================================================================================
+ RHI Phase 0 - Step 2 : RHIオブジェクト層 (DirectX12/RHIObject) の修正記録
+ 日付   : 2026-11-01
+ ブランチ: docs/rhi-design-review (未コミット)
+ 対象   : RHI/Source/DirectX12/RHIObject/*, RenderHardwareInterface.*, RHIDll.cpp,
+          ResourceBufferAllocator.*, dx12_descriptorHeapManager.*, dx12_textureManager.*,
+          RHIObject/TextureHandle.h
+ 参照   : RHI_DesignReview_2026-11-01.txt の項目番号
+          RHI_Phase0_Step1_LowLevelWrappers_2026-11-01.txt (前回分)
+================================================================================
+
+■ ビルド確認
+  - RHI.vcxproj  Debug|x64 / Release|x64 (どちらも Rebuild) : 成功
+  - RHI 側の警告はゼロになった。
+    (前回まで出ていた C4715 return 抜け / C4018 / C4267 / C4244 / C4099 は全て解消)
+  - 残っている警告は Renderer プロジェクトのヘッダーのみ
+    (C4251 / C4275 の DLL エクスポート、IModelLoader.h と objLoader.h の class/struct 不一致)
+  - ★実行(描画)確認はまだ。C#ホストで次を確認してほしい:
+      1) 起動してクリア色(青)が出るか
+      2) Test_LoadModel → 描画で box が出るか
+      3) 終了時にクラッシュ・デバッグレイヤーのエラーが出ないか
+    Debug ビルドでは D3D12 の警告/エラーが Logger 経由で C# のコンソールに出るようになっている。
+
+■ 今回もファイルを UTF-8 (BOM付き) / CRLF に変換した (編集したもののみ)
+■ ソース内に日本語コメントを追加した。修正した箇所には「以前は〜だった (レビュー番号)」の形で
+  理由を残しているので、grep で「以前は」を検索すると変更点を一覧できる。
+
+
+--------------------------------------------------------------------------------
+1. CommandContext (コマンドの記録・送信・同期)
+--------------------------------------------------------------------------------
+  [1-10] 記録中のコマンドリストがあるのにアロケーターを Reset していた
+    原因: ExecuteAndSync が最後にコマンドリストを Reset して「記録中」のまま返していたため、
+          次の RenderStart で allocator->Reset() が失敗していた (デバッグレイヤーのエラー)。
+    対策: コマンドリストの状態を次のように決めた (CommandContext.h の冒頭に図を記載)
+            [記録中] --ExecuteAndSync / RenderEnd--> [Close済み] --BeginRecording / RenderStart--> [記録中]
+          - BeginRecording() を新設。Close済みなら アロケーター → コマンドリスト の順にリセットする。
+            記録中なら何もしない (積み足し)。
+          - ExecuteAndSync() は Close済みのまま返す。
+          - アップロード処理 (Buffer / Texture) はコマンドを積む前に BeginRecording() を呼ぶ。
+          - RenderStart は BeginRecording() の後に SetPipelineState で PSO を設定する。
+
+  [1-15] Initialize が HRESULT を全て無視して常に成功を返していた
+    → 各 Create の失敗を検出し、HRESULT をログに出して RHI_FAILED_CREATE_ANY_OBJECT を返す。
+
+  [2-5] VSync 設定 (ObjectInfo::EnabledVSync) を無視して常に Present(1, 0) だった
+    → EnabledVSync を SyncInterval (0/1) として SwapChain::Present に渡す。
+
+  [2-4 の一部] ビューポート/シザーが 1280x720 固定だった
+    → スワップチェーンの実サイズを使う。(C# 側がフォームの外枠サイズを渡している件は未対応)
+
+  [2-9] 頂点の開始位置を二重に指定していた
+    → DrawIndexedInstanced の BaseVertexLocation は SV_VertexID に加算されないので 0 にした。
+      頂点の開始位置はルート定数 (b0) のみで渡す。
+
+  [2-11] Dispose が空で、GPUが使用中のまま破棄されていた
+    → WaitForGpu() を新設。Dispose / デストラクタで GPU の完了を待ってから破棄する。
+
+  [その他]
+    - Present の失敗を検出。デバイスロスト時は GetDeviceRemovedReason をログに出す。
+    - バックバッファを ResourceBuffer に毎フレーム Regist していたのをやめ、所有しないポインタで保持。
+      (Resize の時にバックバッファの参照が残らないようにするため)
+    - ルートパラメータ番号・ディスクリプタ番号の直書き (0〜4 / 1 / 2) を名前付き定数に置き換えた (2-8)。
+    - RenderStart / RenderEnd / ExecuteAndSync は bool を返すようにした。
+    - バリア作成とHRESULTログのヘルパー関数を追加。
+
+
+--------------------------------------------------------------------------------
+2. Device
+--------------------------------------------------------------------------------
+  [1-15] Initialize が HRESULT を全て無視していた
+    → ファクトリー / アダプター / デバイス の各段階で失敗を検出し RHI_FAILED_INITIALIZED を返す。
+      使えるGPUが無い場合 (DXGI_ERROR_NOT_FOUND) もここで止まる。
+      Device5/9・Adapter3 の取得は「使える機能が増えるだけ」なので失敗でも続行する。
+
+  [Phase 0 項目: InfoQueue のログ出力] (レビュー 3-7 の一部)
+    - Debug ビルドのみ、ID3D12InfoQueue1::RegisterMessageCallback でデバッグレイヤーの
+      WARNING / ERROR / CORRUPTION を Core::Logger に流すようにした。
+      → C# のコンソールで D3D12 のエラーが見える。
+    - デバッガーが付いている時だけ ERROR / CORRUPTION でブレークする。
+    - ID3D12InfoQueue1 が無い古いランタイムでは何もしない。
+
+  [その他]
+    - Dispose を実装 (コールバック解除 → デバイス → アダプター → ファクトリー)。
+    - 起動ログに GPU名 / レイトレ対応 / メッシュシェーダー対応を追加。
+
+
+--------------------------------------------------------------------------------
+3. Buffer
+--------------------------------------------------------------------------------
+  [1-2] makeGlobalVBV / makeSceneVBV に return が無く、戻り値が不定だった
+    → makeVBView の結果を返す。さらに、確保された SRV 番号が想定 (0 / 1) と違えば失敗にする。
+
+  [1-9] Root CBV のオフセットが 256 の倍数になっていなかった
+    原因: ConstantPerRenderObject (80byte) の間隔で詰めていた。Root CBV のアドレスは 256 境界必須。
+    対策: Buffer::SCENE_CB_STRIDE (= 256 に切り上げたサイズ) を定義し、
+          書き込み側 (Buffer::LoadModel) と 参照側 (RenderHardwareInterface の CbOffset) で同じ値を使う。
+
+  [2-1] インデックスバッファの 2 回目以降のアップロードで遷移前の状態を GENERIC_READ にしていた
+    → バッファは ExecuteCommandLists の完了時に COMMON に戻る (ステートの減衰) ので、常に COMMON から遷移する。
+
+  [2-2] アロケーターが容量オーバーでもオフセット 0 を返し、既存データを上書きしていた
+    → ResourceBufferAllocation に IsValid を追加。失敗時はアップロードを中止してログを出す。
+      オフセットを uint64 にした (4GB 超えで溢れていた)。
+
+  [その他]
+    - 頂点 / インデックスのアップロードは処理がほぼ同じだったので uploadToDefaultBuffer() に共通化。
+      Create / Map の失敗チェックを追加し、Map/memcpy は ResourceBuffer::Map / WriteData (範囲チェック付き) を使う。
+    - SRV ヒープの番号の割り当てを Buffer.h に定数としてまとめた
+        SRV_INDEX_GLOBAL_VB = 0 / SRV_INDEX_SCENE_VB = 1 / SRV_INDEX_TEXTURE_BEGIN = 2
+    - Initialize の最後に既定テクスチャ (白 1x1) を作る (後述)。
+    - LoadModel:
+        * ObjLoader をスマートポインタにした (失敗時にリークしていた)
+        * Texture を呼ぶたびに作り直して、前のテクスチャを破棄していたのを修正
+        * WorldMatrix を単位行列で初期化 (以前はゼロ行列)
+        * アップロード失敗をログに出す
+    - Dispose で globalCB / sceneCB も Unmap する (以前は commonCB だけ)。
+    - バッファ作成失敗時にサイズと HRESULT をログに出す。
+
+
+--------------------------------------------------------------------------------
+4. Texture (RHIObject) / Texture (dx12_textureManager)
+--------------------------------------------------------------------------------
+  [1-8] TextureID が 2 ずれていた
+    原因: ディスクリプタヒープの番号をそのまま TextureID にしていたが、
+          シェーダーの g_Textures[] はテクスチャテーブルの先頭 (ヒープの 2 番) から数える。
+    対策: TextureID = ヒープ番号 - SRV_INDEX_TEXTURE_BEGIN
+
+  [1-11] UseTexture が false でも読み込もうとし、失敗(nullptr)のまま SRV を作ってクラッシュしていた
+    対策: 既定テクスチャ (白 1x1) を導入した。
+          - Buffer::Initialize で最初に作るので必ず TextureID 0 になる (TextureHandle::DEFAULT_TEXTURE_ID)
+          - UseTexture == false のマテリアル、読み込みに失敗したテクスチャは TextureID 0 を使う
+          - シェーダーは「頂点カラー × テクスチャ」なので、白を掛ければ頂点カラーそのままになる
+            → シェーダーを変えずにテクスチャ無しマテリアルを描ける
+
+  [dx12_textureManager]
+    - LoadTextureFromFile を「ファイル読み込み」と「メモリ上の画像からテクスチャ作成
+      (CreateTextureFromImage)」に分割した。
+    - CreateSolidColorTexture (単色 1x1) を追加。
+    - アップロードバッファの Map 失敗チェックを追加。
+    - RHI::DirectX 名前空間と DirectXTex / DirectXMath の DirectX 名前空間がぶつかるため、
+      ライブラリ側は ::DirectX:: と明示した。(Phase 3 の名前空間整理 3-1 で根本対応したい)
+
+  [その他]
+    - SRV 作成とアップロード後の処理を registerTexture() に共通化。
+    - Texture::Dispose を実装。
+
+
+--------------------------------------------------------------------------------
+5. Pipeline
+--------------------------------------------------------------------------------
+  [1-14] シェーダーの Blob がリークし、errorBlob が nullptr のまま参照してクラッシュしていた
+    → ComPtr で受け、errorBlob があればログに出す compileShader() ヘルパーを作った。
+      ファイルが見つからない時もクラッシュせずに RHI_FAILED_COMPILED_SHADER を返す。
+    → MakeCustomPipeline は FXC に vs_6_0 / ps_6_0 を渡していた (必ず失敗) ので vs_5_1 / ps_5_1 に修正。
+      ただし PSO の作成・登録は未実装のまま (TODO を記載。Phase 4 の PSO キャッシュで対応)。
+    - HLSLCompiler を new/delete からスタック変数に変更 (失敗時にリークしていた)。
+
+  [2-8] ルートパラメータ番号を Pipeline::RootParameterIndex として定義し、
+        ルートシグネチャ作成側と CommandContext 側で同じ名前を使うようにした。
+
+  [その他]
+    - PSO の RTVFormats をスワップチェーンの FORMAT から取る (以前は別々に直書き)。
+    - ラスタライザのコメントが逆だったのを修正 (CULL_MODE_NONE = カリングしない / 反時計回りが表)。
+    - NumDescriptors = -1 を UINT_MAX と明記。
+    - GetPipelineState / GetRootSignature の null チェック、Dispose の実装。
+    - 前方宣言 class ID3D12PipelineState → struct に修正 (C4099)。
+    - [cite: N] の残骸コメントを削除。
+
+
+--------------------------------------------------------------------------------
+6. RenderHardwareInterface / RHIDll
+--------------------------------------------------------------------------------
+  [1-15] 初期化の途中で失敗しても次へ進んでいた
+    → 失敗した段階で止める。以降の項目は -1 のまま (= 未初期化) なので C# 側で判別できる。
+      IsInitialized() を追加し、未初期化なら Begin / End / Test_* は何もしない。
+
+  [2-11] 終了処理
+    - CleanUp の順番を修正: GPU完了待ち → Texture / Pipeline / Buffer / CommandContext → 最後に Device
+      (以前は Device を最初に Dispose していた)
+    - CleanUp は 2 回呼んでも安全。デストラクタからも呼ぶ。
+    - RHI_CleanUp で g_pRhi を delete するようにした (以前はリークしていた)。
+
+  [その他]
+    - Test_LoadModel: モデル読み込み失敗時の nullptr 参照を修正。CbOffset を SCENE_CB_STRIDE 間隔に。
+    - Begin / End が bool を返すようにした。
+
+
+--------------------------------------------------------------------------------
+7. DescriptorHeapManager / ResourceBufferAllocator
+--------------------------------------------------------------------------------
+  - AllocateSrv の失敗値 9999 を INVALID_INDEX (0xFFFFFFFF) に変更 (9999 は正しい番号にもなり得る) (2-8)
+  - FreeSrv で無効な番号・未発行の番号を弾く (同じ枠の二重使用を防ぐ)
+  - ResourceBufferAllocation に IsValid と既定値を追加。count / stride が 0 の確保は失敗扱い。
+
+
+--------------------------------------------------------------------------------
+8. 未対応 (次のステップ以降)
+--------------------------------------------------------------------------------
+  Phase 0 の残り (シェーダー / Renderer 側):
+  - [1-7]  頂点レイアウトの不一致 (C++ 56byte / HLSL 36byte、Color が 0)
+           → 今回 TextureID を直しても、頂点データの読み方がずれているので見た目はまだ正しくない可能性が高い
+  - [2-7]  頂点シェーダーが行列を使っていない / WorldMatrix をシェーダーへ渡す行列の転置
+  - Renderer 側ヘッダーの class/struct 不一致 (C4099)、Mesh の解放 (所有権が曖昧)
+
+  Phase 1 へ持ち越し:
+  - [2-3]  毎フレーム GPU の完了を待っている / アロケーターが 1 つ → FrameContext[N]
+  - [2-4]  C# 側がフォームの外枠サイズを渡している / UpdateViewProjection の 1280x720 固定 / リサイズ対応
+           (SwapChain::Resize は用意済み。RTV の作り直しと合わせて対応する)
+  - [2-6]  深度バッファ
+
+  Phase 3 へ持ち越し:
+  - 抽象インターフェイスから具象型への static_cast (各所に TODO コメントを記載)
+  - RHI::DirectX と ::DirectX の名前空間の衝突
+
+
+--------------------------------------------------------------------------------
+9. 変換前ファイルのバックアップ
+--------------------------------------------------------------------------------
+  Shift-JIS の変換前ファイル (未コミットの変更を含む) はセッションの作業領域に退避した。
+
+================================================================================

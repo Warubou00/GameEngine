@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_pipelineState.cpp
-* @brief   DX12‚ÌPSO
+* @brief   DX12ã®PSO
 * @details
 *
 * @author  Keigo Onari
@@ -38,28 +38,37 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		PipelineState::PipelineState() {}
+		PipelineState::PipelineState() = default;
 		PipelineState::~PipelineState() {}
 
 		// ==============================================
-		// ƒtƒFƒ“ƒX‚Ìì¬
+		// PSOã®ä½œæˆ
 		// ==============================================
-		HRESULT PipelineState::Create(ID3D12Device* device)
+		HRESULT PipelineState::Create(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc)
 		{
-			return device->CreateGraphicsPipelineState(&_psoDesc, IID_PPV_ARGS(&_pPSO));
+			if (!device || _pPSO)
+			{
+				return E_INVALIDARG;
+			}
+
+			return device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pPSO));
+		}
+
+		ID3D12PipelineState* PipelineState::Get()const
+		{
+			return _pPSO.Get();
 		}
 
 		// ==============================================
-		// ‰ð•ú
+		// è§£æ”¾
 		// ==============================================
 		void PipelineState::Release(void)
 		{
-			// ComPtr‚Ì‚½‚ß–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pPSO.Get())_pPSO.Get()->Release();
+			_pPSO.Reset();
 		}
 	}
 }
 
 /************************************
 * End of file
-************************************/
+************************************/

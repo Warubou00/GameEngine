@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_descriptorHeap.h
-* @brief   DX12‚ÌƒfƒXƒNƒŠƒvƒ^ƒq[ƒvˆêŠ‡ŠÇ—
+* @brief   DX12ã®ãƒ‡ã‚¹ã‚¯ãƒªãƒ—ã‚¿ãƒ’ãƒ¼ãƒ—ä¸€æ‹¬ç®¡ç†
 * @details 
 *
 * @author  Keigo Onari
@@ -57,72 +57,78 @@ namespace RHI
             ******************************************************************/
 
 
-        private:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             DescriptorHeapManager() {};
             ~DescriptorHeapManager() {};
-            DescriptorHeapManager(const DescriptorHeapManager&) = delete;
-            DescriptorHeapManager& operator=(const DescriptorHeapManager) = delete;
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
-
-            static DescriptorHeapManager& getInstance()
-            {
-                static DescriptorHeapManager instance;
-                return instance;
-            }
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
             /***********************************************************************************
-             * @brief ¶¬ŠÖ”
+             * @brief ç”Ÿæˆé–¢æ•°
              * @details 
              *
-             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] ID3D12CommandQueue* pCmdQueue ƒRƒ}ƒ“ƒhƒLƒ…[
-             * @param[in] HWND* hWnd ƒEƒCƒ“ƒhƒEƒnƒ“ƒhƒ‹‚Ìƒ|ƒCƒ“ƒ^
-             * @param[in] UINT width •
-             * @param[in] UINT height ‚‚³
-             * @return HRESULT ¬Œ÷‚Ì—L–³
+             * @param[in] IDXGIFactory6* pDxgiFactory DXGIFactory6ã®ãƒã‚¤ãƒ³ã‚¿
+             * @param[in] ID3D12CommandQueue* pCmdQueue ã‚³ãƒãƒ³ãƒ‰ã‚­ãƒ¥ãƒ¼
+             * @param[in] HWND* hWnd ã‚¦ã‚¤ãƒ³ãƒ‰ã‚¦ãƒãƒ³ãƒ‰ãƒ«ã®ãƒã‚¤ãƒ³ã‚¿
+             * @param[in] UINT width å¹…
+             * @param[in] UINT height é«˜ã•
+             * @return HRESULT æˆåŠŸã®æœ‰ç„¡
              ************************************************************************************/
             HRESULT Create(ID3D12Device* device);
 
-            // ƒeƒNƒXƒ`ƒƒƒ[ƒh‚È‚Ç‚ÉŒÄ‚Î‚ê‚éF‹ó‚¢‚Ä‚¢‚éƒCƒ“ƒfƒbƒNƒX‚ğ•Ô‚·
+            // ç¢ºä¿ã«å¤±æ•—ã—ãŸæ™‚ã®å€¤ (ä»¥å‰ã¯ 9999 ã‚’è¿”ã—ã¦ã„ãŸãŒã€9999ç•ªã‚‚æ­£ã—ã„ç•ªå·ã«ãªã‚Šå¾—ã‚‹ãŸã‚æœ€å¤§å€¤ã«å¤‰æ›´)
+            static constexpr uint32_t INVALID_INDEX = 0xFFFFFFFFu;
+
+            // ãƒ†ã‚¯ã‚¹ãƒãƒ£ãƒ­ãƒ¼ãƒ‰æ™‚ãªã©ã«å‘¼ã°ã‚Œã‚‹ï¼šç©ºã„ã¦ã„ã‚‹ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã‚’è¿”ã™ (æº€æ¯ãªã‚‰ INVALID_INDEX)
             uint32_t AllocateSrv();
 
 
-            // ƒeƒNƒXƒ`ƒƒ”jŠü‚ÉŒÄ‚Î‚ê‚éFƒCƒ“ƒfƒbƒNƒX‚ğ‹ó‚«ƒŠƒXƒg‚É–ß‚·
+            // ãƒ†ã‚¯ã‚¹ãƒãƒ£ç ´æ£„æ™‚ã«å‘¼ã°ã‚Œã‚‹ï¼šã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã‚’ç©ºããƒªã‚¹ãƒˆã«æˆ»ã™
             void FreeSrv(uint32_t index);
 
-            // w’èƒCƒ“ƒfƒbƒNƒX‚ÌCPUƒnƒ“ƒhƒ‹iÀÛ‚Ì‘‚«‚İæƒAƒhƒŒƒXj‚ğæ“¾‚·‚é
+            // æŒ‡å®šã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã®CPUãƒãƒ³ãƒ‰ãƒ«ï¼ˆå®Ÿéš›ã®æ›¸ãè¾¼ã¿å…ˆã‚¢ãƒ‰ãƒ¬ã‚¹ï¼‰ã‚’å–å¾—ã™ã‚‹
             D3D12_CPU_DESCRIPTOR_HANDLE GetSrvCpuHandle(UINT index);
 
-            // Šî–{2‚Â‚È‚Ì‚Åæ“ª‚ğ•Ô‚·
+            // æŒ‡å®šã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã®GPUãƒãƒ³ãƒ‰ãƒ«ï¼ˆå®Ÿéš›ã®æ›¸ãè¾¼ã¿å…ˆã‚¢ãƒ‰ãƒ¬ã‚¹ï¼‰ã‚’å–å¾—ã™ã‚‹
+            D3D12_GPU_DESCRIPTOR_HANDLE GetSrvGpuHandle(UINT index);
+
+            // æŒ‡å®šã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã®CPUãƒãƒ³ãƒ‰ãƒ«ã‚’å–å¾—(RTV)
+            D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandle(UINT index);
+
+            // æŒ‡å®šã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã®GPUãƒãƒ³ãƒ‰ãƒ«ã‚’å–å¾—(RTV)
+            D3D12_GPU_DESCRIPTOR_HANDLE GetRtvGpuHandle(UINT index);
+
+            // åŸºæœ¬2ã¤ãªã®ã§å…ˆé ­ã‚’è¿”ã™
             D3D12_CPU_DESCRIPTOR_HANDLE GetRtvCpuHandleStart();
 
-            // ƒTƒCƒYæ“¾
+            ID3D12DescriptorHeap* GetSrvHeap()const { return _srvUavCbvHeap.Get(); }
+
+            // ã‚µã‚¤ã‚ºå–å¾—
             UINT GetSrvDescriptorSize();
             UINT GetRtvDescriptorSize();
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
 
-        private:         /*---ƒƒ“ƒo•Ï”---*/
+        private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
-            // DX12‚Ìƒq[ƒvÀ‘Ì
+            // DX12ã®ãƒ’ãƒ¼ãƒ—å®Ÿä½“
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _srvUavCbvHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _samplerHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _rtvHeap;
             Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> _dsvHeap;
 
-            // --- SRVƒq[ƒv‚ÌƒAƒƒP[ƒ^iƒCƒ“ƒfƒbƒNƒXŠÇ—j ---
-            const uint32_t _maxSrvCount = 1000000; // Šm•Û‚µ‚½Å‘å”
-            uint32_t _currentSrvIndex = 0;   // Œ»İ–¢g—p‚Ìæ“ªƒCƒ“ƒfƒbƒNƒX
+            // --- SRVãƒ’ãƒ¼ãƒ—ã®ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ï¼ˆã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ç®¡ç†ï¼‰ ---
+            const uint32_t _maxSrvCount = 1000000; // ç¢ºä¿ã—ãŸæœ€å¤§æ•°
+            uint32_t _currentSrvIndex = 0;   // ç¾åœ¨æœªä½¿ç”¨ã®å…ˆé ­ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹
 
-            // ”jŠü‚³‚ê‚ÄÄ—˜—p‰Â”\‚É‚È‚Á‚½ƒCƒ“ƒfƒbƒNƒX‚ÌƒŠƒXƒgiFreeListj
+            // ç ´æ£„ã•ã‚Œã¦å†åˆ©ç”¨å¯èƒ½ã«ãªã£ãŸã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã®ãƒªã‚¹ãƒˆï¼ˆFreeListï¼‰
             std::vector<uint32_t> _freeSrvIndices;
 
-            // Šeƒq[ƒv‚ÌƒfƒBƒXƒNƒŠƒvƒ^‚ÌƒTƒCƒYiƒCƒ“ƒfƒbƒNƒX‚©‚çƒAƒhƒŒƒX‚ğŒvZ‚·‚é‚Ì‚É•K—vj
+            // å„ãƒ’ãƒ¼ãƒ—ã®ãƒ‡ã‚£ã‚¹ã‚¯ãƒªãƒ—ã‚¿ã®ã‚µã‚¤ã‚ºï¼ˆã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã‹ã‚‰ã‚¢ãƒ‰ãƒ¬ã‚¹ã‚’è¨ˆç®—ã™ã‚‹ã®ã«å¿…è¦ï¼‰
             UINT _srvDescriptorSize;
 
-            // rtv‚Ìƒq[ƒvƒTƒCƒY
+            // rtvã®ãƒ’ãƒ¼ãƒ—ã‚µã‚¤ã‚º
             UINT _rtvDescriptorSize;
 
         };

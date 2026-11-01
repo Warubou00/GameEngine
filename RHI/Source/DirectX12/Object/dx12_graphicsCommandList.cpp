@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_graphicsCommandList.cpp
-* @brief   DX12‚ÌƒOƒ‰ƒtƒBƒbƒNƒRƒ}ƒ“ƒhƒŠƒXƒg
+* @brief   DX12ã®ã‚°ãƒ©ãƒ•ã‚£ãƒƒã‚¯ã‚³ãƒžãƒ³ãƒ‰ãƒªã‚¹ãƒˆ
 * @details
 *
 * @author  Keigo Onari
@@ -42,24 +42,61 @@ namespace RHI
 		GraphicsCommandList::~GraphicsCommandList() {}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒŠƒXƒg‚Ìì¬
+		// ã‚³ãƒžãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®ä½œæˆ
 		// ==============================================
 		HRESULT GraphicsCommandList::Create(ID3D12Device* device, ID3D12CommandAllocator* cmdAllocator)
 		{
-			if (!device || !cmdAllocator)
+			if (!device || !cmdAllocator || _pCmdList)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-
-				return E_NOTIMPL;
+				return E_INVALIDARG;
 			}
-			return device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cmdAllocator, nullptr, IID_PPV_ARGS(&_pCmdList));
+
+			// CreateCommandListç›´å¾Œã¯è¨˜éŒ²ä¸­(Open)çŠ¶æ…‹ã§è¿”ã£ã¦ãã‚‹
+			RHI_RETURN_IF_FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, cmdAllocator, nullptr, IID_PPV_ARGS(&_pCmdList)));
+			_isRecording = true;
+			return S_OK;
+		}
+
+		// ==============================================
+		// è¨˜éŒ²ã®é–‹å§‹
+		// ==============================================
+		HRESULT GraphicsCommandList::Reset(ID3D12CommandAllocator* cmdAllocator, ID3D12PipelineState* pso)
+		{
+			if (!_pCmdList || !cmdAllocator)
+			{
+				return E_INVALIDARG;
+			}
+
+			RHI_RETURN_IF_FAILED(_pCmdList->Reset(cmdAllocator, pso));
+			_isRecording = true;
+			return S_OK;
+		}
+
+		// ==============================================
+		// è¨˜éŒ²ã®çµ‚äº†
+		// ==============================================
+		HRESULT GraphicsCommandList::Close(void)
+		{
+			if (!_pCmdList)
+			{
+				return E_FAIL;
+			}
+
+			// äºŒé‡Closeã¯ã‚¨ãƒ©ãƒ¼ã«ãªã‚‹ãŸã‚ã€è¨˜éŒ²ä¸­ã§ãªã‘ã‚Œã°ä½•ã‚‚ã—ãªã„
+			if (!_isRecording)
+			{
+				return S_OK;
+			}
+
+			_isRecording = false;
+			return _pCmdList->Close();
 		}
 
 		HRESULT GraphicsCommandList::TryVersionUp()
 		{
 			if (!_pCmdList)
 			{
-				// TODO : —áŠOˆ— -> nullptr
+				// TODO : ä¾‹å¤–å‡¦ç† -> nullptr
 
 				return E_NOTIMPL;
 			}
@@ -71,7 +108,7 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : —áŠOˆ— -> nullptr
+				// TODO : ä¾‹å¤–å‡¦ç† -> nullptr
 
 				return E_NOTIMPL;
 			}
@@ -83,12 +120,12 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : —áŠOˆ— -> nullptr
+				// TODO : ä¾‹å¤–å‡¦ç† -> nullptr
 
 				return E_NOTIMPL;
 			}
 
-			// 4‚à‘O’ñ‚É...
+			// 4ã‚‚å‰æã«...
 			asCmdList4();
 			return asCmdList6();
 		}
@@ -97,19 +134,19 @@ namespace RHI
 		{
 			if (!_pCmdList)
 			{
-				// TODO : —áŠOˆ— -> nullptr
+				// TODO : ä¾‹å¤–å‡¦ç† -> nullptr
 
 				return E_NOTIMPL;
 			}
 
-			// 4,6‚à‘O’ñ‚É...
+			// 4,6ã‚‚å‰æã«...
 			asCmdList4();
 			asCmdList6();
 			return asCmdList7();
 		}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒŠƒXƒg‚ÌŽæ“¾
+		// ã‚³ãƒžãƒ³ãƒ‰ãƒªã‚¹ãƒˆã®å–å¾—
 		// ==============================================
 		ID3D12GraphicsCommandList* GraphicsCommandList::GetCmdList(void)const
 		{
@@ -133,13 +170,12 @@ namespace RHI
 
 		HRESULT GraphicsCommandList::asCmdList()
 		{
-			HRESULT hr = S_OK;
-
-			hr = asCmdList4();
+			// ä¸Šä½ç‰ˆãŒå–ã‚Œãªã‹ã£ãŸæ™‚ç‚¹ã§æ‰“ã¡åˆ‡ã‚‹
+			HRESULT hr = asCmdList4();
+			if (FAILED(hr)) return hr;
 			hr = asCmdList6();
-			hr = asCmdList7();
-
-			return hr;
+			if (FAILED(hr)) return hr;
+			return asCmdList7();
 		}
 
 		HRESULT GraphicsCommandList::asCmdList4()
@@ -158,16 +194,19 @@ namespace RHI
 		}
 
 		// ==============================================
-		// ‰ð•ú
+		// è§£æ”¾
 		// ==============================================
 		void GraphicsCommandList::Release(void)
 		{
-			// ComPtr‚È‚Ì‚Å–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pCmdList.Get())_pCmdList->Release();
+			_pCmdList7.Reset();
+			_pCmdList6.Reset();
+			_pCmdList4.Reset();
+			_pCmdList.Reset();
+			_isRecording = false;
 		}
 	}
 }
 
 /************************************
 * End of file
-************************************/
+************************************/

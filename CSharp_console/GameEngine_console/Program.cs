@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Drawing.Text;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -10,47 +11,28 @@ namespace GameEngine_console
     {
         public static void Main(string[] args)
         {
-            RHI rHI = new RHI();
+            RHI rhi = new RHI();
             RHI.RHIInitializedInfo info;
 
-            rHI.Initialize(out info);
+            rhi.Initialize(out info);
 
-            if(info.InitializedDevice == 0)
-            {
-                Console.WriteLine("Initialized Device");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Device");
-            }
+            Console.WriteLine($"Device         : {rhi.CheckRHIResult(info.InitializedDevice)}");
+            Console.WriteLine($"CommandContext : {rhi.CheckRHIResult(info.InitializedCommandContext)}");
+            Console.WriteLine($"Buffer         : {rhi.CheckRHIResult(info.InitializedBuffer)}");
+            Console.WriteLine($"Texture        : {rhi.CheckRHIResult(info.InitializedTexture)}");
+            Console.WriteLine($"Pipeline       : {rhi.CheckRHIResult(info.InitializedPipeline)}");
 
-            if (info.InitializedCommandContext == 0)
-            {
-                Console.WriteLine("Initialized CommandContext");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize CommandContext");
-            }
+            //rhi.DebugExecute();
 
-            if(info.InitializedBuffer == 0)
-            {
-                Console.WriteLine("Initialized Buffer");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Buffer");
-            }
+            rhi.Test_LoadModel(0.0f, 5.0f, -10.0f);
 
-            if(info.InitializedTexture == 0)
+            while(true)
             {
-                Console.WriteLine("Initialized Texture");
-            }
-            else
-            {
-                Console.WriteLine("Failed Initialize Texture");
-            }
+                System.Windows.Forms.Application.DoEvents();
 
+                if (rhi.isAllInitialized(info))
+                    rhi.Render();
+            }
         }
     }
 }

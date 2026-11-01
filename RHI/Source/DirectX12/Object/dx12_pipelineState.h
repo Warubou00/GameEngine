@@ -1,7 +1,7 @@
-
+﻿
 /***********************************************************************************
 * @file    dx12_pipelineState.h
-* @brief   DX12��PSO
+* @brief   DX12のPSO
 * @details
 *
 * @author  Keigo Onari
@@ -49,24 +49,29 @@ namespace RHI
 
 
 			/***********************************************************************************
-			 * @brief �����֐�
+			 * @brief 生成関数
 			 *
-			 * @param[in] ID3D12Device* device �f�o�C�X�̃|�C���^
-			 * @return HRESULT �����̗L��
+			 * @details 以前はコンストラクタで受け取ったDescのポインタを保持していたが、
+			 *          呼び出し元のスタック変数を指していたため Create 時に直接受け取るようにした
+			 *
+			 * @param[in] ID3D12Device* device デバイスのポインタ
+			 * @param[in] const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc PSOの設定
+			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT Create(ID3D12Device* device);
+			HRESULT Create(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& psoDesc);
+
+			ID3D12PipelineState* Get()const;
 
 			/***********************************************************************************
-			 * @briefe ����֐�
+			 * @brief 解放関数
 			 *
 			 ************************************************************************************/
 			void Release(void);
 
 		private:
 			Microsoft::WRL::ComPtr<ID3D12PipelineState> _pPSO = nullptr;
-			D3D12_GRAPHICS_PIPELINE_STATE_DESC _psoDesc = {};
 		};
 	}
 }
 
-#endif // DX12_PIPELINE_STATE_H_
+#endif // DX12_PIPELINE_STATE_H_

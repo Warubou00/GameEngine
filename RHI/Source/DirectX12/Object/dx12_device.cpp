@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_device.cpp
-* @brief   DX12‚ÌƒIƒuƒWƒFƒNƒg
+* @brief   DX12ã®ã‚ªãƒ–ã‚¸ã‚§ã‚¯ãƒˆ
 * @details 
 *
 * @author  Keigo Onari
@@ -40,37 +40,46 @@ namespace RHI
 {
 	namespace DirectX12
 	{
-		//ƒtƒB[ƒ`ƒƒƒŒƒxƒ‹—ñ‹“
-		D3D_FEATURE_LEVEL levels[] = {
-			D3D_FEATURE_LEVEL_12_1,
-			D3D_FEATURE_LEVEL_12_0,
-			D3D_FEATURE_LEVEL_11_1,
-			D3D_FEATURE_LEVEL_11_0,
-		};
+		namespace
+		{
+			//ãƒ•ã‚£ãƒ¼ãƒãƒ£ãƒ¬ãƒ™ãƒ«åˆ—æŒ™ (é«˜ã„é †ã«è©¦ã™)
+			constexpr D3D_FEATURE_LEVEL FEATURE_LEVELS[] = {
+				D3D_FEATURE_LEVEL_12_1,
+				D3D_FEATURE_LEVEL_12_0,
+				D3D_FEATURE_LEVEL_11_1,
+				D3D_FEATURE_LEVEL_11_0,
+			};
+		}
 
 		Device::Device() : _isRaytracingSupported(false), _isRaytracingSupported_1_1(false), _isMeshShaderSupported(false) {}
 		Device::~Device() = default;
 
 		HRESULT Device::Create(IDXGIAdapter* adapter)
 		{
-			//Direct3DƒfƒoƒCƒX‚Ì‰Šú‰»
-			D3D_FEATURE_LEVEL featureLevel;
-			for (auto l : levels) {
-				if (D3D12CreateDevice(adapter, l, IID_PPV_ARGS(&_pDevice)) == S_OK) {
-					featureLevel = l;
+			if (!adapter || _pDevice)
+			{
+				return E_INVALIDARG;
+			}
+
+			//Direct3Dãƒ‡ãƒã‚¤ã‚¹ã®åˆæœŸåŒ–
+			HRESULT hr = E_FAIL;
+			for (auto l : FEATURE_LEVELS) {
+				hr = D3D12CreateDevice(adapter, l, IID_PPV_ARGS(&_pDevice));
+				if (SUCCEEDED(hr)) {
+					_featureLevel = l;
 					return S_OK;
 				}
 			}
 
-			return E_INVALIDARG;
+			// æœ€å¾Œã«å¤±æ•—ã—ãŸç†ç”±ã‚’è¿”ã™
+			return hr;
 		}
 
 		HRESULT Device::TryVersionUp()
 		{
 			if (!_pDevice)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 
 			return asDevice();
@@ -80,24 +89,26 @@ namespace RHI
 		{
 			if (!_pDevice)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 
-			return asDevice5();
+			HRESULT hr = asDevice5();
+			checkFeatureSupport();
+			return hr;
 		}
 
 		HRESULT Device::TryVersionUp9()
 		{
 			if (!_pDevice)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return E_NOTIMPL;
+				return E_FAIL;
 			}
 
-			// 5‚à‘O’ñ‚É...
+			// 5ã‚‚å‰æã«...
 			asDevice5();
-			return asDevice9();
+			HRESULT hr = asDevice9();
+			checkFeatureSupport();
+			return hr;
 		}
 
 		ID3D12Device* Device::GetDevice()const
@@ -117,73 +128,59 @@ namespace RHI
 
 		void Device::Release(void)
 		{
-			// ComPtr‚È‚Ì‚Å–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pDevice.Get())_pDevice.Get()->Release();
+			_pDevice9.Reset();
+			_pDevice5.Reset();
+			_pDevice.Reset();
 		}
-		
+
 		HRESULT Device::asDevice()
 		{
-			// TODO : hr‚Ì—áŠOˆ—
-
-			HRESULT hr = S_OK;
-
-			hr = asDevice5();
-			hr = asDevice9();
-
+			// ã‚¤ãƒ³ã‚¿ãƒ¼ãƒ•ã‚§ã‚¤ã‚¹ã®å–å¾—ã¨æ©Ÿèƒ½ã®æœ‰ç„¡ã¯åˆ¥ç‰©ãªã®ã§åˆ†ã‘ã¦æ‰±ã†
+			// (ä»¥å‰ã¯ãƒ¬ã‚¤ãƒˆãƒ¬éžå¯¾å¿œGPUã ã¨ Device5 ãŒå–ã‚Œã¦ã„ã¦ã‚‚å¤±æ•—æ‰±ã„ã«ãªã£ã¦ã„ãŸ)
+			HRESULT hr = asDevice5();
+			if (SUCCEEDED(hr))
+			{
+				hr = asDevice9();
+			}
+			checkFeatureSupport();
 			return hr;
 		}
 
 		HRESULT Device::asDevice5()
 		{
-			// ID3D12Device5‚ÅŽg‚¦‚é‚©ŽŽ‚Ý‚é
-			if (SUCCEEDED(_pDevice.As(&_pDevice5)))
-			{
-				// ƒfƒoƒCƒXƒIƒvƒVƒ‡ƒ“‚ÌŽæ“¾
-				D3D12_FEATURE_DATA_D3D12_OPTIONS5 option5 = {};
-				if (SUCCEEDED(_pDevice5->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,
-					&option5,
-					sizeof(option5)
-				)))
-				{
-					// ƒŒƒCƒgƒŒ‚ðƒTƒ|[ƒg‚µ‚Ä‚¢‚é‚©ƒ`ƒFƒbƒN
-					if (option5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED)
-					{
-						if (option5.RaytracingTier == D3D12_RAYTRACING_TIER_1_1)
-						{
-							_isRaytracingSupported_1_1 = true;
-						}
-						_isRaytracingSupported = true;
-
-						return S_OK;
-					}
-				}
-			}
-
-			return E_INVALIDARG;
+			// ID3D12Device5ã§ä½¿ãˆã‚‹ã‹è©¦ã¿ã‚‹
+			return _pDevice.As(&_pDevice5);
 		}
 
 		HRESULT Device::asDevice9()
 		{
-			// ID3D12Device9‚ÅŽg‚¦‚é‚©ŽŽ‚Ý‚é
-			if (SUCCEEDED(_pDevice.As(&_pDevice9)))
+			// ID3D12Device9ã§ä½¿ãˆã‚‹ã‹è©¦ã¿ã‚‹
+			return _pDevice.As(&_pDevice9);
+		}
+
+		void Device::checkFeatureSupport()
+		{
+			_isRaytracingSupported     = false;
+			_isRaytracingSupported_1_1 = false;
+			_isMeshShaderSupported     = false;
+
+			if (!_pDevice) return;
+
+			// ãƒ¬ã‚¤ãƒˆãƒ¬ã‚’ã‚µãƒãƒ¼ãƒˆã—ã¦ã„ã‚‹ã‹ãƒã‚§ãƒƒã‚¯
+			D3D12_FEATURE_DATA_D3D12_OPTIONS5 option5 = {};
+			if (SUCCEEDED(_pDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &option5, sizeof(option5))))
 			{
-				// ƒfƒoƒCƒXƒIƒvƒVƒ‡ƒ“‚ÌŽæ“¾
-				D3D12_FEATURE_DATA_D3D12_OPTIONS9 option9 = {};
-				if (SUCCEEDED(_pDevice9->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9,
-					&option9,
-					sizeof(option9)
-				)))
-				{
-					// MeshShader‚ðƒTƒ|[ƒg‚µ‚Ä‚¢‚é‚©ƒ`ƒFƒbƒN
-					if (option9.MeshShaderPipelineStatsSupported)
-					{
-						_isMeshShaderSupported = true;
-						return S_OK;
-					}
-				}
+				_isRaytracingSupported     = option5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_0;
+				_isRaytracingSupported_1_1 = option5.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1;
 			}
 
-			return E_INVALIDARG;
+			// MeshShaderã‚’ã‚µãƒãƒ¼ãƒˆã—ã¦ã„ã‚‹ã‹ãƒã‚§ãƒƒã‚¯
+			// OPTIONS9.MeshShaderPipelineStatsSupported ã¯ã€Œçµ±è¨ˆã‚¯ã‚¨ãƒªå¯¾å¿œã€ãªã®ã§åˆ¤å®šã«ã¯ä½¿ãˆãªã„ã€‚æ­£ã—ãã¯ OPTIONS7.MeshShaderTier
+			D3D12_FEATURE_DATA_D3D12_OPTIONS7 option7 = {};
+			if (SUCCEEDED(_pDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &option7, sizeof(option7))))
+			{
+				_isMeshShaderSupported = option7.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
+			}
 		}
 	}
 }

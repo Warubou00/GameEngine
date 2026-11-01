@@ -1,0 +1,132 @@
+================================================================================
+ RHI Phase 0 - Step 3 : シェーダー / Renderer 側の修正記録
+ 日付   : 2026-11-01
+ ブランチ: docs/rhi-design-review (未コミット)
+ 対象   : RHI/Source/Shader/hlslTemplate.shader
+          Renderer/Source/vertex.h, Renderer/Source/Loader/IModelLoader.h, objLoader.h
+          RHI/Source/DirectX12/RHIObject/Buffer.cpp (World行列の転置のみ)
+ 参照   : RHI_DesignReview_2026-11-01.txt の項目番号
+================================================================================
+
+■ ビルド確認
+  - Core / Renderer / RHI : Debug|x64, Release|x64 とも成功
+  - 警告は DLL エクスポート関連 (C4251 / C4275) のみ。C4099 (class/struct 不一致) も解消した
+  - シェーダーは fxc.exe (SDK 10.0.26100) で VSMain:vs_5_1 / PSMain:ps_5_1 ともコンパイル成功を確認
+  - ★実行(描画)確認はまだ (後述「3. 実行時のファイル配置」を参照)
+
+
+--------------------------------------------------------------------------------
+0. 発見したこと : シェーダーが 2 つあった
+--------------------------------------------------------------------------------
+  実行時に読まれるのは C# の出力フォルダ側
+      CSharp_console/GameEngine_console/bin/x64/Debug/Shader/hlslTemplate.shader
+  で、リポジトリの RHI/Source/Shader/hlslTemplate.shader とは内容が違っていた。
+  bin 側はデバッグ中の版 (パディング追加済み・mul(pos, g_View) 済み・色を赤固定・g_Textures[0] 固定 等)。
+  bin フォルダは git 管理外なので、この内容は履歴に残っていなかった。
+
+  → bin 側で分かったこと (パディング・行列の掛け順) を取り込んで、
+    リポジトリ側 (RHI/Source/Shader) を正本として書き直した。
+  → bin 側のファイルは「まだ触っていない」。元の内容はセッションの作業領域にバックアップ済み。
+
+
+--------------------------------------------------------------------------------
+1. hlslTemplate.shader
+--------------------------------------------------------------------------------
+  [1-7] 頂点レイアウトが C++ と一致していなかった
+    原因: HLSL の struct Vertex が Position / Color / UV の 36byte、
+          C++ の Renderer::Vertex は Position / pad / Normal / pad / Color / UV の 56byte。
+          StructuredBuffer は 1要素 = C++ 側の stride(56byte) で並んでいるので、
+          2頂点目以降の読み取り位置がずれていた。
+    対策: HLSL 側にも padding と Normal を入れて 56byte に揃えた (オフセットをコメントで明記)。
+
+  [2-7] 頂点シェーダーが行列を使っていなかった
+    対策: ローカル → ワールド → ビュー → クリップ の順に変換するようにした。
+            worldPos = mul(float4(pos, 1), g_WorldMatrix)
+            viewPos  = mul(worldPos, g_ViewMatrix)
+            clipPos  = mul(viewPos, g_ProjectionMatrix)
+    掛け順の理由:
+          C++ 側は DirectXMath (行ベクトル規約 v * M) で作った行列を XMMatrixTranspose してから送っている。
+          HLSL の matrix は既定で column_major として読むので、転置済みの行列は
+          シェーダー上では元の M として見える。よって mul(ベクトル, 行列) が正しい。
+          (bin 側のデバッグ版でも同じ結論になっていた)
+
+  [その他]
+    - 法線をワールド空間に変換して VSOutput に渡すようにした (ライティングはまだ。今は未使用)
+    - ピクセルシェーダーを「頂点カラー × テクスチャ」に戻した (bin 側はデバッグ用に固定値になっていた)
+    - 文字コードは UTF-8 (BOMなし)。FXC は BOM を読めないので付けていない (ファイル先頭に注意書き)
+    - 各リソースがどの RootParameterIndex に対応するかをコメントで明記
+
+
+--------------------------------------------------------------------------------
+2. Renderer 側
+--------------------------------------------------------------------------------
+  [1-7 後半] 頂点カラーが 0 (黒) だった
+    原因: Vertex のメンバーに既定値が無く、OBJ ローダーも Color を設定していない。
+          ピクセルシェーダーは「頂点カラー × テクスチャ」なので、常に黒になっていた。
+    対策: Renderer::Vertex に既定値を付けた (Color は白、他は 0)。
+          → OBJ ローダーを変更せずに白になる。テクスチャ無しなら既定テクスチャ(白) × 白 = 白。
+
+  [サイズ検査]
+    vertex.h に static_assert を追加 (sizeof == 56, Normal / Color / UV のオフセット)。
+    C++ 側の Vertex を変えた時に、シェーダーとの不一致がコンパイルエラーで分かる。
+
+  [C4099] 前方宣言の class / struct 不一致を修正
+    - IModelLoader.h : class Mesh;     → struct Mesh;
+    - objLoader.h    : class Material; → struct Material;
+    (この 2 ファイルは ASCII の行だけ書き換えたので Shift-JIS のまま)
+
+  [World行列] Buffer::LoadModel で World 行列も View / Projection と同じく転置して送るようにした
+    (今は単位行列なので結果は同じだが、移動・回転を入れた時に正しくなるように)
+
+
+--------------------------------------------------------------------------------
+3. 実行時のファイル配置 (要確認)
+--------------------------------------------------------------------------------
+  C# の出力フォルダ (bin/x64/Debug/net9.0-windows) にある DLL は 9/28 のまま。
+  今回までの修正を動かすには、次のファイルを手動でコピーする必要がある:
+      RHI/x64/Debug/RHI.dll           → bin/x64/Debug/net9.0-windows/
+      Renderer/x64/Debug/Renderer.dll → bin/x64/Debug/net9.0-windows/
+      Core/x64/Debug/Core.dll         → bin/x64/Debug/net9.0-windows/
+      RHI/Source/Shader/hlslTemplate.shader → bin/x64/Debug/Shader/
+  ※提案: C# の csproj にビルド後コピーを入れれば、ソースと実行時のファイルがずれなくなる。
+
+
+  ★追記 (同日) : csproj でコピーを自動化した
+    GameEngine_console.csproj に CopyNativeEngineFiles ターゲットを追加 (AfterTargets="Build")。
+      - Core / Renderer / RHI の DLL (+PDB) → $(OutDir)
+      - RHI/Source/Shader/*.shader          → $(OutDir)..\Shader\  (RHI が "../Shader/" から読むため)
+      - C# の Debug/Release に合わせて C++ 側の x64\Debug / x64\Release を選ぶ
+      - RHI.dll が無い時は警告を出す
+      - ※C++ 側は自動ではビルドされない。先に GameEngine.sln (C++) をビルドすること
+    → これでリポジトリの RHI/Source/Shader が正本になった。bin 側の旧シェーダー (デバッグ版) は
+      上書きされたが、内容はセッションの作業領域にバックアップしてある。
+
+  ★追記 (同日) : 起動確認
+    C# ホストを 8 秒間起動して、コンソール出力を確認した:
+      - GPU : NVIDIA GeForce RTX 2070 / Device9 / Adapter3 / レイトレ・メッシュシェーダー対応
+      - Device / CommandContext / Buffer / Texture / Pipeline : 全て RHI_RESULT_SUCCEEDED
+      - box.obj とテクスチャ 2 枚 (grass.jpg / gravel.jpg) の読み込み成功
+      - 8 秒間の描画ループ中、D3D12 のエラー/警告の出力なし・クラッシュなし
+      - 画面の見た目 : ユーザーが目視で「正しく描画された」ことを確認 (2026-11-01)
+        → Phase 0 完了
+    未確認:
+      - デバッグメッセージのコールバックが実際に登録されているか
+        (出力が無い = エラーが無い、とは断定できない。意図的にエラーを起こして確かめるのが確実)
+      - 終了処理 (今回は強制終了したため RHI_CleanUp は通っていない)
+
+  ★注意 : Model/ と Image/ (box.obj, grass.jpg, gravel.jpg, image.png) は bin の中にしか無く、
+           git 管理外。bin を消すと失われるので、リポジトリ内 (例: Assets/) に置いてコピーする形にしたい。
+
+
+--------------------------------------------------------------------------------
+4. Phase 0 の状況
+--------------------------------------------------------------------------------
+  レビュー 1章 (致命) の 15 項目は、コード上は全て対応した。
+  残りは実行確認と、そこで出たデバッグレイヤーのエラーの修正。
+
+  既知の見た目の問題 (Phase 1 で対応):
+  - [2-6] 深度バッファが無いので、箱の奥の面が手前に描かれることがある (描画順で決まる)
+  - [2-4] 投影行列のアスペクト比が 1280x720 固定
+  - マテリアルの Diffuse 色はまだシェーダーに渡していない (定数バッファに追加が必要)
+
+================================================================================

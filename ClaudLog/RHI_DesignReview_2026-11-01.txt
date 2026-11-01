@@ -1,0 +1,480 @@
+==========================================================================================
+ RHI 設計レビュー報告書
+ 対象      : D:\GameEngine_git （ブランチ feature/SpriteRenderer の作業ツリー時点）
+ 作成日    : 2026-11-01
+ 作成者    : Claude (Claude Code)
+ 対象範囲  : RHI / Renderer / Core(File, Log, Vector) / Platform / Audio / Engine / CSharp_console
+             ※ DirectXTex, Core/Engine の数学ライブラリ本体は外部/汎用コードのため概観のみ
+==========================================================================================
+
+------------------------------------------------------------------------------------------
+ 0. 総評
+------------------------------------------------------------------------------------------
+バインドレス（頂点プル + StructuredBuffer、Unbounded テクスチャ配列）、メガバッファ、
+Root CBV 採用、ExecuteIndirect 準備など、方向性は現代的で良い選択をしています。
+
+一方で現状は「動く最小構成を一つのクラスに積み上げた」段階で、以下の 3 点が今後の発展を
+最も強く妨げています。
+
+  (A) 抽象化レイヤーが機能していない
+      I*** インターフェースを受け取った直後に DX12 具象型へ static_cast しており、
+      インターフェースは「関数の置き場」になっている。RHI が Renderer(Vertex/Camera/Mesh/
+      ObjLoader)に依存しており、依存方向が逆転している。
+  (B) フレーム/同期/リソース状態の管理機構がない
+      アロケータ 1 個・毎フレーム GPU 完全待機・状態はハードコード。
+      ダブルバッファリングや複数モデル/テクスチャのロードを入れた瞬間に破綻する。
+  (C) 未定義動作(UB)と潜在クラッシュが多数
+      return 文の欠落、未初期化メンバ、ダングリングポインタ、COM 参照リーク等。
+      Debug/Release、環境の違いで突然壊れる種類のバグが複数ある。
+
+以下、重大度順に記載します。
+  [致命] … UB/クラッシュ/確実に誤描画。早急に修正推奨
+  [重大] … 現状は偶然動いているが、機能追加ですぐ壊れる
+  [設計] … 構造上の欠陥。発展のために作り直しを推奨
+  [軽微] … 品質・保守性
+
+
+==========================================================================================
+ 1. [致命] 未定義動作・クラッシュ・確実な誤描画
+==========================================================================================
+
+1-1. DXGIFactory6::Create() の成功パスに return がない
+     場所 : RHI/Source/DXGI/dxgiFactory6.cpp  DXGIFactory6::Create
+     内容 : 成功時に関数末尾へ落ちて return しない → 戻り値は不定(UB)。
+            失敗時の戻り値も S_FALSE(=成功扱い)になっている。
+     修正 : 最後に return S_OK; 失敗時は FAILED になる HRESULT を返す。
+            DXGI_CREATE_FACTORY_DEBUG は _DEBUG 時のみ付ける。
+
+1-2. Buffer::makeGlobalVBV / makeSceneVBV に return がない
+     場所 : RHI/Source/DirectX12/RHIObject/Buffer.cpp (makeGlobalVBV, makeSceneVBV)
+     内容 : bool 関数が値を返さず終了 → UB。Initialize の成否判定が不定。
+     修正 : return makeVBView(...);
+
+1-3. ResourceBuffer::_mappedData が未初期化
+     場所 : RHI/Source/DirectX12/Object/dx12_resourceBuffer.h (_mappedData)
+     内容 : コンストラクタで初期化されていない。Map() は
+              if (!_resourceBuffer || _mappedData != nullptr) return S_OK;
+            としているため、ゴミ値が非 null だと「Map せずに成功」を返し、
+            WriteData() が不正アドレスへ memcpy する。Debug ヒープ(0xCD 埋め)では
+            ほぼ確実にこの経路になる。
+     修正 : void* _mappedData = nullptr; （_capacity 等も同様にメンバ初期化子で初期化）
+
+1-4. Fence::_fenceEvent が未初期化かつ CloseHandle されない
+     場所 : dx12_fence.h / dx12_fence.cpp
+     修正 : HANDLE _fenceEvent = nullptr; デストラクタで CloseHandle。
+            CreateEvent の失敗チェックも追加。
+
+1-5. Adapter::GetAdapterName() がスタック上の配列を返す（ダングリング）
+     場所 : RHI/Source/adapter.cpp 142行付近 return adDesc.Description;
+     内容 : ローカル変数 adDesc のメンバ配列へのポインタを返している。
+     修正 : std::wstring を値で返す。
+
+1-6. Adapter::EnumerateAdaptersFromGpuName の二重解放
+     場所 : adapter.cpp 54行付近
+     内容 : EnumAdapters(i, &_pAdapter) の ComPtr::operator& は直前のアダプタを
+            Release する。生ポインタを _pAdapters に積んでいるため、ベクタ内は
+            解放済みポインタになり、さらに Release() で再度 Release → 二重解放。
+            （現在 #if 0 側なので未発火だが、切り替えた瞬間に壊れる）
+     修正 : std::vector<ComPtr<IDXGIAdapter1>> で保持し、EnumAdapters1 にローカル
+            ComPtr を渡す。見つからなかった場合の戻り値も返す。
+
+1-7. シェーダーと C++ の頂点構造体レイアウトが不一致
+     C++  : Renderer::Vertex = Position(12) + pad(4) + Normal(12) + pad(4)
+                              + Color(16) + UV(8) = 56 byte
+            SRV の StructureByteStride も 56
+     HLSL : struct Vertex { float3 Position; float4 Color; float2 UV; } = 36 byte
+     結果 : g_MegaVB[i] の読み出しがずれ、Color/UV がゴミになる。
+            デバッグレイヤーでも stride 不一致として検出されうる。
+     修正 : HLSL 側を C++ と同一レイアウトにする（float3 Pos; float pad; float3 Normal;
+            float pad; float4 Color; float2 UV;）。根本的には頂点フォーマットを
+            1 か所で定義し、static_assert(sizeof(Vertex) == 56) を置く。
+     補足 : ObjLoader は Color を設定しないため 0 のまま。PS で
+            input.Color * texColor としているので、レイアウトを直しても真っ黒になる。
+            ローダーで Color = (1,1,1,1) を既定値にすること。
+
+1-8. テクスチャ ID のオフセットずれ（off-by-2）
+     場所 : Texture.cpp 93行 handle.TextureID = createShaderResourceView(...)
+            CommandContext.cpp 169行 SetGraphicsRootDescriptorTable(4, GetSrvGpuHandle(2))
+     内容 : ヒープは [0]=GlobalVB SRV, [1]=SceneVB SRV, [2..]=テクスチャ。
+            テクスチャテーブルはヒープ index 2 起点なのに、TextureID には
+            ヒープの絶対 index(2,3,...) が入る。シェーダーは g_Textures[TextureID] =
+            ヒープ[2 + TextureID] を参照 → 2 つ先の未初期化ディスクリプタを読む。
+     修正 : (案1) テーブルをヒープ先頭(index 0)から張り、TextureID は絶対 index のまま。
+            (案2) TextureID = srvIndex - textureTableBase とする。
+            将来の SM6.6 ResourceDescriptorHeap[] 移行を考えると案1が素直。
+
+1-9. Root CBV のアドレスが 256 byte アライメントされていない
+     場所 : RenderHardwareInterface.cpp 156行 CbOffset = idx * sizeof(ConstantPerRenderObject)
+            Buffer::LoadModel の _sceneCB->WriteData(sizeof(...) * idx, ...)
+     内容 : ConstantPerRenderObject = XMMATRIX(64) + uint32(4) → sizeof 80。
+            SetGraphicsRootConstantBufferView に渡す GPU VA は 256 の倍数が必須。
+            idx >= 1 で要件違反（デバッグレイヤーエラー / 未定義の読み出し）。
+     修正 : ストライドを AlignUp(sizeof(T), 256) にする。
+            （あるいは CB を 1 つの StructuredBuffer にして ObjectID で引く方式へ）
+
+1-10. コマンドアロケータを「記録中」に Reset している
+     場所 : CommandContext::RenderStart 121行, ExecuteAndSync 250行
+     内容 : CreateCommandList 直後のリストは記録中状態。また ExecuteAndSync は
+            最後に Reset してリストを記録中のまま返す。その状態で RenderStart が
+            allocator->Reset() → 「記録中のリストがあるアロケータは Reset 不可」エラー、
+            続く cmdList->Reset も「Close されていないリストの Reset」エラー。
+            つまり 1 フレーム目は毎回デバッグレイヤーエラーになっている。
+            逆に描画後(Close 済み)に UploadVertexData を呼ぶと、Close 済みリストへ
+            記録 → 失敗する。
+     修正 : コマンドリストの状態(Closed/Recording)を明示的に持ち、
+            Begin() で必ず「Close 済み → Reset」の順序を保証する。
+            作成直後に Close() しておくのが定石。
+            アップロードは描画用リストと分ける（後述 3-4）。
+
+1-11. 未使用マテリアルでもテクスチャをロードし、失敗時に null 参照
+     場所 : Buffer.cpp 643行 //if (material->UseTexture)
+            Texture.cpp LoadTextureFromFile → createShaderResourceView(newBuffer.get())
+     内容 : if がコメントアウトされているため TexturePath が空でもロードし、
+            dx12::Texture::LoadTextureFromFile が nullptr を返す →
+            targetBuffer->Get() で null 参照クラッシュ。
+            また mesh->Materials[i] 自体が nullptr になりうる(ObjLoader で該当マテリアル
+            が見つからない場合)のに material->UseTexture を参照している。
+     修正 : 失敗時は「デフォルト白テクスチャ」のハンドルを返す設計にする。
+            null チェックを入れる。
+
+1-12. スワップチェーンのバックバッファ取得で毎フレーム参照カウントがリーク
+     場所 : dx12_swapChain.cpp GetBackBuffer / GetBufferFromIndex
+            CommandContext.cpp 135行 _backBuffer->Regist(backBuffer)
+     内容 : IDXGISwapChain::GetBuffer は AddRef 済みのポインタを返す。生ポインタで
+            返して ComPtr に代入(さらに AddRef)しているため、毎フレーム +1 リーク。
+            makeRtv でも 2 個リーク。ResizeBuffers は参照が残っていると失敗するため、
+            将来のリサイズ対応が不可能になる。
+     修正 : 初期化時にバックバッファを ComPtr 配列で 1 回だけ取得して保持する。
+            Resize 時は全て Reset → ResizeBuffers → 再取得。
+
+1-13. PipelineState がスタック上の PSO 記述子へのポインタを保持
+     場所 : dx12_pipelineState.cpp 41行
+     内容 : makePipeline() のローカル psoDesc のアドレスを保持。Create は直後に呼ぶので
+            今は動くが、再生成や遅延生成をした瞬間ダングリング。
+     修正 : Create(device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC&) に変更し保持しない。
+
+1-14. シェーダーコンパイル失敗時の null 参照 / 未初期化ポインタ
+     場所 : Pipeline.cpp makePipeline, MakeCustomPipeline / dx12_rootSignature.cpp
+     内容 : - ファイルが見つからない場合 errorBlob は nullptr のまま → GetBufferPointer で落ちる
+            - MakeCustomPipeline の errorBlob は未初期化。成功時(errorBlob=null)でも参照。
+              しかも D3DCompile(FXC) に "vs_6_0" を渡しており、常に失敗する
+              （SM6 は DXC が必要）。
+            - RootSignature::Create の errorBlob 未初期化、Blob を Release しない(リーク)。
+            - pVSBlob/pPSBlob/HLSLCompiler も失敗パスでリーク。
+     修正 : ComPtr<ID3DBlob> を使い、errorBlob は null チェックしてからログ出力。
+            DXC(IDxcCompiler3) へ移行。
+
+1-15. HRESULT 無視で後続が null 参照する箇所多数
+     例   : Device::Initialize (hr を上書きするだけ), CommandContext::Initialize,
+            Texture のアップロード Map 結果, swapChain 作成失敗後も続行 等。
+            Initialize は常に RHI_SUCCEEDED を返すため、C# 側の isAllInitialized が
+            意味を持たない。
+     修正 : 失敗は即 return。共通マクロ(RHI_CHECK_HR(hr, "msg"))でログ + 早期 return。
+
+
+==========================================================================================
+ 2. [重大] 現在は偶然動いているが、機能追加ですぐ壊れるもの
+==========================================================================================
+
+2-1. リソース状態をハードコードしている（状態追跡がない）
+     - UploadVertexData は StateBefore = COMMON 固定。
+     - UploadIndexData は「ByteOffset==0 なら COMMON, それ以外は GENERIC_READ」という
+       推測で決めている。
+     ※ D3D12 の仕様上、バッファは ExecuteCommandLists 完了時に COMMON へ「減衰(decay)」
+       するため、ExecuteAndSync 後は COMMON が正しい。つまり IB の GENERIC_READ 分岐の方が
+       誤りで、2 個目以降のインデックスアップロードで状態不一致エラーになる。
+     修正 : (短期) バッファは COMMON 前提＋暗黙プロモーションに任せる、で統一。
+            (中長期) ResourceStateTracker を導入し、リソースごとに現在状態を持たせ、
+            Transition(resource, newState) で必要時のみバリアを発行。
+            Enhanced Barriers(ID3D12GraphicsCommandList7::Barrier) 対応も視野に。
+
+2-2. アロケータが満杯でも書き込む / 失敗が分からない
+     場所 : ResourceBufferAllocator::Allocate
+     内容 : 容量超過時は全 0 の構造体を返すが、呼び出し側はチェックせず
+            オフセット 0 に上書きコピーする（既存データ破壊）。
+            _currentByteOffset が uint32_t のため 4GB 以上を扱えない（_maxByteSize は u64）。
+            アライメント指定もない。Free もできない（シーン単位の Reset のみ）。
+     修正 : std::optional / bool で失敗を返す。オフセットは uint64_t。
+            alignment 引数を追加。用途に応じて Linear(フレーム) / Block(TLSF等) を分ける。
+
+2-3. 毎フレーム GPU 完全待機・単一アロケータ
+     場所 : CommandContext::RenderEnd → _fence->WaitForSignal
+     内容 : CPU と GPU が並列に動かない（フレームインフライト = 1）。
+            Upload ヒープの CB に CPU が直接書いているが、これは完全待機しているから
+            安全なだけで、待機を外すと GPU 読み取り中に上書きするレースになる。
+     修正 : FrameContext[N]（N=2〜3）を作り、各フレームに
+              - CommandAllocator
+              - フェンス値
+              - 動的 CB/アップロード用リングバッファ領域
+            を持たせる。Begin で「そのフレームのフェンス値まで待つ」だけにする。
+
+2-4. ビューポート/投影の解像度がハードコード（1280x720）
+     場所 : CommandContext::RenderStart 125行, Buffer::UpdateViewProjection
+     内容 : C# 側は Form.Width/Height（枠込みの外寸）を渡しているため、
+            スワップチェーン(=外寸) とクライアント領域サイズがずれて拡大縮小表示になる。
+            ObjectInfo の Width/Height はスワップチェーン作成にしか使われていない。
+     修正 : ClientSize を渡す。SwapChain の実サイズ(GetDesc1)からビューポートを作る。
+            WM_SIZE → RHI_Resize(w,h) API を用意。
+
+2-5. VSync 設定が無視されている
+     場所 : CommandContext::RenderEnd 199行 Present(1, 0)
+     修正 : ObjectInfo.EnabledVSync を保持して SyncInterval に反映。
+            VSync OFF ならティアリング対応(DXGI_FEATURE_PRESENT_ALLOW_TEARING 確認 +
+            DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING + DXGI_PRESENT_ALLOW_TEARING)。
+
+2-6. 深度バッファがない
+     場所 : Pipeline.cpp 280行 DepthEnable = FALSE, OMSetRenderTargets(..., nullptr)
+     内容 : 3D モデル(box.obj)を描いているが深度テストなし → 描画順で前後が壊れる。
+            DescriptorHeapManager に _dsvHeap メンバはあるが作成していない
+            （Create() 末尾で Type を書き換えているだけで CreateDescriptorHeap を呼んでいない）。
+     修正 : DSV ヒープ + D32_FLOAT 深度テクスチャを作成し、PSO の DSVFormat を設定。
+
+2-7. 頂点シェーダーが行列を使っていない
+     場所 : hlslTemplate.shader 60行 output.Position = float4(v.Position, 1.0f);
+     内容 : UpdateViewProjection で View/Proj を書き込んでいるが未使用。
+            WorldMatrix は誰も書き込んでいない（0 行列）。
+     修正 : mul(mul(mul(pos, World), View), Proj)（転置規約は C++ 側の XMMatrixTranspose と
+            合わせる）。World を書き込む API を用意する。
+
+2-8. ディスクリプタ index のハードコードとエラー値 9999
+     場所 : CommandContext.cpp 161, 169行 GetSrvGpuHandle(1)/(2)
+            dx12_descriptorHeapManager.cpp 89行 return 9999;
+     内容 : 生成順に依存したマジックナンバー。9999 は正当なインデックスと区別できない。
+            RTV ヒープも NumDescriptors = 2 固定（スワップチェーン枚数と別管理）。
+            シェーダー可視ヒープ 1,000,000 個は Tier1 上限ちょうどで、メモリも大きい。
+     修正 : 割り当て結果をハンドル(struct DescriptorHandle{uint32 index; ...})で保持。
+            失敗は UINT32_MAX + ログ。RTV 数は SwapChain::GetBufferCount() から決める。
+            ヒープは「永続領域」と「フレームごとのリング領域」に分割する。
+
+2-9. 頂点オフセットの二重指定
+     内容 : Root Constant(b0) で BaseVertex を渡しつつ、DrawIndexedInstanced の
+            BaseVertexLocation にも VertexOffset を渡している。D3D12 の SV_VertexID には
+            BaseVertexLocation が含まれない（だから SM6.8 で SV_StartVertexLocation が
+            追加された）ため現状は Root Constant 側だけが効いている。
+            意図が読み取りにくく、将来 IA 経由に戻したときにずれる。
+     修正 : 頂点プル方式なら BaseVertexLocation は 0 に固定し、コメントで明記。
+
+2-10. フィーチャー判定のロジック誤り
+     場所 : dx12_device.cpp asDevice5 / asDevice9 (178行)
+     内容 : - メッシュシェーダー対応は D3D12_OPTIONS7.MeshShaderTier で判定すべきところ、
+              OPTIONS9.MeshShaderPipelineStatsSupported（統計機能）で判定している。
+            - QueryInterface 成功でもレイトレ非対応なら E_INVALIDARG を返すため、
+              「Device5 が取れたか」と「レイトレ対応か」が混ざっている。
+            - featureLevel をローカルに入れて捨てている。
+     修正 : 「インターフェース取得」と「機能判定(CheckFeatureSupport)」を分離し、
+            DeviceCaps 構造体（FeatureLevel, ShaderModel, ResourceBindingTier,
+            RaytracingTier, MeshShaderTier, EnhancedBarriers...）として公開。
+            バインドレスを使う以上、ResourceBindingTier と ShaderModel の確認は必須。
+
+2-11. 終了処理で GPU 待機せずに破棄・各種リーク
+     - RHI_CleanUp → Dispose を呼ぶが、多くの Dispose は空。GPU 完了待ちなし。
+     - g_pRhi は delete されない。RHI_Initialize を 2 回呼ぶと旧オブジェクトを
+       GPU 使用中に破棄する。
+     - Buffer::LoadModel が new Mesh / new Material を返しっぱなし（呼び出し元で破棄なし）。
+     - Buffer 内部と RenderHardwareInterface に別々の Texture インスタンスがある。
+     修正 : Shutdown() = WaitForGpuIdle() → 逆順で破棄。所有権は unique_ptr で一元化。
+            Mesh は CPU 側データなので RHI の外(Renderer)で所有させる。
+
+2-12. C# 相互運用の不整合
+     場所 : CSharp_console/GameEngine_console/RHI.cs 51行
+     内容 : C++ は RHI_Initialize(RHIInitializeInfo*, ObjectInfo*) なのに C# は
+            RHIInfo を「値渡し」している。x64 ABI では 8byte 超の構造体が隠れポインタで
+            渡されるため偶然動いているだけ。x86 や構造体サイズ変更で即破綻。
+            また無限ループで Dispose が呼ばれない、ウィンドウを閉じても描画し続ける。
+     修正 : ref / in で渡す。C API は「バージョン付き構造体（先頭に StructSize）」にする。
+            フォームの FormClosed で RHI_CleanUp。
+
+
+==========================================================================================
+ 3. [設計] 構造上の欠陥と推奨アーキテクチャ
+==========================================================================================
+
+3-1. 抽象化レイヤーが「抽象」になっていない
+     現状:
+       - IDevice/IBuffer/... を受け取り直後に static_cast<ObjectInterface::Device*>。
+         別バックエンドを作ると全関数がキャストに失敗する。
+       - DX12 の具象クラスが RHI::ObjectInterface 名前空間にあり、インターフェースと
+         同じ名前空間・同じような名前(Device / IDevice)で紛らわしい。
+       - RenderHardwareInterface.cpp が DirectX12/*.h を直接 include。
+       - Buffer.h, CommandContext.h が <d3d12.h> を公開ヘッダで include。
+       - CommandContext::RenderStart(Pipeline*, Buffer*) のように具象型を引数に取る。
+     推奨:
+       - 名前空間を RHI（共通）/ RHI::D3D12（実装）に分ける。
+       - 公開 API はハンドル + 記述子(Desc) ベースにする:
+           BufferHandle   CreateBuffer(const BufferDesc&);
+           TextureHandle  CreateTexture(const TextureDesc&);
+           PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc&);
+           void           Destroy(handle);
+         ハンドルは {index, generation} の 32bit/64bit 値で、解放後アクセスを検出可能に。
+       - ICommandList に SetPipeline / SetViewport / SetConstants / Draw / Dispatch /
+         CopyBuffer / Barrier 等の「描画命令」を持たせ、バックエンドが実装する。
+       - バックエンド選択はファクトリ関数 CreateDevice(Backend::D3D12) で。
+
+3-2. 依存方向の逆転（RHI → Renderer）
+     現状:
+       - IBuffer.h が Renderer の vertex.h / camera.h / viewMatrix.h / projectionMatrix.h を include。
+       - Buffer::LoadModel が ObjLoader を使って OBJ をロード（RHI がファイル形式を知っている）。
+       - Buffer::UpdateViewProjection がカメラ行列を計算。
+       - RHI.vcxproj が Renderer.vcxproj を参照。
+     推奨: 依存は  Core ← RHI ← Renderer ← Engine/Editor  の一方向。
+       - RHI が知ってよいのは「バイト列・フォーマット・ストライド」だけ。
+       - モデル/テクスチャのファイル読み込み、カメラ、マテリアル、RenderQueue の構築は
+         Renderer 層へ移動。RHI には UploadBuffer(handle, offset, data, size) を提供する。
+
+3-3. Buffer クラスが神クラス化
+     現状の責務: ディスクリプタヒープ管理, RTV 作成, VB/IB/CB 全 7 種のメガバッファ作成,
+                アロケータ 7 種, SRV 作成, テクスチャ所有, モデルロード, カメラ行列更新。
+     推奨分割:
+       - DescriptorAllocator（ヒープ種別ごと, 永続 + フレームリング）
+       - GpuMemoryAllocator / BufferPool（メガバッファとサブアロケーション）
+       - UploadManager（下記 3-4）
+       - SwapChain がバックバッファと RTV を所有
+       - Global/Scene の区別は「寿命(ライフタイム)プール」という汎用概念にする
+
+3-4. アップロード経路
+     現状: アップロードのたびに一時 UPLOAD バッファを CreateCommittedResource →
+           描画用コマンドリストに積む → ExecuteAndSync で完全待機 → 破棄。
+           OBJ 1 個で (テクスチャ数 + 1 + マテリアル数) 回の GPU 完全同期が発生。
+     推奨: UploadManager を新設
+       - 大きな UPLOAD リングバッファ(例: 64MB)を 1 つ持ち、サブアロケートしてコピー。
+       - コピーは専用の COPY キュー + 専用コマンドリストでまとめて発行。
+       - 完了はフェンス値で管理し、リング領域はフェンス到達後に再利用。
+       - 描画キューは COPY キューのフェンスを Wait してから使う。
+
+3-5. 遅延破棄の仕組みがない
+     GPU が参照中のリソースを即破棄できない問題に対して、
+     DeferredReleaseQueue（リソースと「破棄可能になるフェンス値」のペア）を用意し、
+     毎フレーム完了済みのものだけ解放する。テクスチャ/バッファの動的ロード・アンロード
+     （シーン遷移）に必須。
+
+3-6. パイプライン/ルートシグネチャ/シェーダー
+     現状:
+       - ルートシグネチャ・PSO が Pipeline::makePipeline に 1 種類だけハードコード。
+       - シェーダーパスが "../Shader/hlslTemplate.shader" の作業ディレクトリ依存。
+         実ファイルは RHI/Source/Shader/ にあり、配置ルールがコードから読めない。
+       - FXC(D3DCompileFromFile, SM5.1) 使用。
+       - PipelineStateManager は生ポインタ Hash, int ハッシュ, 折り返し探索 TODO,
+         未使用（vcxproj には含まれるが誰も使っていない）。
+       - Root Signature 1.0 でシリアライズ（1.1 の DATA_STATIC 等の最適化不可）。
+     推奨:
+       - GraphicsPipelineDesc（シェーダー, ブレンド, ラスタ, 深度, RT フォーマット）を
+         ハッシュして PSO キャッシュ（std::unordered_map<hash, ComPtr<PSO>>）。
+       - バインドレス前提なら「全パイプライン共通の 1 つのルートシグネチャ」に固定すると
+         設計が単純になる（Root Constants + 数個の Root CBV + ヒープ全体テーブル）。
+         さらに SM6.6 の ResourceDescriptorHeap[] を使えばテーブル自体不要。
+       - DXC へ移行（SM6.x、SV_StartVertexLocation、Wave 命令、メッシュシェーダー対応）。
+       - シェーダーはビルド時に .cso へオフラインコンパイル（実行時コンパイルは開発用）。
+       - D3D12_VERSIONED_ROOT_SIGNATURE_DESC (1.1) を使う。
+
+3-7. エラー処理とログ
+     現状: RHI_RESULT は int マクロ、HRESULT はほぼ未チェック、std::cout と Logger が混在、
+           CONSOLE_DEBUG が common.h で無条件 define、Logger は初期化時に null コールバック
+           を渡すと Log で即クラッシュ（片方だけ null でも同様）。
+     推奨:
+       - enum class RHIResult : int32_t と、HRESULT→文字列変換付きのチェックマクロ。
+       - ID3D12InfoQueue1::RegisterMessageCallback でデバッグレイヤーのメッセージを
+         Logger に流す（C# コンソールで D3D12 エラーが見えるようになり、本報告の
+         1-9, 1-10, 2-1 等は即座に検出できる）。
+       - DRED(Device Removed Extended Data) を Debug 時に有効化。
+       - Logger は null を no-op として扱い、ログレベルを持たせる。
+       - debugLayer.h の EnableDebugLayer はヘッダ内の非 inline 関数定義
+         → 2 つ目の .cpp から include すると LNK2005。inline にするか .cpp へ。
+         GPU-based validation の ON/OFF も選べるようにする。
+
+3-8. DLL / ビルド構成
+     - RHI_API / CORE_API_CLASS / RENDERER_API_CLASS が常に __declspec(dllexport)。
+       使う側でも dllexport になるため、Renderer のヘッダ専用構造体(Camera, Mesh,
+       Vertex, Projection...)が RHI.dll からもエクスポートされる。
+       → #ifdef RHI_EXPORTS で dllexport/dllimport を切り替えるマクロにする。
+     - DLL 境界を std::vector / std::wstring / XMMATRIX を含むクラスが越えている。
+       CRT/コンパイラ設定が揃わないと壊れる。C# 向け境界は純 C API(POD とハンドル)に限定。
+     - LanguageStandard が Renderer のみ C++20、他は既定(C++14)。全体で C++20 に統一を推奨。
+     - インクルードが "../../Core/Source/..." のような相対パスで、実際には
+       追加インクルードディレクトリ頼みで解決している箇所がある
+       （例: DirectX12/RHIObject/Device.cpp からの "../../Core/Source/Log/logger.h"）。
+       $(SolutionDir) を基点に "Core/Log/logger.h" のように統一する。
+     - RHI/Source/adapter.{h,cpp} と RHI/Source/DXGI/adapter.{h,cpp} が完全に同一の重複。
+       vcxproj は前者をコンパイル、Device.cpp は後者を include。片方を削除。
+       同様に RHI/Source/TextureHandle.h と RHIObject/TextureHandle.h が別物で同名。
+     - hlslCompiledState.cpp, dx12_computeCommandList.cpp(空), IShaderCompiledState,
+       IHandle(空), dx12_helper*.h, PipelineStateManager, CommandSignature は未使用/未完成。
+     - dx12_header.h の #define NOMINMAX は <d3d12.h>(内部で windows.h) より後なので無効。
+       プロジェクト設定のプリプロセッサ定義に NOMINMAX / WIN32_LEAN_AND_MEAN を入れる。
+     - ソースが Shift-JIS(CP932)。ツールや他環境で文字化けする。UTF-8(BOM付き) に統一し
+       /utf-8 オプションを付けることを推奨。
+     - .gitignore がなく x64/ やビルド成果物が未追跡ファイルとして見える。
+       DirectXTex の .lib（_old.lib 含む）がリポジトリに入っており変更差分にも出ている。
+       vcpkg か submodule + ソースビルドに切り替えると管理が楽になる。
+
+3-9. スワップチェーン
+     - フォーマット R8G8B8A8_UNORM（非 sRGB）でガンマ補正なし。
+       RTV を _SRGB フォーマットで作るか、ポストプロセスでトーンマップ/ガンマを行う。
+     - FLIP_DISCARD + 2 枚。3 枚 + SetMaximumFrameLatency + WaitableObject で
+       レイテンシ制御を推奨。
+     - リサイズ非対応、フルスクリーン/Alt+Enter 未処理（MakeWindowAssociation）。
+
+
+==========================================================================================
+ 4. [軽微] 品質・保守性
+==========================================================================================
+ - RHIInitializeInfo の uint32_t メンバに -1 を代入（RHI_RESULT は int）。型を合わせる。
+ - "Indecies" → "Indices"、"_READ_ONRY" → "_READ_ONLY"、"Regist" → "Register" 等の綴り。
+ - Core::File::OpenFile(const char*) は失敗時に false(0) を返し、wchar_t 版は CORE_FAILED(-1)
+   を返す。呼び出し側も ! と == CORE_FAILED が混在。戻り値を統一。
+ - ラスタライザのコメントが実際の設定と逆（FrontCounterClockwise=TRUE に「時計回りを表面」、
+   CullMode NONE に「裏面をカリング」）。
+ - Buffer.cpp 等に "[cite: 5]" のような AI 生成コード由来と思われる残骸コメント。
+ - ObjLoader: 頂点の重複排除なし（三角形ごとに頂点を複製）、usemtl とインデックス群の
+   対応がずれうる（空グループは push されないが newmtlName は push される）。
+   マテリアルは生ポインタ所有。std::unique_ptr か値で持つ。
+ - WorldMatrix::GetWorldMatrix が回転(オイラー角 Vector3)を XMMatrixRotationQuaternion に
+   渡している（クォータニオンではない）。XMMatrixRotationRollPitchYaw を使う。
+ - Projection の FOV が 1.0 rad 固定。near=1.0, far=10000 は精度的に厳しい
+   （Reverse-Z + 無限遠投影を推奨）。
+ - Engine プロジェクトは存在しない "../Renderer/Source/meshRenderer.h" を include しており
+   ビルド不可。main のシグネチャも int main(char argv, char* args) と誤り。
+   Engine/Math は Core/Source/Math とほぼ重複。
+ - Platform::WindowSystem のウィンドウサイズ計算は AdjustWindowRect を使うべき。
+   DispatchWindowMessage の WM_QUIT 判定は PeekMessage で取得しなかった場合に
+   msg.message が 0 のままで問題ないが、ループ構造が読みにくい。
+ - Audio: CreateSourceVoiceWAV の失敗時に CoUninitialize を呼んでいる（Initialize 以外で
+   COM を解放するのは不整合）。WavLoader の new[] は RAII 化を推奨。
+
+
+==========================================================================================
+ 5. 推奨ロードマップ（このチャットで RHI を発展させる順序の提案）
+==========================================================================================
+
+ Phase 0 : 安全化（1〜2 日）  ※機能は変えずにバグだけ潰す
+   - 1章の [致命] を全修正（return 欠落, 未初期化, ダングリング, リーク, off-by-2,
+     256 アライメント, 頂点レイアウト, コマンドリスト状態, null チェック）
+   - InfoQueue コールバックでデバッグレイヤーのメッセージを Logger へ転送
+   - HRESULT チェックマクロ導入、Initialize が本当の成否を返すように
+
+ Phase 1 : フレーム基盤
+   - FrameContext[N] (アロケータ/フェンス値/動的CBリング) で GPU 待機を最小化
+   - SwapChain がバックバッファ/RTV を所有、Resize 対応、VSync/Tearing
+   - 深度バッファ追加、WVP 行列をシェーダーで適用
+
+ Phase 2 : リソース管理
+   - ハンドル(index+generation) ベースの Buffer/Texture
+   - DescriptorAllocator（永続 + フレームリング）
+   - UploadManager（リングバッファ + COPY キュー）
+   - ResourceStateTracker、DeferredReleaseQueue
+
+ Phase 3 : 抽象化の整理
+   - 名前空間 RHI / RHI::D3D12 分離、公開ヘッダから d3d12.h を排除
+   - Renderer 依存を RHI から除去（OBJ ロード・カメラ・Mesh を Renderer 層へ）
+   - ICommandList に描画命令 API、RenderQueue は Renderer 層で構築
+   - C API をハンドルベースで再設計（C# 向け）
+
+ Phase 4 : パイプライン
+   - DXC 移行（SM6.6 ResourceDescriptorHeap でバインドレスを単純化）
+   - PSO キャッシュ、共通ルートシグネチャ
+   - ExecuteIndirect（既に CommandSignature の雛形あり）で GPU 駆動描画へ
+
+ どこから着手するか指示をいただければ、Phase 0 から順にコード修正を進めます。
+
+==========================================================================================
+ End of report
+==========================================================================================

@@ -9,6 +9,42 @@
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
+  <!--
+    ==========================================================================
+    C++ 側の成果物を出力フォルダへ自動コピーする
+      - DLL (Core / Renderer / RHI) とシェーダーを、ビルドのたびに最新にする
+      - 以前は手作業でコピーしていたため、ソースと実行時のファイルがずれていた
+      - C++ 側は自動ではビルドされない。先に GameEngine.sln (C++) をビルドしておくこと
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <!-- リポジトリのルート (この csproj から 2 つ上) -->
+    <EngineRootDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\'))</EngineRootDir>
+    <!-- C# の Debug / Release に合わせて C++ 側の構成を選ぶ -->
+    <NativeConfiguration Condition="'$(Configuration)' == 'Release'">Release</NativeConfiguration>
+    <NativeConfiguration Condition="'$(NativeConfiguration)' == ''">Debug</NativeConfiguration>
+  </PropertyGroup>
+
+  <Target Name="CopyNativeEngineFiles" AfterTargets="Build">
+    <ItemGroup>
+      <!-- DLL と、デバッグ用の PDB (あれば) -->
+      <NativeEngineFile Include="$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.dll;$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.pdb" />
+      <NativeEngineFile Include="$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.dll;$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.pdb" />
+      <NativeEngineFile Include="$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll;$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.pdb" />
+      <!-- シェーダー : RHI は実行時に "../Shader/" から読むので、出力フォルダの 1 つ上に置く -->
+      <EngineShaderFile Include="$(EngineRootDir)RHI\Source\Shader\*.shader" />
+    </ItemGroup>
+
+    <!-- DLL が無い = C++ 側をビルドしていない。古い DLL のまま動いてしまわないよう警告を出す -->
+    <Warning Condition="!Exists('$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll')"
+             Text="RHI.dll ($(NativeConfiguration)) が見つかりません。先に C++ 側 (GameEngine.sln) をビルドしてください。" />
+
+    <Copy SourceFiles="@(NativeEngineFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+    <Copy SourceFiles="@(EngineShaderFile)" DestinationFolder="$(OutDir)..\Shader\" SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="[Engine] C++ ($(NativeConfiguration)) の DLL とシェーダーを $(OutDir) にコピーしました" />
+  </Target>
+
   <ItemGroup>
     <COMReference Include="{215d64d2-031c-33c7-96e3-61794cd1ee61}">
       <WrapperTool>tlbimp</WrapperTool>

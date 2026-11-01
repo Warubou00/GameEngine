@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_commandAllocator.cpp
-* @brief   DX12‚ÌƒRƒ}ƒ“ƒhˆŸƒƒP[ƒ^[
+* @brief   DX12ã®ã‚³ãƒžãƒ³ãƒ‰äºœãƒ­ã‚±ãƒ¼ã‚¿ãƒ¼
 * @details
 *
 * @author  Keigo Onari
@@ -42,33 +42,43 @@ namespace RHI
 		CommandAllocator::~CommandAllocator() {}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒAƒƒP[ƒ^‚Ìì¬
+		// ã‚³ãƒžãƒ³ãƒ‰ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ã®ä½œæˆ
 		// ==============================================
-		HRESULT CommandAllocator::Create(ID3D12Device* device)
+		HRESULT CommandAllocator::Create(ID3D12Device* device, D3D12_COMMAND_LIST_TYPE type)
 		{
-			if (!device)
+			if (!device || _pCmdAllocator)
 			{
-				// TODO : —áŠOˆ— -> nullptr
-				return E_NOTIMPL;
+				return E_INVALIDARG;
 			}
-			return device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_pCmdAllocator));
+			return device->CreateCommandAllocator(type, IID_PPV_ARGS(&_pCmdAllocator));
 		}
 
 		// ==============================================
-		// ƒRƒ}ƒ“ƒhƒAƒƒP[ƒ^‚ÌŽæ“¾
+		// ã‚³ãƒžãƒ³ãƒ‰ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ã®å–å¾—
 		// ==============================================
-		ID3D12CommandAllocator* CommandAllocator::Get(void)
+		ID3D12CommandAllocator* CommandAllocator::Get(void)const
 		{
 			return _pCmdAllocator.Get();
 		}
 
 		// ==============================================
-		// ‰ð•ú
+		// ã‚³ãƒžãƒ³ãƒ‰ã‚¢ãƒ­ã‚±ãƒ¼ã‚¿ã®ãƒªã‚»ãƒƒãƒˆ
+		// ==============================================
+		HRESULT CommandAllocator::Reset(void)
+		{
+			if (!_pCmdAllocator)
+			{
+				return E_FAIL;
+			}
+			return _pCmdAllocator->Reset();
+		}
+
+		// ==============================================
+		// è§£æ”¾
 		// ==============================================
 		void CommandAllocator::Release(void)
 		{
-			// ComPtr‚È‚Ì‚Å–¾Ž¦“I‚È‰ð•ú‚Í”ð‚¯‚é
-			//if (_pCmdAllocator.Get())_pCmdAllocator->Release();
+			_pCmdAllocator.Reset();
 		}
 
 	}
@@ -76,4 +86,4 @@ namespace RHI
 
 /************************************
 * End of file
-************************************/
+************************************/

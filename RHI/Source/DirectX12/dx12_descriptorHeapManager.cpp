@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_descriptorHeap.cpp
-* @brief   DX12‚ÌƒfƒXƒNƒŠƒvƒ^ƒq[ƒvˆêŠ‡ŠÇ—
+* @brief   DX12ã®ãƒ‡ã‚¹ã‚¯ãƒªãƒ—ã‚¿ãƒ’ãƒ¼ãƒ—ä¸€æ‹¬ç®¡ç†
 * @details 
 *
 * @author  Keigo Onari
@@ -44,13 +44,13 @@ namespace RHI
         {
             if (!device)
             {
-                // TODO : —áŠOˆ— -> nullptr
+                // TODO : ä¾‹å¤–å‡¦ç† -> nullptr
                 return E_INVALIDARG;
             }
 
             D3D12_DESCRIPTOR_HEAP_DESC descHeapDesc = {};
             descHeapDesc.NumDescriptors = 2;
-            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;                      // ƒVƒF[ƒ_[‚©‚ç‰B‚·
+            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;                      // ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼ã‹ã‚‰éš ã™
             descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;                       // RTV
             descHeapDesc.NodeMask       = 0;
             HRESULT hr = device->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_rtvHeap));
@@ -58,10 +58,10 @@ namespace RHI
 
             _rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-            descHeapDesc.NumDescriptors = _maxSrvCount;                                         // Å‘åƒrƒ…[”
-            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;            // ƒVƒF[ƒ_[‚©‚çŒ©‚¦‚é‚æ‚¤‚É
+            descHeapDesc.NumDescriptors = _maxSrvCount;                                         // æœ€å¤§ãƒ“ãƒ¥ãƒ¼æ•°
+            descHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;            // ã‚·ã‚§ãƒ¼ãƒ€ãƒ¼ã‹ã‚‰è¦‹ãˆã‚‹ã‚ˆã†ã«
             descHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;               // CBV/SRV/UAV
-            hr = device ->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_srvUavCbvHeap));   // ¶¬
+            hr = device ->CreateDescriptorHeap(&descHeapDesc, IID_PPV_ARGS(&_srvUavCbvHeap));   // ç”Ÿæˆ
             if (FAILED(hr))return hr;
 
             _srvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -76,25 +76,27 @@ namespace RHI
         {
             if (!_freeSrvIndices.empty())
             {
-                // Ä—˜—p‰Â”\‚È‹ó‚«‚ª‚ ‚ê‚Î‚»‚ê‚ğ•Ô‚·
+                // å†åˆ©ç”¨å¯èƒ½ãªç©ºããŒã‚ã‚Œã°ãã‚Œã‚’è¿”ã™
                 uint32_t index = _freeSrvIndices.back();
                 _freeSrvIndices.pop_back();
                 return index;
             }
             else 
             {
-                if (_currentSrvIndex > _maxSrvCount)
-                {// ‹–—eƒI[ƒo[
-                    MessageBox(NULL, "SRV / CBV / DSV Heap is full!", "SRV / CBV / DSV Heap is full!", MB_OK);
-                    return -1;
+                if (_currentSrvIndex >= _maxSrvCount)
+                {// è¨±å®¹ã‚ªãƒ¼ãƒãƒ¼
+
+                    return INVALID_INDEX;
                 }
-                // ‚È‚¯‚ê‚ÎV‚µ‚¢”Ô†‚ğ”­s
+                // ãªã‘ã‚Œã°æ–°ã—ã„ç•ªå·ã‚’ç™ºè¡Œ
                 return _currentSrvIndex++;
             }
         }
 
-        void DescriptorHeapManager::FreeSrv(uint32_t index) 
+        void DescriptorHeapManager::FreeSrv(uint32_t index)
         {
+            // ç„¡åŠ¹ãªç•ªå·ã‚„æœªç™ºè¡Œã®ç•ªå·ã‚’ç©ºããƒªã‚¹ãƒˆã«å…¥ã‚Œã‚‹ã¨ã€å¾Œã§åŒã˜æ ã‚’äºŒé‡ã«ä½¿ã£ã¦ã—ã¾ã†
+            if (index == INVALID_INDEX || index >= _currentSrvIndex) return;
             _freeSrvIndices.push_back(index);
         }
 
@@ -102,6 +104,29 @@ namespace RHI
         {
             D3D12_CPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetCPUDescriptorHandleForHeapStart();
             handle.ptr += static_cast<SIZE_T>(index) * _srvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetSrvGpuHandle(UINT index)
+        {
+            D3D12_GPU_DESCRIPTOR_HANDLE handle = _srvUavCbvHeap->GetGPUDescriptorHandleForHeapStart();
+            // ãƒã‚¤ãƒ³ã‚¿ã®åŠ ç®— (GPUã‚¢ãƒ‰ãƒ¬ã‚¹ã¯UINT64ãƒ™ãƒ¼ã‚¹)
+            handle.ptr += static_cast<UINT64>(index) * _srvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvCpuHandle(UINT index)
+        {
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetCPUDescriptorHandleForHeapStart();
+            handle.ptr += static_cast<SIZE_T>(index) * _rtvDescriptorSize;
+            return handle;
+        }
+
+        D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHeapManager::GetRtvGpuHandle(UINT index)
+        {
+            D3D12_GPU_DESCRIPTOR_HANDLE handle = _rtvHeap->GetGPUDescriptorHandleForHeapStart();
+            // ãƒã‚¤ãƒ³ã‚¿ã®åŠ ç®— (GPUã‚¢ãƒ‰ãƒ¬ã‚¹ã¯UINT64ãƒ™ãƒ¼ã‚¹)
+            handle.ptr += static_cast<UINT64>(index) * _rtvDescriptorSize;
             return handle;
         }
 

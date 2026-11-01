@@ -42,7 +42,7 @@
 
 namespace Core
 {
-    class CORE_API Hash
+    class CORE_API_CLASS Hash
     {
 
         /******************************************************************

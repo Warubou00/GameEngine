@@ -1,7 +1,7 @@
-
+ï»¿
 /***********************************************************************************
 * @file    dx12_pipelineStateManager.h
-* @brief   PSOŠÇ—ƒNƒ‰ƒX
+* @brief   PSOç®¡ç†ã‚¯ãƒ©ã‚¹
 * @details 
 *
 * @author  Keigo Onari
@@ -11,7 +11,7 @@
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ‚»‚Ì‘¼
+* @note    ãã®ä»–
 ************************************************************************************/
 
 #pragma once
@@ -59,46 +59,33 @@ namespace RHI
             ******************************************************************/
 
 
-        private:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
+        public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
             PipelineStateManager();
             ~PipelineStateManager();
 
 
-        public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
+        public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
 
-        public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
-
-
-            /***********************************************************************************
-             * @brief ƒCƒ“ƒXƒ^ƒ“ƒX‚Ìæ“¾
-             * @details ƒVƒ“ƒOƒ‹ƒgƒ“İŒv
-             *
-             * @return GraphicsPipelineManager* ƒOƒ‰ƒtƒBƒbƒNƒXƒpƒCƒvƒ‰ƒCƒ“‚Ìƒ}ƒl[ƒWƒƒ[‚Ìƒ|ƒCƒ“ƒ^
-             ************************************************************************************/
-            static PipelineStateManager* getInstance();
-
-
+        public:          /*---ã‚¢ã‚¯ã‚»ãƒƒã‚µãƒ¼é–¢æ•°ç¾¤---*/
 
             /***********************************************************************************
-             * @brief PSO‚Ì“o˜^
-             * @details PSO‚Ì“o˜^
+             * @brief PSOã®ç™»éŒ²
+             * @details PSOã®ç™»éŒ²
              *
-             * @param[in] ID3D12PipelineState* pipelineState PSOƒ|ƒCƒ“ƒ^
-             * @return int “o˜^ID
+             * @param[in] ID3D12PipelineState* pipelineState PSOãƒã‚¤ãƒ³ã‚¿
+             * @return int ç™»éŒ²ID
              ************************************************************************************/
             int Register(ID3D12PipelineState* pipelineState, const std::string& pipelineName);
 
 
             /***********************************************************************************
-             * @brief Hash‚ÌƒŠƒŠ[ƒX
+             * @brief Hashã®ãƒªãƒªãƒ¼ã‚¹
              *
              ************************************************************************************/
             void Release(void);
 
-        private :         /*---ƒƒ“ƒo•Ï”---*/
-
-            static PipelineStateManager* Instance;
+        private :         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
 
             std::vector<Microsoft::WRL::ComPtr<ID3D12PipelineState>> _states;
 

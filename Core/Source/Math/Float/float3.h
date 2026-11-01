@@ -17,12 +17,14 @@
 #ifndef FLOAT3_H_
 #define FLOAT3_H_
 
+#include "../../common.h"
+
 namespace Core
 {
 	// =============================================================
 	// Float3
 	// =============================================================
-	struct Float3
+	struct CORE_API_CLASS Float3
 	{
 		union {
 			float _float[3];
