@@ -272,9 +272,9 @@ namespace RHI
 		}
 		if (drawOpen && occlusion)
 		{
-			// オクルージョンカリングの ON / OFF (GPU カリングの時だけ効く。前のフレームの深度 (Hi-Z) を使う)
+			// オクルージョンカリングの ON / OFF (GPU カリングの時だけ効く。2 段階 : 前段の深度で Hi-Z を作り、後段で判定する)
 			ImGui::Checkbox("Occlusion (Hi-Z)", occlusion);
-			if (s.OcclusionCulling)                 { ImGui::SameLine(); ImGui::TextDisabled("(previous frame depth)"); }
+			if (s.OcclusionCulling)                 { ImGui::SameLine(); ImGui::TextDisabled("(two-phase)"); }
 			else if (*occlusion && !s.GpuCulling)   { ImGui::SameLine(); ImGui::TextDisabled("(needs GPU culling)"); }
 		}
 		if (drawOpen && ImGui::BeginTable("draw", 2, tableFlags))

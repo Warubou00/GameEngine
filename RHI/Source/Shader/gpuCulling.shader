@@ -11,6 +11,14 @@
 //   CSCompact : 1 個でも映った描画の引数だけを前から詰めて並べ、その数を数える (1 スレッド = 描画 1 回分)
 //               ExecuteIndirect はその数 (Count バッファ) だけ描く。以前は映らなかった描画も InstanceCount = 0 で残っていた
 //
+//   オクルージョンカリングは 2 段階で行う (g_Phase)
+//     0 : 視錐台だけ (オクルージョンカリングしない時)
+//     1 : 前段 : 前のフレームで見えていた物 (g_Visibility = 1) を、視錐台だけで判定して描く
+//     2 : 後段 : 前段の深度で作った Hi-Z (このフレームのカメラ) で全部を判定し直し、
+//                見えている物を g_Visibility に記録して、そのうち前段で描かなかった物だけを描く
+//   以前は前のフレームの深度とカメラで判定していたため、カメラが動くと新しく見えた物が 1 フレーム遅れて出ていた。
+//   2 段階にすると、Hi-Z がこのフレームのカメラなので遅れが無い
+//
 // ※この文字コードは UTF-8 (BOMなし)。FXC は BOM を読めないため BOM を付けないこと
 // ※バインディングは Pipeline.cpp の makeCullingPipeline と一致させること
 // ==============================================================
@@ -46,10 +54,19 @@ cbuffer CullConstants : register(b0)
     uint   g_CounterOffset;    // g_OutArgs 内のカウンターの位置 (byte)。+0 : 映ったオブジェクトの数 / +4 : 詰めた描画の数 (Count バッファ)
 
     // ---------- オクルージョンカリング (Hi-Z) ----------
-    matrix g_HiZViewProj;      // Hi-Z を作った時 (前のフレーム) の View × Projection (シェーダー用に転置済み)
     uint   g_HiZWidth;         // Hi-Z の段 0 の大きさ (画面の半分、切り上げ)
     uint   g_HiZHeight;
-    uint   g_HiZLevels;        // 段の数。0 ならオクルージョンカリングをしない
+    uint   g_HiZLevels;        // 段の数 (後段で使う)
+    uint   g_Phase;            // 0 : 視錐台だけ / 1 : 前段 / 2 : 後段
+    uint   g_ResetVisibility;  // 1 : g_Visibility が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
+};
+
+// [1] フレームの定数 (描画用の GlobalData と同じもの。後段で Hi-Z と比べる時に、このフレームのカメラで投影する)
+// 以前は Hi-Z を作った時 (前のフレーム) の View × Projection をルート定数で渡していた
+cbuffer FrameData : register(b1)
+{
+    matrix g_ViewMatrix;
+    matrix g_ProjectionMatrix;
 };
 
 StructuredBuffer<ObjectData>   g_Objects  : register(t0);   // このフレームのオブジェクトの定数
@@ -61,6 +78,7 @@ StructuredBuffer<float>        g_HiZ      : register(t4);   // Hi-Z (全段を�
 RWStructuredBuffer<DrawData>   g_OutDraws : register(u0);   // 映ったものだけの DrawData (描画ごとの範囲の前から詰める)
 RWByteAddressBuffer            g_OutArgs  : register(u1);   // 描画ごとの引数 (映らなかった描画は InstanceCount = 0) + 末尾にカウンター
 RWByteAddressBuffer            g_Compact  : register(u2);   // 映った描画だけを詰めた引数 (ExecuteIndirect が読む)
+RWStructuredBuffer<uint>       g_Visibility : register(u3); // オブジェクトごとに「前のフレームで見えていたか」(後段が書き、次のフレームの前段が読む)
 
 static const uint ARGS_STRIDE = 20;   // D3D12_DRAW_INDEXED_ARGUMENTS
 // 引数の中の位置 : 0 IndexCountPerInstance / 4 InstanceCount / 8 StartIndexLocation / 12 BaseVertexLocation / 16 StartInstanceLocation
@@ -86,12 +104,12 @@ void CSClear(uint3 id : SV_DispatchThreadID)
 }
 
 // ==============================================================
-// オクルージョンカリング : 前のフレームの深度 (Hi-Z) に完全に隠れているか
-//   1. ワールド座標の箱 (球を囲む立方体) の 8 頂点を、Hi-Z を作った時のカメラで画面に投影し、
+// オクルージョンカリング : 前段で描いた深度 (Hi-Z) に完全に隠れているか
+//   1. ワールド座標の箱 (球を囲む立方体) の 8 頂点を、このフレームのカメラで画面に投影し、
 //      画面上の四角形と一番手前の深度を求める (カメラの後ろにかかる時は判定しない = 描く)
 //   2. 四角形が 2x2 texel 以内に収まる段を選び、その 4 texel の「一番奥」を読む
 //   3. 物の一番手前がそれより奥なら、その範囲の全部の物の後ろにある = 隠れている
-//   ※前のフレームの結果なので、カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+//   ※前段で描いた物は Hi-Z に自分の深度が入っているが、自分の一番手前はそれより奥にならないので、自分で自分を隠すことは無い
 // ==============================================================
 bool isOccluded(float3 center, float radius)
 {
@@ -99,11 +117,13 @@ bool isOccluded(float3 center, float radius)
     float2 maxNdc = float2(-1e9, -1e9);
     float  nearestZ = 1.0f;
 
+    const matrix viewProj = mul(g_ViewMatrix, g_ProjectionMatrix);   // どちらも転置済みなので、この順で掛ける
+
     [unroll]
     for (uint i = 0; i < 8; ++i)
     {
         const float3 corner = center + radius * float3((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f, (i & 4) ? 1.0f : -1.0f);
-        const float4 clip = mul(float4(corner, 1.0f), g_HiZViewProj);
+        const float4 clip = mul(float4(corner, 1.0f), viewProj);
         if (clip.w <= 1e-4f) return false;   // カメラの後ろ (または真横) にかかる : 判定できないので描く
         const float3 ndc = clip.xyz / clip.w;
         minNdc   = min(minNdc, ndc.xy);
@@ -175,6 +195,11 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
         cull = g_Cull[index];
         draw = g_InDraws[index];
 
+        // 前のフレームで見えていたか (前段で描いたか)
+        const bool wasVisible = g_ResetVisibility == 0 && g_Visibility[index] != 0;
+        bool       inFrustum  = true;
+        bool       occluded   = false;
+
         // 境界球が無い (半径が負) ものは常に描く
         if (cull.Sphere.w >= 0.0f)
         {
@@ -190,11 +215,27 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             [unroll]
             for (uint i = 0; i < 6; ++i)
             {
-                if (dot(g_Planes[i].xyz, center) + g_Planes[i].w < -radius) visible = false;
+                if (dot(g_Planes[i].xyz, center) + g_Planes[i].w < -radius) inFrustum = false;
             }
 
-            // 視錐台の中にあるものだけ、前のフレームの深度に隠れていないかを見る
-            if (visible && g_HiZLevels > 0 && isOccluded(center, radius)) visible = false;
+            // 後段だけ : 視錐台の中にあるものを、前段の深度 (Hi-Z) に隠れていないか調べる
+            if (g_Phase == 2 && inFrustum && isOccluded(center, radius)) occluded = true;
+        }
+
+        if (g_Phase == 0)
+        {
+            visible = inFrustum;                         // 視錐台だけ
+        }
+        else if (g_Phase == 1)
+        {
+            visible = inFrustum && wasVisible;           // 前段 : 前のフレームで見えていた物
+        }
+        else
+        {
+            // 後段 : 見えているかを記録し (次のフレームの前段で使う)、前段で描かなかった物だけ描く
+            const bool nowVisible = inFrustum && !occluded;
+            g_Visibility[index] = nowVisible ? 1 : 0;
+            visible = nowVisible && !wasVisible;
         }
     }
 

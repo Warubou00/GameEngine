@@ -179,10 +179,12 @@ namespace RHI
 
             /***********************************************************************************
              * @brief オクルージョンカリングをするか (既定 : true)
-             * @details シーンを描き終えた深度から Hi-Z (深度の縮小ピラミッド) を作っておき、
-             *          次のフレームの GPU カリングで、手前の物に完全に隠れている物を除く。
+             * @details 2 段階で行う。
+             *            前段 : 前のフレームで見えていた物を描く (視錐台だけで判定)
+             *            その深度から Hi-Z (深度の縮小ピラミッド) を作る (このフレームのカメラ)
+             *            後段 : 全部を視錐台と Hi-Z で判定し直し、見えている物を記録して、前段で描かなかった物を描く
              *          GPU カリングが前提 (GPU カリングが OFF の時は行わない)。
-             *          前のフレームの深度を使うので、カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+             *          (以前は前のフレームの深度とカメラで判定していて、カメラが動くと新しく見えた物が 1 フレーム遅れて出ていた)
              ************************************************************************************/
             void SetOcclusionCullingEnabled(bool enabled) { _useOcclusion = enabled; }
             bool IsOcclusionCullingEnabled()const         { return _useOcclusion; }
@@ -311,11 +313,11 @@ namespace RHI
                 uint32_t InstanceCount;
                 uint32_t DrawCount;
                 uint32_t CounterOffset;
-                uint32_t Padding;            // HLSL の matrix は 16byte 境界から始まるので詰め物を入れる
-                float    HiZViewProj[16];    // Hi-Z を作った時の View × Projection (転置済み)
                 uint32_t HiZWidth;
                 uint32_t HiZHeight;
-                uint32_t HiZLevels;          // 0 ならオクルージョンカリングしない
+                uint32_t HiZLevels;
+                uint32_t Phase;              // 0 : 視錐台だけ / 1 : 前段 / 2 : 後段
+                uint32_t ResetVisibility;    // 1 : 可視の記録が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
             };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
@@ -334,6 +336,7 @@ namespace RHI
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Culled;
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Readback;
                 bool                       CullRecorded = false;    // このフレームでカリングを記録したか (読み戻しの有無)
+                uint32_t                   CullPhases   = 0;        // カリングを何回したか (2 = オクルージョンの前段と後段。読み戻しは 2 回分を足す)
                 uint8_t*                   Cpu       = nullptr;     // Staging を Map したままのアドレス
                 // 前回このフレームに書いた内容。描画リストが同じなら書き込みを省く
                 std::vector<RHI::DrawItem> LastItems;
@@ -365,9 +368,11 @@ namespace RHI
             uint32_t                                             _hiZMipWidth[MAX_HIZ_LEVELS]  = {};
             uint32_t                                             _hiZMipHeight[MAX_HIZ_LEVELS] = {};
             uint32_t                                             _hiZMipOffset[MAX_HIZ_LEVELS] = {};   // 要素 (float) の位置
-            ::DirectX::XMFLOAT4X4                                _hiZViewProj = {};       // Hi-Z を作った時のカメラ (転置済み)
-            bool                                                 _hiZValid    = false;    // 前のフレームで Hi-Z を作ったか
             D3D12_RESOURCE_STATES                                _hiZState    = D3D12_RESOURCE_STATE_COMMON;   // このフレームでの _hiZ の状態
+            // オブジェクト (DrawData の番号) ごとに「前のフレームで見えていたか」。後段が書き、次のフレームの前段が読む
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _visibility;
+            D3D12_RESOURCE_STATES                                _visibilityState = D3D12_RESOURCE_STATE_COMMON;
+            bool                                                 _visibilityValid = false;  // 前のフレームで後段まで行ったか
             bool                                                 _warnedTooManyDraws = false;
 
             // インスタンシングでまとめる時の作業用 (毎回確保し直さないようメンバーに持つ)
@@ -411,11 +416,12 @@ namespace RHI
             uint32_t writeDrawsInstanced(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
 
             // GPU カリングを記録する (Culled に映ったものだけの DrawData と引数ができる)
-            void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData);
+            //   phase : 0 = 視錐台だけ / 1 = オクルージョンの前段 / 2 = 後段 (Hi-Z を作った後)
+            void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility);
 
-            // オクルージョンカリング : 深度の写しと Hi-Z を作る (リサイズ時) / 描き終えた深度から Hi-Z を作る (毎フレーム)
+            // オクルージョンカリング : 深度の写しと Hi-Z を作る (リサイズ時) / 前段の深度から Hi-Z を作る (毎フレーム)
             bool createHiZ(uint32_t width, uint32_t height);
-            void buildHiZ(Buffer* buffer);
+            void buildHiZ();
             void transitionHiZ(D3D12_RESOURCE_STATES after);
             void     warnTooManyDraws();
 
