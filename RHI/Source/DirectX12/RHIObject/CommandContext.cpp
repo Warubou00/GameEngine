@@ -232,6 +232,16 @@ namespace RHI
 				}
 			}
 
+			// ---------- オクルージョンカリングの可視の記録 (作れなくてもオクルージョンカリングしないだけ) ----------
+			_visibility = std::make_unique<DirectX12::ResourceBuffer>();
+			if (FAILED(_visibility->Create(dx12Device, static_cast<UINT64>(MAX_DRAWS) * sizeof(uint32_t), D3D12_HEAP_TYPE_DEFAULT,
+				D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)))
+			{
+				Core::Logger::Log("[CommandContext] Failed create visibility buffer. Occlusion culling disabled.");
+				_visibility.reset();
+			}
+			_visibilityValid = false;
+
 			// ---------- 描画番号バッファ (0, 1, 2, ...) : 中身は変わらないので VRAM に 1 回だけ転送する ----------
 			{
 				const UINT64 size = static_cast<UINT64>(MAX_DRAWS) * sizeof(uint32_t);
@@ -316,12 +326,13 @@ namespace RHI
 				if (draws.CullRecorded && draws.Readback)
 				{
 					void* mapped = nullptr;
-					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) * 2 };
+					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) * 4 };
 					if (SUCCEEDED(draws.Readback->Get()->Map(0, &readRange, &mapped)))
 					{
+						// [0][1] : 1 回目 (視錐台だけ / 前段) の映ったオブジェクト数・描画数、[2][3] : 後段
 						const uint32_t* counters = static_cast<const uint32_t*>(mapped);
-						_stats.VisibleInstances = counters[0];
-						_stats.VisibleDraws     = counters[1];
+						_stats.VisibleInstances = counters[0] + (draws.CullPhases == 2 ? counters[2] : 0);
+						_stats.VisibleDraws     = counters[1] + (draws.CullPhases == 2 ? counters[3] : 0);
 						_stats.VisibleValid     = true;
 						const D3D12_RANGE noWrite = { 0, 0 };
 						draws.Readback->Get()->Unmap(0, &noWrite);
@@ -330,7 +341,8 @@ namespace RHI
 				draws.CullRecorded = false;
 			}
 			// バッファは前のフレームの ExecuteCommandLists の完了で COMMON に戻っている
-			_hiZState = D3D12_RESOURCE_STATE_COMMON;
+			_hiZState        = D3D12_RESOURCE_STATE_COMMON;
+			_visibilityState = D3D12_RESOURCE_STATE_COMMON;
 
 			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
 			hr = frame.Allocator->Reset();
@@ -490,51 +502,71 @@ namespace RHI
 			const bool culling  = indirect && _useGpuCulling && frame.Culled && frame.Written > 0 &&
 			                      _currentPipeline->IsGpuCullingAvailable();
 
-			// 描画が読む DrawData と引数 : カリングした時はその結果、しない時は CPU が並べたもの
-			ID3D12Resource* drawSource = frame.Gpu->Get();
-			if (culling)
-			{
-				recordCulling(frame, buffer, objectData);
-				drawSource = frame.Culled->Get();
-			}
-			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, drawSource->GetGPUVirtualAddress());
+			// オクルージョンカリング (2 段階) : GPU カリングが前提
+			const bool occlusion = culling && _useOcclusion && _hiZ && _visibility && _currentPipeline->IsHiZAvailable();
 
-			if (frame.Written > 0)
+			// 描画が読む DrawData と引数 : カリングした時はその結果、しない時は CPU が並べたもの
+			ID3D12Resource* drawSource = culling ? frame.Culled->Get() : frame.Gpu->Get();
+
+			// カリングの結果 (映った描画だけを詰めた引数) を、GPU が数えた数 (Count バッファ) だけ描く
+			// frame.Written は上限 (詰めた数がこれを超えることは無い)
+			// (以前は映らなかった描画も InstanceCount = 0 のまま全部渡していて、GPU が 1 個ずつ読み飛ばしていた)
+			auto drawCulled = [&]()
 			{
-				if (indirect)
+				cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, drawSource->GetGPUVirtualAddress());
+				cmdList->ExecuteIndirect(signature, frame.Written, drawSource, COMPACT_ARGS_OFFSET,
+					drawSource, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET + sizeof(uint32_t));
+			};
+
+			if (occlusion)
+			{
+				// ==============================================================
+				// 2 段階のオクルージョンカリング
+				//   前段 : 前のフレームで見えていた物を描く (視錐台だけで判定)
+				//   Hi-Z : 前段の深度から作る (このフレームのカメラなので、カメラが動いても遅れない)
+				//   後段 : 全部を視錐台と Hi-Z で判定し直して可視を記録し、前段で描かなかった物を描く
+				//   描画リストが変わった時 / 前のフレームでオクルージョンしていない時は、可視の記録が使えないので
+				//   前段は何も描かず、後段で全部を判定する (そのフレームだけ Hi-Z は空 = 何も隠れない)
+				// ==============================================================
+				const bool resetVisibility = !reused || !_visibilityValid;
+				recordCulling(frame, buffer, objectData, 1, resetVisibility);
+				drawCulled();
+				buildHiZ();
+				recordCulling(frame, buffer, objectData, 2, resetVisibility);
+				drawCulled();
+				_visibilityValid = true;
+			}
+			else
+			{
+				if (culling) recordCulling(frame, buffer, objectData, 0, true);
+				_visibilityValid = false;   // 可視の記録は更新されないので、次にオクルージョンする時は使わない
+
+				if (frame.Written > 0)
 				{
-					// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く。GPU は描画の引数を読むだけ (ルート引数は変えない)
-					// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
 					if (culling)
 					{
-						// カリングした時は、映った描画だけを詰めた引数を、GPU が数えた数 (Count バッファ) だけ描く
-						// frame.Written は上限 (詰めた数がこれを超えることは無い)
-						// (以前は映らなかった描画も InstanceCount = 0 のまま全部渡していて、GPU が 1 個ずつ読み飛ばしていた)
-						cmdList->ExecuteIndirect(signature, frame.Written, drawSource, COMPACT_ARGS_OFFSET,
-							drawSource, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET + sizeof(uint32_t));
+						drawCulled();
+					}
+					else if (indirect)
+					{
+						// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く。GPU は描画の引数を読むだけ (ルート引数は変えない)
+						// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
+						cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, drawSource->GetGPUVirtualAddress());
+						cmdList->ExecuteIndirect(signature, frame.Written, drawSource, DRAW_ARGS_OFFSET, nullptr, 0);
 					}
 					else
 					{
-						cmdList->ExecuteIndirect(signature, frame.Written, drawSource, DRAW_ARGS_OFFSET, nullptr, 0);
-					}
-				}
-				else
-				{
-					// 1 個ずつ描く。描画ごとのルート引数の設定は無い (以前は描画ごとにルート定数とルート CBV を設定していた)
-					// BaseVertexLocation (第4引数) は SV_VertexID に加算されないので 0。頂点の開始位置は DrawData で渡す (2-9)
-					for (const auto& args : frame.Args)
-					{
-						cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, args.InstanceCount, args.StartIndexLocation, 0, args.StartInstanceLocation);
+						// 1 個ずつ描く。描画ごとのルート引数の設定は無い (以前は描画ごとにルート定数とルート CBV を設定していた)
+						// BaseVertexLocation (第4引数) は SV_VertexID に加算されないので 0。頂点の開始位置は DrawData で渡す (2-9)
+						cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, drawSource->GetGPUVirtualAddress());
+						for (const auto& args : frame.Args)
+						{
+							cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, args.InstanceCount, args.StartIndexLocation, 0, args.StartInstanceLocation);
+						}
 					}
 				}
 			}
-
-			// オクルージョンカリング : 描き終えた深度から Hi-Z を作り、次のフレームのカリングで使う
-			// (GPU カリングをしなかったフレームは作らない。次にカリングする時は Hi-Z が古いので使わない)
-			const bool buildOcclusion = culling && _useOcclusion && _hiZ && _currentPipeline->IsHiZAvailable();
-			if (buildOcclusion) buildHiZ(buffer);
-			else                _hiZValid = false;
-			if (!culling) _stats.OcclusionCulling = false;
+			_stats.OcclusionCulling = occlusion;
 
 			_stats.IndirectDraw       = indirect;
 			_stats.IndirectArgsReused = reused;
@@ -705,7 +737,7 @@ namespace RHI
 			return slot;
 		}
 
-		void CommandContext::recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData)
+		void CommandContext::recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility)
 		{
 			// ==============================================================
 			// GPU カリング (描画の前に、同じコマンドリストでコンピュートシェーダーを 2 回実行する)
@@ -714,6 +746,7 @@ namespace RHI
 			//                自分の描画の InstanceCount を増やして、その場所に DrawData を書く
 			//   3. CSCompact : 1 個でも映った描画の引数だけを前から詰めて並べ、その数を Count バッファに数える
 			//   4. Culled を ExecuteIndirect と頂点シェーダーが読む状態にする (映った数・描画数は読み戻し用にコピー)
+			// オクルージョンカリングの時は、前段 (phase 1) と後段 (phase 2) の 2 回呼ばれる
 			// CPU は結果を待たない (同じフレームの ExecuteIndirect がそのまま使う)
 			// ==============================================================
 			auto cmdList = _frameCommandList->GetCmdList();
@@ -732,19 +765,38 @@ namespace RHI
 			constants.DrawCount     = frame.Written;
 			constants.CounterOffset = static_cast<uint32_t>(CULL_COUNTER_OFFSET);
 
-			// オクルージョンカリング : 前のフレームで作った Hi-Z と、その時のカメラ
-			const bool occlusion = _useOcclusion && _hiZValid && _hiZ;
-			std::memcpy(constants.HiZViewProj, &_hiZViewProj, sizeof(constants.HiZViewProj));
-			constants.HiZWidth  = _hiZMipWidth[0];
-			constants.HiZHeight = _hiZMipHeight[0];
-			constants.HiZLevels = occlusion ? _hiZLevels : 0;
-			_stats.OcclusionCulling = occlusion;
-			if (occlusion) transitionHiZ(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			// オクルージョンカリング : 後段は前段の深度で作った Hi-Z を読む
+			constants.HiZWidth        = _hiZMipWidth[0];
+			constants.HiZHeight       = _hiZMipHeight[0];
+			constants.HiZLevels       = _hiZLevels;
+			constants.Phase           = phase;
+			constants.ResetVisibility = resetVisibility ? 1 : 0;
 			static_assert(sizeof(CullConstants) == Pipeline::CULL_CONSTANT_COUNT * sizeof(uint32_t), "CullConstants size mismatch");
 
-			// Culled はフレームの始めには COMMON (前のフレームの ExecuteCommandLists の完了で戻っている)
-			const auto toUav = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			// Culled : 1 回目はフレームの始めの COMMON から、後段は前段の描画が読み終わってから書き直す
+			// (この遷移バリアで、前段の ExecuteIndirect と頂点シェーダーの読み込みが終わるのを待つ)
+			const D3D12_RESOURCE_STATES culledRead =
+				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE;
+			const auto toUav = makeTransitionBarrier(culled, phase == 2 ? culledRead : D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 			cmdList->ResourceBarrier(1, &toUav);
+			// Hi-Z と可視の記録は、使わない段階でもルートに設定するので、毎回その状態にしておく
+			// (デバッグレイヤーはルートに設定しただけで「使った」とみなし、暗黙の昇格をしたことにするため。
+			//  前段で状態を合わせないと、Hi-Z を作る時の遷移バリアが食い違っていた)
+			transitionHiZ(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			if (_visibility && _visibilityState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+			{
+				const auto visibilityToUav = makeTransitionBarrier(_visibility->Get(), _visibilityState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+				cmdList->ResourceBarrier(1, &visibilityToUav);
+				_visibilityState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			}
+			else if (phase == 2 && _visibility)
+			{
+				// 前段が読み終わってから後段が書き換えるように
+				D3D12_RESOURCE_BARRIER visibilityUav = {};
+				visibilityUav.Type          = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+				visibilityUav.UAV.pResource = _visibility->Get();
+				cmdList->ResourceBarrier(1, &visibilityUav);
+			}
 
 			cmdList->SetComputeRootSignature(_currentPipeline->GetCullRootSignature());
 			cmdList->SetComputeRoot32BitConstants(Pipeline::CULL_PARAM_CONSTANTS, Pipeline::CULL_CONSTANT_COUNT, &constants, 0);
@@ -755,8 +807,10 @@ namespace RHI
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_DRAWS, output);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_ARGS,  output + DRAW_ARGS_OFFSET);
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_OUT_COMPACT, output + COMPACT_ARGS_OFFSET);
-			// Hi-Z が無い時もルート SRV には有効なアドレスを入れておく (シェーダーは HiZLevels = 0 なら読まない)
-			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_HIZ, occlusion ? _hiZ->GetGPUVirtualAddress() : input);
+			// Hi-Z / 可視の記録が無い時もルート SRV / UAV には有効なアドレスを入れておく (シェーダーは後段 / 前段でしか読まない)
+			cmdList->SetComputeRootShaderResourceView(Pipeline::CULL_PARAM_HIZ, _hiZ ? _hiZ->GetGPUVirtualAddress() : input);
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::CULL_PARAM_VISIBILITY, _visibility ? _visibility->GetGPUVirtualAddress() : output);
+			cmdList->SetComputeRootConstantBufferView(Pipeline::CULL_PARAM_FRAME, buffer->WriteFrameConstants(_frameIndex));
 
 			const UINT group = Pipeline::CULL_THREAD_GROUP;
 
@@ -785,8 +839,11 @@ namespace RHI
 			const auto toRead = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE);
 			cmdList->ResourceBarrier(1, &toRead);
-			cmdList->CopyBufferRegion(frame.Readback->Get(), 0, culled, DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 2);
+			// 読み戻し : 1 回目 (視錐台だけ / 前段) は [0][1]、後段は [2][3] に写す
+			cmdList->CopyBufferRegion(frame.Readback->Get(), phase == 2 ? sizeof(uint32_t) * 2 : 0, culled,
+				DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 2);
 			frame.CullRecorded = true;
+			frame.CullPhases   = phase == 0 ? 1 : 2;
 
 			// 描画用の PSO に戻す (ルートシグネチャはグラフィックス用とコンピュート用で別なので、描画側の設定はそのまま)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
@@ -794,7 +851,6 @@ namespace RHI
 
 		bool CommandContext::createHiZ(uint32_t width, uint32_t height)
 		{
-			_hiZValid  = false;
 			_hiZLevels = 0;
 			_depthCopy.reset();
 			_hiZ.reset();
@@ -847,13 +903,13 @@ namespace RHI
 			_hiZState = after;
 		}
 
-		void CommandContext::buildHiZ(Buffer* buffer)
+		void CommandContext::buildHiZ()
 		{
 			// ==============================================================
-			// Hi-Z を作る (シーンを描き終えた直後。UI は深度を使わないので、この時点の深度で完成している)
+			// Hi-Z を作る (オクルージョンカリングの前段を描いた直後。後段はこの Hi-Z で判定する)
 			//   1. 深度バッファをバッファに写す (DEPTH_WRITE → COPY_SOURCE → 写す → DEPTH_WRITE に戻す)
-			//   2. 段 0 : 深度の写しの 2x2 の一番奥 / 段 1〜 : 前の段の 2x2 の一番奥 (段ごとに UAV バリア)
-			//   3. この時のカメラを覚えておく (次のフレームのカリングは、このカメラで物を投影して Hi-Z と比べる)
+			//   2. 段 0 : 深度の写しの 2x2 の一番奥 / 段 1〜 : 前の段の 2x2 の一番奥
+			// (以前はシーンを描き終えた後に作って、次のフレームで使っていた。カメラが動くと 1 フレーム遅れていた)
 			// ==============================================================
 			auto cmdList = _frameCommandList->GetCmdList();
 			ID3D12Resource* depth = _depthBuffer->Get();
@@ -929,11 +985,7 @@ namespace RHI
 				cmdList->ResourceBarrier(1, &uavBarrier);   // 次の Dispatch はこの Dispatch の最後の段を読む
 			}
 
-			// 3. この時のカメラを覚える
-			_hiZViewProj = buffer->GetViewProjectionForShader();
-			_hiZValid    = true;
-
-			// 描画用の PSO に戻す (この後 ImGui が自分の PSO を設定するが、念のため)
+			// 描画用の PSO に戻す (この後、後段のカリングと描画が続く)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
 		}
 
@@ -1062,6 +1114,7 @@ namespace RHI
 				if (frame.Staging) frame.Staging->Unmap();
 				frame = DrawFrame();   // Culled / Readback もここで解放される
 			}
+			_visibility.reset();
 			_drawIdBuffer.reset();
 			_currentPipeline = nullptr;
 			_depthBuffer.reset();

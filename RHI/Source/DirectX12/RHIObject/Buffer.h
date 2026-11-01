@@ -176,9 +176,6 @@ namespace RHI
              ************************************************************************************/
             const ::DirectX::XMFLOAT4* GetFrustumPlanes();
 
-            // 今のカメラの View × Projection (シェーダー用に転置済み)。オクルージョンカリングで Hi-Z と一緒に覚えておく
-            const ::DirectX::XMFLOAT4X4& GetViewProjectionForShader() { GetFrustumPlanes(); return _viewProjForShader; }
-
             // 登録されている描画オブジェクトの数 (プロファイラー用)
             uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size()); }
 
@@ -253,7 +250,6 @@ namespace RHI
             // ---------- GPU カリング用 ----------
             std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;            // BaseVertex → 境界球
             ::DirectX::XMFLOAT4                 _frustumPlanes[6] = {};
-            ::DirectX::XMFLOAT4X4               _viewProjForShader = {};
             uint64_t                            _frustumVersion   = 0;                      // 計算した時の _frameConstantsVersion
 
             // ---------- オブジェクトごとの定数 (CPU 側) ----------

@@ -475,8 +475,8 @@ namespace RHI
                 param.Descriptor.ShaderRegister = i;
                 param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             }
-            // 書き込むもの (u0〜u2)。atomic で書き換えるので DATA_VOLATILE
-            const CullRootParameterIndex uavs[] = { CULL_PARAM_OUT_DRAWS, CULL_PARAM_OUT_ARGS, CULL_PARAM_OUT_COMPACT };
+            // 書き込むもの (u0〜u3)。atomic で書き換えるので DATA_VOLATILE
+            const CullRootParameterIndex uavs[] = { CULL_PARAM_OUT_DRAWS, CULL_PARAM_OUT_ARGS, CULL_PARAM_OUT_COMPACT, CULL_PARAM_VISIBILITY };
             for (UINT i = 0; i < _countof(uavs); ++i)
             {
                 auto& param = params[uavs[i]];
@@ -484,6 +484,10 @@ namespace RHI
                 param.Descriptor.ShaderRegister = i;
                 param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
             }
+            // フレームの定数 (b1) : 描画用と同じ View / Projection。後段のオクルージョンカリングで投影に使う
+            params[CULL_PARAM_FRAME].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+            params[CULL_PARAM_FRAME].Descriptor.ShaderRegister = 1;
+            params[CULL_PARAM_FRAME].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             for (auto& param : params) param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;   // コンピュートは ALL のみ
 
             D3D12_VERSIONED_ROOT_SIGNATURE_DESC desc = {};

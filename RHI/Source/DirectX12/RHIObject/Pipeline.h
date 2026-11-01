@@ -115,11 +115,14 @@ namespace RHI
                 CULL_PARAM_OUT_ARGS    = 6,  // u1 : 映ったものの引数 + カウンター (Root UAV)
                 CULL_PARAM_OUT_COMPACT = 7,  // u2 : 映った描画だけを詰めた引数 (Root UAV)
                 CULL_PARAM_HIZ         = 8,  // t4 : Hi-Z (オクルージョンカリング。Root SRV)
+                CULL_PARAM_VISIBILITY  = 9,  // u3 : オブジェクトごとの「前のフレームで見えていたか」(Root UAV)
+                CULL_PARAM_FRAME       = 10, // b1 : フレームの定数 (View / Projection。Root CBV)
                 CULL_PARAM_COUNT
             };
-            // float4 ×6 + uint ×3 + 詰め物 1 (HLSL の matrix は 16byte 境界から) + matrix + uint ×3
-            // ルートシグネチャの上限は 64 DWORD : 47 + ルート SRV / UAV 8 個 × 2 = 63
-            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 3 + 1 + 16 + 3;
+            // float4 ×6 + uint ×8
+            // ルートシグネチャの上限は 64 DWORD : 32 + ルート CBV / SRV / UAV 10 個 × 2 = 52
+            // (以前は Hi-Z のカメラの行列もルート定数で渡していて 63 だった。今はフレームの定数を Root CBV で読む)
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 8;
             static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
 
             // ----------------------------------------------------------
