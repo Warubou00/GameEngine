@@ -123,6 +123,9 @@ namespace RHI
 			void Unmap();
 			bool IsMapped()const { return _mappedData != nullptr; }
 
+			// Map中の先頭アドレス (Mapしていなければ nullptr)。UploadManager のリングバッファで直接書き込むのに使う
+			void* GetMappedData()const { return _mappedData; }
+
 			/***********************************************************************************
 			 * @brief 指定したオフセットにデータを書き込む
 			 * @details Map済みであること。範囲外の書き込みは行わずfalseを返す

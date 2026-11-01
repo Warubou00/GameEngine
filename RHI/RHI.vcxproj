@@ -154,6 +154,7 @@
     <ClInclude Include="Source\DirectX12\dx12_helperDescriptorRange.h" />
     <ClInclude Include="Source\DirectX12\dx12_helperRootParameter.h" />
     <ClInclude Include="Source\DirectX12\dx12_textureManager.h" />
+    <ClInclude Include="Source\DirectX12\dx12_uploadManager.h" />
     <ClInclude Include="Source\DirectX12\dx12_pipelineStateManager.h" />
     <ClInclude Include="Source\DirectX12\dx12_header.h" />
     <ClInclude Include="Source\DirectX12\Object\dx12_commandAllocator.h" />
@@ -187,11 +188,13 @@
     <ClInclude Include="Source\Shader\hlslCompiler.h" />
     <ClInclude Include="Source\TextureHandle.h" />
     <ClInclude Include="Source\ResourceBufferAllocator.h" />
+    <ClInclude Include="Source\scopedTimer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\DXGI\adapter.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_descriptorHeapManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp" />
+    <ClCompile Include="Source\DirectX12\dx12_uploadManager.cpp" />
     <ClCompile Include="Source\DirectX12\dx12_pipelineStateManager.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_commandAllocator.cpp" />
     <ClCompile Include="Source\DirectX12\Object\dx12_commandList.cpp" />

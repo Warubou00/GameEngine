@@ -57,6 +57,7 @@ namespace RHI
         class Fence;
         class ResourceBuffer;
         class CommandQueue;
+        class UploadManager;
 
         class Texture
         {
@@ -78,16 +79,26 @@ namespace RHI
         public:          /*---クラスメソッド---*/
 
             /***********************************************************************************
-             * @brief 画像ファイルからテクスチャを作る
-             * @details コピー命令をコマンドリストに積むだけ。送信して完了するまで outUploadBuffer を破棄しないこと
+             * @brief 画像ファイルのデコード (WIC) だけを行う
+             * @details GPU には触らないので、ワーカースレッドから並列に呼んでよい
+             *          (呼ぶスレッドで CoInitializeEx 済みであること)
+             *
+             * @param[in] const std::wstring& filePath 画像ファイル
+             * @param[out] ::DirectX::ScratchImage& outImage デコード結果
+             * @return HRESULT 成功の有無
+             ************************************************************************************/
+            static HRESULT DecodeImageFile(const std::wstring& filePath, ::DirectX::ScratchImage& outImage);
+
+            /***********************************************************************************
+             * @brief 画像ファイルからテクスチャを作る (デコード + アップロード)
+             * @details コピー命令を UploadManager に積むだけ。送信は CommandContext がまとめて行う
              *
              * @return std::unique_ptr<ResourceBuffer> テクスチャ (失敗時は nullptr)
              ************************************************************************************/
             std::unique_ptr<ResourceBuffer> LoadTextureFromFile(
                 RHI::DirectX12::Device* device,
-                RHI::DirectX12::GraphicsCommandList* cmdList,
-                const std::wstring& filePath,
-                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
+                RHI::DirectX12::UploadManager* uploadManager,
+                const std::wstring& filePath);
 
             /***********************************************************************************
              * @brief 単色 1x1 のテクスチャを作る (テクスチャ無しマテリアルや読み込み失敗時の代わり)
@@ -97,18 +108,18 @@ namespace RHI
              ************************************************************************************/
             std::unique_ptr<ResourceBuffer> CreateSolidColorTexture(
                 RHI::DirectX12::Device* device,
-                RHI::DirectX12::GraphicsCommandList* cmdList,
-                uint32_t rgba,
-                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
+                RHI::DirectX12::UploadManager* uploadManager,
+                uint32_t rgba);
 
             /***********************************************************************************
-             * @brief メモリ上の画像からテクスチャを作る (上の2つの共通処理)
+             * @brief メモリ上の画像からテクスチャを作る (アップロード部分)
+             * @details image のデータはこの関数の中でアップロード用の領域にコピーし終わるので、
+             *          戻った後に image を破棄してよい
              ************************************************************************************/
             std::unique_ptr<ResourceBuffer> CreateTextureFromImage(
                 RHI::DirectX12::Device* device,
-                RHI::DirectX12::GraphicsCommandList* cmdList,
-                const ::DirectX::Image& image,
-                std::unique_ptr<ResourceBuffer>& outUploadBuffer);
+                RHI::DirectX12::UploadManager* uploadManager,
+                const ::DirectX::Image& image);
 
         public:          /*---アクセッサー関数群---*/
 

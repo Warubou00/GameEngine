@@ -18,6 +18,7 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <wincodec.h>       // GetWICFactory の宣言に必要 (DirectXTex.h より先に読む)
 #include <DirectXTex.h>
 #include "Texture.h"
 #include "Device.h"
@@ -30,6 +31,11 @@
 #include "../dx12_descriptorHeapManager.h"
 
 #include "../../Core/Source/Log/logger.h"
+#include "../../scopedTimer.h"
+
+#include <algorithm>
+#include <future>
+#include <thread>
 
 /******************************************************************
 * Macro Definitions
@@ -67,51 +73,117 @@ namespace RHI
             const wchar_t* filePath)
         {
             // 失敗時はどれも既定テクスチャ(白)のハンドルを返す
-            TextureHandle handle;
-
-            if (!iDevice || !iCommandContext || !iBuffer || !filePath)
+            if (!filePath)
             {
-                return handle;
+                return TextureHandle();
+            }
+
+            // 1 枚でも複数枚と同じ処理 (デコード → アップロード登録)
+            auto handles = LoadTexturesFromFiles(iDevice, iCommandContext, iBuffer, { std::wstring(filePath) });
+            return handles.empty() ? TextureHandle() : handles[0];
+        }
+
+        std::vector<TextureHandle> Texture::LoadTexturesFromFiles(
+            RHI::ObjectInterface::IDevice* iDevice,
+            RHI::ObjectInterface::ICommandContext* iCommandContext,
+            RHI::ObjectInterface::IBuffer* iBuffer,
+            const std::vector<std::wstring>& filePaths)
+        {
+            // 失敗したものは既定テクスチャ(白)のハンドルのまま
+            std::vector<TextureHandle> handles(filePaths.size());
+
+            if (!iDevice || !iCommandContext || !iBuffer || filePaths.empty())
+            {
+                return handles;
             }
 
             // TODO : Phase 3 で抽象化を見直すまでは具象型へのキャストで扱う
             auto device         = static_cast<RHI::ObjectInterface::Device*>(iDevice);
             auto commandContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
             auto buffer         = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
+            auto textureManager = getTextureManager();
 
-            // _textureの初期化は初回のみ行うようにする
-            if (!_texture) {
-                _texture = std::make_unique<RHI::DirectX12::Texture>();
-            }
+            RHI::ScopedTimer timer(" Texture load total");
 
-            // コピー命令を積む前に記録状態にしておく
-            if (!commandContext->BeginRecording())
+            // ==========================================================
+            // 1. デコードを並列に行う (CPU だけの処理なので複数スレッドで同時にできる)
+            // ==========================================================
+            std::vector<::DirectX::ScratchImage> images(filePaths.size());
+            std::vector<HRESULT>                 results(filePaths.size(), E_FAIL);
             {
-                return handle;
+                RHI::ScopedTimer decodeTimer(" Texture decode (parallel)");
+
+                // WIC のファクトリーはメインスレッドで先に作っておく
+                // (ワーカースレッドで初めて作ると、そのスレッドの終了と一緒に使えなくなる恐れがある)
+                bool isWIC2 = false;
+                ::DirectX::GetWICFactory(isWIC2);
+
+                // 同時に動かすスレッド数は CPU のコア数まで
+                const size_t hardwareThreads = (std::max)(1u, std::thread::hardware_concurrency());
+                const size_t workerCount     = (std::min)(filePaths.size(), hardwareThreads);
+
+                std::vector<std::future<void>> workers;
+                workers.reserve(workerCount);
+                for (size_t worker = 0; worker < workerCount; ++worker)
+                {
+                    // ワーカー w は w, w+workerCount, w+2*workerCount ... 番目を担当する
+                    workers.push_back(std::async(std::launch::async, [&, worker]()
+                    {
+                        // WIC (COM) を使うので、スレッドごとに COM を初期化する
+                        const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                        for (size_t i = worker; i < filePaths.size(); i += workerCount)
+                        {
+                            results[i] = RHI::DirectX12::Texture::DecodeImageFile(filePaths[i], images[i]);
+                        }
+                        if (SUCCEEDED(coInit))
+                        {
+                            CoUninitialize();
+                        }
+                    }));
+                }
+                for (auto& w : workers)
+                {
+                    w.get();
+                }
             }
 
-            // 画像読み込み (メンバ変数ではなくローカル変数で受け取る)
-            std::unique_ptr<RHI::DirectX12::ResourceBuffer> uploadBuffer;
-            auto newBuffer = _texture->LoadTextureFromFile(
-                device->GetDevice(),
-                commandContext->GetGraphicsCommandList(),
-                filePath,
-                uploadBuffer
-            );
-
-            // 以前は読み込み失敗(nullptr)のまま SRV 作成に進んでクラッシュしていた (1-11)
-            if (!newBuffer)
+            // ==========================================================
+            // 2. アップロードの登録と SRV の作成 (メインスレッドで順番に)
+            //    コピー命令は UploadManager に積むだけで、送信は次の RenderEnd でまとめて行われる
+            // ==========================================================
+            for (size_t i = 0; i < filePaths.size(); ++i)
             {
-                Core::Logger::Log("Failed Load Texture. Use default texture.");
-                return handle;
+                if (FAILED(results[i]))
+                {
+                    // 以前は読み込み失敗(nullptr)のまま SRV 作成に進んでクラッシュしていた (1-11)
+                    Core::Logger::Log(L"Failed Load Texture. Use default texture.");
+                    Core::Logger::Log(filePaths[i].c_str());
+                    continue;
+                }
+
+                const ::DirectX::Image* img = images[i].GetImage(0, 0, 0);
+                if (!img)
+                {
+                    continue;
+                }
+
+                auto newBuffer = textureManager->CreateTextureFromImage(device->GetDevice(), commandContext->GetUploadManager(), *img);
+                if (!newBuffer)
+                {
+                    continue;
+                }
+
+                // アップロード用の領域にコピー済みなので、デコード結果のメモリはここで手放す (ピークメモリを抑える)
+                images[i].Release();
+
+                uint32_t textureID = TextureHandle::DEFAULT_TEXTURE_ID;
+                if (registerTexture(device, buffer, std::move(newBuffer), &textureID))
+                {
+                    handles[i].TextureID = textureID;
+                }
             }
 
-            uint32_t textureID = TextureHandle::DEFAULT_TEXTURE_ID;
-            if (registerTexture(device, commandContext, buffer, std::move(newBuffer), std::move(uploadBuffer), &textureID))
-            {
-                handle.TextureID = textureID;
-            }
-            return handle;
+            return handles;
         }
 
         bool Texture::CreateDefaultTexture(
@@ -128,21 +200,10 @@ namespace RHI
             auto commandContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
             auto buffer         = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
 
-            if (!_texture) {
-                _texture = std::make_unique<RHI::DirectX12::Texture>();
-            }
-
-            if (!commandContext->BeginRecording())
-            {
-                return false;
-            }
-
-            std::unique_ptr<RHI::DirectX12::ResourceBuffer> uploadBuffer;
-            auto whiteTexture = _texture->CreateSolidColorTexture(
+            auto whiteTexture = getTextureManager()->CreateSolidColorTexture(
                 device->GetDevice(),
-                commandContext->GetGraphicsCommandList(),
-                DEFAULT_TEXTURE_COLOR,
-                uploadBuffer
+                commandContext->GetUploadManager(),
+                DEFAULT_TEXTURE_COLOR
             );
             if (!whiteTexture)
             {
@@ -150,7 +211,7 @@ namespace RHI
             }
 
             uint32_t textureID = 0;
-            if (!registerTexture(device, commandContext, buffer, std::move(whiteTexture), std::move(uploadBuffer), &textureID))
+            if (!registerTexture(device, buffer, std::move(whiteTexture), &textureID))
             {
                 return false;
             }
@@ -171,24 +232,22 @@ namespace RHI
             _texture.reset();
         }
 
+        RHI::DirectX12::Texture* Texture::getTextureManager()
+        {
+            if (!_texture) {
+                _texture = std::make_unique<RHI::DirectX12::Texture>();
+            }
+            return _texture.get();
+        }
+
         bool Texture::registerTexture(
             RHI::ObjectInterface::Device* device,
-            RHI::ObjectInterface::CommandContext* commandContext,
             RHI::ObjectInterface::Buffer* buffer,
             std::unique_ptr<RHI::DirectX12::ResourceBuffer> texture,
-            std::unique_ptr<RHI::DirectX12::ResourceBuffer> uploadBuffer,
             uint32_t* outTextureID)
         {
-            // コマンド実行 (完了するまでアップロード用バッファを破棄してはいけない)
-            if (!commandContext->ExecuteAndSync())
-            {
-                return false;
-            }
-
-            // アップロード用バッファ解放 (GPUのコピーは完了している)
-            uploadBuffer.reset();
-
-            // SRV作成
+            // SRV は「どのリソースをどう読むか」の情報なので、データの転送が終わる前に作ってよい
+            // (描画キューはアップロードの完了を GPU 上で待ってから読む)
             if (!createShaderResourceView(device, buffer, texture.get(), outTextureID))
             {
                 return false;

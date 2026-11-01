@@ -126,6 +126,9 @@
     <ClInclude Include="Source\DirectX12\dx12_textureManager.h">
       <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
     </ClInclude>
+    <ClInclude Include="Source\DirectX12\dx12_uploadManager.h">
+      <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
+    </ClInclude>
     <ClInclude Include="Source\DirectX12\dx12_pipelineStateManager.h">
       <Filter>ヘッダー ファイル\DirectX12\Manager</Filter>
     </ClInclude>
@@ -139,6 +142,9 @@
       <Filter>ヘッダー ファイル\DirectX12\Helper</Filter>
     </ClInclude>
     <ClInclude Include="Source\ResourceBufferAllocator.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\scopedTimer.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="Source\common.h">
@@ -240,6 +246,9 @@
       <Filter>ソース ファイル\DirectX12\Object</Filter>
     </ClCompile>
     <ClCompile Include="Source\DirectX12\dx12_textureManager.cpp">
+      <Filter>ソース ファイル\DirectX12\Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\dx12_uploadManager.cpp">
       <Filter>ソース ファイル\DirectX12\Manager</Filter>
     </ClCompile>
     <ClCompile Include="Source\DirectX12\dx12_descriptorHeapManager.cpp">

@@ -122,12 +122,15 @@ namespace RHI
             desc.Layout                     = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             desc.Flags                      = D3D12_RESOURCE_FLAG_NONE;
 
-            // 最初はUPLOADバッファからデータをコピーするため COPY_DEST 状態にします
+            // COMMON で作る
+            //   COPY キューでコピーすると COMMON → COPY_DEST に暗黙で昇格し、コピー後は COMMON に戻る。
+            //   描画キューで読む時は COMMON → PIXEL_SHADER_RESOURCE に暗黙で昇格するので、バリアは不要
+            //   (COPY キューでは PIXEL_SHADER_RESOURCE へのバリアを張れないため、この仕組みを使う)
             RHI_RETURN_IF_FAILED(device->CreateCommittedResource(
                 &heapProps,
                 D3D12_HEAP_FLAG_NONE,
                 &desc,
-                D3D12_RESOURCE_STATE_COPY_DEST,
+                D3D12_RESOURCE_STATE_COMMON,
                 nullptr,
                 IID_PPV_ARGS(&_resourceBuffer)
             ));

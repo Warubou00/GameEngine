@@ -61,6 +61,13 @@ namespace RHI
 			HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator) override;
 
 			/***********************************************************************************
+			 * @brief 種類を指定してコマンドリストを作成 (COPY / COMPUTE 用)
+			 * @details COPY のコマンドリストでもインターフェイスは ID3D12GraphicsCommandList だが、
+			 *          使えるのはコピー系の命令だけ (描画・バリアの多くは使えない)
+			 ************************************************************************************/
+			HRESULT Create(ID3D12Device* device, ID3D12CommandAllocator* commandAllocator, D3D12_COMMAND_LIST_TYPE type);
+
+			/***********************************************************************************
 			 * @brief 記録の開始 (コマンドリストのリセット)
 			 * @details Close済みであること
 			 *

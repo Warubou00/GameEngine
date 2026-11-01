@@ -22,9 +22,9 @@
 *            フレーム N+1:                   CPU [記録 N+1] → GPU [実行 N+1]
 *                                            ↑ GPU が N を実行中でも、N+1 の記録を始められる
 *
-*          [即時用]       BeginRecording → (コピー命令) → ExecuteAndSync で使う。テクスチャ・頂点のアップロード用。
-*                         送信のたびに GPU の完了を待つ (ロード時専用。毎フレーム呼ぶと遅くなる)
-*                         状態遷移 : [記録中] --ExecuteAndSync--> [Close済み] --BeginRecording--> [記録中]
+*          [アップロード] UploadManager (COPY キュー) を使う。テクスチャ・頂点の転送用。
+*                         積んだコピー命令は RenderEnd でまとめて送信し、描画キューは GPU 上で完了を待つ。
+*                         (Phase 1 までは送信のたびに CPU で GPU の完了を待っていた)
 ************************************************************************************/
 
 #pragma once
@@ -67,6 +67,7 @@ namespace RHI
         class Fence;
         class DescriptorHeap;
         class ResourceBuffer;
+        class UploadManager;
     }
 
     namespace ObjectInterface
@@ -137,26 +138,11 @@ namespace RHI
 
             void Render(Buffer* buffer, const RenderQueue& renderQueue);
 
-            // ==========================================================
-            // 即時コマンド (アップロード用)
-            // ==========================================================
-
             /***********************************************************************************
-             * @brief 即時コマンドの記録を開始する
-             * @details 既に記録中なら何もしない。Close済みならアロケーターとコマンドリストをリセットする
-             *          ※即時用は送信のたびに完了を待つので、ここでリセットしても安全
-             *
-             * @return bool 記録を開始できたか
+             * @brief 積んであるアップロードを送信し、描画キューがその完了を GPU 上で待つようにする
+             * @details RenderEnd で毎フレーム自動で呼ばれる。ロード直後に描画せず使う場合に明示的に呼ぶ
              ************************************************************************************/
-            bool BeginRecording();
-
-            /***********************************************************************************
-             * @brief 即時コマンドを送信して、GPUの完了まで待つ
-             * @details 終了後のコマンドリストはClose済みのまま。次に積む前に BeginRecording() を呼ぶこと
-             *
-             * @return bool 成功の有無
-             ************************************************************************************/
-            bool ExecuteAndSync();
+            void SubmitUploads();
 
             // ==========================================================
             // その他
@@ -173,6 +159,7 @@ namespace RHI
 
             /***********************************************************************************
              * @brief GPUが今積まれている処理を全て終えるまで待つ (終了処理・リサイズ前に使う)
+             * @details 描画キューとアップロード (COPY キュー) の両方を待つ
              ************************************************************************************/
             void WaitForGpu();
 
@@ -183,8 +170,8 @@ namespace RHI
 
         public:          /*---アクセッサー関数群---*/
 
-            // アップロード用 (即時用) のコマンドリスト
-            RHI::DirectX12::GraphicsCommandList* GetGraphicsCommandList()const;
+            // アップロード (Buffer / Texture が転送に使う)
+            RHI::DirectX12::UploadManager*       GetUploadManager()const;
             RHI::DirectX12::CommandQueue*        GetCommandQueue()const;
             RHI::DirectX12::SwapChain*           GetSwapChain()const;
 
@@ -205,9 +192,9 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _frameCommandList;
             uint32_t                                             _frameIndex = 0;
 
-            // 即時用 (アップロード)
-            std::unique_ptr<RHI::DirectX12::CommandAllocator>    _immediateAllocator;
-            std::unique_ptr<RHI::DirectX12::GraphicsCommandList> _immediateCommandList;
+            // アップロード (COPY キュー)
+            std::unique_ptr<RHI::DirectX12::UploadManager>       _uploadManager;
+            UINT64                                               _uploadFenceWaited = 0;   // 描画キューに待たせたアップロードのフェンス値
 
             // 描画先
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _rtvHeap;       // バックバッファの数だけ

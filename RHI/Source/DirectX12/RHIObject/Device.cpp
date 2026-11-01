@@ -178,9 +178,15 @@ namespace RHI
 
 			// ID3D12InfoQueue1 は比較的新しいランタイムでのみ使える。取れなければ何もしない
 			Microsoft::WRL::ComPtr<ID3D12InfoQueue1> infoQueue1;
-			if (SUCCEEDED(_dx12Device->GetDevice()->QueryInterface(IID_PPV_ARGS(&infoQueue1))))
+			if (SUCCEEDED(_dx12Device->GetDevice()->QueryInterface(IID_PPV_ARGS(&infoQueue1))) &&
+				SUCCEEDED(infoQueue1->RegisterMessageCallback(onDebugMessage, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &_debugCallbackCookie)))
 			{
-				infoQueue1->RegisterMessageCallback(onDebugMessage, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &_debugCallbackCookie);
+				Core::Logger::Log("[Device] D3D12 debug messages -> Logger : enabled");
+			}
+			else
+			{
+				// ここに来た場合、D3D12 のエラーはコンソールに出ない (Visual Studio の出力ウィンドウには出る)
+				Core::Logger::Log("[Device] D3D12 debug messages -> Logger : NOT available (ID3D12InfoQueue1 / debug layer missing)");
 			}
 #endif
 		}
