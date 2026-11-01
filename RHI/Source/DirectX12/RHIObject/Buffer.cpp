@@ -327,7 +327,7 @@ namespace RHI
 					// 変わったオブジェクトだけ書く (UPLOAD ヒープへの書き込みは遅いので最小限に)
 					if (written[i] == _objectVersion[i]) continue;
 
-					if (_sceneCB->WriteData(frameOffset + SCENE_CB_STRIDE * i, &_objects[i], sizeof(RHI::ObjectConstants)))
+					if (_sceneCB->WriteData(frameOffset + OBJECT_DATA_STRIDE * i, &_objects[i], sizeof(RHI::ObjectConstants)))
 					{
 						written[i] = _objectVersion[i];
 					}

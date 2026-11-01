@@ -1,0 +1,72 @@
+====================================================================
+ ExecuteIndirect の GPU 時間の調査と改善案
+ 日付   : 2026-11-02
+ 環境   : NVIDIA GeForce RTX 2070 / Release / --stress 10000 (20002 描画)
+====================================================================
+
+■ 背景
+  Phase 4 の ExecuteIndirect は CPU の記録時間を 0.47 → 0.05 ms にしたが、
+  GPU 時間は direct (0.54 ms) より増えていた (0.84 ms)。
+  引数を VRAM に移しても変わらなかったので、どの引数が重いのかを実験で切り分けた。
+
+■ 実験 (一時的なコード。計測後に元に戻した)
+  コマンドシグネチャの引数を減らし、同じ引数バッファの読み始めをずらして描画した
+  (見た目は正しくないが、GPU の処理量は比べられる)。
+
+    構成                                       GPU      direct 比
+    ---------------------------------------------------------------
+    direct (1 描画ずつ、毎回ルート引数を設定)      0.54 ms   -
+    indirect : ルート定数 + ルート CBV + 描画      0.85 ms   +0.31
+    indirect : ルート CBV + 描画                   0.68 ms   +0.14
+    indirect : 描画のみ (ルートシグネチャ無し)     0.43 ms   -0.11
+
+  → 描画ごとのルート定数の切り替えで約 0.17 ms、ルート CBV の切り替えで約 0.25 ms かかる。
+    描画だけの ExecuteIndirect は direct より速い。
+    つまり「GPU が描画ごとにルート引数を書き換える」ことが重さの原因。
+    (NVIDIA では、ルート引数を変える ExecuteIndirect は描画ごとに状態を更新する遅い処理になると言われており、それと合う)
+    direct でも毎回ルート引数を設定しているので、direct の 0.54 ms にも同じコストが含まれている。
+
+  ※ 補足 : ルートシグネチャを指定したまま「ルート引数を変えない」シグネチャを作ろうとすると失敗する
+    (その場合はルートシグネチャに nullptr を渡す決まり)。
+
+■ 改善案 : 描画ごとのルート引数をなくす (おすすめ)
+  ルート引数の代わりに、シェーダーが「自分が何番目の描画か (DrawID)」を知り、
+  その番号でバッファから必要なデータを読む形にする。
+
+  1. DrawID の受け渡し
+     D3D12 では SV_InstanceID に StartInstanceLocation が足されない (SV_VertexID と BaseVertex の関係と同じ)。
+     ただし入力アセンブラの「インスタンス単位の頂点バッファ」は StartInstanceLocation から読み始める。
+     そこで 0, 1, 2, ... と番号を並べただけのバッファ (32768 個 × 4 byte = 128 KB、作るのは 1 回) を
+     インスタンス単位の入力として 1 回だけ設定し、各描画の StartInstanceLocation = 描画番号にする。
+     → シェーダーは入力 (DRAWID) で描画番号を受け取れる。広く使われている方法。
+     (Shader Model 6.8 の SV_StartInstanceLocation でも同じことができるが、Agility SDK が必要なので見送る)
+
+  2. 描画ごとのデータ
+     StructuredBuffer<DrawData> { uint ObjectIndex; uint BaseVertex; } を引数バッファと同じ扱い
+     (描画リストが変わった時だけ書いて VRAM にコピー) で用意し、DrawID で引く。
+     オブジェクトの定数は Root CBV ではなく、フレームの領域全体を 1 つの Root SRV
+     (StructuredBuffer<ObjectData>) として描画前に 1 回だけ設定し、ObjectIndex で引く。
+     テクスチャ番号はピクセルシェーダーへ nointerpolation で渡す。
+
+  3. コマンドシグネチャは DrawIndexed だけ (ルートシグネチャ無し) になる。
+     引数 1 個 = 20 byte になり、引数バッファも半分になる。
+
+  4. direct の経路も同じ仕組み (StartInstanceLocation = 描画番号) にする
+     → direct も描画ごとのルート引数の設定がなくなり、GPU / CPU の両方が軽くなる見込み。
+       2 つの経路でシェーダーとルートシグネチャが同じになるので、保守も楽になる。
+
+  効果の見込み
+    GPU : 0.84 ms → 0.45 ms 前後 (実験の「描画のみ」0.43 ms に、データを 1 回多く読む分を足した程度)
+    ※ 実装後に計測して確かめる。
+
+  影響範囲
+    hlslTemplate.shader (DRAWID 入力 / DrawData / ObjectData の StructuredBuffer 化)
+    Pipeline.cpp (ルートシグネチャ : ルート定数・オブジェクト CBV → Root SRV×2、入力レイアウト、コマンドシグネチャ)
+    CommandContext.cpp (DrawData の書き込み・コピー、DrawID バッファ、direct 経路)
+    Buffer (オブジェクト領域の間隔は今の 256 byte のままでも動く。Root CBV でなくなるので 80 byte に詰めればさらに軽くなる)
+
+■ その先の案 (今回は見送り)
+  - インスタンシング : 同じメッシュの描画を 1 回の描画 (InstanceCount = N) にまとめる。
+    負荷テストのように同じモデルを並べる場面では描画数自体が 20002 → 2 になる。シーン次第。
+  - GPU カリング : コンピュートシェーダーで視錐台の外の描画を除き、引数バッファを GPU が作る (ExecuteIndirect の Count バッファ)。
+  - Shader Model 6.8 (Agility SDK) の SV_StartInstanceLocation : IA の番号バッファが不要になる。

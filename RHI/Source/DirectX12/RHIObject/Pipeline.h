@@ -87,14 +87,17 @@ namespace RHI
             // ----------------------------------------------------------
             // ルートシグネチャのパラメータ番号 (シェーダーのレジスタと対応)
             // 以前は 0〜4 の数字が CommandContext に直書きされていた (2-8)
+            // どれも 1 フレームに 1 回だけ設定する。描画ごとに変わるもの (頂点の開始位置 / オブジェクト) は
+            // 入力 DRAWID で DrawData を引いて読む
+            // (以前は描画ごとにルート定数 b0 とルート CBV b2 を切り替えていて、ExecuteIndirect の GPU 時間が増えていた)
             // ----------------------------------------------------------
             enum RootParameterIndex : unsigned int
             {
-                ROOT_PARAM_BASE_VERTEX         = 0,  // b0 : 頂点オフセット (ルート定数)
-                ROOT_PARAM_VERTEX_BUFFER_TABLE = 1,  // t0 : メガ頂点バッファ (ディスクリプタテーブル)
-                ROOT_PARAM_GLOBAL_CBV          = 2,  // b1 : View / Projection 行列 (Root CBV)
-                ROOT_PARAM_OBJECT_CBV          = 3,  // b2 : オブジェクトごとの定数 (Root CBV)
-                ROOT_PARAM_TEXTURE_TABLE       = 4,  // t1 : テクスチャ配列 (ディスクリプタテーブル)
+                ROOT_PARAM_VERTEX_BUFFER_TABLE = 0,  // t0        : メガ頂点バッファ (ディスクリプタテーブル)
+                ROOT_PARAM_GLOBAL_CBV          = 1,  // b0        : View / Projection 行列 (Root CBV)
+                ROOT_PARAM_DRAW_DATA_SRV       = 2,  // t1        : 描画ごとのデータ (Root SRV)
+                ROOT_PARAM_OBJECT_DATA_SRV     = 3,  // t2        : オブジェクトごとのデータ (Root SRV)
+                ROOT_PARAM_TEXTURE_TABLE       = 4,  // t0,space1 : テクスチャ配列 (ディスクリプタテーブル)
                 ROOT_PARAM_COUNT
             };
 

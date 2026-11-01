@@ -168,8 +168,8 @@ namespace RHI
             D3D12_DESCRIPTOR_RANGE1 srvRangeTex           = {};
             srvRangeTex.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
             srvRangeTex.NumDescriptors                    = UINT_MAX; // UINT_MAX(-1) で無制限(Unbounded)配列を指定
-            srvRangeTex.BaseShaderRegister                = 1;  // t1
-            srvRangeTex.RegisterSpace                     = 0;
+            srvRangeTex.BaseShaderRegister                = 0;  // t0, space1 (上限の無い範囲なので他の SRV と空間を分ける。以前は t1)
+            srvRangeTex.RegisterSpace                     = 1;
             srvRangeTex.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE |
                                                             D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             srvRangeTex.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -177,37 +177,41 @@ namespace RHI
             // パラメータの設定 (番号は Pipeline.h の RootParameterIndex を参照)
             D3D12_ROOT_PARAMETER1 rootParams[ROOT_PARAM_COUNT] = {};
 
-            // [0]: メッシュの頂点オフセット (b0) - 32Bit Constants
-            auto& baseVertex = rootParams[ROOT_PARAM_BASE_VERTEX];
-            baseVertex.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-            baseVertex.Constants.ShaderRegister            = 0;
-            // 2 個目は ExecuteIndirect の引数で 64bit のアドレスを 8byte 境界にそろえるための詰め物 (シェーダーでは使わない)
-            baseVertex.Constants.Num32BitValues            = 2;
-            baseVertex.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_VERTEX;
-
-            // [1]: メガVBのSRV (t0) - Descriptor Table
+            // [0]: メガVBのSRV (t0) - Descriptor Table
             auto& vbTable = rootParams[ROOT_PARAM_VERTEX_BUFFER_TABLE];
             vbTable.ParameterType                          = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
             vbTable.DescriptorTable.NumDescriptorRanges    = 1;
             vbTable.DescriptorTable.pDescriptorRanges      = &srvRangeVB;
             vbTable.ShaderVisibility                       = D3D12_SHADER_VISIBILITY_VERTEX;
 
-            // [2]: Global定数バッファ (b1) - Root CBV
+            // [1]: Global定数バッファ (b0) - Root CBV
             //      フレームごとの領域に描画前に書き込み、描画中は変えないので DATA_STATIC_WHILE_SET_AT_EXECUTE
             auto& globalCbv = rootParams[ROOT_PARAM_GLOBAL_CBV];
             globalCbv.ParameterType                        = D3D12_ROOT_PARAMETER_TYPE_CBV;
-            globalCbv.Descriptor.ShaderRegister            = 1;
+            globalCbv.Descriptor.ShaderRegister            = 0;
             globalCbv.Descriptor.RegisterSpace             = 0;
             globalCbv.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-            globalCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_ALL;
+            globalCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_VERTEX;
 
-            // [3]: Scene(Object)定数バッファ (b2) - Root CBV
-            auto& objectCbv = rootParams[ROOT_PARAM_OBJECT_CBV];
-            objectCbv.ParameterType                        = D3D12_ROOT_PARAMETER_TYPE_CBV;
-            objectCbv.Descriptor.ShaderRegister            = 2;
-            objectCbv.Descriptor.RegisterSpace             = 0;
-            objectCbv.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-            objectCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_ALL;
+            // [2]: 描画ごとのデータ (t1) - Root SRV (StructuredBuffer<DrawData>)
+            //      描画リストが変わった時だけ描画前にコピーで書き換える
+            //      (以前の [0] 頂点オフセットのルート定数の代わり)
+            auto& drawData = rootParams[ROOT_PARAM_DRAW_DATA_SRV];
+            drawData.ParameterType                         = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            drawData.Descriptor.ShaderRegister             = 1;
+            drawData.Descriptor.RegisterSpace              = 0;
+            drawData.Descriptor.Flags                      = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            drawData.ShaderVisibility                      = D3D12_SHADER_VISIBILITY_VERTEX;
+
+            // [3]: オブジェクトごとのデータ (t2) - Root SRV (StructuredBuffer<ObjectData>)
+            //      このフレームの領域の先頭を 1 回だけ設定し、DrawData.ObjectIndex で引く
+            //      (以前は描画ごとに Root CBV でオブジェクトの位置を指していた)
+            auto& objectData = rootParams[ROOT_PARAM_OBJECT_DATA_SRV];
+            objectData.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            objectData.Descriptor.ShaderRegister           = 2;
+            objectData.Descriptor.RegisterSpace            = 0;
+            objectData.Descriptor.Flags                    = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            objectData.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_VERTEX;
 
             // [4]: テクスチャ配列のSRV (t1) - Descriptor Table
             auto& texTable = rootParams[ROOT_PARAM_TEXTURE_TABLE];
@@ -239,7 +243,9 @@ namespace RHI
             rootSigDesc.Desc_1_1.NumStaticSamplers    = 1;
             rootSigDesc.Desc_1_1.pStaticSamplers      = &samplerDesc;
             // 使わないシェーダーステージからのアクセスを禁止すると、ドライバーが少し最適化できる
-            rootSigDesc.Desc_1_1.Flags                = D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
+            // 入力レイアウトは DRAWID (描画番号) の 1 つだけ使うので ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT が必要
+            rootSigDesc.Desc_1_1.Flags                = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+                                                        D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
                                                         D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
                                                         D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS;
 
@@ -268,8 +274,16 @@ namespace RHI
             psoDesc.VS = vs.View();
             psoDesc.PS = ps.View();
 
-            // 【最重要】Programmable Vertex Fetchなので入力レイアウトは空にする！
-            psoDesc.InputLayout = { nullptr, 0 };
+            // 頂点はシェーダーがメガ頂点バッファから読む (Programmable Vertex Fetch) ので、頂点の入力は無い。
+            // 入力アセンブラに読ませるのは、描画番号 (DRAWID) のインスタンス単位の入力 1 つだけ。
+            //   中身は 0, 1, 2, ... を並べただけのバッファで、各描画の StartInstanceLocation = 描画番号 にしておくと
+            //   その番号から読み始めるので、シェーダーが「自分が何番目の描画か」を知れる
+            //   (SV_InstanceID には StartInstanceLocation が加算されないため、この方法を使う)
+            // 以前は入力レイアウトが空で、描画ごとにルート引数で情報を渡していた
+            const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "DRAWID", 0, DXGI_FORMAT_R32_UINT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+            };
+            psoDesc.InputLayout = { inputElements, _countof(inputElements) };
 
             // ==============================================================
             // ラスタライザステート (RasterizerState) の設定
@@ -363,34 +377,22 @@ namespace RHI
         {
             // ==============================================================
             // ExecuteIndirect 用のコマンドシグネチャ
-            //   描画 1 回ごとに GPU が引数バッファから読んで設定するもの :
-            //     1. 頂点の開始位置 (ルート定数 : b0。2 個目は詰め物)
-            //     2. オブジェクトの定数バッファ (Root CBV : b2)
-            //     3. DrawIndexedInstanced
-            //   ルート引数はルートパラメータの番号が小さい順に並べる決まりがある
-            //   (逆にすると "Root parameter {slots, offset} must be increasing" のエラーになる)
-            //   並び順は CommandSignature::IndirectDrawCommand と一致させること
+            //   描画 1 回ごとに GPU が引数バッファから読むのは DrawIndexedInstanced の引数だけ。
+            //   描画ごとの情報は StartInstanceLocation = 描画番号 → シェーダーが DrawData を引く、で渡す
+            //   以前は [ルート定数 b0 ×2][ルート CBV b2][描画] の 40byte で、GPU が描画ごとにルート引数を
+            //   書き換えるのが遅かった (RTX 2070 / 20002 描画で GPU 0.85 ms。描画だけなら 0.43 ms)
             // ==============================================================
-            D3D12_INDIRECT_ARGUMENT_DESC args[3] = {};
-
-            args[0].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-            args[0].Constant.RootParameterIndex     = ROOT_PARAM_BASE_VERTEX;
-            args[0].Constant.DestOffsetIn32BitValues = 0;
-            args[0].Constant.Num32BitValuesToSet    = 2;
-
-            args[1].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW;
-            args[1].ConstantBufferView.RootParameterIndex = ROOT_PARAM_OBJECT_CBV;
-
-            args[2].Type                            = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+            D3D12_INDIRECT_ARGUMENT_DESC args[1] = {};
+            args[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
 
             D3D12_COMMAND_SIGNATURE_DESC desc = {};
             desc.ByteStride       = sizeof(RHI::DirectX12::CommandSignature::IndirectDrawCommand);
             desc.NumArgumentDescs = _countof(args);
             desc.pArgumentDescs   = args;
 
-            // ルート引数を書き換える引数を含むので、ルートシグネチャの指定が必要
+            // ルート引数を書き換えないので、ルートシグネチャは渡さない (渡すと作成に失敗する決まり)
             _indirectDrawSignature = std::make_unique<RHI::DirectX12::CommandSignature>();
-            const HRESULT hr = _indirectDrawSignature->Create(device->GetDevice()->GetDevice(), _rootSignature->Get(), desc);
+            const HRESULT hr = _indirectDrawSignature->Create(device->GetDevice()->GetDevice(), nullptr, desc);
             if (FAILED(hr))
             {
                 Core::Logger::Log("[Pipeline] ExecuteIndirect is not available. Use direct draw only.");
