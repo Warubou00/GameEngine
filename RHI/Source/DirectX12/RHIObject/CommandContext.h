@@ -287,8 +287,12 @@ namespace RHI
             static_assert(sizeof(CullInstance) == 20, "CullInstance must be 20 bytes (same as HLSL)");
             // Staging / Gpu の中で CullInstance が始まる位置 (引数の後ろ)
             static constexpr UINT64 CULL_DATA_OFFSET = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE;
-            // Culled (カリングの結果) の中で「映った数」のカウンターを置く位置 (引数の後ろ。引数の先頭からの距離)
+            // Culled (カリングの結果) の中でカウンターを置く位置 (引数の後ろ。引数の先頭からの距離)
+            //   +0 : 映ったオブジェクトの数 (プロファイラー用)
+            //   +4 : 詰めた描画の数 (ExecuteIndirect の Count バッファ)
             static constexpr UINT64 CULL_COUNTER_OFFSET = DRAW_ARGS_SIZE;
+            // Culled の中で、映った描画だけを詰めた引数が始まる位置 (カウンターの後ろ。256byte 境界にそろえる)
+            static constexpr UINT64 COMPACT_ARGS_OFFSET = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE + 256;
 
             // GPU カリングのルート定数 (gpuCulling.shader の cbuffer CullConstants と同じ並び)
             struct CullConstants
@@ -305,7 +309,8 @@ namespace RHI
             //             描画リストが変わった時だけ Staging からコピーする。
             //             (UPLOAD ヒープを直接読ませると、GPU が毎フレーム PCIe 越しにメインメモリを読むので遅い)
             //   並び : [DrawData × MAX_DRAWS][IndirectDrawCommand × MAX_DRAWS][CullInstance × MAX_DRAWS]
-            //   Culled   : DEFAULT ヒープ (UAV)。GPU カリングの結果 [DrawData × MAX_DRAWS][引数 × MAX_DRAWS][映った数]
+            //   Culled   : DEFAULT ヒープ (UAV)。GPU カリングの結果
+            //              [DrawData × MAX_DRAWS][描画ごとの引数 × MAX_DRAWS][カウンター][詰めた引数 × MAX_DRAWS]
             //   Readback : 映った数を CPU で読む (プロファイラー用。FRAME_COUNT フレーム後に読む)
             struct DrawFrame
             {

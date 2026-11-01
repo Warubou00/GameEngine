@@ -6,8 +6,10 @@
 //   カメラに映るオブジェクトだけを残した引数と DrawData を GPU が作る。
 //   ExecuteIndirect はその結果をそのまま描く (CPU は結果を待たない)
 //
-//   CSClear : 引数を写して InstanceCount を 0 にする (1 スレッド = 描画 1 回分)
-//   CSCull  : オブジェクトの境界球を視錐台と比べ、映るものだけ自分の描画の範囲に追加する (1 スレッド = 1 オブジェクト)
+//   CSClear   : 引数を写して InstanceCount を 0 にする (1 スレッド = 描画 1 回分)
+//   CSCull    : オブジェクトの境界球を視錐台と比べ、映るものだけ自分の描画の範囲に追加する (1 スレッド = 1 オブジェクト)
+//   CSCompact : 1 個でも映った描画の引数だけを前から詰めて並べ、その数を数える (1 スレッド = 描画 1 回分)
+//               ExecuteIndirect はその数 (Count バッファ) だけ描く。以前は映らなかった描画も InstanceCount = 0 で残っていた
 //
 // ※この文字コードは UTF-8 (BOMなし)。FXC は BOM を読めないため BOM を付けないこと
 // ※バインディングは Pipeline.cpp の makeCullingPipeline と一致させること
@@ -41,7 +43,7 @@ cbuffer CullConstants : register(b0)
     float4 g_Planes[6];        // 視錐台の 6 平面 (ワールド座標。内側が正、xyz は正規化済み)
     uint   g_InstanceCount;    // オブジェクトの数
     uint   g_DrawCount;        // 描画 (引数) の数
-    uint   g_CounterOffset;    // g_OutArgs 内の「映った数」のカウンターの位置 (byte)
+    uint   g_CounterOffset;    // g_OutArgs 内のカウンターの位置 (byte)。+0 : 映ったオブジェクトの数 / +4 : 詰めた描画の数 (Count バッファ)
 };
 
 StructuredBuffer<ObjectData>   g_Objects  : register(t0);   // このフレームのオブジェクトの定数
@@ -50,7 +52,8 @@ StructuredBuffer<CullInstance> g_Cull     : register(t2);   // 各オブジェ�
 ByteAddressBuffer              g_InArgs   : register(t3);   // CPU が並べた引数 (D3D12_DRAW_INDEXED_ARGUMENTS : 20byte)
 
 RWStructuredBuffer<DrawData>   g_OutDraws : register(u0);   // 映ったものだけの DrawData (描画ごとの範囲の前から詰める)
-RWByteAddressBuffer            g_OutArgs  : register(u1);   // ExecuteIndirect が読む引数 (+ 末尾に映った数のカウンター)
+RWByteAddressBuffer            g_OutArgs  : register(u1);   // 描画ごとの引数 (映らなかった描画は InstanceCount = 0) + 末尾にカウンター
+RWByteAddressBuffer            g_Compact  : register(u2);   // 映った描画だけを詰めた引数 (ExecuteIndirect が読む)
 
 static const uint ARGS_STRIDE = 20;   // D3D12_DRAW_INDEXED_ARGUMENTS
 // 引数の中の位置 : 0 IndexCountPerInstance / 4 InstanceCount / 8 StartIndexLocation / 12 BaseVertexLocation / 16 StartInstanceLocation
@@ -64,7 +67,7 @@ void CSClear(uint3 id : SV_DispatchThreadID)
     const uint draw = id.x;
     if (draw == 0)
     {
-        g_OutArgs.Store(g_CounterOffset, 0);
+        g_OutArgs.Store2(g_CounterOffset, uint2(0, 0));   // 映ったオブジェクトの数 / 詰めた描画の数
     }
     if (draw >= g_DrawCount) return;
 
@@ -135,5 +138,56 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
     {
         uint dummy;
         g_OutArgs.InterlockedAdd(g_CounterOffset, gs_Visible, dummy);
+    }
+}
+
+// ==============================================================
+// 描画数の詰め直し : 1 個でも映った描画の引数だけを g_Compact に前から並べる
+//   グループ (64 描画) の中では元の順番を保つ (各スレッドの書き込み位置をグループ内の前から数えて決める)。
+//   グループ同士の順番は atomic の早い者勝ちになるが、64 個ずつのまとまりは保たれる
+//   (描く順番を大きく崩すと、画面上の近い場所を続けて描かなくなって GPU が遅くなるため : インスタンシングの調査より)
+//   SM 5.1 (FXC) でも動くよう、Wave 命令は使わず groupshared で数える
+// ==============================================================
+groupshared uint gs_Flag[64];
+groupshared uint gs_Offset[64];
+groupshared uint gs_Base;
+
+[numthreads(64, 1, 1)]
+void CSCompact(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
+{
+    const uint draw = id.x;
+    uint4 args = uint4(0, 0, 0, 0);
+    uint  start = 0;
+    bool  visible = false;
+    if (draw < g_DrawCount)
+    {
+        const uint offset = draw * ARGS_STRIDE;
+        args    = g_OutArgs.Load4(offset);        // CSCull が数え終わった InstanceCount が入っている
+        start   = g_OutArgs.Load(offset + 16);
+        visible = args.y > 0;
+    }
+    gs_Flag[groupIndex] = visible ? 1 : 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    // グループ内の書き込み位置 (前にある「映った描画」の数) と、全体の中の先頭をまとめて決める
+    if (groupIndex == 0)
+    {
+        uint sum = 0;
+        for (uint i = 0; i < 64; ++i)
+        {
+            gs_Offset[i] = sum;
+            sum += gs_Flag[i];
+        }
+        uint base = 0;
+        if (sum > 0) g_OutArgs.InterlockedAdd(g_CounterOffset + 4, sum, base);
+        gs_Base = base;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    if (visible)
+    {
+        const uint dest = (gs_Base + gs_Offset[groupIndex]) * ARGS_STRIDE;
+        g_Compact.Store4(dest, args);
+        g_Compact.Store(dest + 16, start);
     }
 }

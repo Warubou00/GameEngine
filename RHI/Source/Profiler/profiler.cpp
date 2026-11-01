@@ -94,7 +94,7 @@ namespace RHI
 			_lastInstancing = stats.Instancing;
 			_lastInstances  = stats.Instances;
 			_lastCulling    = stats.GpuCulling;
-			if (stats.VisibleValid) _lastVisible = stats.VisibleInstances;
+			if (stats.VisibleValid) { _lastVisible = stats.VisibleInstances; _lastVisibleDraws = stats.VisibleDraws; }
 		}
 
 		// グラフの履歴
@@ -150,7 +150,7 @@ namespace RHI
 			"[Profiler] Summary (%llu frames) : %.1f FPS / frame %.3f ms / record scene %.3f ms / UI %.3f ms / GPU %.3f ms / draws %u, objects %u, visible %u (%s%s%s)",
 			_totalFrames, 1000.0 / (_totalFrameMs / n), _totalFrameMs / n, _totalRecordMs / n, _totalUiMs / n,
 			_totalGpuFrames ? _totalGpuMs / static_cast<double>(_totalGpuFrames) : 0.0,
-			_lastDrawCalls, _lastInstances, _lastCulling ? _lastVisible : _lastInstances,
+			_lastCulling ? _lastVisibleDraws : _lastDrawCalls, _lastInstances, _lastCulling ? _lastVisible : _lastInstances,
 			_lastIndirect ? "ExecuteIndirect" : "direct", _lastInstancing ? " + instancing" : "", _lastCulling ? " + GPU culling" : "");
 		Core::Logger::Log(message);
 	}
@@ -272,7 +272,12 @@ namespace RHI
 		{
 			row("Draw calls", "%.0f", static_cast<double>(s.DrawCalls));
 			row("Instances",  "%.0f", static_cast<double>(s.Instances));
-			if (s.GpuCulling && s.VisibleValid) row("Visible (GPU)", "%.0f", static_cast<double>(s.VisibleInstances));
+			if (s.GpuCulling && s.VisibleValid)
+			{
+				// GPU カリング後に実際に描いた数 (詰め直した後の描画数 / 映ったオブジェクトの数)
+				row("Draw calls (GPU)", "%.0f", static_cast<double>(s.VisibleDraws));
+				row("Visible (GPU)",    "%.0f", static_cast<double>(s.VisibleInstances));
+			}
 			row("Triangles",  "%.0f", static_cast<double>(s.Triangles));
 			row("Objects",    "%.0f", static_cast<double>(s.Objects));
 			ImGui::EndTable();
