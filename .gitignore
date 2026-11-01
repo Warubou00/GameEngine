@@ -22,3 +22,6 @@ obj/
 
 # Claude の作業用一時スクリプト
 ClaudLog/_tmp_*
+
+# テクスチャの DDS キャッシュ (初回読み込み時に自動生成。例: grass.jpg.v1.dds)
+*.v[0-9]*.dds

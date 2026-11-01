@@ -78,18 +78,28 @@ namespace RHI
         public:          /*---クラスメソッド---*/
 
             /***********************************************************************************
-             * @brief 画像ファイルのデコード (WIC) だけを行う
+             * @brief 画像ファイルを GPU に送れる形で読み込む (デコード / キャッシュ)
              * @details GPU には触らないので、ワーカースレッドから並列に呼んでよい
              *          (呼ぶスレッドで CoInitializeEx 済みであること)
              *
+             *          .dds      : そのまま読む (デコード不要)
+             *          それ以外  : 隣に DDS キャッシュ (例: grass.jpg → grass.jpg.v1.dds) があり、
+             *                      元の画像より新しければそれを読む (ほぼファイルを読むだけ)
+             *                      無ければ「デコード → ミップマップ生成 → BC 圧縮」して読み込み、キャッシュに保存する
+             *                      (初回だけ時間がかかる。保存に失敗しても読み込み自体は成功する)
+             *
              * @param[in] const std::wstring& filePath 画像ファイル
-             * @param[out] ::DirectX::ScratchImage& outImage デコード結果
+             * @param[out] ::DirectX::ScratchImage& outImage 読み込み結果 (ミップマップ込み)
+             * @param[in] bool useCache false なら毎回デコードし、キャッシュも作らない
              * @return HRESULT 成功の有無
              ************************************************************************************/
-            static HRESULT DecodeImageFile(const std::wstring& filePath, ::DirectX::ScratchImage& outImage);
+            static HRESULT LoadImageFile(const std::wstring& filePath, ::DirectX::ScratchImage& outImage, bool useCache = true);
+
+            // キャッシュのファイル名 (圧縮の方法を変えたら DDS_CACHE_VERSION を上げて古いキャッシュを使わないようにする)
+            static std::wstring GetCachePath(const std::wstring& filePath);
 
             /***********************************************************************************
-             * @brief 画像ファイルからテクスチャを作る (デコード + アップロード)
+             * @brief 画像ファイルからテクスチャを作る (読み込み + アップロード)
              * @details コピー命令を UploadManager に積むだけ。送信は CommandContext がまとめて行う
              *
              * @return std::unique_ptr<ResourceBuffer> テクスチャ (失敗時は nullptr)
@@ -111,14 +121,28 @@ namespace RHI
                 uint32_t rgba);
 
             /***********************************************************************************
-             * @brief メモリ上の画像からテクスチャを作る (アップロード部分)
-             * @details image のデータはこの関数の中でアップロード用の領域にコピーし終わるので、
+             * @brief 読み込んだ画像 (ミップマップ全段) からテクスチャを作る (アップロード部分)
+             * @details データはこの関数の中でアップロード用の領域にコピーし終わるので、
              *          戻った後に image を破棄してよい
              ************************************************************************************/
+            std::unique_ptr<ResourceBuffer> CreateTextureFromScratchImage(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::UploadManager* uploadManager,
+                const ::DirectX::ScratchImage& image);
+
+            // ミップマップ 1 段だけの画像からテクスチャを作る
             std::unique_ptr<ResourceBuffer> CreateTextureFromImage(
                 RHI::DirectX12::Device* device,
                 RHI::DirectX12::UploadManager* uploadManager,
                 const ::DirectX::Image& image);
+
+        private:
+            // mips[0] が最上段 (原寸)。mipCount 段分をまとめてアップロードする
+            std::unique_ptr<ResourceBuffer> createTexture(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::UploadManager* uploadManager,
+                const ::DirectX::Image* mips,
+                size_t mipCount);
 
         public:          /*---アクセッサー関数群---*/
 
