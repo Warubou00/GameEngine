@@ -139,22 +139,25 @@ namespace RHI
             bool RenderEnd();
 
             /***********************************************************************************
-             * @brief 描画命令を積む (RenderStart と RenderEnd の間で呼ぶ)
-             * @details 同じ値のルート引数は設定し直さない。DrawItem を頂点の開始位置ごとに並べておくと効率が良い
+             * @brief 描画命令を積む (RenderStart と RenderEnd の間で、1 フレームに 1 回呼ぶ)
+             * @details 描画ごとのルート引数は設定しない。描画 i は StartInstanceLocation = i で描き、
+             *          シェーダーが DrawData[i] (頂点の開始位置 / オブジェクトの番号) を読む。
+             *          描画リストが前回このフレームで描いたものと同じなら、DrawData と引数の書き込みも省く
              ************************************************************************************/
             void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
 
             /***********************************************************************************
              * @brief ExecuteIndirect で描くか (false なら 1 個ずつ DrawIndexedInstanced)
              * @details ExecuteIndirect : 描画の引数をバッファに並べ、1 回の命令で全部描く。
-             *          描画ごとの API 呼び出し (ルート引数の設定 + Draw) が無くなるので、描画数が多いほど CPU が軽くなる。
+             *          描画ごとの API 呼び出し (Draw) が無くなるので、描画数が多いほど CPU が軽くなる。
              *          コマンドシグネチャが作れなかった環境では自動で通常の描画になる
              ************************************************************************************/
             void SetIndirectDrawEnabled(bool enabled) { _useIndirectDraw = enabled; }
             bool IsIndirectDrawEnabled()const         { return _useIndirectDraw; }
 
-            // ExecuteIndirect 1 回で描ける最大数 (フレームごとの引数バッファの大きさ)
-            static constexpr uint32_t MAX_INDIRECT_DRAWS = 32768;
+            // 1 フレームで描ける最大数 (DrawData / 引数バッファ / 描画番号バッファの大きさ)
+            // 以前は ExecuteIndirect だけの上限 (32768) で、超えた分は 1 個ずつ描いていた
+            static constexpr uint32_t MAX_DRAWS = 65536;
 
             // ==========================================================
             // プロファイラー / ImGui 用 (RenderStart と RenderEnd の間で使う)
@@ -235,32 +238,44 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _dsvHeap;       // 1 つ
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthBuffer;
 
-            // ---------- ExecuteIndirect ----------
-            // フレームごとの引数バッファ (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
+            // ---------- 描画ごとのデータ ----------
+            // シェーダーの struct DrawData と同じ並び (8byte)。描画番号 (DRAWID) で引かれる
+            struct DrawData
+            {
+                uint32_t ObjectIndex;   // オブジェクトのデータ (StructuredBuffer<ObjectData>) の番号
+                uint32_t BaseVertex;    // メガ頂点バッファ内の開始位置 (以前は描画ごとのルート定数 b0)
+            };
+            // DrawFrame のバッファ内で、ExecuteIndirect の引数が始まる位置 (DrawData × MAX_DRAWS の後ろ)
+            static constexpr UINT64 DRAW_ARGS_OFFSET = static_cast<UINT64>(MAX_DRAWS) * sizeof(DrawData);
+
+            // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
             //   Staging : UPLOAD ヒープ。CPU が書き込む
             //   Gpu     : DEFAULT ヒープ (VRAM)。GPU はこちらを読む
             //             描画リストが変わった時だけ Staging からコピーする。
-            //             (UPLOAD ヒープを直接読ませると、GPU が毎フレーム PCIe 越しにメインメモリを読むので遅かった)
-            struct IndirectFrame
+            //             (UPLOAD ヒープを直接読ませると、GPU が毎フレーム PCIe 越しにメインメモリを読むので遅い)
+            //   並び : [DrawData × MAX_DRAWS][IndirectDrawCommand × MAX_DRAWS]
+            struct DrawFrame
             {
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Staging;
                 std::unique_ptr<RHI::DirectX12::ResourceBuffer> Gpu;
-                uint8_t*                  Cpu              = nullptr;   // Staging を Map したままのアドレス
-                // 前回このフレームの引数バッファに書いた内容。描画リストが同じなら書き込みを省く
+                uint8_t*                   Cpu       = nullptr;     // Staging を Map したままのアドレス
+                // 前回このフレームに書いた内容。描画リストが同じなら書き込みを省く
                 std::vector<RHI::DrawItem> LastItems;
-                D3D12_GPU_VIRTUAL_ADDRESS LastObjectCbBase = 0;
-                uint32_t                  Written          = 0;         // 引数バッファに書いた数
-                uint32_t                  Consumed         = 0;         // そのために読んだ DrawItem の数
-                uint64_t                  Triangles        = 0;
-                bool                      Valid            = false;
+                // 描画の引数の CPU 側の控え (1 個ずつ描く時に使う。UPLOAD ヒープは CPU から読むと非常に遅いため)
+                std::vector<D3D12_DRAW_INDEXED_ARGUMENTS> Args;
+                uint32_t                   Written   = 0;           // 描く数
+                uint64_t                   Triangles = 0;
+                bool                       Valid     = false;
             };
-            IndirectFrame                                        _indirect[FRAME_COUNT];
+            DrawFrame                                            _draws[FRAME_COUNT];
+            // 描画番号バッファ (0, 1, 2, ... MAX_DRAWS-1)。インスタンス単位の入力 DRAWID として 1 回だけ設定する
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _drawIdBuffer;
             bool                                                 _useIndirectDraw = true;
+            bool                                                 _warnedTooManyDraws = false;
             Pipeline*                                            _currentPipeline = nullptr;   // RenderStart で受け取ったもの (所有しない)
 
-            // ExecuteIndirect で描く。戻り値 = 処理した DrawItem の数 (残りは通常の描画で描く)
-            uint32_t renderIndirect(const RHI::DrawItem* items, uint32_t count, D3D12_GPU_VIRTUAL_ADDRESS objectCbBase,
-                                    uint32_t& outDrawCalls, uint64_t& outTriangles);
+            // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
+            bool updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count);
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)
             std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;

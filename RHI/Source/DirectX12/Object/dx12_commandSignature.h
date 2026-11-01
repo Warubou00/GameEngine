@@ -46,20 +46,15 @@ namespace RHI
 		class CommandSignature
 		{
 		public:
-			// ExecuteIndirect で GPU に渡す、描画 1 回分の引数
-			// コマンドシグネチャの引数の並び (Pipeline::makeIndirectDrawSignature) と同じ順番にすること
-			// ※D3D12 の決まりで、ルート引数はルートパラメータの番号が小さい順に並べる必要がある
-			//   1. 頂点の開始位置 (ルート定数 b0 の 2 個 : 2 個目は 64bit のアドレスを 8byte 境界にそろえるための詰め物) : 8byte
-			//   2. オブジェクトの定数バッファのアドレス (Root CBV b2)                                                   : 8byte
-			//   3. DrawIndexedInstanced の引数                                                                           : 20byte
+			// ExecuteIndirect で GPU に渡す、描画 1 回分の引数 (DrawIndexedInstanced の引数だけ : 20byte)
+			// コマンドシグネチャの引数の並び (Pipeline::makeIndirectDrawSignature) と同じにすること
+			// 以前は [頂点の開始位置 (ルート定数 ×2)][オブジェクトの Root CBV][描画] の 40byte だった。
+			// 描画ごとの情報は StartInstanceLocation = 描画番号 でシェーダーに渡す (ルート引数を切り替えないので GPU が速い)
 			struct IndirectDrawCommand
 			{
-				UINT                         BaseVertex;
-				UINT                         Padding;
-				D3D12_GPU_VIRTUAL_ADDRESS    ObjectCbv;
 				D3D12_DRAW_INDEXED_ARGUMENTS Draw;
 			};
-			static_assert(sizeof(IndirectDrawCommand) == 40, "IndirectDrawCommand must be 40 bytes");
+			static_assert(sizeof(IndirectDrawCommand) == 20, "IndirectDrawCommand must be 20 bytes");
 
 		public:
 			CommandSignature();
@@ -67,7 +62,7 @@ namespace RHI
 
 			/***********************************************************************************
 			 * @brief コマンドシグネチャの生成
-			 * @details ルート定数を書き換える引数を含む場合はrootSignatureが必須
+			 * @details ルート引数を書き換える引数を含む場合は rootSignature が必須。含まない場合は nullptr にすること
 			 *
 			 * @param[in] ID3D12Device* デバイス
 			 * @param[in] ID3D12RootSignature* rootSignature ルートシグネチャ

@@ -101,6 +101,8 @@ namespace RHI
 			// 画面クリア色
 			constexpr float CLEAR_COLOR[] = { 0.1f, 0.2f, 0.4f, 1.0f };
 
+			using IndirectDrawCommand = RHI::DirectX12::CommandSignature::IndirectDrawCommand;
+
 			// GPU のタイムスタンプの番号
 			constexpr UINT TIMESTAMP_FRAME_BEGIN = 0;
 			constexpr UINT TIMESTAMP_SCENE_END   = 1;
@@ -196,21 +198,43 @@ namespace RHI
 			if (!createRenderTargetViews())     return RHI_FAILED_CREATE_ANY_OBJECT;
 			if (!createDepthBuffer(width, height)) return RHI_FAILED_CREATE_ANY_OBJECT;
 
-			// ---------- ExecuteIndirect の引数バッファ (フレームごと。作れなくても通常の描画で続けられる) ----------
-			for (auto& frame : _indirect)
+			// ---------- 描画ごとのデータと ExecuteIndirect の引数 (フレームごと) ----------
+			// シェーダーが描画番号で DrawData を読むので、通常の描画でも必須
 			{
-				frame = IndirectFrame();
-				frame.Staging = std::make_unique<DirectX12::ResourceBuffer>();
-				frame.Gpu     = std::make_unique<DirectX12::ResourceBuffer>();
-				const UINT64 size = static_cast<UINT64>(MAX_INDIRECT_DRAWS) * sizeof(DirectX12::CommandSignature::IndirectDrawCommand);
-				if (FAILED(frame.Staging->Create(dx12Device, size, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(frame.Staging->Map()) ||
-					FAILED(frame.Gpu->Create(dx12Device, size, D3D12_HEAP_TYPE_DEFAULT)))
+				const UINT64 size = DRAW_ARGS_OFFSET + static_cast<UINT64>(MAX_DRAWS) * sizeof(IndirectDrawCommand);
+				for (auto& frame : _draws)
 				{
-					Core::Logger::Log("[CommandContext] Failed create indirect argument buffer. Use direct draw only.");
-					frame = IndirectFrame();
-					continue;
+					frame = DrawFrame();
+					frame.Staging = std::make_unique<DirectX12::ResourceBuffer>();
+					frame.Gpu     = std::make_unique<DirectX12::ResourceBuffer>();
+					if (FAILED(frame.Staging->Create(dx12Device, size, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(frame.Staging->Map()) ||
+						FAILED(frame.Gpu->Create(dx12Device, size, D3D12_HEAP_TYPE_DEFAULT)))
+					{
+						Core::Logger::Log("[CommandContext] Failed create draw data buffer.");
+						return RHI_FAILED_CREATE_ANY_OBJECT;
+					}
+					frame.Cpu = static_cast<uint8_t*>(frame.Staging->GetMappedData());
+					frame.Args.reserve(1024);
 				}
-				frame.Cpu = static_cast<uint8_t*>(frame.Staging->GetMappedData());
+			}
+
+			// ---------- 描画番号バッファ (0, 1, 2, ...) : 中身は変わらないので VRAM に 1 回だけ転送する ----------
+			{
+				const UINT64 size = static_cast<UINT64>(MAX_DRAWS) * sizeof(uint32_t);
+				_drawIdBuffer = std::make_unique<DirectX12::ResourceBuffer>();
+				DirectX12::UploadManager::Allocation allocation;
+				ID3D12GraphicsCommandList* copyList = nullptr;
+				if (FAILED(_drawIdBuffer->Create(dx12Device, size, D3D12_HEAP_TYPE_DEFAULT)) ||
+					!_uploadManager->Allocate(size, 16, allocation) || !(copyList = _uploadManager->GetCommandList()))
+				{
+					Core::Logger::Log("[CommandContext] Failed create draw id buffer.");
+					return RHI_FAILED_CREATE_ANY_OBJECT;
+				}
+				uint32_t* ids = reinterpret_cast<uint32_t*>(allocation.Cpu);
+				for (uint32_t i = 0; i < MAX_DRAWS; ++i) ids[i] = i;
+				// COPY キューで転送する。最初のフレームの送信前に SubmitUploads で送られ、描画キューはその完了を待つ
+				// (バリアは不要 : COMMON → COPY_DEST → 完了後 COMMON → 描画キューで頂点バッファの状態に暗黙で昇格)
+				copyList->CopyBufferRegion(_drawIdBuffer->Get(), 0, allocation.Resource, allocation.Offset, size);
 			}
 
 			// ---------- GPU の時間の計測 (失敗してもプロファイラーの GPU 欄が出ないだけ) ----------
@@ -342,6 +366,14 @@ namespace RHI
 			ibView.Format         = DXGI_FORMAT_R32_UINT;
 			cmdList->IASetIndexBuffer(&ibView);
 
+			// 描画番号バッファ (インスタンス単位の入力 DRAWID)。StartInstanceLocation の位置から読まれる
+			// (ImGui が自分の頂点バッファに差し替えるので、毎フレームここで設定し直す)
+			D3D12_VERTEX_BUFFER_VIEW drawIdView = {};
+			drawIdView.BufferLocation = _drawIdBuffer->GetGPUVirtualAddress();
+			drawIdView.SizeInBytes    = MAX_DRAWS * sizeof(uint32_t);
+			drawIdView.StrideInBytes  = sizeof(uint32_t);
+			cmdList->IASetVertexBuffers(0, 1, &drawIdView);
+
 			return true;
 		}
 
@@ -403,145 +435,112 @@ namespace RHI
 			}
 
 			auto cmdList = _frameCommandList->GetCmdList();
+			DrawFrame& frame = _draws[_frameIndex];
 
-			// オブジェクトの定数を、このフレーム用の領域に書いてからその先頭アドレスを得る
+			// オブジェクトの定数を、このフレーム用の領域に書いてからその先頭を Root SRV に設定する
 			// (変わったオブジェクトだけ書く。GPU が前のフレームで読んでいる領域には触らない)
-			const D3D12_GPU_VIRTUAL_ADDRESS objectCbBase = buffer->WriteObjectConstants(_frameIndex);
+			// 以前は描画ごとに Root CBV でオブジェクトの位置を設定していた
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_OBJECT_DATA_SRV, buffer->WriteObjectConstants(_frameIndex));
 
-			// プロファイラー用の数
-			uint32_t drawCalls = 0;
-			uint64_t triangles = 0;
+			// 描画ごとのデータ (DrawData) と引数を用意する (描画リストが同じなら前回のものを使い回す)
+			const bool reused = updateDraws(frame, items, count);
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, frame.Gpu->GetGPUVirtualAddress());
 
-			// 1. ExecuteIndirect で描けるだけ描く
-			uint32_t first = 0;
-			_stats.IndirectDraw       = false;
-			_stats.IndirectArgsReused = false;
-			if (_useIndirectDraw)
+			ID3D12CommandSignature* signature = _currentPipeline ? _currentPipeline->GetIndirectDrawSignature() : nullptr;
+			const bool indirect = _useIndirectDraw && signature;
+			if (frame.Written > 0)
 			{
-				first = renderIndirect(items, count, objectCbBase, drawCalls, triangles);
+				if (indirect)
+				{
+					// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く。GPU は描画の引数を読むだけ (ルート引数は変えない)
+					// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
+					cmdList->ExecuteIndirect(signature, frame.Written, frame.Gpu->Get(), DRAW_ARGS_OFFSET, nullptr, 0);
+				}
+				else
+				{
+					// 1 個ずつ描く。描画ごとのルート引数の設定は無い (以前は描画ごとにルート定数とルート CBV を設定していた)
+					// BaseVertexLocation (第4引数) は SV_VertexID に加算されないので 0。頂点の開始位置は DrawData で渡す (2-9)
+					for (const auto& args : frame.Args)
+					{
+						cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, 1, args.StartIndexLocation, 0, args.StartInstanceLocation);
+					}
+				}
 			}
 
-			// 2. 残り (ExecuteIndirect を使わない / 使えない / 引数バッファに入りきらない分) を 1 個ずつ描く
-			// 同じ値を何度もセットしないように前回の値を覚えておく (ルート引数の変更は描画ごとのコストになる)
-			UINT     lastBaseVertex = UINT_MAX;
-			uint32_t lastObject     = RHI::INVALID_HANDLE_INDEX;
+			_stats.IndirectDraw       = indirect;
+			_stats.IndirectArgsReused = reused;
+			_stats.DrawCalls          = frame.Written;
+			_stats.Triangles          = frame.Triangles;
+		}
 
-			for (uint32_t i = first; i < count; ++i)
+		bool CommandContext::updateDraws(DrawFrame& frame, const RHI::DrawItem* items, uint32_t count)
+		{
+			// 描画リストが前回このフレームで書いたものと同じなら、書き込みもコピーも省く
+			// (止まっているシーンでは毎フレーム同じなので、UPLOAD ヒープにも触らず、コピーも走らない)
+			if (frame.Valid && frame.LastItems.size() == count &&
+				(count == 0 || std::memcmp(frame.LastItems.data(), items, sizeof(RHI::DrawItem) * count) == 0))
+			{
+				return true;
+			}
+
+			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
+			auto* commands = reinterpret_cast<IndirectDrawCommand*>(frame.Cpu + DRAW_ARGS_OFFSET);
+			frame.Args.clear();
+			uint32_t written   = 0;
+			uint64_t triangles = 0;
+			for (uint32_t i = 0; i < count; ++i)
 			{
 				const RHI::DrawItem& item = items[i];
 				if (!item.Object.IsValid() || item.IndexCount == 0) continue;
-
-				// 頂点オフセット (b0)
-				// シェーダーは g_MegaVB[g_BaseVertexIndex + SV_VertexID] で頂点を読む
-				if (item.BaseVertex != lastBaseVertex)
+				if (written >= MAX_DRAWS)
 				{
-					UINT baseVertexIndex = item.BaseVertex;
-					cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_BASE_VERTEX, 1, &baseVertexIndex, 0);
-					lastBaseVertex = baseVertexIndex;
+					if (!_warnedTooManyDraws)
+					{
+						Core::Logger::Log("[CommandContext] Too many draws. Draws over MAX_DRAWS are skipped.");
+						_warnedTooManyDraws = true;
+					}
+					break;
 				}
 
-				// オブジェクトの定数バッファ (b2) : Root CBV は 256 の倍数のアドレスが必須 (SCENE_CB_STRIDE 間隔)
-				if (item.Object.Index != lastObject)
-				{
-					cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_OBJECT_CBV,
-						objectCbBase + Buffer::SCENE_CB_STRIDE * item.Object.Index);
-					lastObject = item.Object.Index;
-				}
+				// 描画番号 written の描画 : シェーダーは DrawData[written] を読む
+				drawData[written] = { item.Object.Index, item.BaseVertex };
 
-				// インデックスバッファを使用
-				// BaseVertexLocation(第4引数)は SV_VertexID に加算されない。
-				// 頂点の開始位置はルート定数で渡しているので、ここは 0 にしておく (2-9)
-				cmdList->DrawIndexedInstanced(
-					item.IndexCount,
-					1,
-					item.FirstIndex,
-					0,
-					0
-				);
-				drawCalls++;
+				D3D12_DRAW_INDEXED_ARGUMENTS args;
+				args.IndexCountPerInstance = item.IndexCount;
+				args.InstanceCount         = 1;
+				args.StartIndexLocation    = item.FirstIndex;
+				args.BaseVertexLocation    = 0;         // SV_VertexID に加算されないので 0 (2-9)
+				args.StartInstanceLocation = written;   // = 描画番号 (DRAWID)
+				frame.Args.push_back(args);
+
+				++written;
 				triangles += item.IndexCount / 3;
 			}
-
-			_stats.DrawCalls = drawCalls;
-			_stats.Triangles = triangles;
-		}
-
-		uint32_t CommandContext::renderIndirect(const RHI::DrawItem* items, uint32_t count, D3D12_GPU_VIRTUAL_ADDRESS objectCbBase,
-		                                        uint32_t& outDrawCalls, uint64_t& outTriangles)
-		{
-			ID3D12CommandSignature* signature = _currentPipeline ? _currentPipeline->GetIndirectDrawSignature() : nullptr;
-			IndirectFrame& frame = _indirect[_frameIndex];
-			if (!signature || !frame.Cpu || count == 0)
+			// 引数はまとめて書く (UPLOAD ヒープは書き込み結合メモリなので、連続で書くのが速い)
+			if (written > 0)
 			{
-				return 0;
+				std::memcpy(commands, frame.Args.data(), sizeof(IndirectDrawCommand) * written);
 			}
 
-			using IndirectDrawCommand = DirectX12::CommandSignature::IndirectDrawCommand;
+			frame.LastItems.assign(items, items + count);
+			frame.Written   = written;
+			frame.Triangles = triangles;
+			frame.Valid     = true;
 
-			// 描画リストとオブジェクトの領域が前回このフレームで書いたものと同じなら、書き込みを省く
-			// (止まっているシーンでは毎フレーム同じなので、引数バッファ (CPU から遅い UPLOAD ヒープ) に触らずに済む)
-			const bool reusable = frame.Valid &&
-			                      frame.LastObjectCbBase == objectCbBase &&
-			                      frame.LastItems.size() == count &&
-			                      std::memcmp(frame.LastItems.data(), items, sizeof(RHI::DrawItem) * count) == 0;
-
-			if (!reusable)
+			// VRAM 側へコピーする (書き直した時だけ。使った分だけ)
+			//   バッファは毎フレーム COMMON に戻る (ExecuteCommandLists の完了で減衰する) ので、
+			//   コピーでは COMMON → COPY_DEST に暗黙で昇格する。コピー後はシェーダーと ExecuteIndirect が読む状態へ明示的に移す
+			if (written > 0)
 			{
-				auto* commands = reinterpret_cast<IndirectDrawCommand*>(frame.Cpu);
-				uint32_t written   = 0;
-				uint32_t consumed  = 0;
-				uint64_t triangles = 0;
-				for (; consumed < count && written < MAX_INDIRECT_DRAWS; ++consumed)
-				{
-					const RHI::DrawItem& item = items[consumed];
-					if (!item.Object.IsValid() || item.IndexCount == 0) continue;
-
-					// 一旦ローカルで組み立ててから 1 回で書く (UPLOAD ヒープは書き込み結合メモリなので、まとめて書くのが速い)
-					IndirectDrawCommand command;
-					command.BaseVertex                    = item.BaseVertex;
-					command.Padding                       = 0;
-					command.ObjectCbv                     = objectCbBase + Buffer::SCENE_CB_STRIDE * item.Object.Index;
-					command.Draw.IndexCountPerInstance    = item.IndexCount;
-					command.Draw.InstanceCount            = 1;
-					command.Draw.StartIndexLocation       = item.FirstIndex;
-					command.Draw.BaseVertexLocation       = 0;   // SV_VertexID に加算されないので 0 (2-9)
-					command.Draw.StartInstanceLocation    = 0;
-					commands[written++] = command;
-					triangles += item.IndexCount / 3;
-				}
-
-				frame.LastItems.assign(items, items + count);
-				frame.LastObjectCbBase = objectCbBase;
-				frame.Written          = written;
-				frame.Consumed         = consumed;
-				frame.Triangles        = triangles;
-				frame.Valid            = true;
-
-				// VRAM 側へコピーする (書き直した時だけ)
-				//   バッファは毎フレーム COMMON に戻る (ExecuteCommandLists の完了で減衰する) ので、
-				//   コピーでは COMMON → COPY_DEST に暗黙で昇格する。コピー後は ExecuteIndirect で読む状態へ明示的に移す
-				if (written > 0)
-				{
-					auto cmdList = _frameCommandList->GetCmdList();
-					cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0,
-						static_cast<UINT64>(written) * sizeof(IndirectDrawCommand));
-					const auto toIndirect = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-					cmdList->ResourceBarrier(1, &toIndirect);
-				}
+				auto cmdList = _frameCommandList->GetCmdList();
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * written);
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
+					sizeof(IndirectDrawCommand) * written);
+				const auto toRead = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+				cmdList->ResourceBarrier(1, &toRead);
 			}
-
-			// 引数バッファ (VRAM) に並べた分を 1 回の命令で描く (GPU が描画ごとにルート引数を設定してから描く)
-			// 書き直さなかったフレームは COMMON → INDIRECT_ARGUMENT に暗黙で昇格するのでバリアは不要
-			if (frame.Written > 0)
-			{
-				_frameCommandList->GetCmdList()->ExecuteIndirect(signature, frame.Written, frame.Gpu->Get(), 0, nullptr, 0);
-			}
-
-			_stats.IndirectDraw       = true;
-			_stats.IndirectArgsReused = reusable;
-			outDrawCalls += frame.Written;
-			outTriangles += frame.Triangles;
-			return frame.Consumed;
+			return false;
 		}
 
 		ID3D12GraphicsCommandList* CommandContext::GetFrameCommandList()const
@@ -655,11 +654,12 @@ namespace RHI
 			// 描画先 → スワップチェーン → コマンドリスト → アロケーター → フェンス → キュー の順に破棄
 			_currentBackBuffer = nullptr;
 			_gpuTimer.reset();
-			for (auto& frame : _indirect)
+			for (auto& frame : _draws)
 			{
 				if (frame.Staging) frame.Staging->Unmap();
-				frame = IndirectFrame();
+				frame = DrawFrame();
 			}
+			_drawIdBuffer.reset();
 			_currentPipeline = nullptr;
 			_depthBuffer.reset();
 			_dsvHeap.reset();

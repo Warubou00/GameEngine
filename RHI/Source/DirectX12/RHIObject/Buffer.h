@@ -90,16 +90,18 @@ namespace RHI
             // Root CBV のアドレスは 256byte の倍数でなければならない
             static constexpr uint64_t CONSTANT_BUFFER_ALIGNMENT = 256;
 
-            // Scene定数バッファの 1オブジェクト分の間隔 (ObjectConstants を 256 に切り上げたもの)
-            // 以前は 80byte 間隔で詰めていたため、2つ目以降のアドレスが不正だった (1-9)
-            static constexpr uint64_t SCENE_CB_STRIDE =
-                (sizeof(RHI::ObjectConstants) + CONSTANT_BUFFER_ALIGNMENT - 1) & ~(CONSTANT_BUFFER_ALIGNMENT - 1);
+            // Scene定数バッファの 1オブジェクト分の間隔 (シェーダーの struct ObjectData と同じ 80byte)
+            // シェーダーは StructuredBuffer<ObjectData> (Root SRV) として読むので、16byte の倍数に切り上げるだけでよい
+            // 以前は描画ごとに Root CBV で指していたため 256byte 間隔が必須だった (1-9)。
+            // 詰めたことで、1 フレームの領域に入るオブジェクトの数が約 3 倍になり、GPU が読むメモリも減る
+            static constexpr uint64_t OBJECT_DATA_STRIDE = (sizeof(RHI::ObjectConstants) + 15) & ~15ull;
+            static_assert(OBJECT_DATA_STRIDE == 80, "OBJECT_DATA_STRIDE must match HLSL struct ObjectData (80 bytes)");
 
             // Scene定数バッファの容量 (フレームの数で等分して使う)
             static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
             static constexpr uint64_t SCENE_CB_FRAME_SIZE  = SCENE_CB_SIZE / CommandContext::FRAME_COUNT;
             // 1 フレームで扱えるオブジェクトの最大数
-            static constexpr uint32_t MAX_OBJECTS          = static_cast<uint32_t>(SCENE_CB_FRAME_SIZE / SCENE_CB_STRIDE);
+            static constexpr uint32_t MAX_OBJECTS          = static_cast<uint32_t>(SCENE_CB_FRAME_SIZE / OBJECT_DATA_STRIDE);
 
         public:          /*---コンストラクタ・デストラクタ---*/
             Buffer();
@@ -152,7 +154,7 @@ namespace RHI
             /***********************************************************************************
              * @brief オブジェクトの定数をこのフレームの領域へ書き込み、その先頭アドレスを返す
              * @details 前回このフレームの領域に書いてから変わったオブジェクトだけ書く
-             *          オブジェクト i の Root CBV アドレス = 戻り値 + i * SCENE_CB_STRIDE
+             *          戻り値を Root SRV (StructuredBuffer<ObjectData>) に渡す。オブジェクト i は戻り値 + i * OBJECT_DATA_STRIDE
              ************************************************************************************/
             D3D12_GPU_VIRTUAL_ADDRESS WriteObjectConstants(uint32_t frameIndex);
 
