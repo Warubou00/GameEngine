@@ -1,14 +1,66 @@
-// ==================================================
+ï»¿// ==================================================
 // file : wavSoundLoader.cpp
 // name : Keigo Onari
 // data : 2025/09/05
-// ver  : v1.00
-// 
-// https://toolbox.aaa-plaza.net/archives/3559#:~:text=WAV%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%20%E3%81%AF%E3%80%81%20RIFF%20%E3%81%A8%E3%82%88%E3%81%B0%E3%82%8C%E3%82%8B%E5%9E%8B%E5%BC%8F%E3%81%AE%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%E3%81%AE%E4%B8%80%E7%A8%AE%E3%81%A7%E3%81%99%E3%80%82%20RIFF%E3%81%A8%E3%81%AFResource%20Interchange%20File,Format%E3%81%AE%E7%95%A5%E3%81%A7%E3%80%81%E7%94%BB%E5%83%8F%E3%82%84%E9%9F%B3%E5%A3%B0%E3%82%92%E6%A0%BC%E7%B4%8D%E3%81%99%E3%82%8B%E6%B1%8E%E7%94%A8%E3%81%AE%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%E5%BD%A2%E5%BC%8F%E3%81%A7%E3%81%99%E3%80%82%20RIFF%E3%81%AF%E3%80%81%20%E3%83%81%E3%83%A3%E3%83%B3%E3%82%AF%20%EF%BC%88%3D%20chunk%20%E3%80%81%E3%82%82%E3%81%A8%E3%81%AF%E3%80%8E%E5%A4%A7%E3%81%8D%E3%81%AA%E5%A1%8A%E3%80%8F%E3%82%92%E6%84%8F%E5%91%B3%E3%81%99%E3%82%8B%E8%8B%B1%E5%8D%98%E8%AA%9E%EF%BC%89%E3%81%A8%E5%91%BC%E3%81%B0%E3%82%8C%E3%82%8B%E3%83%87%E3%83%BC%E3%82%BF%E3%81%AE%E5%8D%98%E4%BD%8D%E3%81%8C%E4%B8%A6%E3%82%93%E3%81%A0%E6%A7%8B%E9%80%A0%E3%82%92%E3%81%97%E3%81%A6%E3%81%84%E3%81%BE%E3%81%99%E3%80%82%20%E3%83%95%E3%82%A1%E3%82%A4%E3%83%AB%E5%85%A8%E4%BD%93%E3%81%A8%E3%81%97%E3%81%A6%E3%81%AF%E4%BB%A5%E4%B8%8B%E3%81%AE%E3%82%88%E3%81%86%E3%81%AA%E3%82%A4%E3%83%A1%E3%83%BC%E3%82%B8%E3%81%A7%E3%81%99%E3%80%82
+// ver  : v1.10
+//
+// WAV (RIFF) ã®æ§‹é€  : "RIFF" <å…¨ä½“ã‚µã‚¤ã‚º> "WAVE" ã®å¾Œã«ã€<ID 4byte> <ã‚µã‚¤ã‚º 4byte> <ä¸­èº«> ã®ãƒãƒ£ãƒ³ã‚¯ãŒä¸¦ã¶
+//   - ãƒãƒ£ãƒ³ã‚¯ã®ã‚µã‚¤ã‚ºãŒå¥‡æ•°ã®æ™‚ã¯ã€å¾Œã‚ã« 1 ãƒã‚¤ãƒˆã®è©°ã‚ç‰©ãŒå…¥ã‚‹ (ã©ã®ãƒãƒ£ãƒ³ã‚¯ã§ã‚‚)
+//   - å¿…è¦ãªã®ã¯ "fmt " (å½¢å¼) ã¨ "data" (PCM)ã€‚ãã‚Œä»¥å¤– (LIST / JUNK / bext ãªã©) ã¯èª­ã¿é£›ã°ã™
+//
+// ä»¥å‰ã®å®Ÿè£…ã‹ã‚‰ã®ä¸»ãªä¿®æ­£ (è©³ã—ãã¯ ClaudLog/Audio_Review_2026-11-02.txt)
+//   - è©°ã‚ç‰©ã®å‡¦ç†ãŒ data ãƒãƒ£ãƒ³ã‚¯ã ã‘ã§ã€å¥‡æ•°ã‚µã‚¤ã‚ºã® LIST ãªã©ã®å¾Œã‚ã§ãƒãƒ£ãƒ³ã‚¯ã®ä½ç½®ãŒãšã‚Œã¦ã„ãŸ
+//   - fmt ãƒãƒ£ãƒ³ã‚¯ãŒ 16 ãƒã‚¤ãƒˆ (ã‚ˆãã‚ã‚‹ PCM) ã®æ™‚ã€WAVEFORMATEX::cbSize ãŒåˆæœŸåŒ–ã•ã‚Œãšã«æ®‹ã£ã¦ã„ãŸ
+//   - data ã®ã‚µã‚¤ã‚ºã‚’ä¿¡ã˜ã¦ç¢ºä¿ã—ã¦ã„ãŸã®ã§ã€å£Šã‚ŒãŸ / é€”ä¸­ã§åˆ‡ã‚ŒãŸãƒ•ã‚¡ã‚¤ãƒ«ã§å·¨å¤§ãªç¢ºä¿ã‚’ã—ã¦ã„ãŸ
+//   - PCM ãŒ nBlockAlign ã®å€æ•°ã§ãªã„ã¨ XAudio2 ãŒå†ç”Ÿã‚’æ‹’å¦ã™ã‚‹ã®ã«ã€ç«¯æ•°ã‚’åˆ‡ã£ã¦ã„ãªã‹ã£ãŸ
+//   - std::string ã®ãƒ‘ã‚¹ (ANSI) ã§ã€æ—¥æœ¬èªã‚’å«ã‚€ãƒ‘ã‚¹ã‚’é–‹ã‘ãªã‹ã£ãŸ
 // ==================================================
-#include <iostream>
-#include <fstream>
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <mmreg.h>
+#include <cstring>
+#include <string>
 #include "wavSoundLoader.h"
+#include "../../Core/Source/Log/logger.h"
+
+namespace
+{
+	// XAudio2 ã® 1 ãƒãƒƒãƒ•ã‚¡ã®ä¸Šé™ (XAUDIO2_MAX_BUFFER_BYTES = 0x80000000) ã‚ˆã‚Šå°ã•ã„ç‰©ã ã‘èª­ã‚€
+	constexpr uint64_t MAX_FILE_BYTES = 0x7FFFFFFFull;
+
+	bool isChunk(const uint8_t* id, const char* name)
+	{
+		return std::memcmp(id, name, 4) == 0;
+	}
+
+	uint32_t readU32(const uint8_t* p)
+	{
+		uint32_t value;
+		std::memcpy(&value, p, sizeof(value));
+		return value;
+	}
+
+	void logError(const wchar_t* message, const std::wstring& filePath)
+	{
+		std::wstring text = L"[WavLoader] ";
+		text += message;
+		text += L" : ";
+		text += filePath;
+		Core::Logger::Log(text.c_str());
+	}
+
+	// WAVE_FORMAT_EXTENSIBLE ã® SubFormat ãŒ PCM / IEEE float ã‹
+	// (KSDATAFORMAT_SUBTYPE_xxx ã¯ Data1 ãŒå½¢å¼ã®ç•ªå·ã§ã€æ®‹ã‚Šã¯å…±é€šã® {xxxxxxxx-0000-0010-8000-00AA00389B71})
+	bool isSupportedSubFormat(const GUID& guid, WORD* outTag)
+	{
+		static const uint8_t baseData4[8] = { 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71 };
+		if (guid.Data2 != 0x0000 || guid.Data3 != 0x0010 || std::memcmp(guid.Data4, baseData4, 8) != 0) return false;
+		if (guid.Data1 != WAVE_FORMAT_PCM && guid.Data1 != WAVE_FORMAT_IEEE_FLOAT) return false;
+		*outTag = static_cast<WORD>(guid.Data1);
+		return true;
+	}
+}
 
 namespace Library
 {
@@ -17,225 +69,126 @@ namespace Library
 		namespace Loader
 		{
 			/// <summary>
-			/// ƒ[ƒh
+			/// ãƒ­ãƒ¼ãƒ‰
+			/// ä»¥å‰ã¯ Load(const std::string&) ãŒã€Œç„¡åŠ¹ãªé–¢æ•°ã§ã™ã€ã¨å‡ºã—ã¦ false ã‚’è¿”ã™ã ã‘ã§ã€
+			/// å®Ÿéš›ã®èª­ã¿è¾¼ã¿ã¯ Load(path, WAVEFORMATEX*) ãŒ std::vector<short> ã‚’è¿”ã—ã¦ã„ãŸ
 			/// </summary>
-			/// <param name="filePath"></param>
-			/// <returns></returns>
-			bool WavLoader::Load(const std::string& filePath)
+			bool WavLoader::Load(const std::wstring& filePath, SoundData* outData)
 			{
-				std::cerr << "–³Œø‚ÈŠÖ”‚Å‚·" << std::endl;
-				return false;
-			}
+				if (!outData) return false;
 
-			std::vector<short> WavLoader::Load(const std::string& filePath, WAVEFORMATEX* wavFormat)
-			{
-#if false
-				std::ifstream file(filePath, std::ios::binary);
-				if (!file) {
-					std::cerr << "ƒtƒ@ƒCƒ‹‚ğŠJ‚¯‚Ü‚¹‚ñ‚Å‚µ‚½: " << filePath << std::endl;
+				HANDLE file = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+					OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+				if (file == INVALID_HANDLE_VALUE)
+				{
+					logError(L"Failed to open file", filePath);
 					return false;
 				}
 
-				// ƒwƒbƒ_[“Ç‚İ‚İ
-				file.read(reinterpret_cast<char*>(&_riffHeader), sizeof(RIFFHeader));
-
-				while (!file.eof())
+				LARGE_INTEGER size{};
+				if (!GetFileSizeEx(file, &size) || size.QuadPart < 12 || static_cast<uint64_t>(size.QuadPart) > MAX_FILE_BYTES)
 				{
-					char* chunk = new char[_CHUNK_ID_SIZE] {};
-					file.read(reinterpret_cast<char*>(chunk), sizeof(char) * _CHUNK_ID_SIZE);
-
-					if (checkChunk(chunk, _CHUNK_JUNK.c_str()))
-					{// ƒf[ƒ^ƒTƒCƒY•â³ƒ`ƒƒƒ“ƒN
-						int dummyByteSize;
-						file.read(reinterpret_cast<char*>(&dummyByteSize), sizeof(int));
-						char* buffer = new char[dummyByteSize];
-						file.read(reinterpret_cast<char*>(buffer), sizeof(char) * dummyByteSize);
-					}
-					else if (checkChunk(chunk, _CHUNK_FMT.c_str()))
-					{// ƒtƒH[ƒ}ƒbƒgƒ`ƒƒƒ“ƒN
-#if false
-						// “Æ©ƒtƒH[ƒ}ƒbƒg“Ç‚İ‚İ
-						file.read(reinterpret_cast<char*>(&_formatChunk), sizeof(FormatChunk));
-						if (_formatChunk.fmtChunkSize != _LINEAR_PCM_FMT_CHUNK_SIZE)
-						{
-							std::cerr << "”ñˆ³kPCM‚Å‚È‚¢‚½‚ß“Ç‚İ‚İ‘Î‰‚µ‚Ä‚¢‚Ü‚¹‚ñ" << std::endl;
-							return false;
-						}
-#else
-						file.read(reinterpret_cast<char*>(&_format), sizeof(WAVEFORMATEX));
-
-						if (_format.wFormatTag != _LINEAR_PCM_FMT_CHUNK_SIZE)
-						{
-							std::cerr << "”ñˆ³kPCM‚Å‚È‚¢‚½‚ß“Ç‚İ‚İ‘Î‰‚µ‚Ä‚¢‚Ü‚¹‚ñ" << std::endl;
-							return false;
-						}
-#endif
-					}
-					else if (checkChunk(chunk, _CHUNK_DATA.c_str()))
-					{// ƒf[ƒ^ƒ`ƒƒƒ“ƒN
-
-						file.read(reinterpret_cast<char*>(&_dataChunk), sizeof(DataChunk));
-
-						// PCMƒf[ƒ^‚ğ“Ç‚İ‚İ
-						std::vector<short> data;
-						data.resize(_dataChunk.dataChunkSize / sizeof(short));
-						file.read(reinterpret_cast<char*>(data.data()), _dataChunk.dataChunkSize);
-
-						if (!file) {
-							std::cerr << "PCMƒf[ƒ^‚Ì“Ç‚İ‚İ‚É¸”s‚µ‚Ü‚µ‚½B" << std::endl;
-							_audioData.clear();
-							return false;
-						}
-
-						// •¡”‚ ‚Á‚½ê‡‚É––”ö‚É’Ç‰Á‚µ‚Ä‚¢‚­
-						_audioData.insert(_audioData.end(), data.begin(), data.end());
-					}
-
-					delete[] chunk;
+					CloseHandle(file);
+					logError(L"Invalid file size (12 bytes to 2 GB)", filePath);
+					return false;
 				}
 
+				// ãƒ•ã‚¡ã‚¤ãƒ«å…¨ä½“ã‚’ 1 å›ã§èª­ã‚€ (PCM ã¯ã“ã®é…åˆ—ã‚’æŒ‡ã—ãŸã¾ã¾å†ç”Ÿã™ã‚‹ã®ã§ã€åˆ¥ã®é…åˆ—ã¸ã‚³ãƒ”ãƒ¼ã—ãªã„)
+				outData->bytes.resize(static_cast<size_t>(size.QuadPart));
+				DWORD read = 0;
+				const BOOL ok = ReadFile(file, outData->bytes.data(), static_cast<DWORD>(size.QuadPart), &read, nullptr);
+				CloseHandle(file);
+				if (!ok || read != static_cast<DWORD>(size.QuadPart))
+				{
+					outData->bytes.clear();
+					logError(L"Failed to read file", filePath);
+					return false;
+				}
+
+				if (!Parse(outData))
+				{
+					outData->bytes.clear();
+					outData->bytes.shrink_to_fit();
+					logError(L"Unsupported or broken WAV file", filePath);
+					return false;
+				}
 				return true;
-#else
-				std::vector<short>audioData(0);
-
-				std::ifstream file(filePath, std::ios::binary);
-				if (!file) {
-					std::cerr << "ƒtƒ@ƒCƒ‹‚ğŠJ‚¯‚Ü‚¹‚ñ‚Å‚µ‚½: " << filePath << std::endl;
-					return std::vector<short>(0);
-				}
-
-				// 1. RIFFƒwƒbƒ_[“Ç‚İ‚İ
-				RIFFHeader riffHeader;
-				if (!file.read(reinterpret_cast<char*>(&riffHeader), sizeof(RIFFHeader))) return audioData;
-
-				// "RIFF" ‚Æ "WAVE" ‚Ìƒ`ƒFƒbƒN‚ğ“ü‚ê‚½‚Ù‚¤‚ªˆÀ‘S‚Å‚·
-				if (std::strncmp(riffHeader.chunkID, "RIFF", 4) != 0 ||
-					std::strncmp(riffHeader.format, "WAVE", 4) != 0) {
-					std::cerr << "—LŒø‚ÈWAVƒtƒ@ƒCƒ‹‚Å‚Í‚ ‚è‚Ü‚¹‚ñB" << std::endl;
-					return audioData;
-				}
-
-				// 2. ƒ`ƒƒƒ“ƒN‰ğÍƒ‹[ƒv
-				ChunkHeader chunkHeader;
-				while (file.read(reinterpret_cast<char*>(&chunkHeader), sizeof(ChunkHeader)))
-				{
-					// ƒ`ƒƒƒ“ƒNID‚É‰‚¶‚½ˆ—
-					if (std::strncmp(chunkHeader.id, "fmt ", 4) == 0)
-					{
-						// --- fmt ƒ`ƒƒƒ“ƒN ---
-						// –{—ˆ‚ÌWAVEFORMATEXƒTƒCƒY‚æ‚èƒ`ƒƒƒ“ƒNƒTƒCƒY‚ª¬‚³‚¢ê‡‚ÌƒK[ƒh
-						unsigned int readSize = sizeof(WAVEFORMATEX);
-						if (chunkHeader.size < readSize) readSize = chunkHeader.size;
-
-						if (!file.read(reinterpret_cast<char*>(wavFormat), readSize)) return audioData;
-
-						// PCM(1) ‚©‚Â IEEE Float(3) ˆÈŠO‚Í‘Î‰‚µ‚È‚¢‚È‚Ç‚Ìƒ`ƒFƒbƒN
-						if (wavFormat->wFormatTag != WAVE_FORMAT_PCM) { // 1‚Æ”äŠr
-							std::cerr << "”ñˆ³kPCMˆÈŠO‚Í‘Î‰‚µ‚Ä‚¢‚Ü‚¹‚ñ(Tag: " << wavFormat->wFormatTag << ")" << std::endl;
-							return audioData;
-						}
-
-						// ƒ`ƒƒƒ“ƒNƒTƒCƒY‚ª\‘¢‘Ì‚æ‚è‘å‚«‚©‚Á‚½ê‡iŠg’£—Ìˆæ‚È‚ÇjAc‚è‚ğƒXƒLƒbƒv
-						if (chunkHeader.size > readSize) {
-							file.seekg(chunkHeader.size - readSize, std::ios::cur);
-						}
-					}
-					else if (std::strncmp(chunkHeader.id, "data", 4) == 0)
-					{
-						// --- data ƒ`ƒƒƒ“ƒN ---
-						// ƒf[ƒ^ƒTƒCƒYæ“¾
-						unsigned int dataBytes = chunkHeader.size;
-
-						// Œ»İ‚Ìƒoƒbƒtƒ@––”ö‚É’Ç‰Á‚·‚éê‡‚ÌƒIƒtƒZƒbƒg
-						size_t currentSize = audioData.size();
-						size_t addCount = dataBytes / sizeof(short);
-
-						// ƒƒ‚ƒŠ‚ğˆê‰ñ‚ÅŠm•ÛiÅ“K‰»j
-						audioData.resize(currentSize + addCount);
-
-						// ’¼ÚƒxƒNƒ^[‚Ìƒƒ‚ƒŠ—Ìˆæ‚É‘‚«‚ŞiƒRƒs[‰ñ”ğj
-						file.read(reinterpret_cast<char*>(audioData.data() + currentSize), dataBytes);
-
-						if (!file) {
-							std::cerr << "PCMƒf[ƒ^‚Ì“Ç‚İ‚İ‚É¸”s‚µ‚Ü‚µ‚½B" << std::endl;
-							return std::vector<short>(0);
-						}
-
-						// “Ç‚İ‚İƒoƒCƒg”‚ªŠï”‚Ìê‡‚ÌƒpƒfƒBƒ“ƒO‘Î‰iWAVd—lj
-						if (dataBytes % 2 != 0) {
-							file.seekg(1, std::ios::cur);
-						}
-					}
-					else
-					{
-						// --- –¢’m‚Ìƒ`ƒƒƒ“ƒN (JUNK, LIST“™) ---
-						// “Ç‚İ‚Ü‚¸‚ÉƒTƒCƒY•ªƒXƒLƒbƒv‚·‚éi–³ŒÀƒ‹[ƒv‰ñ”ğ & ‚‘¬‰»j
-						file.seekg(chunkHeader.size, std::ios::cur);
-					}
-				}
-
-				return audioData;
-#endif
 			}
 
-			///// <summary>
-			///// ƒtƒH[ƒ}ƒbƒg‚Ìæ“¾
-			///// </summary>
-			///// <returns></returns>
-			//const WAVEFORMATEX& WavLoader::GetFormat()const
-			//{
-			//	return _format;
-			//}
+			bool WavLoader::Parse(SoundData* data)
+			{
+				const uint8_t* bytes    = data->bytes.data();
+				const uint64_t fileSize = data->bytes.size();
 
-			///// <summary>
-			///// PCM‚Ìæ“¾
-			///// </summary>
-			///// <returns></returns>
-			//const std::vector<short>& WavLoader::GetAudioData() const
-			//{
-			//	return _audioData;
-			//}
+				// 1. RIFF ãƒ˜ãƒƒãƒ€ãƒ¼ ("RIFF" <ã‚µã‚¤ã‚º> "WAVE")
+				if (fileSize < 12 || !isChunk(bytes, "RIFF") || !isChunk(bytes + 8, "WAVE")) return false;
+				// RIFF ã®ã‚µã‚¤ã‚ºãŒãƒ•ã‚¡ã‚¤ãƒ«ã‚ˆã‚Šå¤§ãã„ (é€”ä¸­ã§åˆ‡ã‚ŒãŸ) æ™‚ã¯ãƒ•ã‚¡ã‚¤ãƒ«ã®çµ‚ã‚ã‚Šã¾ã§
+				const uint64_t end = (std::min)(fileSize, static_cast<uint64_t>(readU32(bytes + 4)) + 8);
 
-			///// <summary>
-			///// ƒTƒ“ƒvƒ‹ƒŒ[ƒg‚Ìæ“¾
-			///// </summary>
-			///// <returns></returns>
-			//unsigned int WavLoader::GetSampleRate() const
-			//{
-			//	return _format.nSamplesPerSec;
-			//}
+				// 2. ãƒãƒ£ãƒ³ã‚¯ã‚’é †ã«è¦‹ã‚‹
+				bool     hasFormat = false;
+				bool     hasData   = false;
+				uint64_t pos       = 12;
+				while (pos + 8 <= end)
+				{
+					const uint8_t* id        = bytes + pos;
+					const uint64_t chunkSize = readU32(bytes + pos + 4);
+					const uint64_t body      = pos + 8;
+					const uint64_t available = end - body;
 
-			///// <summary>
-			///// ƒ`ƒƒƒ“ƒlƒ‹”‚Ìæ“¾
-			///// </summary>
-			///// <returns></returns>
-			//unsigned short WavLoader::GetNumChannels() const
-			//{
-			//	return _format.nChannels;
-			//}
+					if (isChunk(id, "fmt "))
+					{
+						// 16 : WAVEFORMAT + wBitsPerSample (PCM)ã€18 : + cbSizeã€40 : WAVEFORMATEXTENSIBLE
+						if (chunkSize < 16 || chunkSize > available) return false;
 
-			///// <summary>
-			///// ƒTƒ“ƒvƒ‹’PˆÊ‚Ìƒrƒbƒg”
-			///// </summary>
-			///// <returns></returns>
-			//unsigned short WavLoader::GetBitsPerSample() const
-			//{
-			//	return _format.wBitsPerSample;
-			//}
+						// ä»¥å‰ã¯ sizeof(WAVEFORMATEX) = 18 ãƒã‚¤ãƒˆã‚’èª­ã‚‚ã†ã¨ã—ã¦ã€16 ãƒã‚¤ãƒˆã®æ™‚ã« cbSize ãŒä¸å®šã®ã¾ã¾ã ã£ãŸ
+						const size_t formatSize = static_cast<size_t>((std::max<uint64_t>)(chunkSize, sizeof(WAVEFORMATEX)));
+						data->format.assign(formatSize, 0);
+						std::memcpy(data->format.data(), bytes + body, static_cast<size_t>(chunkSize));
 
-			///// <summary>
-			///// ƒ`ƒƒƒ“ƒN‚Ìƒ`ƒFƒbƒN
-			///// </summary>
-			///// <param name="chunk"></param>
-			///// <param name="checkChunk"></param>
-			///// <returns></returns>
-			//bool WavLoader::checkChunk(const char* chunk, const char* checkChunk)
-			//{
-			//	return chunk[0] == checkChunk[0] &&
-			//		chunk[1] == checkChunk[1] &&
-			//		chunk[2] == checkChunk[2] &&
-			//		chunk[3] == checkChunk[3];
-			//}
+						auto* format = reinterpret_cast<WAVEFORMATEX*>(data->format.data());
+						// cbSize ã¯ã€Œå¾Œã‚ã«ç¶šãæ‹¡å¼µéƒ¨åˆ†ã®ãƒã‚¤ãƒˆæ•°ã€ã€‚ãƒãƒ£ãƒ³ã‚¯ã«å…¥ã‚Šãã‚‰ãªã„å€¤ãªã‚‰åˆ‡ã‚Šè©°ã‚ã‚‹
+						const size_t extraMax = formatSize - sizeof(WAVEFORMATEX);
+						if (chunkSize < sizeof(WAVEFORMATEX)) format->cbSize = 0;
+						else if (format->cbSize > extraMax)  format->cbSize = static_cast<WORD>(extraMax);
+
+						WORD tag = format->wFormatTag;
+						if (tag == WAVE_FORMAT_EXTENSIBLE)
+						{
+							// ä»¥å‰ã¯ WAVE_FORMAT_PCM ä»¥å¤–ã‚’å…¨éƒ¨æ‹’å¦ã—ã¦ã„ãŸã®ã§ã€24bit ãªã©ã® wav ãŒèª­ã‚ãªã‹ã£ãŸ
+							if (format->cbSize < sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)) return false;
+							const auto* extensible = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(format);
+							if (!isSupportedSubFormat(extensible->SubFormat, &tag)) return false;
+						}
+						if (tag != WAVE_FORMAT_PCM && tag != WAVE_FORMAT_IEEE_FLOAT) return false;
+						if (format->nChannels == 0 || format->nSamplesPerSec == 0 || format->nBlockAlign == 0) return false;
+						hasFormat = true;
+					}
+					else if (isChunk(id, "data"))
+					{
+						if (!hasData)
+						{
+							// ã‚µã‚¤ã‚ºãŒãƒ•ã‚¡ã‚¤ãƒ«ã®æ®‹ã‚Šã‚ˆã‚Šå¤§ãã„ (é€”ä¸­ã§åˆ‡ã‚ŒãŸ / 0xFFFFFFFF ã§æ›¸ã‹ã‚ŒãŸ) æ™‚ã¯æ®‹ã‚Šã®åˆ†ã ã‘ä½¿ã†
+							// ä»¥å‰ã¯ã‚µã‚¤ã‚ºã‚’ãã®ã¾ã¾ä¿¡ã˜ã¦ç¢ºä¿ã—ã€èª­ã¿è¾¼ã¿ã«å¤±æ•—ã—ã¦ã„ãŸ
+							data->dataOffset = static_cast<uint32_t>(body);
+							data->dataSize   = static_cast<uint32_t>((std::min)(chunkSize, available));
+							hasData = true;
+						}
+						// data ãƒãƒ£ãƒ³ã‚¯ã¯ 1 ã¤ã®æ±ºã¾ã‚Šã€‚2 ã¤ç›®ä»¥é™ã¯ä½¿ã‚ãªã„ (ä»¥å‰ã¯å¾Œã‚ã«è¶³ã—ã¦ã„ãŸ)
+					}
+					// ãã‚Œä»¥å¤–ã®ãƒãƒ£ãƒ³ã‚¯ã¯èª­ã¿é£›ã°ã™
+
+					// æ¬¡ã®ãƒãƒ£ãƒ³ã‚¯ã¸ (å¥‡æ•°ã‚µã‚¤ã‚ºã®å¾Œã‚ã«ã¯ 1 ãƒã‚¤ãƒˆã®è©°ã‚ç‰©ãŒã‚ã‚‹ã€‚ä»¥å‰ã¯ data ãƒãƒ£ãƒ³ã‚¯ã®æ™‚ã—ã‹é£›ã°ã—ã¦ã„ãªã‹ã£ãŸ)
+					pos = body + chunkSize + (chunkSize & 1);
+				}
+
+				if (!hasFormat || !hasData) return false;
+
+				// 3. PCM ã‚’ 1 ãƒ•ãƒ¬ãƒ¼ãƒ  (å…¨ãƒãƒ£ãƒ³ãƒãƒ«åˆ†) ã®å€æ•°ã«åˆ‡ã‚Šè©°ã‚ã‚‹ (ç«¯æ•°ãŒã‚ã‚‹ã¨ XAudio2 ãŒ SubmitSourceBuffer ã‚’æ‹’å¦ã™ã‚‹)
+				const auto* format = reinterpret_cast<const WAVEFORMATEX*>(data->format.data());
+				data->dataSize -= data->dataSize % format->nBlockAlign;
+				return data->dataSize > 0;
+			}
 		}
 	}
 }

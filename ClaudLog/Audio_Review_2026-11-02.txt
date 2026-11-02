@@ -1,0 +1,110 @@
+﻿====================================================================
+ Audio プロジェクト (wav 読み込み + XAudio2 再生) のレビュー
+ 日付   : 2026-11-02
+ 対象   : Audio/Source/XAudio.h / XAudio.cpp / wavSoundLoader.h / wavSoundLoader.cpp / soundLoaderBase.h
+          (使う側 : Engine/main.cpp)
+ 結果   : 下の指摘はすべて直した (A-1 〜 E-3)。直した後のテストは最後の「■ 確認」
+====================================================================
+
+重さの目安 : [重大] 音が鳴らない・壊れる・リークする / [中] 条件によって壊れる / [軽] 品質・保守性
+
+■ A. リソースの解放
+  A-1 [重大] IXAudio2 とマスターボイスを一度も解放していない
+      XAudio::~XAudio() が空で、Release() / DestroyVoice() を呼ぶ所が無い。
+      IXAudio2 を Release しないと XAudio2 のスレッドと音声デバイスがプロセスの終わりまで残る。
+      → Shutdown() を追加 (全ソースボイス → マスターボイス → IXAudio2 → PCM の順)。デストラクタからも呼ぶ。
+  A-2 [重大] CoUninitialize の対応がずれている
+      Initialize は CoInitializeEx の結果を (void) で捨て、失敗した時にも CoUninitialize していた。
+      C# のメインスレッドは [STAThread] なので MULTITHREADED では RPC_E_CHANGED_MODE が返る (= 初期化していない)。
+      この状態で CoUninitialize すると、C# (WinForms) が初期化した COM を 1 回分終わらせてしまう。
+      また CreateSourceVoiceWAV の失敗時にも CoUninitialize していた (XAudio2 を使っている途中で COM を終了)。
+      → 成功 (S_OK / S_FALSE) した時だけ覚えておき、Shutdown で 1 回だけ CoUninitialize する。
+  A-3 [中] Initialize が CreateMasteringVoice に失敗した時、IXAudio2 を解放せずに残していた
+      (音声デバイスが無い PC で起きる)。→ Release して nullptr に戻す。
+  A-4 [軽] 無効にした #if false の古い読み込みコードに new char[] の解放漏れがあった (動いてはいない)。→ 削除。
+
+■ B. ボイスの寿命
+  B-1 [重大] ソースボイスが指す PCM と、ボイスの寿命が結び付いていない
+      CreateAudioBuffers は data.pcmData (std::vector<short>) の中を指す XAUDIO2_BUFFER を返すだけで、
+      PCM の持ち主 (Engine/main.cpp のローカル変数) が先に無くなると、XAudio2 のスレッドが解放済みのメモリを読む。
+      ボイスを DestroyVoice する所も無かった。
+      → サウンド (PCM) とボイスを XAudio が持ち、ハンドル (番号 + 世代) で渡す。
+        サウンドを破棄する時は、それを使うボイスを先に DestroyVoice する (DestroyVoice は XAudio2 のスレッドが
+        使い終わるまで待つので、その後に PCM を解放してよい)。古いハンドルは世代が違うので無視される。
+  B-2 [中] 再生の終わりで Stop するだけで、もう一度鳴らす手段が無かった
+      → Play (最初から。再生中でも Stop + Flush してから入れ直す) / Stop / SetLoop / SetVolume / GetPlaying を追加。
+        Stop / Flush は XAudio2 のスレッドで後から反映されるので、今鳴っているバッファがキューに残った時は
+        ボイスを作り直す (残ったまま入れると前の続きの後に鳴る)。テストでは再生中の Play で 1.0 秒の音が
+        0.997 秒で終わり (前の続きは残っていない)、50 回続けて Play しても同じだった。
+
+■ C. wav のチャンク解析 (wavSoundLoader.cpp)
+  C-1 [重大] 奇数サイズのチャンクの詰め物 (1 バイト) を data チャンクでしか飛ばしていない
+      RIFF ではどのチャンクも奇数サイズなら後ろに 1 バイト入る。LIST / bext などが奇数の時に次のチャンクの位置が
+      1 バイトずれ、fmt / data を見つけられない (DAW の書き出した wav でよくある)。
+      → 全チャンクで pos = 本体 + サイズ + (サイズ & 1)。テスト : fmt の前に 9 バイトの LIST がある wav を読めた。
+  C-2 [重大] fmt チャンクが 16 バイト (一般的な PCM) の時、WAVEFORMATEX::cbSize が不定
+      sizeof(WAVEFORMATEX) = 18 バイトを読もうとして、16 バイトに切り詰めて読むので cbSize は呼び出し側の値のまま。
+      今は呼び出し側が {} で 0 にしていたので偶然動いていた。→ 16 バイトの時は 0 にし、大きすぎる値は切り詰める。
+  C-3 [中] WAVE_FORMAT_EXTENSIBLE (0xFFFE) と IEEE float (3) を拒否していた
+      24bit / マルチチャンネルの wav は EXTENSIBLE で書かれることが多い。→ SubFormat が PCM / float なら読む。
+      XAudio2 にはバイト列をそのまま (WAVEFORMATEXTENSIBLE のまま) 渡す。
+  C-4 [中] data のサイズを信じて resize していた
+      途中で切れた / 0xFFFFFFFF で書かれた (ストリーミング録音) wav で巨大な確保をして失敗する。
+      → ファイルの残りの分だけ使う。テスト : サイズが 0x7FFFFFF0 と書かれた 0.5 秒の wav を 0.5 秒として読めた。
+  C-5 [中] PCM が nBlockAlign (1 フレーム = 全チャンネル分) の倍数でないと SubmitSourceBuffer が失敗する
+      → 端数を切り詰める (テストの truncated.wav は末尾に 3 バイトの端数)。
+  C-6 [中] 16bit 前提 (std::vector<short>)
+      8bit / 24bit でも short の配列に入れ、奇数バイトの最後が落ちる。CreateAudioBuffers も bytesPerSample を
+      sizeof(short) に決め打ちし、引数の nBlockAlign を使っていなかった (24bit ではフレームの途中で区切る)。
+      → PCM はバイト列のまま扱い、区切りは nBlockAlign で考える (そもそも区切らなくした : E-1)。
+  C-7 [中] fmt が無い / data が fmt より前にある / 2 つ目の data
+      fmt が無くても data を返し、不定の形式で CreateSourceVoice に渡していた。
+      2 つ目の data を後ろに足していた (RIFF の決まりでは data は 1 つ)。→ fmt と data の両方が必要。data は最初の 1 つ。
+  C-8 [軽] パスが std::string (ANSI) で、日本語を含むパスが開けない (x64 の構成は MultiByte だった)
+      → std::wstring + CreateFileW。テスト : 「テスト音.wav」を読めた。C# からは LPWStr で渡す (Renderer_LoadModel と同じ)。
+  C-9 [軽] インクルードガードの綴り違い (#ifndef _WAV_SOUND_LOADER_H_ / #define _WAV_SOUND_LAODER_H_)
+      #pragma once があるので実害は無かった。→ 揃えた。
+  C-10 [軽] SoundLoaderBase に仮想デストラクタが無く、WavLoader は private 継承 (class の既定) だった。
+      Load(const std::string&) は「無効な関数です」を出して false を返すだけ。
+      → 仮想デストラクタ + public 継承。Load(path, SoundData*) を親の純粋仮想関数にした (ogg などを足せる形)。
+  C-11 [軽] RIFF / WAVE の確認を std::strncmp でしていた (<cstring> を直接インクルードしていなかった)。→ memcmp。
+
+■ D. エラー処理
+  D-1 [中] 失敗の理由が std::cout / std::cerr に出るだけ
+      C# から使うとコンソールに出ない場合がある / 文字コードが CP932 で化ける。
+      → Core.dll の Logger に出す (Renderer_SetLogCallback で C# のコンソールに流れる)。メッセージは英語
+        (C# の LPStr の delegate で受けるため。パスは wchar_t のログで出す)。
+  D-2 [中] Engine/main.cpp は CreateSourceVoiceWAV が nullptr を返しても g_sourceVoice->Start() していた (クラッシュ)。
+      → C ABI では無効なハンドルを受けても何もしない / false を返す。
+  D-3 [軽] 音声デバイスが無い環境で何もできなかった
+      → Initialize が失敗しても読み込みはでき、ボイスの作成が INVALID_HANDLE を返すだけ (C# 側は鳴らないだけ)。
+        C# は Audio.dll 自体が無い時も描画はそのまま動く (Engine が DllNotFoundException を受ける)。
+
+■ E. スレッド / 性能
+  E-1 [重大] 1024 フレームごとの小さなバッファを、OnBufferEnd (XAudio2 のスレッド) で 1 つずつ渡していた
+      キューに常に 1 つしか無いので、コールバックが少しでも遅れると次のバッファが間に合わず音が途切れる。
+      44.1kHz なら 1024 フレーム = 23 ms ごとにコールバックと Submit が起きる。
+      PCM は全部メモリにあるので分ける理由が無い。
+      → PCM 全体を 1 つの XAUDIO2_BUFFER で渡す。ループは LoopCount = XAUDIO2_LOOP_INFINITE。コールバックは使わない。
+  E-2 [重大] コールバックの中で std::cout をしていた (OnBufferStart / OnStreamEnd / OnLoopEnd ...)
+      コールバックは XAudio2 のオーディオスレッドで呼ばれる。コンソール出力は ms 単位で止まることがあり、
+      音の途切れの原因になる。→ コールバック自体を使わない (鳴り終わりは GetState で調べる)。
+  E-3 [中] Engine/main.cpp の g_index / g_stopFlag はオーディオスレッドとメインスレッドの両方から触る普通の変数
+      (データ競合)。→ 状態はメインスレッドだけで持つ。XAudio2 の API はスレッドセーフなので、
+      C ABI はメインスレッドから呼ぶ前提にした (Initialize と Shutdown は同じスレッドで。CoUninitialize のため)。
+  E-4 [軽] std::ifstream でチャンクごとに read / seekg していた。→ ファイル全体を 1 回の ReadFile で読み、
+      メモリ上で解析。PCM は読んだ配列を指したまま再生する (別の配列へのコピーが無い)。
+  E-5 [軽] winmm.lib をリンクしていたが使っていない。→ 外した。
+
+■ 確認 (Release / Debug の x64。マスター音量 0 で C ABI を直接呼ぶテスト。26 項目すべて OK)
+  読み込み : 16bit ステレオ (奇数サイズの LIST 付き) / EXTENSIBLE 24bit / float 32bit / 途中で切れた + 端数 / 日本語のパス → 読める
+             RIFF でない / ADPCM / fmt 無し / ファイル無し → INVALID_HANDLE とログ
+  再生     : 長さどおりに終わる (1.000 秒の音 → 0.990〜0.998 秒、0.5 秒の音 → 0.484〜0.510 秒。5 ms ごとに調べた誤差込み)
+             再生中に Play → 最初からやり直し、前の続きは残らない / ループ / ループ中に切る → その周で止まる / Stop
+  寿命     : サウンドを破棄すると、そのボイスは無効 / 古いハンドルは無視 / 番号を使い回すと世代が変わる
+             再生中のボイスを残したまま Shutdown / Shutdown 2 回 → 落ちない
+  速さ (Release, 200 回の平均)
+             176 KB の wav の読み込み + 破棄 : 0.105 ms
+             ボイスの作成 + 破棄             : 0.014 ms
+             Play : 最初の 1 回だけ 1.8 ms (XAudio2 のエンジンが動き出す分)、それ以降 0.005〜0.07 ms
+  ※以前の実装 (ifstream + 1024 フレームのバッファ) との速さの比較はしていない (以前の形は DLL から呼べないため)
