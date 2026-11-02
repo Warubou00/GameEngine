@@ -84,9 +84,10 @@ namespace Renderer
 		// ==========================================================
 
 		/***********************************************************************************
-		 * @brief OBJ モデルを読み込む
-		 * @details 頂点・インデックス・テクスチャを RHI に登録する。まだ描画はされない (CreateRenderObject で置く)
+		 * @brief モデルを読み込む (拡張子で選ぶ : .obj / .pmx)
+		 * @details 頂点・インデックス・テクスチャ・マテリアルを RHI に登録する。まだ描画はされない (CreateRenderObjects で置く)
 		 *          GPU への転送は次の Render でまとめて行われる (ここでは待たない)
+		 *          テクスチャのファイルが無い時は、同じ名前で拡張子の違う画像を探す (.png / .jpg など)
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)。outSubMeshCount にサブメッシュの数
 		 ************************************************************************************/
 		uint32_t LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount);
@@ -97,7 +98,8 @@ namespace Renderer
 
 		/***********************************************************************************
 		 * @brief 描画オブジェクトをまとめて作る (原点に置かれる。位置は SetRenderObjectTransforms で)
-		 * @details サブメッシュごとに RHI のオブジェクト (ワールド行列 / テクスチャの置き場) を作る
+		 * @details RHI のオブジェクト (ワールド行列の置き場) を 1 個作り、全サブメッシュで共有する
+		 *          (以前はサブメッシュごとに作り、テクスチャもオブジェクトが持っていた。今はマテリアルが持つ)
 		 * @param[out] outHandles count 個のハンドル (作れなかったものは INVALID_HANDLE)
 		 ************************************************************************************/
 		void CreateRenderObjects(uint32_t model, uint32_t count, uint32_t* outHandles);
@@ -138,19 +140,21 @@ namespace Renderer
 		bool IsInitialized()const { return _rhi && _rhi->IsInitialized(); }
 
 	private:
-		// モデル : サブメッシュごとの DrawItem の元 (Object は未設定) と、テクスチャ
+		// モデル : サブメッシュごとの DrawItem の元 (メッシュの範囲とマテリアル。Object は未設定)
 		struct ModelResource
 		{
 			std::vector<RHI::DrawItem> SubMeshes;
-			std::vector<uint32_t>      Textures;       // SubMeshes[i] のテクスチャ番号
 		};
 
-		// 描画オブジェクト : どのモデルを、どの RHI のオブジェクト (サブメッシュごと) で描くか
+		// 描画オブジェクト : どのモデルを、どの RHI のオブジェクト (ワールド行列) で描くか
 		struct RenderObject
 		{
-			uint32_t                       Model = INVALID_HANDLE;   // INVALID_HANDLE なら空き
-			std::vector<RHI::ObjectHandle> Objects;                  // サブメッシュごと
+			uint32_t          Model = INVALID_HANDLE;   // INVALID_HANDLE なら空き
+			RHI::ObjectHandle Object;                   // 全サブメッシュで共有する
 		};
+
+		// テクスチャのファイルが無ければ、拡張子を変えて探す (見つからなければそのまま返す)
+		static std::wstring resolveTexturePath(const std::wstring& path);
 
 		// 行列を作り直して RHI に渡す (カメラ変更・リサイズ時)
 		void updateViewProjection();

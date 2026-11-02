@@ -91,12 +91,25 @@ namespace RHI
             // Root CBV のアドレスは 256byte の倍数でなければならない
             static constexpr uint64_t CONSTANT_BUFFER_ALIGNMENT = 256;
 
-            // Scene定数バッファの 1オブジェクト分の間隔 (シェーダーの struct ObjectData と同じ 80byte)
+            // Scene定数バッファの 1オブジェクト分の間隔 (シェーダーの struct ObjectData と同じ 64byte = ワールド行列だけ)
+            // (テクスチャの番号をマテリアルに移したので 80 → 64byte)
             // シェーダーは StructuredBuffer<ObjectData> (Root SRV) として読むので、16byte の倍数に切り上げるだけでよい
             // 以前は描画ごとに Root CBV で指していたため 256byte 間隔が必須だった (1-9)。
             // 詰めたことで、1 フレームの領域に入るオブジェクトの数が約 3 倍になり、GPU が読むメモリも減る
             static constexpr uint64_t OBJECT_DATA_STRIDE = (sizeof(RHI::ObjectConstants) + 15) & ~15ull;
-            static_assert(OBJECT_DATA_STRIDE == 80, "OBJECT_DATA_STRIDE must match HLSL struct ObjectData (80 bytes)");
+            static_assert(OBJECT_DATA_STRIDE == 64, "OBJECT_DATA_STRIDE must match HLSL struct ObjectData (64 bytes)");
+
+            // ---------- マテリアル ----------
+            // シェーダーの struct MaterialData と同じ並び (32byte)
+            struct MaterialData
+            {
+                float    Color[4];
+                uint32_t TextureIndex;
+                uint32_t Blend;          // RHI::BlendMode
+                uint32_t Padding[2];
+            };
+            static_assert(sizeof(MaterialData) == 32, "MaterialData must be 32 bytes (same as HLSL)");
+            static constexpr uint32_t MAX_MATERIALS = 4096;
 
             // Scene定数バッファの容量 (フレームの数で等分して使う)
             static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
@@ -144,6 +157,26 @@ namespace RHI
              * @return ObjectHandle 満杯なら IsValid() == false
              ************************************************************************************/
             RHI::ObjectHandle CreateObject();
+
+            /***********************************************************************************
+             * @brief マテリアルを作る (テクスチャ / 色 / ブレンドの方法)
+             * @details CPU 側に足すだけ。GPU へは WriteMaterials でフレームごとの領域に書いて VRAM へ写す
+             *          満杯なら既定のマテリアル (0 : 白・不透明)
+             ************************************************************************************/
+            RHI::MaterialHandle CreateMaterial(const RHI::MaterialDesc& desc);
+
+            // マテリアルのブレンドの方法 (描く順番と PSO を決める。範囲外なら不透明)
+            RHI::BlendMode GetMaterialBlend(uint32_t material)const
+            {
+                return material < _materials.size() ? static_cast<RHI::BlendMode>(_materials[material].Blend) : RHI::BlendMode::Opaque;
+            }
+
+            /***********************************************************************************
+             * @brief マテリアルをこのフレームの領域へ書いて VRAM へ写し、その先頭アドレスを返す
+             * @details 増えた / 変わった時だけ書く (止まっているシーンでは何もしない)
+             *          戻り値を Root SRV (StructuredBuffer<MaterialData>) に渡す
+             ************************************************************************************/
+            D3D12_GPU_VIRTUAL_ADDRESS WriteMaterials(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList);
 
             /***********************************************************************************
              * @brief 描画オブジェクトを削除する (番号は次の CreateObject で使い回す)
@@ -258,6 +291,13 @@ namespace RHI
             std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;            // BaseVertex → 境界球
             ::DirectX::XMFLOAT4                 _frustumPlanes[6] = {};
             uint64_t                            _frustumVersion   = 0;                      // 計算した時の _frameConstantsVersion
+
+            // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
+            std::vector<MaterialData>                       _materials;
+            uint64_t                                        _materialsVersion = 1;
+            uint64_t                                        _materialsWritten[CommandContext::FRAME_COUNT] = {};
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _materialUpload;    // [フレーム][MAX_MATERIALS]
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _materialGpu;       // 同じ並びの VRAM 側
 
             // ---------- オブジェクトごとの定数 (CPU 側) ----------
             std::vector<RHI::ObjectConstants>   _objects;                                   // シェーダー用に転置済み

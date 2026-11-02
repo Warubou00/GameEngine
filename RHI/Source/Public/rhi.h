@@ -80,7 +80,11 @@ namespace RHI
 		// 画像ファイルをまとめて読み込む (デコードは並列)。失敗したものは TextureHandle::DEFAULT
 		virtual void LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles) = 0;
 
-		// 描画オブジェクト (ワールド行列 / テクスチャの置き場) を作る (削除された番号があれば使い回す)
+		// マテリアル (テクスチャ / 色 / ブレンドの方法) を作る。DrawItem::Material に入れて使う
+		// 満杯なら MaterialHandle::DEFAULT (白・不透明)
+		virtual MaterialHandle CreateMaterial(const MaterialDesc& desc) = 0;
+
+		// 描画オブジェクト (ワールド行列の置き場) を作る (削除された番号があれば使い回す)
 		virtual ObjectHandle CreateObject() = 0;
 
 		// 描画オブジェクトを削除する。削除したオブジェクトを指す DrawItem は、次の Render から渡さないこと

@@ -150,6 +150,7 @@
     <ClInclude Include="Source\Loader\IModelLoader.h" />
     <ClInclude Include="Source\Loader\modelData.h" />
     <ClInclude Include="Source\Loader\objLoader.h" />
+    <ClInclude Include="Source\Loader\pmxLoader.h" />
     <ClInclude Include="Source\material.h" />
     <ClInclude Include="Source\mesh.h" />
     <ClInclude Include="Source\vertex.h" />
@@ -162,6 +163,7 @@
     <ClCompile Include="Source\rendererDll.cpp" />
     <ClCompile Include="Source\sceneRenderer.cpp" />
     <ClCompile Include="Source\Loader\objLoader.cpp" />
+    <ClCompile Include="Source\Loader\pmxLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\RHI\RHI.vcxproj">

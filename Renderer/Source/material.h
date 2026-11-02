@@ -1,4 +1,4 @@
-
+﻿
 /***********************************************************************************
 * @file    material.h
 * @brief   Renderer material
@@ -48,12 +48,14 @@ namespace Renderer
 
     struct RENDERER_API_CLASS Material
     {
-        Core::Vector4 Ambient;          // ����
-        Core::Vector4 Diffuse;          // �ʂ̐F
-        Core::Vector4 Specular;         // ���ˌ�
-        std::wstring TexturePath;       // �e�N�X�`���̃p�X
-        bool UseTexture;                // �e�N�X�`���̎g�p�̗L��
-        uint32_t TextureIndex;          // �e�N�X�`���C���f�b�N�X(SRVIndex)
+        Core::Vector4 Ambient;          // 環境光
+        Core::Vector4 Diffuse;          // 面の色
+        Core::Vector4 Specular;         // 反射光
+        std::wstring TexturePath;       // テクスチャのパス
+        bool UseTexture;                // テクスチャの使用の有無
+        bool DoubleSided;               // 裏面も描く (PMX の材質のフラグ)
+        bool Transparent;               // 半透明として描く (不透明な物の後に、ブレンドして描く。PMX は全部)
+        uint32_t TextureIndex;          // テクスチャインデックス(SRVIndex)
     };
 
 }

@@ -207,6 +207,12 @@ namespace RHI
         }
     }
 
+    MaterialHandle RenderHardwareInterface::CreateMaterial(const MaterialDesc& desc)
+    {
+        if (!_isInitialized) return MaterialHandle();
+        return _buffer->CreateMaterial(desc);
+    }
+
     ObjectHandle RenderHardwareInterface::CreateObject()
     {
         if (!_isInitialized) return ObjectHandle();

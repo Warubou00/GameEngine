@@ -113,12 +113,18 @@ namespace RHI
                 ::DirectX::ScratchImage mipChain;
                 RHI_RETURN_IF_FAILED(::DirectX::GenerateMipMaps(*image.GetImage(0, 0, 0), ::DirectX::TEX_FILTER_DEFAULT, 0, mipChain));
 
-                // 3. BC 圧縮 (JPEG などアルファが全て不透明なら BC1、そうでなければ BC7)
+                // 3. BC 圧縮
+                //    アルファが全て不透明 (JPEG など)          → BC1 (RGBA8 の 1/8)
+                //    半透明があり、1024x1024 以下             → BC7 (1/4。綺麗)
+                //    半透明があり、それより大きい             → BC3 (1/4。BC7 より少し粗いが、圧縮が桁違いに速い)
+                //    以前は半透明なら全て BC7 で、4096x4096 (PMX のキャラクターのテクスチャ) の初回の変換に
+                //    1 枚 約 60 秒 (Release) かかっていた。BC7 の圧縮は CPU ではとても重い
                 const bool opaque = mipChain.IsAlphaAllOpaque();
-                const DXGI_FORMAT format = opaque ? DXGI_FORMAT_BC1_UNORM : DXGI_FORMAT_BC7_UNORM;
+                const bool large  = meta.width * meta.height > 1024u * 1024u;
+                const DXGI_FORMAT format = opaque ? DXGI_FORMAT_BC1_UNORM : (large ? DXGI_FORMAT_BC3_UNORM : DXGI_FORMAT_BC7_UNORM);
                 // PARALLEL : OpenMP で複数スレッド圧縮 / BC7_QUICK : BC7 の探索を減らして高速化 (画質は少し落ちる)
                 ::DirectX::TEX_COMPRESS_FLAGS flags = ::DirectX::TEX_COMPRESS_PARALLEL;
-                if (!opaque) flags |= ::DirectX::TEX_COMPRESS_BC7_QUICK;
+                if (format == DXGI_FORMAT_BC7_UNORM) flags |= ::DirectX::TEX_COMPRESS_BC7_QUICK;
 
                 ::DirectX::ScratchImage compressed;
                 RHI_RETURN_IF_FAILED(::DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(),
@@ -186,10 +192,15 @@ namespace RHI
             logTime(L"Build DDS cache (mip + BC)", filePath,
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convertStart).count());
 
+            // 一時ファイルに書いてから名前を変える (書いている途中で終了しても、壊れたキャッシュが残らないように。
+            // 大きなテクスチャは Debug ビルドだと変換に数秒かかり、その間にウィンドウを閉じることがある)
+            const std::wstring tempPath = cachePath + L".tmp";
             if (FAILED(::DirectX::SaveToDDSFile(outImage.GetImages(), outImage.GetImageCount(), outImage.GetMetadata(),
-                ::DirectX::DDS_FLAGS_NONE, cachePath.c_str())))
+                    ::DirectX::DDS_FLAGS_NONE, tempPath.c_str())) ||
+                !MoveFileExW(tempPath.c_str(), cachePath.c_str(), MOVEFILE_REPLACE_EXISTING))
             {
                 // 書き込めない場所でも読み込みは続ける (次回もまた変換される)
+                DeleteFileW(tempPath.c_str());
                 Core::Logger::Log(L"  [Texture] Failed save DDS cache.");
                 Core::Logger::Log(cachePath.c_str());
             }

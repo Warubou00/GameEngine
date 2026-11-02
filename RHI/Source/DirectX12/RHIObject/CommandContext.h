@@ -280,12 +280,21 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthBuffer;
 
             // ---------- 描画ごとのデータ ----------
-            // シェーダーの struct DrawData と同じ並び (8byte)。描画番号 (DRAWID) で引かれる
+            // シェーダーの struct DrawData と同じ並び (16byte)。描画番号 (DRAWID) で引かれる
             struct DrawData
             {
-                uint32_t ObjectIndex;   // オブジェクトのデータ (StructuredBuffer<ObjectData>) の番号
-                uint32_t BaseVertex;    // メガ頂点バッファ内の開始位置 (以前は描画ごとのルート定数 b0)
+                uint32_t ObjectIndex;     // オブジェクトのデータ (StructuredBuffer<ObjectData>) の番号
+                uint32_t BaseVertex;      // メガ頂点バッファ内の開始位置 (以前は描画ごとのルート定数 b0)
+                uint32_t MaterialIndex;   // マテリアル (StructuredBuffer<MaterialData>) の番号
+                uint32_t Padding;
             };
+            static_assert(sizeof(DrawData) == 16, "DrawData must be 16 bytes (same as HLSL)");
+
+            // 描き方 (PSO) のまとまりの数 (Pipeline::PIPELINE_GROUP_COUNT と同じ)。不透明 → 半透明 の順に描く
+            static constexpr uint32_t GROUP_COUNT = 2;
+            // 半透明の描画の先頭を、この数の倍数にそろえる (カリングの詰め直しは 64 個ずつまとめて処理するため、
+            // 64 個のまとまりの中に不透明と半透明が混ざらないようにする。間は空の描画で埋める)
+            static constexpr uint32_t GROUP_ALIGNMENT = 64;
             // DrawFrame のバッファ内で、ExecuteIndirect の引数が始まる位置 (DrawData × MAX_DRAWS の後ろ)
             static constexpr UINT64 DRAW_ARGS_OFFSET = static_cast<UINT64>(MAX_DRAWS) * sizeof(DrawData);
             static constexpr UINT64 DRAW_ARGS_SIZE   = static_cast<UINT64>(MAX_DRAWS) * sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
@@ -301,7 +310,7 @@ namespace RHI
             static constexpr UINT64 CULL_DATA_OFFSET = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE;
             // Culled (カリングの結果) の中でカウンターを置く位置 (引数の後ろ。引数の先頭からの距離)
             //   +0 : 映ったオブジェクトの数 (プロファイラー用)
-            //   +4 : 詰めた描画の数 (ExecuteIndirect の Count バッファ)
+            //   +4 : 詰めた不透明の描画の数 / +8 : 詰めた半透明の描画の数 (ExecuteIndirect の Count バッファ)
             static constexpr UINT64 CULL_COUNTER_OFFSET = DRAW_ARGS_SIZE;
             // Culled の中で、映った描画だけを詰めた引数が始まる位置 (カウンターの後ろ。256byte 境界にそろえる)
             static constexpr UINT64 COMPACT_ARGS_OFFSET = DRAW_ARGS_OFFSET + DRAW_ARGS_SIZE + 256;
@@ -318,6 +327,7 @@ namespace RHI
                 uint32_t HiZLevels;
                 uint32_t Phase;              // 0 : 視錐台だけ / 1 : 前段 / 2 : 後段
                 uint32_t ResetVisibility;    // 1 : 可視の記録が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
+                uint32_t AlphaDrawStart;     // 半透明の描画の先頭 (無ければ 0xFFFFFFFF)
             };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
@@ -342,7 +352,9 @@ namespace RHI
                 std::vector<RHI::DrawItem> LastItems;
                 // 描画の引数の CPU 側の控え (1 個ずつ描く時に使う。UPLOAD ヒープは CPU から読むと非常に遅いため)
                 std::vector<D3D12_DRAW_INDEXED_ARGUMENTS> Args;
-                uint32_t                   Written   = 0;           // 描画の数 (引数の数)
+                uint32_t                   Written   = 0;           // 引数の数 (まとまりの間を埋める空の描画を含む)
+                uint32_t                   GroupStart[GROUP_COUNT] = {};   // 描き方 (PSO) ごとの引数の先頭
+                uint32_t                   GroupCount[GROUP_COUNT] = {};   // 描き方ごとの描画の数 (空の描画は含まない)
                 uint32_t                   Instances = 0;           // 描くオブジェクトの数 (DrawData の数)
                 uint64_t                   Triangles = 0;
                 bool                       Instanced = false;       // インスタンシングでまとめて書いたか
@@ -384,7 +396,11 @@ namespace RHI
                 uint32_t BaseVertex;
                 uint32_t FirstIndex;
                 uint32_t IndexCount;
-                bool operator==(const MeshKey& o)const { return BaseVertex == o.BaseVertex && FirstIndex == o.FirstIndex && IndexCount == o.IndexCount; }
+                uint32_t Group;          // 描き方 (PSO)。同じメッシュでも描き方が違えば別の描画にする
+                bool operator==(const MeshKey& o)const
+                {
+                    return BaseVertex == o.BaseVertex && FirstIndex == o.FirstIndex && IndexCount == o.IndexCount && Group == o.Group;
+                }
             };
             struct MeshKeyHash
             {
@@ -394,6 +410,7 @@ namespace RHI
                     h = (h ^ k.BaseVertex) * 1099511628211ull;
                     h = (h ^ k.FirstIndex) * 1099511628211ull;
                     h = (h ^ k.IndexCount) * 1099511628211ull;
+                    h = (h ^ k.Group)      * 1099511628211ull;
                     return static_cast<size_t>(h);
                 }
             };
@@ -413,10 +430,11 @@ namespace RHI
             Pipeline*                                            _currentPipeline = nullptr;   // RenderStart で受け取ったもの (所有しない)
 
             // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
-            // (書き込みは writeDrawsDirect / writeDrawsInstanced。戻り値 = 書いた DrawData の数)
             bool updateDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
-            uint32_t writeDrawsDirect(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
-            uint32_t writeDrawsInstanced(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+
+            // DrawItem をまとまり (同じメッシュ・同じ描き方を最大 batchSize 個) に分けて、DrawData と引数を書く。戻り値 = 書いた DrawData の数
+            // インスタンシングしない時は batchSize = 1 (以前は別の関数 writeDrawsDirect だった)
+            uint32_t writeDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count, uint32_t batchSize);
 
             // GPU カリングを記録する (Culled に映ったものだけの DrawData と引数ができる)
             //   phase : 0 = 視錐台だけ / 1 = オクルージョンの前段 / 2 = 後段 (Hi-Z を作った後)

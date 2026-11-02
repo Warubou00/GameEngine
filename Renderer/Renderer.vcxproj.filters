@@ -40,6 +40,9 @@
     <ClInclude Include="Source\Loader\objLoader.h">
       <Filter>ヘッダー ファイル\Loader</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Loader\pmxLoader.h">
+      <Filter>ヘッダー ファイル\Loader</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Loader\IModelLoader.h">
       <Filter>ヘッダー ファイル\Loader</Filter>
     </ClInclude>
@@ -66,6 +69,9 @@
     <ClCompile Include="Source\rendererDll.cpp" />
     <ClCompile Include="Source\sceneRenderer.cpp" />
     <ClCompile Include="Source\Loader\objLoader.cpp">
+      <Filter>ソース ファイル\Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Loader\pmxLoader.cpp">
       <Filter>ソース ファイル\Loader</Filter>
     </ClCompile>
   </ItemGroup>
