@@ -5,6 +5,7 @@
 *          - 呼んだスレッドも一緒に働く。仕事は batch 個ずつ取り合う (重さが偏っても均される)
 *          - 数が batch 以下か、ワーカーが 0 なら、呼んだスレッドだけで行う (起こす手間の方が大きい)
 *          - fn(begin, end) は別の範囲を同時に呼ぶので、範囲ごとに別の所へ書くこと
+*          - 仕事の後、スレッドは 100 µs ほど回して次の仕事を待ってから眠る (P1。剛体を解く時は ParallelFor が続けて来る)
 *
 * @author  Keigo Onari
 * @date    2026/11/03
@@ -65,9 +66,10 @@ namespace Physics
 		uint32_t                 _count = 0;
 		uint32_t                 _batch = 1;
 		std::atomic<uint32_t>    _next{ 0 };
-		uint32_t                 _pending = 0;      // まだ終わっていないワーカー
-		uint64_t                 _generation = 0;   // 仕事の番号 (ワーカーは変わったら起きる)
+		std::atomic<uint32_t>    _pending{ 0 };      // まだ終わっていないワーカー
+		std::atomic<uint64_t>    _generation{ 0 };   // 仕事の番号 (ワーカーは変わったら起きる)
 		bool                     _quit = false;
+		std::atomic<bool>        _quitFlag{ false }; // 回して待っている間に見る
 	};
 }
 

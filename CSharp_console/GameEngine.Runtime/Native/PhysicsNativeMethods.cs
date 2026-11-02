@@ -25,12 +25,119 @@ internal static unsafe class PhysicsNativeMethods
         public Vector3    Center;
         public uint       Mesh;          // CollisionMesh のハンドル (Shape = Mesh の時)
         public Vector3    Size;
-        public float      Padding1;
+        public float      Friction;      // 以前は詰め物 (P1)
         public Vector3    Position;
-        public float      Padding2;
+        public float      Restitution;   // 以前は詰め物 (P1)
         public Quaternion Rotation;
         public Vector3    Scale;
-        public float      Padding3;
+        public uint       Flags;         // 1 : トリガー (以前は詰め物。P1)
+    }
+
+    // ---------- 剛体 (P1。C++ の common.h と同じ並び) ----------
+
+    // 32byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BodyDynamics
+    {
+        public uint  Motion;          // 0 : 剛体なし / 1 : Dynamic / 2 : Kinematic
+        public float Mass;
+        public float LinearDamping;
+        public float AngularDamping;
+        public float GravityScale;
+        public uint  Locks;           // RigidbodyConstraints
+        public float InertiaScale;
+        public uint  Padding;
+
+        public readonly bool Same(in BodyDynamics o) =>
+            Motion == o.Motion && Mass == o.Mass && LinearDamping == o.LinearDamping && AngularDamping == o.AngularDamping &&
+            GravityScale == o.GravityScale && Locks == o.Locks && InertiaScale == o.InertiaScale;
+    }
+
+    public const uint CommandForce           = 1u << 0;
+    public const uint CommandImpulse         = 1u << 1;
+    public const uint CommandSetVelocity     = 1u << 2;
+    public const uint CommandSetAngular      = 1u << 3;
+    public const uint CommandKinematicTarget = 1u << 4;
+
+    // 144byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BodyCommand
+    {
+        public uint       Handle;
+        public uint       Flags;
+        public uint       Padding0;
+        public uint       Padding1;
+        public Vector3    Force;           public float Padding2;
+        public Vector3    Torque;          public float Padding3;
+        public Vector3    Impulse;         public float Padding4;
+        public Vector3    AngularImpulse;  public float Padding5;
+        public Vector3    Velocity;        public float Padding6;
+        public Vector3    AngularVelocity; public float Padding7;
+        public Vector3    TargetPosition;  public float Padding8;
+        public Quaternion TargetRotation;
+    }
+
+    // 96byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BodyState
+    {
+        public uint       Handle;
+        public uint       Flags;
+        public uint       Padding0;
+        public uint       Padding1;
+        public Vector3    Position;        public float Padding2;
+        public Quaternion Rotation;
+        public Vector3    Velocity;        public float Padding3;
+        public Vector3    AngularVelocity; public float Padding4;
+        public Vector3    CenterOfMass;    public float Padding5;
+    }
+
+    // 64byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SolverSettings
+    {
+        public Vector3 Gravity;
+        public uint    SubSteps;
+        public float   ContactHertz;
+        public float   ContactDampingRatio;
+        public float   ContactPushMaxVelocity;
+        public float   RestitutionThreshold;
+        public float   SpeculativeDistance;
+        public float   JointHertz;
+        public float   JointDampingRatio;
+        public float   MaxLinearSpeed;
+        public uint    Iterations;
+        public uint    RelaxIterations;
+        public uint    Padding0;
+        public uint    Padding1;
+    }
+
+    // 64byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JointDesc
+    {
+        public uint    Type;
+        public uint    BodyA;
+        public uint    BodyB;          // InvalidHandle ならワールド
+        public uint    Flags;          // 1 : 繋いだ体どうしも押し戻す
+        public Vector3 AnchorA;
+        public float   Length;
+        public Vector3 AnchorB;
+        public float   MinLength;
+        public float   MaxLength;
+        public float   Hertz;
+        public float   DampingRatio;
+        public float   BreakForce;
+    }
+
+    // 16byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JointInfo
+    {
+        public uint  Broken;
+        public float Force;
+        public float Length;
+        public float Padding;
     }
 
     // 48byte
@@ -92,7 +199,7 @@ internal static unsafe class PhysicsNativeMethods
         public float   Padding2;
     }
 
-    // 48byte (以前は 32byte)
+    // 64byte (以前は 48byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct PhysicsStats
     {
@@ -108,6 +215,10 @@ internal static unsafe class PhysicsNativeMethods
         public float EventsMs;
         public uint  Workers;
         public float TreeMs;
+        public float SolverMs;
+        public uint  RigidBodies;
+        public uint  ContactConstraints;
+        public uint  Joints;
     }
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -168,4 +279,32 @@ internal static unsafe class PhysicsNativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Physics_GetContacts(ContactPoint* contacts, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_SetBodyDynamics(uint body, ref BodyDynamics dynamics);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_ApplyCommands(BodyCommand* commands, uint count);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_Simulate(float dt);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_GetBodyStates(BodyState* states, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_SetSolverSettings(ref SolverSettings settings);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_GetSolverSettings(out SolverSettings settings);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_CreateJoint(ref JointDesc desc);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_DestroyJoint(uint joint);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Physics_GetJointInfo(uint joint, out JointInfo info);
 }

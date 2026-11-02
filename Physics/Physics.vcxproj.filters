@@ -33,6 +33,12 @@
     <ClInclude Include="Source\jobSystem.h">
       <Filter>Source</Filter>
     </ClInclude>
+    <ClInclude Include="Source\dynamics.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\joints.h">
+      <Filter>Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\dynamicTree.cpp">
@@ -57,6 +63,12 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="Source\jobSystem.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\joints.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\solver.cpp">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>

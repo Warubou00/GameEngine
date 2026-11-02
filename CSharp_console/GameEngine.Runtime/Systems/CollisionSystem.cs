@@ -11,7 +11,7 @@ namespace GameEngine;
 //   4. 外された / 削除された Collider の体は次の更新で消す
 //   体の状態はエンティティの番号で引く表に持つ (AudioSystem と同じ)
 // ==========================================================================
-internal sealed unsafe class CollisionSystem
+internal sealed unsafe partial class CollisionSystem
 {
     private struct BodyState
     {
@@ -23,9 +23,16 @@ internal sealed unsafe class CollisionSystem
         public int           Layer;
         public uint          Mask;
         public bool          IsStatic;
+        public float         Friction;
+        public float         Restitution;
+        public bool          IsTrigger;
         public Matrix4x4     Sent;       // 最後に送った行列 (同じなら送らない)
         public int           Overlaps;   // 今重なっている相手の数 (確認用の色)
         public bool          Active;
+
+        // 剛体 (P1)。0 : 剛体なし / 1 : Dynamic / 2 : Kinematic。剛体の値は _rigidStates (同じ番号) に分けた
+        // (コライダーだけの物が多い時に、この表が大きくなって毎フレームの見回りが遅くならないように)
+        public uint          Rigid;
     }
 
     private readonly PhysicsSettings _settings;
@@ -50,13 +57,22 @@ internal sealed unsafe class CollisionSystem
             ref var state = ref _states[entity.Id];
             if (state.Active) _pendingDestroy.Add(state.Body);
             state = default;
+            if ((uint)entity.Id < (uint)_rigidStates.Length) _rigidStates[entity.Id] = default;
         };
+        initializeRigidbodies(world);
     }
 
-    public void Update(World world)
+    public void Update(World world, IReadOnlyList<IFixedSystem> fixedSystems)
     {
         _settings.EventList.Clear();
-        if (!_enabled) return;
+        Time.FixedStepsThisFrame = 0;
+        TransformsWritten = 0;
+        if (!_enabled)
+        {
+            // Physics.dll が無い時も、FixedUpdate だけは固定の刻みで呼ぶ
+            if (fixedSystems.Count > 0) runFixedSystemsOnly(world, fixedSystems);
+            return;
+        }
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
 
         foreach (var body in _pendingDestroy) PhysicsNativeMethods.Physics_DestroyBody(body);
@@ -67,10 +83,18 @@ internal sealed unsafe class CollisionSystem
             PhysicsNativeMethods.Physics_SetBroadphase((uint)_settings.Broadphase);
             _settings.BroadphaseDirty = false;
         }
+        if (_settings.Solver.Dirty)
+        {
+            var solver = _settings.Solver.ToNative();
+            PhysicsNativeMethods.Physics_SetSolverSettings(ref solver);
+            _settings.Solver.Dirty = false;
+        }
 
-        var colliders  = world.GetPool<Collider>();
-        var transforms = world.GetPool<Transform>();
-        var statics    = world.GetPool<Static>();
+        var colliders   = world.GetPool<Collider>();
+        var transforms  = world.GetPool<Transform>();
+        var statics     = world.GetPool<Static>();
+        var rigidbodies = world.GetPool<Rigidbody>();
+        var hasRigidbodies = rigidbodies.Count > 0;
         var entities   = colliders.Entities;
         var components = colliders.Components;
         var batchCount = 0;
@@ -87,7 +111,8 @@ internal sealed unsafe class CollisionSystem
             var mesh     = collider.Shape == ColliderShape.Mesh && collider.Mesh != null ? collider.Mesh.Handle : 0u;
 
             var changedShape = !state.Active || state.Shape != collider.Shape || state.Size != collider.Size || state.Center != collider.Center ||
-                               state.Mesh != mesh || state.Layer != collider.Layer || state.Mask != collider.CollideWith || state.IsStatic != isStatic;
+                               state.Mesh != mesh || state.Layer != collider.Layer || state.Mask != collider.CollideWith || state.IsStatic != isStatic ||
+                               state.Friction != collider.Friction || state.Restitution != collider.Restitution || state.IsTrigger != collider.IsTrigger;
             if (changedShape)
             {
                 if (state.Active) PhysicsNativeMethods.Physics_DestroyBody(state.Body);
@@ -103,12 +128,16 @@ internal sealed unsafe class CollisionSystem
                     Position    = transform.Position,
                     Rotation    = transform.Rotation,
                     Scale       = transform.Scale,
+                    Friction    = collider.Friction,
+                    Restitution = collider.Restitution,
+                    Flags       = collider.IsTrigger ? 1u : 0u,
                 };
                 var body = PhysicsNativeMethods.Physics_CreateBody(ref desc);
                 state = new BodyState
                 {
                     Body = body, Shape = collider.Shape, Size = collider.Size, Center = collider.Center, Mesh = mesh, Layer = collider.Layer,
-                    Mask = collider.CollideWith, IsStatic = isStatic, Sent = transform.LocalToWorld, Active = body != PhysicsNativeMethods.InvalidHandle,
+                    Mask = collider.CollideWith, IsStatic = isStatic, Friction = collider.Friction, Restitution = collider.Restitution,
+                    IsTrigger = collider.IsTrigger, Sent = transform.LocalToWorld, Active = body != PhysicsNativeMethods.InvalidHandle,
                 };
                 if (state.Active)
                 {
@@ -120,12 +149,19 @@ internal sealed unsafe class CollisionSystem
                     }
                     _bodyEntities[index] = entity;
                     _bodyHandles[index]  = body;
+                    syncRigidbody(entity, ref state, ref transform, rigidbodies);
                 }
                 continue;
             }
+            if (state.Rigid != 0 || hasRigidbodies) syncRigidbody(entity, ref state, ref transform, rigidbodies);
 
+            if (state.Rigid != 0)
+            {
+                // 剛体 : 物理が書いた位置から自分で動かした時だけ送る (瞬間移動。キネマティックは目標)
+                if (!userMovedRigidbody(entity.Id, ref state, ref transform)) continue;
+            }
             // 動いた物だけ送る (Static で描画しない物は Changed が下りないので、行列でも比べる)
-            if (!transform.Changed || transform.LocalToWorld == state.Sent) continue;
+            else if (!transform.Changed || transform.LocalToWorld == state.Sent) continue;
             state.Sent = transform.LocalToWorld;
             if (batchCount == _batch.Length) Array.Resize(ref _batch, _batch.Length * 2);
             _batch[batchCount++] = new PhysicsNativeMethods.BodyTransform
@@ -142,26 +178,24 @@ internal sealed unsafe class CollisionSystem
             }
         }
 
-        // 重なりを調べて、イベントを受け取る
-        var eventCount = (int)PhysicsNativeMethods.Physics_Step();
-        if (eventCount > 0)
+        syncJoints(world);
+
+        // 剛体 / ジョイント / FixedUpdate がある時は固定の刻みで進める (重なりも刻みごとに調べる)
+        // 無い時は以前と同じく、毎フレーム重なりだけ調べる
+        var useFixedSteps = rigidbodies.Count > 0 || world.GetPool<Joint>().Count > 0 || fixedSystems.Count > 0;
+        if (useFixedSteps)
         {
-            if (eventCount > _events.Length) Array.Resize(ref _events, Math.Max(_events.Length * 2, eventCount));
-            fixed (PhysicsNativeMethods.CollisionEvent* events = _events)
-            {
-                eventCount = (int)PhysicsNativeMethods.Physics_GetEvents(events, (uint)_events.Length);
-            }
-            for (int i = 0; i < eventCount; i++)
-            {
-                ref var e = ref _events[i];
-                var a = entityOf(e.BodyA);
-                var b = entityOf(e.BodyB);
-                var type = (CollisionEventType)e.Type;
-                _settings.EventList.Add(new CollisionEvent(a, b, type));
-                addOverlap(a, e.BodyA, type == CollisionEventType.Enter ? 1 : -1);
-                addOverlap(b, e.BodyB, type == CollisionEventType.Enter ? 1 : -1);
-            }
+            var steps = runFixedSteps(world, fixedSystems);
+            Time.FixedStepsThisFrame = steps;
+            if (steps == 0 && batchCount > 0) collectEvents((int)PhysicsNativeMethods.Physics_Step());   // 動かした物の重なりはすぐ知らせる
+            writeRigidbodyTransforms(world, Time.FixedAlpha);
+            readJoints(world);
         }
+        else
+        {
+            collectEvents((int)PhysicsNativeMethods.Physics_Step());
+        }
+        _settings.FixedSteps = Time.FixedStepsThisFrame;
 
         PhysicsNativeMethods.Physics_GetStats(out var stats);
         _settings.Bodies        = (int)stats.Bodies;
@@ -175,9 +209,13 @@ internal sealed unsafe class CollisionSystem
         _settings.TreeMs        = stats.TreeMs;
         _settings.EventsMs      = stats.EventsMs;
         _settings.Workers       = (int)stats.Workers;
+        _settings.SolverMs           = stats.SolverMs;
+        _settings.RigidBodies        = (int)stats.RigidBodies;
+        _settings.ContactConstraints = (int)stats.ContactConstraints;
+        _settings.Joints             = (int)stats.Joints;
         _settings.SystemMs      = (float)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;   // 表示の線を描く前まで
 
-        if (_settings.ShowColliders) drawColliders(world);
+        if (_settings.ShowColliders) { drawColliders(world); drawJoints(world); }
         if (_settings.ShowContacts)  drawContacts();
     }
 
@@ -197,6 +235,46 @@ internal sealed unsafe class CollisionSystem
             DebugDraw.Line(c.Position - Vector3.UnitZ * s, c.Position + Vector3.UnitZ * s, pointColor);
             DebugDraw.Line(c.Position, c.Position + c.Normal * 0.3f, normalColor);
         }
+    }
+
+    // イベントを受け取る (固定の刻みが 1 フレームに何回あっても、全部 Events に入る)
+    private void collectEvents(int eventCount)
+    {
+        if (eventCount <= 0) return;
+        if (eventCount > _events.Length) Array.Resize(ref _events, Math.Max(_events.Length * 2, eventCount));
+        fixed (PhysicsNativeMethods.CollisionEvent* events = _events)
+        {
+            eventCount = (int)PhysicsNativeMethods.Physics_GetEvents(events, (uint)_events.Length);
+        }
+        for (int i = 0; i < eventCount; i++)
+        {
+            ref var e = ref _events[i];
+            var a = entityOf(e.BodyA);
+            var b = entityOf(e.BodyB);
+            var type = (CollisionEventType)e.Type;
+            _settings.EventList.Add(new CollisionEvent(a, b, type));
+            addOverlap(a, e.BodyA, type == CollisionEventType.Enter ? 1 : -1);
+            addOverlap(b, e.BodyB, type == CollisionEventType.Enter ? 1 : -1);
+        }
+    }
+
+    // Physics.dll が無い時 : FixedUpdate だけ
+    private void runFixedSystemsOnly(World world, IReadOnlyList<IFixedSystem> fixedSystems)
+    {
+        var dt = Time.FixedDeltaTime;
+        _accumulator += Time.DeltaTime;
+        var steps = 0;
+        while (_accumulator >= dt && steps < Time.MaxFixedSteps)
+        {
+            Time.BeginFixedStep();
+            foreach (var system in fixedSystems) system.FixedUpdate(world);
+            Time.EndFixedStep();
+            _accumulator -= dt;
+            steps++;
+        }
+        if (steps == Time.MaxFixedSteps && _accumulator > dt) _accumulator = dt;
+        Time.FixedAlpha = Math.Clamp(_accumulator / dt, 0.0f, 1.0f);
+        Time.FixedStepsThisFrame = steps;
     }
 
     private Entity entityOf(uint body)

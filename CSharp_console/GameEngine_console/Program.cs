@@ -31,6 +31,8 @@ namespace GameEngine_console;
 //                                 --bench-moving P : 毎フレーム動く物の割合 (%。既定 100)
 //                                 --bench-layers N : レイヤーを N 個に分け、違うレイヤーどうしを調べない (--layer-pruning off で木での間引きを切る)
 //                                 --physics-workers N : 衝突判定の追加のスレッドの数 (既定 論理コア - 1、3 本まで) / --tree-rebuild off
+//   --scene physics             : 物理 (剛体 / ジョイント) の見本のシーン。スペースで球を撃つ / R で積み木を作り直す
+//   --physics-bench N           : 箱を N 個落として積む (物理の計測。--physics-workers N も使える)
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -69,16 +71,34 @@ internal static class Program
         var world = engine.World;
 
         var benchCount = options.TryGetValue("--collision-bench", out var bench) && int.TryParse(bench, out var b) ? b : 0;
+        var physicsBench = options.TryGetValue("--physics-bench", out var pbench) && int.TryParse(pbench, out var pb) ? pb : 0;
+        var physicsScene = options.GetValueOrDefault("--scene", "") == "physics";
+        var physicsOnly  = physicsScene || physicsBench > 0;
 
         // 原点に 1 個 (動かないので Static)
-        var origin = world.CreateEntity();
-        world.Add(origin, new Transform());
-        world.Add(origin, new MeshRenderer(box));
-        world.Add(origin, new Static());
-        world.Add(origin, Collider.Box(new Vector3(1, 1, 1), new Vector3(0, 1, 0)));
+        if (!physicsOnly)
+        {
+            var origin = world.CreateEntity();
+            world.Add(origin, new Transform());
+            world.Add(origin, new MeshRenderer(box));
+            world.Add(origin, new Static());
+            world.Add(origin, Collider.Box(new Vector3(1, 1, 1), new Vector3(0, 1, 0)));
+        }
+
+        // 物理 (P1) の見本 / 計測
+        if (physicsScene)
+        {
+            PhysicsDemo.Spawn(engine, box);
+            engine.Physics.ShowColliders = true;
+        }
+        if (physicsBench > 0)
+        {
+            PhysicsBench.Spawn(engine, box, physicsBench);
+            if (options.TryGetValue("--physics-workers", out var pworkerText) && int.TryParse(pworkerText, out var pworkers)) engine.Physics.SetWorkerCount(pworkers);
+        }
 
         // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン + 衝突判定の見本
-        if (stressCount == 0 && benchCount == 0)
+        if (stressCount == 0 && benchCount == 0 && !physicsOnly)
         {
             Showcase.Spawn(engine);
             CollisionDemo.Spawn(world);
@@ -110,11 +130,11 @@ internal static class Program
 
         // ---------- カメラ ----------
         var camera = world.CreateEntity();
-        world.Add(camera, Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
+        world.Add(camera, physicsOnly ? Transform.LookingAt(new Vector3(0, 9, -24), new Vector3(0, 2, 0)) : Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
         world.Add(camera, new Camera());
 
         var animate = options.GetValueOrDefault("--animate", "off") == "on";
-        if (animate || stressCount == 0) engine.AddSystem(new SpinSystem());   // 見本のシーンのキャラクターも回す
+        if (animate || (stressCount == 0 && !physicsOnly)) engine.AddSystem(new SpinSystem());   // 見本のシーンのキャラクターも回す
 
         if (stressCount > 0)
         {

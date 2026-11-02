@@ -227,6 +227,7 @@ public sealed class Engine : IDisposable
 {
     private readonly Form _window;
     private readonly List<ISystem> _systems = new();
+    private readonly List<IFixedSystem> _fixedSystems = new();   // 固定の刻みで呼ぶ (物理の前。P1)
     private readonly TransformSystem  _transformSystem = new();
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
@@ -335,8 +336,18 @@ public sealed class Engine : IDisposable
         AddSystem(new OrbitCameraSystem());
     }
 
-    // 毎フレーム呼ばれる System を足す (登録した順に呼ばれる)
-    public void AddSystem(ISystem system) => _systems.Add(system);
+    // 毎フレーム呼ばれる System を足す (登録した順に呼ばれる)。IFixedSystem も実装していれば FixedUpdate も呼ぶ
+    public void AddSystem(ISystem system)
+    {
+        _systems.Add(system);
+        if (system is IFixedSystem fixedSystem) _fixedSystems.Add(fixedSystem);
+    }
+
+    // 固定の刻み (Time.FixedDeltaTime) で呼ばれる System を足す (物理の前。剛体に力をかけるのはここ)
+    public void AddFixedSystem(IFixedSystem system)
+    {
+        if (!_fixedSystems.Contains(system)) _fixedSystems.Add(system);
+    }
 
     // ウィンドウが閉じられるまで回す
     public void Run()
@@ -361,7 +372,8 @@ public sealed class Engine : IDisposable
 
             foreach (var system in _systems) system.Update(World);
             _transformSystem.Update(World);
-            _collisionSystem.Update(World);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前
+            _collisionSystem.Update(World, _fixedSystems);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
+            _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
@@ -386,6 +398,14 @@ public sealed class Engine : IDisposable
                 NativeMethods.Renderer_ReportProfilerValue("Physics moved", Physics.MovedBodies);
                 NativeMethods.Renderer_ReportProfilerValue("Physics candidates", Physics.Candidates);
                 NativeMethods.Renderer_ReportProfilerValue("Physics overlaps", Physics.Overlaps);
+                if (Physics.RigidBodies > 0 || Physics.Joints > 0)
+                {
+                    NativeMethods.Renderer_ReportProfilerValue("Physics solver (ms)", Physics.SolverMs);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics rigid bodies", Physics.RigidBodies);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics contacts solved", Physics.ContactConstraints);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics joints", Physics.Joints);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics fixed steps", Physics.FixedSteps);
+                }
             }
             DebugDraw.Flush();   // 確認用の線 (このフレームの描画の最後に描かれる)
 
