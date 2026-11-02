@@ -62,13 +62,15 @@ public sealed unsafe class RenderCommandBuffer
     }
 
     /// <summary>描画先を複数にする (最大 4 枚。G-Buffer など)</summary>
-    public void SetRenderTargets(ReadOnlySpan<RenderTexture> colors, RenderTexture? depth = null)
+    /// <param name="depthSlice">depth が配列 (カスケードのシャドーマップ) の時、何枚目に描くか</param>
+    public void SetRenderTargets(ReadOnlySpan<RenderTexture> colors, RenderTexture? depth = null, int depthSlice = 0)
     {
         if (colors.Length > NativeMethods.MaxPassColorTargets) throw new ArgumentException($"Up to {NativeMethods.MaxPassColorTargets} color targets.");
         ref var command = ref Add(0);
         command.ColorCount = (uint)colors.Length;
         for (int i = 0; i < colors.Length; i++) command.Colors[i] = colors[i].Handle;
         command.Depth = depth?.Handle ?? NativeMethods.InvalidHandle;
+        command.Arg0  = (uint)Math.Max(0, depthSlice);
     }
 
     /// <summary>描画先の色を全部消す</summary>

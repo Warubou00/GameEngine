@@ -11,6 +11,7 @@ namespace GameEngine_console;
 //   F5 : 遮蔽だけを白黒で表示 (SSAO の確認用)
 //   F6 : アンチエイリアス なし → FXAA → MSAA 2x → 4x → 8x (Deferred の MSAA は FXAA になる)
 //   F11: 影の ON / OFF
+//   F12: 影のカスケードを色分けして表示 (確認用)
 //   今の設定はプロファイラー (F1) の "Render pipeline" に出る
 // ==========================================================================
 public sealed class GraphicsHotkeySystem : ISystem
@@ -42,6 +43,7 @@ public sealed class GraphicsHotkeySystem : ISystem
         if (Input.GetKeyDown(Keys.F4)) _graphics.Ssao.Enabled  = !_graphics.Ssao.Enabled;
         if (Input.GetKeyDown(Keys.F5)) _graphics.Ssao.ShowOnly = !_graphics.Ssao.ShowOnly;
         if (Input.GetKeyDown(Keys.F11)) _graphics.Shadows.Enabled = !_graphics.Shadows.Enabled;
+        if (Input.GetKeyDown(Keys.F12)) _graphics.Shadows.ShowCascades = !_graphics.Shadows.ShowCascades;
         if (Input.GetKeyDown(Keys.F6))
         {
             _graphics.AntiAliasing = _graphics.AntiAliasing switch

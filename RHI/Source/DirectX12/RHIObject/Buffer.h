@@ -138,7 +138,9 @@ namespace RHI
                 float                 ShadowFadeStart;      // ここから Distance まで影を薄くする
                 float                 ShadowDistance;
                 float                 ShadowSoftness;       // PCF の間隔 (texel)
-                float                 ShadowPadding;
+                float                 ShadowBlend;          // 段の境目をつなぐ幅 (割合)
+                uint32_t              ShadowShowCascades;   // 1 : 段ごとに色を付ける (確認用)
+                float                 ShadowPadding[3];
             };
             static constexpr uint64_t FRAME_SLOT_SIZE = 768;   // 1 視点の枠 (Root CBV は 256byte の倍数)
             static_assert(sizeof(FrameConstants) <= FRAME_SLOT_SIZE, "FrameConstants must fit in FRAME_SLOT_SIZE");
@@ -279,6 +281,8 @@ namespace RHI
             // 影 (shadowMapTexture : シャドーマップの g_Textures の番号 / resolution : その大きさ)
             void SetShadowSettings(const RHI::ShadowSettings& settings, uint32_t shadowMapTexture, uint32_t resolution);
             uint32_t GetShadowViewCount()const { return _shadowViewCount; }   // 今のフレームで描く影の視点の数 (0 なら影なし)
+            bool     IsShadowUnionCulling()const { return (_shadowSettings.Flags & RHI::SHADOW_FLAG_UNION_CULLING) != 0; }
+            const ::DirectX::XMFLOAT4* GetShadowUnionPlanes()const { return _shadowUnionPlanes; }   // 全カスケードを囲む箱
 
             // 画面の大きさ (フレームの定数に入れる。全画面のシェーダーが使う)
             void SetScreenSize(uint32_t width, uint32_t height);
@@ -372,6 +376,8 @@ namespace RHI
             float                                           _shadowSplits[RHI::MAX_SHADOW_CASCADES] = {};
             float                                           _shadowNormalOffset[RHI::MAX_SHADOW_CASCADES] = {};
             ::DirectX::XMFLOAT4                             _shadowPlanes[RHI::MAX_SHADOW_CASCADES][6] = {};
+            ::DirectX::XMFLOAT4                             _shadowUnionPlanes[6] = {};
+            bool                                            _shadowValid[RHI::MAX_SHADOW_CASCADES] = {};   // 一度でも作ったか (止めてよいか)
             void computeShadowViews();   // カメラとライトから、カスケードごとのライトの行列を作る (WriteFrameConstants の中)
 
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------

@@ -58,14 +58,16 @@ public sealed class RenderTexture : IDisposable
     public static RenderTexture Create(RenderTextureFormat format, float scale = 1.0f, Vector4 clearColor = default, int sampleCount = 1)
     {
         var samples = Math.Max(1, sampleCount);
-        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = scale, ClearColor = clearColor, SampleCount = (uint)samples };
+        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = scale, ClearColor = clearColor, SampleCount = (uint)samples, ArraySize = 1 };
         return CreateNative(ref desc, format, scale, clearColor, samples);
     }
 
     /// <summary>大きさ固定のレンダーターゲットを作る (リサイズしても変わらない)</summary>
-    public static RenderTexture CreateFixed(RenderTextureFormat format, uint width, uint height, Vector4 clearColor = default)
+    /// <param name="arraySize">配列の枚数 (Depth32 だけ。カスケードのシャドーマップ。SetRenderTargets の depthSlice で選ぶ)</param>
+    public static RenderTexture CreateFixed(RenderTextureFormat format, uint width, uint height, Vector4 clearColor = default, int arraySize = 1)
     {
-        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = 0.0f, Width = width, Height = height, ClearColor = clearColor, SampleCount = 1 };
+        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = 0.0f, Width = width, Height = height, ClearColor = clearColor, SampleCount = 1,
+                                                        ArraySize = (uint)Math.Max(1, arraySize) };
         return CreateNative(ref desc, format, 0.0f, clearColor);
     }
 

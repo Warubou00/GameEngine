@@ -19,6 +19,7 @@
 * Include Headers
 ******************************************************************/
 #include <cmath>
+#include <cfloat>
 #include <algorithm>
 #include "Buffer.h"
 
@@ -606,14 +607,21 @@ namespace RHI
 		{
 			// ==============================================================
 			// カスケードごとのライトの行列 (平行光源 → 正射影)
+			// (下の手順 1〜4。手順 5 は上の説明)
 			//   1. カメラの視錐台を奥行きで分ける (対数と均等の混ぜ合わせ : SplitLambda)
 			//   2. 各範囲を囲む球を作る (半径はカメラの向きに関係なく同じ = 回しても影の大きさが変わらない)
 			//   3. 球の中心をライトの視点のテクセル単位に丸める (カメラが動いても影の縁がちらつかない)
 			//   4. ライトの側へ SHADOW_CASTER_DISTANCE 伸ばして、範囲の外の物の影も拾う
 			// ==============================================================
+			//   5. FrozenMask のカスケードは作り直さない (このフレームは描き直さないので、描いた時の行列のまま読む : 更新の間引き)
+			// ==============================================================
 			_shadowViewCount = 0;
 			const RHI::ShadowSettings& s = _shadowSettings;
-			if (!s.Enabled || s.LightIndex >= _lights.size() || _lights[s.LightIndex].Type != RHI::LightType::Directional) return;
+			if (!s.Enabled || s.LightIndex >= _lights.size() || _lights[s.LightIndex].Type != RHI::LightType::Directional)
+			{
+				for (bool& valid : _shadowValid) valid = false;
+				return;
+			}
 
 			// カメラの行列 (保持しているのは転置済み) から、位置・向き・視野を取り出す
 			const ::DirectX::XMMATRIX view = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_viewMatrix));
@@ -641,6 +649,10 @@ namespace RHI
 			const ::DirectX::XMMATRIX lightRotation    = ::DirectX::XMMatrixLookToLH(::DirectX::XMVectorZero(), dir, up);
 			const ::DirectX::XMMATRIX lightRotationInv = ::DirectX::XMMatrixTranspose(lightRotation);   // 回転だけなので転置 = 逆
 
+			// 全カスケードを囲む箱 (ライトの回転の空間の AABB)。まとめてカリングする時に使う
+			::DirectX::XMVECTOR unionMin = ::DirectX::XMVectorReplicate(FLT_MAX);
+			::DirectX::XMVECTOR unionMax = ::DirectX::XMVectorReplicate(-FLT_MAX);
+
 			float splitNear = nearZ;
 			for (uint32_t c = 0; c < count; ++c)
 			{
@@ -651,7 +663,22 @@ namespace RHI
 				const float splitFar = lambda * logSplit + (1.0f - lambda) * uniSplit;
 
 				// 2. 範囲 [a, b] を囲む球 : 中心は視線の上。手前と奥の断面の角を通る位置 (奥の面より奥にはしない)
-				const float a = splitNear, b = splitFar;
+				//    段の境目をなめらかにつなぐため、手前の段の奥の端を少し伸ばす (次の段と重ねる)
+				const float a = splitNear;
+				const float b = (c + 1 < count) ? splitFar + (splitFar - splitNear) * s.CascadeBlend : splitFar;
+				_shadowSplits[c] = splitFar;
+				splitNear = splitFar;
+				if ((s.FrozenMask & (1u << c)) && _shadowValid[c])
+				{
+					// 間引き : このカスケードは前に描いた時の行列のまま (囲む箱には入れる)
+					const float frozenRadius = 1.0f / _shadowProj[c]._11;   // 正射影の幅 / 2
+					const ::DirectX::XMMATRIX frozenInv = ::DirectX::XMMatrixInverse(nullptr, ::DirectX::XMLoadFloat4x4(&_shadowView[c]));
+					const ::DirectX::XMVECTOR frozenEye = ::DirectX::XMVector3TransformNormal(frozenInv.r[3], lightRotation);
+					const float frozenDepth = 1.0f / _shadowProj[c]._33;     // 奥行きの範囲
+					unionMin = ::DirectX::XMVectorMin(unionMin, ::DirectX::XMVectorSubtract(frozenEye, ::DirectX::XMVectorSet(frozenRadius, frozenRadius, 0.0f, 0.0f)));
+					unionMax = ::DirectX::XMVectorMax(unionMax, ::DirectX::XMVectorAdd(frozenEye, ::DirectX::XMVectorSet(frozenRadius, frozenRadius, frozenDepth, 0.0f)));
+					continue;
+				}
 				float centerZ = 0.5f * (a + b) * (1.0f + k);
 				if (centerZ > b) centerZ = b;
 				float radius = std::sqrt((b - centerZ) * (b - centerZ) + b * b * k);
@@ -673,11 +700,22 @@ namespace RHI
 				::DirectX::XMStoreFloat4x4(&_shadowView[c], lightView);
 				::DirectX::XMStoreFloat4x4(&_shadowProj[c], lightProj);
 				extractPlanes(::DirectX::XMMatrixMultiply(lightView, lightProj), _shadowPlanes[c]);
-				_shadowSplits[c]       = splitFar;
 				_shadowNormalOffset[c] = s.NormalBias * texelWorld;
-				splitNear = splitFar;
+				_shadowValid[c]        = true;
+
+				// 囲む箱 : ライトの回転の空間で [中心 ± 半径] × [視点, 視点 + 奥行き]
+				const ::DirectX::XMVECTOR eyeLs = ::DirectX::XMVector3TransformNormal(eye, lightRotation);
+				unionMin = ::DirectX::XMVectorMin(unionMin, ::DirectX::XMVectorSubtract(eyeLs, ::DirectX::XMVectorSet(radius, radius, 0.0f, 0.0f)));
+				unionMax = ::DirectX::XMVectorMax(unionMax, ::DirectX::XMVectorAdd(eyeLs, ::DirectX::XMVectorSet(radius, radius, back + radius, 0.0f)));
 			}
+			for (uint32_t c = count; c < RHI::MAX_SHADOW_CASCADES; ++c) _shadowValid[c] = false;
 			_shadowViewCount = count;
+
+			::DirectX::XMFLOAT3 mn, mx;
+			::DirectX::XMStoreFloat3(&mn, unionMin);
+			::DirectX::XMStoreFloat3(&mx, unionMax);
+			const ::DirectX::XMMATRIX unionProj = ::DirectX::XMMatrixOrthographicOffCenterLH(mn.x, mx.x, mn.y, mx.y, mn.z, mx.z);
+			extractPlanes(::DirectX::XMMatrixMultiply(lightRotation, unionProj), _shadowUnionPlanes);
 		}
 
 		const ::DirectX::XMFLOAT4* Buffer::GetFrustumPlanes(uint32_t view)
@@ -732,6 +770,8 @@ namespace RHI
 				constants.ShadowDistance     = _shadowViewCount > 0 ? _shadowSplits[_shadowViewCount - 1] : 0.0f;
 				constants.ShadowFadeStart    = constants.ShadowDistance * 0.9f;
 				constants.ShadowSoftness     = _shadowSettings.Softness;
+				constants.ShadowBlend        = (std::min)((std::max)(_shadowSettings.CascadeBlend, 0.0f), 0.5f);
+				constants.ShadowShowCascades = (_shadowSettings.Flags & RHI::SHADOW_FLAG_SHOW_CASCADES) ? 1u : 0u;
 				for (uint32_t c = 0; c < _shadowViewCount; ++c)
 				{
 					const ::DirectX::XMMATRIX viewProj = ::DirectX::XMMatrixMultiply(

@@ -181,7 +181,11 @@ namespace RHI
 		// RHI が 1 サンプルの写しへ自動で解決 (Resolve) する。シーンの深度 (SCENE_DEPTH) も描画先と同じサンプル数になる
 		// 対応していない数は、対応している一番近い数に下げる (GetMaxSampleCount)
 		uint32_t SampleCount = 1;
+		// 配列の枚数 (Depth32 だけ。1 〜 MAX_DEPTH_SLICES)。カスケードのシャドーマップを 1 枚の Texture2DArray にする
+		// 描画先にする時は SetRenderTargets の Arg0 で枚目を選ぶ
+		uint32_t ArraySize   = 1;
 	};
+	static constexpr uint32_t MAX_DEPTH_SLICES = 4;
 
 	struct RenderTargetHandle
 	{
@@ -216,7 +220,7 @@ namespace RHI
 
 	enum class RenderCommandType : uint32_t
 	{
-		SetRenderTargets = 0,   // Colors[0..ColorCount) と Depth を描画先にする
+		SetRenderTargets = 0,   // Colors[0..ColorCount) と Depth を描画先にする (Arg0 = 深度の配列の何枚目か)
 		ClearColor       = 1,   // 描画先の色を ClearColor で消す
 		ClearDepth       = 2,   // 描画先の深度を ClearDepth で消す
 		DrawScene        = 3,   // Arg0 = ScenePass / Arg1 = RenderQueue / Inputs[0] = 視点 (0 カメラ / 1〜 影のカスケード)
@@ -294,8 +298,18 @@ namespace RHI
 		float    NormalBias   = 1.0f;                       // 法線方向へずらす量 (シャドーマップの 1 texel の何倍か)
 		float    Softness     = 1.0f;                       // PCF で読む間隔 (texel)
 		float    SplitLambda  = 0.75f;                      // カスケードの分け方 (0 = 均等 / 1 = 対数)
+		float    CascadeBlend = 0.1f;                       // 段の境目をなめらかにつなぐ幅 (段の奥行きに対する割合。0 なら切り替えるだけ)
+		uint32_t Flags        = 0;                          // ShadowFlags
+		uint32_t FrozenMask   = 0;                          // このフレームは行列を作り直さない (描き直さない) カスケード (ビット)
+		uint32_t Padding      = 0;
 	};
-	static_assert(sizeof(ShadowSettings) == 32, "ShadowSettings must be 32 bytes (same as C#)");
+	static_assert(sizeof(ShadowSettings) == 48, "ShadowSettings must be 48 bytes (same as C#)");
+
+	enum ShadowFlags : uint32_t
+	{
+		SHADOW_FLAG_UNION_CULLING = 1,   // 全カスケードを囲む箱で 1 回だけカリングする (既定は段ごと)
+		SHADOW_FLAG_SHOW_CASCADES = 2,   // 確認用 : 段ごとに色を付ける
+	};
 
 	// ==========================================================================
 	// 初期化

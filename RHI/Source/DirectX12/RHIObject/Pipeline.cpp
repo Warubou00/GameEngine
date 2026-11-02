@@ -264,7 +264,8 @@ namespace RHI
             //   範囲は重ねてよい (OffsetInDescriptorsFromTableStart = 0 で同じ場所を指す)。
             //   MSAA の深度を 1 サンプルの深度へ解決するシェーダー (PSResolveDepth) が使う
             //   (Texture2D の配列から MSAA のテクスチャは読めない。種類の違う SRV を同じ添え字で読むため)
-            //   t0, space3 : 同じ配列を Texture2D<float> として読む (シャドーマップを比較サンプラー (SampleCmp) で読むため)
+            //   t0, space3 : 同じ配列を Texture2DArray<float> として読む (カスケードのシャドーマップを比較サンプラー (SampleCmp) で読むため)
+            //                (S1 は Texture2D<float> だった。シャドーマップの SRV を配列にした)
             D3D12_DESCRIPTOR_RANGE1 texRanges[3]           = { srvRangeTex, srvRangeTex, srvRangeTex };
             texRanges[0].OffsetInDescriptorsFromTableStart = 0;
             texRanges[1].NumDescriptors                    = MSAA_TEXTURE_COUNT;
