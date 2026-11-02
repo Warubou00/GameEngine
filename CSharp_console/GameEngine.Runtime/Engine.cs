@@ -122,12 +122,12 @@ public sealed class GraphicsSettings
         }
         // SSAO の ON / OFF も表示する (変わった時だけ文字列を作る)
         var ssaoState = !Ssao.Enabled ? 0 : Ssao.ShowOnly ? 2 : 1;
-        var shadowState = Shadows.Enabled && ShadowLightIndex >= 0 && _lightingModel != LightingModel.Unlit ? Shadows.Resolution : 0;
+        var shadowState = Shadows.Enabled && ShadowLightIndex >= 0 && _lightingModel != LightingModel.Unlit ? Shadows.Resolution * 8 + Shadows.CascadeCount : 0;
         var antiAliasing = _pipeline!.AntiAliasingName(this);   // 定数の文字列 (毎フレーム作らない)
         if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing || shadowState != _shownShadowState)
         {
             var ssao   = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
-            var shadow = shadowState > 0 ? $" / Shadows {shadowState}" : "";
+            var shadow = shadowState > 0 ? $" / Shadows {Shadows.Resolution} x{Shadows.CascadeCount}" : "";
             NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}{shadow} / {antiAliasing}");
             _infoDirty         = false;
             _shownSsaoState    = ssaoState;

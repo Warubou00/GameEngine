@@ -470,6 +470,7 @@ namespace RHI
                 //   描画先にした後で全画面のシェーダーが読む時に、ResolveSubresource で写す (ResolveDirty)
                 uint32_t              SampleCount = 1;
                 bool                  IsDepth     = false;   // 深度だけ (Depth32。DSV + SRV。RTV は無い)
+                uint32_t              ArraySize   = 1;       // 深度の配列の枚数 (DSV は 1 枚ずつ、SRV は Texture2DArray)
                 Microsoft::WRL::ComPtr<ID3D12Resource> Resolved;
                 D3D12_RESOURCE_STATES ResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
                 bool                  ResolveDirty  = false;
@@ -477,7 +478,9 @@ namespace RHI
             std::vector<RenderTarget>                            _renderTargets;
             std::vector<uint32_t>                                _freeRenderTargets;
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetRtvHeap;   // レンダーターゲットの RTV (MAX_RENDER_TARGETS 個)
-            std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetDsvHeap;   // 深度のレンダーターゲットの DSV (MAX_RENDER_TARGETS 個。初めて作る時に用意)
+            std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetDsvHeap;   // 深度のレンダーターゲットの DSV (MAX_RENDER_TARGETS × MAX_DEPTH_SLICES 個。初めて作る時に用意)
+            uint32_t                                             _boundDepthSlice = 0;   // 深度のレンダーターゲットの何枚目に描いているか
+            static constexpr uint32_t                            SHADOW_UNION_VIEW = 0xFFFFFFF0u;   // _culledView : 全カスケードを囲む箱で数えた
             uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ
             Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
             // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)

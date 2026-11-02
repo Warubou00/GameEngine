@@ -712,7 +712,8 @@ namespace RHI
 					cmdList->ResourceBarrier(1, &barrier);
 					target.State = D3D12_RESOURCE_STATE_DEPTH_WRITE;
 				}
-				_boundDepth = command.Depth;
+				_boundDepth      = command.Depth;
+				_boundDepthSlice = (std::min)(command.Arg0, target.ArraySize - 1);   // 配列の何枚目に描くか
 				if (width == 0) { width = target.Width; height = target.Height; }
 			}
 			const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = boundDsv();
@@ -825,10 +826,14 @@ namespace RHI
 				}
 				else
 				{
-					if (_culledView != view)
+					// 段ごとにカリングする (既定) / 全カスケードを囲む箱で 1 回だけ数えて全段で使う (SHADOW_FLAG_UNION_CULLING)
+					const bool     unionCulling = buffer->IsShadowUnionCulling();
+					const uint32_t cullKey      = unionCulling ? SHADOW_UNION_VIEW : view;
+					if (_culledView != cullKey)
 					{
-						recordCulling(frame, buffer, _scene.ObjectData, 0, true, buffer->GetFrustumPlanes(view), false);
-						_culledView = view;
+						recordCulling(frame, buffer, _scene.ObjectData, 0, true,
+							unionCulling ? buffer->GetShadowUnionPlanes() : buffer->GetFrustumPlanes(view), false);
+						_culledView = cullKey;
 					}
 					if (opaque) drawOpaque(drawCulled);
 					else        drawCulled(GROUP_ALPHA);
@@ -1089,7 +1094,7 @@ namespace RHI
 
 		D3D12_CPU_DESCRIPTOR_HANDLE CommandContext::boundDsv() const
 		{
-			if (_boundDepth < _renderTargets.size() && _targetDsvHeap) return _targetDsvHeap->GetCpuHandle(_boundDepth);   // 深度のレンダーターゲット
+			if (_boundDepth < _renderTargets.size() && _targetDsvHeap) return _targetDsvHeap->GetCpuHandle(_boundDepth * RHI::MAX_DEPTH_SLICES + _boundDepthSlice);   // 深度のレンダーターゲット
 			return _dsvHeap->GetCpuHandle(_boundDepthMsaa ? 1 : 0);
 		}
 
@@ -1239,11 +1244,12 @@ namespace RHI
 			target.FixedHeight = desc.Height;
 			std::memcpy(target.Clear, desc.ClearColor, sizeof(target.Clear));
 			target.IsDepth     = desc.Format == RHI::RenderTargetFormat::Depth32;
+			target.ArraySize   = target.IsDepth ? (std::min)((std::max)(desc.ArraySize, 1u), RHI::MAX_DEPTH_SLICES) : 1;
 			target.SampleCount = (!target.IsDepth && desc.SampleCount > 1) ? supportedSampleCount(format, desc.SampleCount) : 1;
 			if (target.IsDepth && !_targetDsvHeap)
 			{
 				_targetDsvHeap = std::make_unique<DirectX12::DescriptorHeap>();
-				if (FAILED(_targetDsvHeap->Create(_device->GetDevice()->GetDevice(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_RENDER_TARGETS)))
+				if (FAILED(_targetDsvHeap->Create(_device->GetDevice()->GetDevice(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_RENDER_TARGETS * RHI::MAX_DEPTH_SLICES)))
 				{
 					Core::Logger::Log("[CommandContext] Failed create depth target heap.");
 					_targetDsvHeap.reset();
@@ -1291,7 +1297,8 @@ namespace RHI
 			{
 				// 深度だけ (シャドーマップ) : DSV (D32_FLOAT) で描き、SRV (R32_FLOAT) で読む
 				if (!_targetDsvHeap) return false;
-				desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+				desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+				desc.DepthOrArraySize = static_cast<UINT16>(target.ArraySize);
 				D3D12_CLEAR_VALUE depthClear = {};
 				depthClear.Format             = DEPTH_FORMAT;
 				depthClear.DepthStencil.Depth = DEPTH_CLEAR_VALUE;
@@ -1304,15 +1311,23 @@ namespace RHI
 				target.Width  = width;
 				target.Height = height;
 
-				D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
-				dsvDesc.Format        = DEPTH_FORMAT;
-				dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-				dx12Device->CreateDepthStencilView(target.Resource.Get(), &dsvDesc, _targetDsvHeap->GetCpuHandle(index));
+				// DSV は 1 枚ずつ (番号 = レンダーターゲットの番号 × MAX_DEPTH_SLICES + 枚目)。SRV は配列のまま
+				// (以前は 1 枚だけ : TEXTURE2D)
+				for (uint32_t slice = 0; slice < target.ArraySize; ++slice)
+				{
+					D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+					dsvDesc.Format                         = DEPTH_FORMAT;
+					dsvDesc.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+					dsvDesc.Texture2DArray.FirstArraySlice = slice;
+					dsvDesc.Texture2DArray.ArraySize       = 1;
+					dx12Device->CreateDepthStencilView(target.Resource.Get(), &dsvDesc, _targetDsvHeap->GetCpuHandle(index * RHI::MAX_DEPTH_SLICES + slice));
+				}
 				D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv = {};
-				depthSrv.Format                  = DXGI_FORMAT_R32_FLOAT;
-				depthSrv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-				depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				depthSrv.Texture2D.MipLevels     = 1;
+				depthSrv.Format                   = DXGI_FORMAT_R32_FLOAT;
+				depthSrv.ViewDimension            = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+				depthSrv.Shader4ComponentMapping  = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				depthSrv.Texture2DArray.MipLevels = 1;
+				depthSrv.Texture2DArray.ArraySize = target.ArraySize;
 				dx12Device->CreateShaderResourceView(target.Resource.Get(), &depthSrv, _heapManager->GetSrvCpuHandle(target.SrvIndex));
 				return true;
 			}

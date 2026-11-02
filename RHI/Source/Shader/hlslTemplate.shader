@@ -120,8 +120,9 @@ StructuredBuffer<LightData> g_Lights : register(t4);
 // レンダーターゲット (G-Buffer など) と深度バッファもここに入っている (番号は g_Inputs で受け取る)
 // 上限の無い範囲なので、他の SRV と番号が重ならないよう space1 に置く (以前は t1)
 Texture2D g_Textures[4096] : register(t0, space1);
-// 同じ配列を 1 成分の深度として読む (シャドーマップを比較サンプラーで読むため。Pipeline.cpp で範囲を重ねている)
-Texture2D<float> g_DepthTextures[4096] : register(t0, space3);
+// 同じ配列を 1 成分の深度の配列として読む (カスケードのシャドーマップを比較サンプラーで読むため。Pipeline.cpp で範囲を重ねている)
+// (S1 は Texture2D<float> だった。シャドーマップを Texture2DArray (カスケードごとに 1 枚) にした)
+Texture2DArray<float> g_DepthArrays[4096] : register(t0, space3);
 
 // (Root Signature の StaticSampler)
 SamplerState g_Sampler      : register(s0);   // 線形・繰り返し (モデルのテクスチャ)
@@ -154,7 +155,9 @@ cbuffer FrameData : register(b0)
     float  g_ShadowFadeStart;      // ここから g_ShadowDistance まで影を薄くする
     float  g_ShadowDistance;
     float  g_ShadowSoftness;       // PCF で読む間隔 (texel)
-    float  g_ShadowPadding;
+    float  g_ShadowBlend;          // 段の境目をつなぐ幅 (段の奥行きに対する割合)
+    uint   g_ShadowShowCascades;   // 1 : 段ごとに色を付ける (確認用)
+    float3 g_ShadowPadding;
 };
 
 // [ROOT_PARAM_PASS_CONSTANTS]: 全画面のパスの値 (ルート定数 16 個)
@@ -219,35 +222,29 @@ float3 shadeAmbient(float3 albedo, float3 N, float3 V, float metallic, float rou
 // ライトの直接の光 (Unlit はテクスチャの色そのまま)
 // N : 法線 (正規化済み) / V : 視線 (物 → カメラ、正規化済み) / P : ワールド座標
 // ==============================================================
-// 影 (シャドーマップ。平行光源 1 つ)
-//   1. カメラからの奥行きでカスケードを選ぶ
+// 影 (カスケードのシャドーマップ。平行光源 1 つ)
+//   1. カメラからの奥行きでカスケードを選ぶ (近いほど細かい段)
 //   2. 位置を法線の向きに少しずらしてからシャドーマップへ投影する (自分の影が縞になる「シャドーアクネ」を抑える。
 //      ずらす量は 1 texel の大きさに比例するので、遠いカスケードほど大きい)
 //   3. PCF : 3x3 の 9 か所を比較サンプラーで読む (1 か所ごとに 2x2 を補間するので、実質 4x4 の範囲がなめらかになる)
-//   4. 影を描く距離の最後の 10% は、だんだん薄くする (影の端がくっきり切れないように)
+//   4. 段の境目 : 次の段の始めの g_ShadowBlend の幅は、手前の段とも読んで混ぜる (境目で影の細かさが急に変わらない)
+//      (C++ が手前の段をその幅だけ広く作っている)
+//   5. 選んだ段の外だった時 (更新を間引いて前の行列のままの段) は、次の段で読む
+//   6. 影を描く距離の最後の 10% は、だんだん薄くする (影の端がくっきり切れないように)
 //   戻り値 : 1 = 光が当たる / 0 = 影
 // ==============================================================
-float shadowFactor(float3 P, float3 N)
+float sampleCascade(uint cascade, float3 P, float3 N, out bool inside)
 {
-    if (g_ShadowCascadeCount == 0) return 1.0f;
-
-    const float depth = mul(float4(P, 1.0f), g_ViewMatrix).z;   // カメラからの奥行き
-    if (depth >= g_ShadowDistance) return 1.0f;
-    uint cascade = 0;
-    [unroll]
-    for (uint c = 0; c < 3; ++c)
-    {
-        if (c + 1 < g_ShadowCascadeCount && depth > g_ShadowSplits[c]) cascade = c + 1;
-    }
-
     const float3 offsetP = P + N * g_ShadowNormalOffset[cascade];
     const float4 shadowPos = mul(float4(offsetP, 1.0f), g_ShadowViewProj[cascade]);
     const float2 uv = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f;
     const float  z  = shadowPos.z;
-    if (z >= 1.0f) return 1.0f;   // ライトの奥の端より奥 (影を落とす物は無い)
+    const float  step   = g_ShadowTexelSize * g_ShadowSoftness;
+    const float  margin = step * 1.5f;   // PCF が段の外を読まない幅
+    inside = all(uv > margin) && all(uv < 1.0f - margin) && z < 1.0f;
+    if (!inside) return 1.0f;
 
-    Texture2D<float> shadowMap = g_DepthTextures[g_ShadowMapTexture];
-    const float step = g_ShadowTexelSize * g_ShadowSoftness;
+    Texture2DArray<float> shadowMap = g_DepthArrays[g_ShadowMapTexture];
     float lit = 0.0f;
     [unroll]
     for (int y = -1; y <= 1; ++y)
@@ -255,18 +252,73 @@ float shadowFactor(float3 P, float3 N)
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            lit += shadowMap.SampleCmpLevelZero(g_ShadowSampler, uv + float2(x, y) * step, z);
+            lit += shadowMap.SampleCmpLevelZero(g_ShadowSampler, float3(uv + float2(x, y) * step, cascade), z);
         }
     }
-    lit /= 9.0f;
+    return lit / 9.0f;
+}
+
+// 奥行きから段を選ぶ
+uint selectCascade(float depth)
+{
+    uint cascade = 0;
+    [unroll]
+    for (uint c = 0; c < 3; ++c)
+    {
+        if (c + 1 < g_ShadowCascadeCount && depth > g_ShadowSplits[c]) cascade = c + 1;
+    }
+    return cascade;
+}
+
+float shadowFactor(float3 P, float3 N)
+{
+    if (g_ShadowCascadeCount == 0) return 1.0f;
+
+    const float depth = mul(float4(P, 1.0f), g_ViewMatrix).z;   // カメラからの奥行き
+    if (depth >= g_ShadowDistance) return 1.0f;
+    uint cascade = selectCascade(depth);
+
+    bool inside;
+    float lit = sampleCascade(cascade, P, N, inside);
+    if (!inside && cascade + 1 < g_ShadowCascadeCount)
+    {
+        cascade++;   // 5. 段の外 : 次の段で読む
+        lit = sampleCascade(cascade, P, N, inside);
+    }
+    else if (inside && cascade > 0 && g_ShadowBlend > 0.0f)
+    {
+        // 4. 段の境目 : 手前の段の奥の端から g_ShadowBlend の幅は、手前の段と混ぜる
+        const float prevSplit  = g_ShadowSplits[cascade - 1];
+        const float prevStart  = cascade >= 2 ? g_ShadowSplits[cascade - 2] : 0.0f;
+        const float blendWidth = (prevSplit - prevStart) * g_ShadowBlend;
+        const float t = (depth - prevSplit) / max(blendWidth, 1e-4f);
+        [branch]
+        if (t < 1.0f)
+        {
+            bool prevInside;
+            const float prevLit = sampleCascade(cascade - 1, P, N, prevInside);
+            if (prevInside) lit = lerp(prevLit, lit, saturate(t));
+        }
+    }
 
     const float fade = saturate((depth - g_ShadowFadeStart) / max(g_ShadowDistance - g_ShadowFadeStart, 1e-4f));
     return lerp(lit, 1.0f, fade);
 }
 
+// 確認用 : 段ごとの色 (赤 → 緑 → 青 → 黄)
+float3 cascadeTint(float3 P)
+{
+    if (g_ShadowCascadeCount == 0) return 1.0f.xxx;
+    const float depth = mul(float4(P, 1.0f), g_ViewMatrix).z;
+    if (depth >= g_ShadowDistance) return 1.0f.xxx;
+    static const float3 TINT[4] = { float3(1.0f, 0.35f, 0.35f), float3(0.35f, 1.0f, 0.35f), float3(0.4f, 0.5f, 1.0f), float3(1.0f, 1.0f, 0.3f) };
+    return TINT[selectCascade(depth)];
+}
+
 float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness)
 {
     if (g_LightingModel == LIGHTING_UNLIT) return albedo;
+    if (g_ShadowShowCascades != 0) albedo *= cascadeTint(P);   // 確認用 : 段ごとに色を付ける (ライトの光だけ)
 
     const bool  pbr = g_LightingModel == LIGHTING_PBR;
     const float NoV = saturate(dot(N, V)) + 1e-4f;

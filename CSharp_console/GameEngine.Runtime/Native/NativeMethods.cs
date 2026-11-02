@@ -75,6 +75,7 @@ internal static unsafe class NativeMethods
         public uint    Height;
         public Vector4 ClearColor;
         public uint    SampleCount;  // MSAA のサンプル数 (1 / 2 / 4 / 8)
+        public uint    ArraySize;    // 配列の枚数 (Depth32 だけ。カスケードのシャドーマップ)
     }
 
     // 120byte (C++ 側は static_assert で確かめている)
@@ -113,7 +114,7 @@ internal static unsafe class NativeMethods
         public Vector3 Ambient;
     }
 
-    // C++ の RHI::ShadowSettings と同じ並び (32byte)
+    // C++ の RHI::ShadowSettings と同じ並び (48byte。以前は 32byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct ShadowSettings
     {
@@ -125,11 +126,16 @@ internal static unsafe class NativeMethods
         public float NormalBias;
         public float Softness;
         public float SplitLambda;
+        public float CascadeBlend;
+        public uint  Flags;          // 1 : 全カスケードを囲む箱で 1 回だけカリング / 2 : 段ごとに色を付ける
+        public uint  FrozenMask;     // このフレームは描き直さないカスケード (ビット)
+        public uint  Padding;
 
         // 値の比較 (Equals は object を受け取るので箱詰めが起きる。毎フレーム比べるので自分で比べる)
         public readonly bool SameAs(in ShadowSettings o) =>
             Enabled == o.Enabled && LightIndex == o.LightIndex && ShadowMap == o.ShadowMap && CascadeCount == o.CascadeCount &&
-            Distance == o.Distance && NormalBias == o.NormalBias && Softness == o.Softness && SplitLambda == o.SplitLambda;
+            Distance == o.Distance && NormalBias == o.NormalBias && Softness == o.Softness && SplitLambda == o.SplitLambda &&
+            CascadeBlend == o.CascadeBlend && Flags == o.Flags && FrozenMask == o.FrozenMask;
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
