@@ -359,11 +359,11 @@ namespace RHI
 					const D3D12_RANGE readRange = { 0, sizeof(uint32_t) * 8 };
 					if (SUCCEEDED(draws.Readback->Get()->Map(0, &readRange, &mapped)))
 					{
-						// [0〜2] : 1 回目 (視錐台だけ / 前段) の映ったオブジェクト数・描画数 (不透明 / 半透明)、[4〜6] : 後段
+						// [0〜3] : 1 回目 (視錐台だけ / 前段) の映ったオブジェクト数・描画数 (不透明 / 半透明 / 両面の不透明)、[4〜7] : 後段
 						const uint32_t* counters = static_cast<const uint32_t*>(mapped);
 						const bool two = draws.CullPhases == 2;
 						_stats.VisibleInstances = counters[0] + (two ? counters[4] : 0);
-						_stats.VisibleDraws     = counters[1] + counters[2] + (two ? counters[5] + counters[6] : 0);
+						_stats.VisibleDraws     = counters[1] + counters[2] + counters[3] + (two ? counters[5] + counters[6] + counters[7] : 0);
 						_stats.VisibleValid     = true;
 						const D3D12_RANGE noWrite = { 0, 0 };
 						draws.Readback->Get()->Unmap(0, &noWrite);
@@ -547,7 +547,7 @@ namespace RHI
 
 			_stats.IndirectDraw       = _scene.Indirect;
 			_stats.IndirectArgsReused = _scene.Reused;
-			_stats.DrawCalls          = frame.GroupCount[0] + frame.GroupCount[1];
+			_stats.DrawCalls          = frame.GroupCount[0] + frame.GroupCount[1] + frame.GroupCount[2];
 			_stats.Instances          = frame.Instances;
 			_stats.Instancing         = frame.Instanced;
 			_stats.GpuCulling         = _scene.Culling;
@@ -734,6 +734,7 @@ namespace RHI
 			ID3D12CommandSignature* signature = _currentPipeline->GetIndirectDrawSignature();
 			constexpr uint32_t GROUP_OPAQUE = Pipeline::PIPELINE_OPAQUE;   // (OPAQUE は wingdi.h のマクロと重なるので使わない)
 			constexpr uint32_t GROUP_ALPHA  = Pipeline::PIPELINE_ALPHA_BLEND;
+			constexpr uint32_t GROUP_DOUBLE = Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED;
 
 			auto setPso = [&](uint32_t group) -> bool
 			{
@@ -779,9 +780,17 @@ namespace RHI
 				}
 			};
 
+			// 不透明 : 片面 (裏面カリング) → 両面 の 2 つの PSO で描く
+			auto drawOpaque = [&](auto&& draw)
+			{
+				draw(GROUP_OPAQUE);
+				draw(GROUP_DOUBLE);
+			};
+
 			if (!_scene.Culling)
 			{
-				drawAll(opaque ? GROUP_OPAQUE : GROUP_ALPHA);
+				if (opaque) drawOpaque(drawAll);
+				else        drawAll(GROUP_ALPHA);
 				return;
 			}
 
@@ -801,7 +810,7 @@ namespace RHI
 					// ==============================================================
 					const bool resetVisibility = !_scene.Reused || !_visibilityValid;
 					recordCulling(frame, buffer, _scene.ObjectData, 1, resetVisibility);
-					drawCulled(GROUP_OPAQUE);
+					drawOpaque(drawCulled);
 					// MSAA : Hi-Z は 1 サンプルの深度から作るので、前段の深度を先に解決する
 					if (_boundDepthMsaa) resolveSceneDepth(buffer);
 					buildHiZ(buffer);
@@ -816,7 +825,8 @@ namespace RHI
 			}
 			// ※ 2 段階のオクルージョンの後に不透明をもう一度描くと、後段の分 (前段で描かなかった物) だけになる。
 			//    同じフレームで不透明を 2 回描く描画パス (影など) を作る時は、カリングをパスごとに分けること
-			drawCulled(opaque ? GROUP_OPAQUE : GROUP_ALPHA);
+			if (opaque) drawOpaque(drawCulled);
+			else        drawCulled(GROUP_ALPHA);
 		}
 
 		void CommandContext::drawFullscreen(Buffer* buffer, const RHI::RenderCommand& command)
@@ -1277,8 +1287,9 @@ namespace RHI
 				const RHI::DrawItem& item = items[i];
 				if (!item.Object.IsValid() || item.IndexCount == 0) { _itemBatch[i] = UINT32_MAX; continue; }
 
-				const uint32_t group = buffer->GetMaterialBlend(item.Material.Index) == RHI::BlendMode::AlphaBlend
-					? Pipeline::PIPELINE_ALPHA_BLEND : Pipeline::PIPELINE_OPAQUE;
+				uint32_t group = Pipeline::PIPELINE_OPAQUE;
+				if (buffer->GetMaterialBlend(item.Material.Index) == RHI::BlendMode::AlphaBlend) group = Pipeline::PIPELINE_ALPHA_BLEND;
+				else if (buffer->GetMaterialDoubleSided(item.Material.Index))                    group = Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED;
 				const MeshKey key = { item.BaseVertex, item.FirstIndex, item.IndexCount, group };
 				auto open = _openBatch.find(key);
 				if (open == _openBatch.end() || _batches[open->second].Count >= batchSize)
@@ -1307,11 +1318,15 @@ namespace RHI
 			}
 
 			// 3. 描画の引数 (まとまりごとに 1 個。描き方ごとに分けて並べる)
-			for (uint32_t g = 0; g < GROUP_COUNT; ++g)
+			//    並び : 不透明 → 両面の不透明 → 半透明 (半透明を最後にして「半透明の先頭より後ろ = 半透明」で見分ける)
+			static constexpr uint32_t GROUP_ORDER[GROUP_COUNT] = {
+				Pipeline::PIPELINE_OPAQUE, Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED, Pipeline::PIPELINE_ALPHA_BLEND };
+			for (uint32_t order = 0; order < GROUP_COUNT; ++order)
 			{
+				const uint32_t g = GROUP_ORDER[order];
 				// 前の描き方の後ろを、空の描画で GROUP_ALIGNMENT の倍数まで埋める
 				// (空の描画は InstanceCount = 0。どのオブジェクトも属さないので、カリングで詰め直すと消える)
-				while (frame.Args.size() % GROUP_ALIGNMENT != 0 && g > 0)
+				while (frame.Args.size() % GROUP_ALIGNMENT != 0 && order > 0)
 				{
 					frame.Args.push_back(D3D12_DRAW_INDEXED_ARGUMENTS{});
 				}
@@ -1388,6 +1403,8 @@ namespace RHI
 			constants.Phase           = phase;
 			constants.ResetVisibility = resetVisibility ? 1 : 0;
 			constants.AlphaDrawStart  = frame.GroupCount[Pipeline::PIPELINE_ALPHA_BLEND] > 0 ? frame.GroupStart[Pipeline::PIPELINE_ALPHA_BLEND] : 0xFFFFFFFFu;
+			constants.DoubleSidedDrawStart = frame.GroupCount[Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED] > 0
+				? frame.GroupStart[Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED] : 0xFFFFFFFFu;
 			static_assert(sizeof(CullConstants) == Pipeline::CULL_CONSTANT_COUNT * sizeof(uint32_t), "CullConstants size mismatch");
 
 			// Culled : 1 回目はフレームの始めの COMMON から、後段は前段の描画が読み終わってから書き直す
@@ -1456,9 +1473,10 @@ namespace RHI
 			const auto toRead = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE);
 			cmdList->ResourceBarrier(1, &toRead);
-			// 読み戻し : 1 回目 (視錐台だけ / 前段) は [0〜2]、後段は [4〜6] に写す (映った数 / 不透明 / 半透明の描画数)
+			// 読み戻し : 1 回目 (視錐台だけ / 前段) は [0〜3]、後段は [4〜7] に写す
+			// (映った数 / 不透明 / 半透明 / 両面の不透明 の描画数。以前は 3 つ)
 			cmdList->CopyBufferRegion(frame.Readback->Get(), phase == 2 ? sizeof(uint32_t) * 4 : 0, culled,
-				DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 3);
+				DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 4);
 			frame.CullRecorded = true;
 			frame.CullPhases   = phase == 0 ? 1 : 2;
 

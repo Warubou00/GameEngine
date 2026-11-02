@@ -427,12 +427,11 @@ namespace RHI
                 D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
                 desc.pRootSignature = rootSignature;
 
-                // カリングしない (両面とも描画する)
-                // TODO(高速化) : 閉じたメッシュなら BACK にするとピクセルシェーダーの実行が約半分になる。
-                //               OBJ(右手系) と DirectXMath(左手系) で面の向きが逆になるため、ローダー側で揃えてから有効にする
+                // 既定はカリングしない (全画面の三角形など)。シーンの不透明な物は GetScenePso で裏面カリングにする
+                // (以前はここに「BACK にすると速くなる」の TODO があり、シーンも全部両面で描いていた)
                 desc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
                 desc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
-                desc.RasterizerState.FrontCounterClockwise = TRUE;
+                desc.RasterizerState.FrontCounterClockwise = FALSE;   // 画面上で時計回りが表 (D3D の既定)。以前は TRUE (カリングしないので意味が無かった)
                 desc.RasterizerState.DepthBias             = D3D12_DEFAULT_DEPTH_BIAS;
                 desc.RasterizerState.DepthBiasClamp        = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
                 desc.RasterizerState.SlopeScaledDepthBias  = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
@@ -487,6 +486,9 @@ namespace RHI
             hash = fnv1a(desc.PS.pShaderBytecode, desc.PS.BytecodeLength, hash);
             hash = fnv1a(&desc.BlendState, sizeof(desc.BlendState), hash);
             hash = fnv1a(&desc.DepthStencilState, sizeof(desc.DepthStencilState), hash);
+            // ラスタライザー (カリング) も名前に入れる。以前は入っておらず、裏面カリングを入れた時に
+            // 前の両面の PSO と同じ名前になり、キャッシュの読み込みも保存も失敗していた (D3D12 の警告)
+            hash = fnv1a(&desc.RasterizerState, sizeof(desc.RasterizerState), hash);
             wchar_t name[96] = {};
             swprintf_s(name, L"%s_%016llx", prefix, hash);
 
@@ -517,6 +519,11 @@ namespace RHI
             desc.VS = shaders.Vs.View();
             const bool gbuffer = scenePass == static_cast<uint32_t>(RHI::ScenePass::GBuffer);
             const bool split   = scenePass == static_cast<uint32_t>(RHI::ScenePass::ForwardSplitAmbient);
+            // 裏面カリング : 片面の不透明な物だけ (ピクセルシェーダーの実行が減る。見本のシーンで GPU 時間 -16%)
+            //   面の向き : ローダーの頂点の並びは、カメラから見て時計回りが表 (OBJ / PMX とも。確認済み)
+            //   両面の物 / 半透明 (描く順番を崩せないので両面のまま) はカリングしない
+            if (group == PIPELINE_OPAQUE) desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+
             // 半透明は環境光を分けない (SSAO を掛けない。RT1 には書かない)
             if (group == PIPELINE_ALPHA_BLEND) desc.PS = shaders.PsForwardAlpha.View();
             else if (gbuffer)                  desc.PS = shaders.PsGBuffer.View();

@@ -188,6 +188,12 @@ namespace RHI
                 return material < _materials.size() ? static_cast<RHI::BlendMode>(_materials[material].Blend) : RHI::BlendMode::Opaque;
             }
 
+            // マテリアルが両面か (PSO を分ける。GPU のデータには入れない : CPU 側の描画のまとまり分けにだけ使う)
+            bool GetMaterialDoubleSided(uint32_t material)const
+            {
+                return material < _materialDoubleSided.size() && _materialDoubleSided[material] != 0;
+            }
+
             /***********************************************************************************
              * @brief マテリアルをこのフレームの領域へ書いて VRAM へ写し、その先頭アドレスを返す
              * @details 増えた / 変わった時だけ書く (止まっているシーンでは何もしない)
@@ -333,6 +339,7 @@ namespace RHI
 
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
             std::vector<MaterialData>                       _materials;
+            std::vector<uint8_t>                          _materialDoubleSided;   // マテリアルごとの両面 (_materials と同じ並び)
             uint64_t                                        _materialsVersion = 1;
             uint64_t                                        _materialsWritten[CommandContext::FRAME_COUNT] = {};
             std::unique_ptr<RHI::DirectX12::ResourceBuffer> _materialUpload;    // [フレーム][MAX_MATERIALS]

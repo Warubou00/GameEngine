@@ -115,12 +115,16 @@ namespace RHI
             static constexpr DXGI_FORMAT HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
             // ----------------------------------------------------------
-            // 描き方のまとまり (PSO)。この順番に描く (不透明 → 半透明)。RHI::BlendMode と同じ番号
+            // 描き方のまとまり (PSO)。不透明 (片面 → 両面) → 半透明 の順に描く
+            //   0 / 1 は RHI::BlendMode と同じ番号。両面の不透明は裏面カリングをしない PSO で描く
+            //   (以前は不透明 / 半透明の 2 つで、全部両面で描いていた)
+            //   引数の並びも 不透明 → 両面の不透明 → 半透明 (GPU カリングは「半透明の先頭より後ろ = 半透明」で見分ける)
             // ----------------------------------------------------------
             enum PipelineGroup : unsigned int
             {
-                PIPELINE_OPAQUE      = 0,
-                PIPELINE_ALPHA_BLEND = 1,
+                PIPELINE_OPAQUE              = 0,
+                PIPELINE_ALPHA_BLEND         = 1,
+                PIPELINE_OPAQUE_DOUBLE_SIDED = 2,
                 PIPELINE_GROUP_COUNT
             };
 
@@ -145,7 +149,7 @@ namespace RHI
             // float4 ×6 + uint ×9
             // ルートシグネチャの上限は 64 DWORD : 33 + ルート CBV / SRV / UAV 10 個 × 2 = 53
             // (以前は Hi-Z のカメラの行列もルート定数で渡していて 63 だった。今はフレームの定数を Root CBV で読む)
-            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 9;
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 10;   // 以前は + 9 (両面の不透明の先頭を足した)
             static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
 
             // ----------------------------------------------------------

@@ -62,6 +62,8 @@ cbuffer CullConstants : register(b0)
     uint   g_AlphaDrawStart;   // この番号以降の描画は半透明 (64 の倍数。無ければ 0xFFFFFFFF)
                                // 半透明は不透明の後に描くので、前段では描かず、後段で (前段で描いたかに関係なく) 描く
                                // 詰め直しも不透明 / 半透明で分ける (カウンターと書く場所が別)
+    uint   g_DoubleSidedDrawStart;   // この番号から半透明の先頭までは両面の不透明 (64 の倍数。無ければ 0xFFFFFFFF)
+                                     // 詰め直しのカウンターと書く場所を分ける (PSO が違うので別の ExecuteIndirect で描く)
 };
 
 // [1] フレームの定数 (描画用の GlobalData と同じもの。後段で Hi-Z と比べる時に、このフレームのカメラで投影する)
@@ -95,7 +97,7 @@ void CSClear(uint3 id : SV_DispatchThreadID)
     const uint draw = id.x;
     if (draw == 0)
     {
-        g_OutArgs.Store3(g_CounterOffset, uint3(0, 0, 0));   // 映ったオブジェクトの数 / 詰めた描画の数 (不透明 / 半透明)
+        g_OutArgs.Store4(g_CounterOffset, uint4(0, 0, 0, 0));   // 映ったオブジェクトの数 / 詰めた描画の数 (不透明 / 半透明 / 両面の不透明)
     }
     if (draw >= g_DrawCount) return;
 
@@ -291,10 +293,14 @@ void CSCompact(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
     gs_Flag[groupIndex] = visible ? 1 : 0;
     GroupMemoryBarrierWithGroupSync();
 
-    // 不透明 / 半透明のどちらの描画か (半透明の先頭は 64 の倍数なので、64 個のまとまりはどちらか一方だけ)
+    // どの描き方の描画か (各まとまりの先頭は 64 の倍数なので、64 個のまとまりはどれか 1 つだけ)
+    //   並びは 不透明 (0) → 両面の不透明 (2) → 半透明 (1)。番号は Pipeline::PipelineGroup と同じ
     // それぞれ別のカウンターに数え、別の場所 (自分の描き方の先頭から) に詰める
-    const uint pipelineGroup = (id.x - groupIndex) >= g_AlphaDrawStart ? 1 : 0;
-    const uint groupFirst    = pipelineGroup == 1 ? g_AlphaDrawStart : 0;
+    const uint first = id.x - groupIndex;
+    uint pipelineGroup = 0;
+    uint groupFirst    = 0;
+    if (first >= g_AlphaDrawStart)            { pipelineGroup = 1; groupFirst = g_AlphaDrawStart; }
+    else if (first >= g_DoubleSidedDrawStart) { pipelineGroup = 2; groupFirst = g_DoubleSidedDrawStart; }
 
     // グループ内の書き込み位置 (前にある「映った描画」の数) と、全体の中の先頭をまとめて決める
     if (groupIndex == 0)

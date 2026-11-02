@@ -433,6 +433,7 @@ namespace RHI
 
 			handle.Index = static_cast<uint32_t>(_materials.size());
 			_materials.push_back(data);
+			_materialDoubleSided.push_back(desc.DoubleSided ? 1 : 0);
 			_materialsVersion++;   // 全部のフレームの領域に書き直す
 			return handle;
 		}

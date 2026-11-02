@@ -211,6 +211,7 @@ namespace Renderer
 				desc.Color[2] = textured ? 1.0f : material->Diffuse._z;
 				desc.Color[3] = material->Transparent ? material->Diffuse._w : 1.0f;
 				desc.Blend    = material->Transparent ? RHI::BlendMode::AlphaBlend : RHI::BlendMode::Opaque;
+				desc.DoubleSided = material->DoubleSided;   // PMX の材質のフラグ (OBJ は常に片面)
 
 				// PBR : OBJ / PMX は金属・粗さを持たないので、鏡面の鋭さ (OBJ の Ns / PMX の反射強度) から粗さを決める
 				//       Blinn-Phong の指数 n と GGX の粗さの対応 : roughness = sqrt(2 / (n + 2))
