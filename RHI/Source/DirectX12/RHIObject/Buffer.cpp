@@ -297,6 +297,23 @@ namespace RHI
 		RHI::ObjectHandle Buffer::CreateObject()
 		{
 			RHI::ObjectHandle handle;
+
+			// 初期値 : 原点に置いて既定テクスチャ(白)
+			RHI::ObjectConstants initial;
+			::DirectX::XMStoreFloat4x4(&initial.World, ::DirectX::XMMatrixIdentity());
+			initial.TextureIndex = RHI::TextureHandle::DEFAULT;
+
+			// 削除された番号があれば使い回す (オブジェクトの配列が増え続けないように)
+			if (!_freeObjects.empty())
+			{
+				handle.Index = _freeObjects.back();
+				_freeObjects.pop_back();
+				_objects[handle.Index] = initial;
+				_objectsVersion++;
+				_objectVersion[handle.Index] = _objectsVersion;   // どのフレームの領域にも書き直す
+				return handle;
+			}
+
 			if (_objects.size() >= MAX_OBJECTS)
 			{
 				Core::Logger::Log("[Buffer] Too many objects.");
@@ -304,11 +321,6 @@ namespace RHI
 			}
 
 			handle.Index = static_cast<uint32_t>(_objects.size());
-
-			// 初期値 : 原点に置いて既定テクスチャ(白)
-			RHI::ObjectConstants initial;
-			::DirectX::XMStoreFloat4x4(&initial.World, ::DirectX::XMMatrixIdentity());
-			initial.TextureIndex = RHI::TextureHandle::DEFAULT;
 
 			_objects.push_back(initial);                 // 単位行列は転置しても同じ
 			_objectVersion.push_back(_objectsVersion);
@@ -318,6 +330,12 @@ namespace RHI
 			}
 			_objectsVersion++;
 			return handle;
+		}
+
+		void Buffer::DestroyObject(RHI::ObjectHandle object)
+		{
+			if (!object.IsValid() || object.Index >= _objects.size()) return;
+			_freeObjects.push_back(object.Index);
 		}
 
 		void Buffer::UpdateObject(RHI::ObjectHandle object, const RHI::ObjectConstants& constants)

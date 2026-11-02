@@ -146,6 +146,13 @@ namespace RHI
             RHI::ObjectHandle CreateObject();
 
             /***********************************************************************************
+             * @brief 描画オブジェクトを削除する (番号は次の CreateObject で使い回す)
+             * @details 削除したオブジェクトを指す DrawItem を、次の描画で渡さないこと。
+             *          GPU が前のフレームで読んでいる領域は、フレームごとに分けてあるので書き換わらない
+             ************************************************************************************/
+            void DestroyObject(RHI::ObjectHandle object);
+
+            /***********************************************************************************
              * @brief オブジェクトの定数を更新する
              * @details CPU 側の値だけを書き換え、GPU へは WriteObjectConstants でフレームごとの領域に書く。
              *          GPU が前のフレームで読んでいる最中の値を上書きしないので、毎フレーム呼んでもよい
@@ -177,7 +184,7 @@ namespace RHI
             const ::DirectX::XMFLOAT4* GetFrustumPlanes();
 
             // 登録されている描画オブジェクトの数 (プロファイラー用)
-            uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size()); }
+            uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size() - _freeObjects.size()); }
 
             // テクスチャの読み込み口 (既定テクスチャを作ったものと同じものを使う)
             RHI::ObjectInterface::Texture* GetTexture()const { return _texture.get(); }
@@ -255,6 +262,7 @@ namespace RHI
             // ---------- オブジェクトごとの定数 (CPU 側) ----------
             std::vector<RHI::ObjectConstants>   _objects;                                   // シェーダー用に転置済み
             std::vector<uint64_t>               _objectVersion;                             // オブジェクトごとの更新回数
+            std::vector<uint32_t>               _freeObjects;                               // 削除されて使い回せる番号
             std::vector<uint64_t>               _objectWritten[CommandContext::FRAME_COUNT]; // フレームの領域に書いた時の更新回数
             uint64_t                            _objectsVersion = 1;                        // どれかが更新されたら増える
             uint64_t                            _objectsWrittenVersion[CommandContext::FRAME_COUNT] = {};

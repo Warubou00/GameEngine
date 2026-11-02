@@ -213,6 +213,12 @@ namespace RHI
         return _buffer->CreateObject();
     }
 
+    void RenderHardwareInterface::DestroyObject(ObjectHandle object)
+    {
+        if (!_isInitialized) return;
+        _buffer->DestroyObject(object);
+    }
+
     void RenderHardwareInterface::UpdateObject(ObjectHandle object, const ObjectConstants& constants)
     {
         if (!_isInitialized) return;

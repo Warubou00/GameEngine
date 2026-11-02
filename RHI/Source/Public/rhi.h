@@ -11,7 +11,7 @@
 *            RHI::IRenderHardwareInterface* rhi = RHI_CreateRenderHardwareInterface();
 *            rhi->Initialize(desc, &result);
 *            auto vertices = rhi->UploadVertices(...);      // 頂点を GPU へ
-*            auto object   = rhi->CreateObject();           // ワールド行列などの置き場
+*            auto object   = rhi->CreateObject();           // ワールド行列などの置き場 (DestroyObject で削除)
 *            rhi->UpdateObject(object, constants);
 *            rhi->SetViewProjection(view, projection);
 *            rhi->Render(drawItems, count);                  // 毎フレーム
@@ -80,8 +80,11 @@ namespace RHI
 		// 画像ファイルをまとめて読み込む (デコードは並列)。失敗したものは TextureHandle::DEFAULT
 		virtual void LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles) = 0;
 
-		// 描画オブジェクト (ワールド行列 / テクスチャの置き場) を作る
+		// 描画オブジェクト (ワールド行列 / テクスチャの置き場) を作る (削除された番号があれば使い回す)
 		virtual ObjectHandle CreateObject() = 0;
+
+		// 描画オブジェクトを削除する。削除したオブジェクトを指す DrawItem は、次の Render から渡さないこと
+		virtual void DestroyObject(ObjectHandle object) = 0;
 
 		// オブジェクトの定数を更新する (毎フレーム呼んでもよい。GPU が使用中の領域は書き換えない)
 		virtual void UpdateObject(ObjectHandle object, const ObjectConstants& constants) = 0;
@@ -114,8 +117,8 @@ namespace RHI
 		virtual void SetGpuCullingEnabled(bool enabled) = 0;
 		virtual bool IsGpuCullingEnabled()const = 0;
 
-		// オクルージョンカリングをするか (既定 : true)。前のフレームの深度で、手前の物に完全に隠れている物を除く
-		// GPU カリングの時だけ効く。カメラが速く動くと、新しく見えた物が 1 フレーム遅れて出ることがある
+		// オクルージョンカリングをするか (既定 : true)。手前の物に完全に隠れている物を除く (2 段階 : 遅れ無し)
+		// GPU カリングの時だけ効く
 		virtual void SetOcclusionCullingEnabled(bool enabled) = 0;
 		virtual bool IsOcclusionCullingEnabled()const = 0;
 
