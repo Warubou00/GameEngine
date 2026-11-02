@@ -97,6 +97,7 @@ namespace RHI
             Shader::CompiledShader PsGBuffer;        // PSGBuffer      : ディファード用の G-Buffer
             Shader::CompiledShader PsForwardSplit;   // PSForwardSplit : ライトの光と環境光を分けて書く (Forward + SSAO)
             Shader::CompiledShader PsForwardAlphaSplit;   // PSForwardAlphaSplit : 半透明 (Forward + SSAO)。環境光を覆った分だけ減らす
+            Shader::CompiledShader PsShadowAlpha;    // PSShadowAlpha : シャドーマップ (半透明をアルファテストで描く。不透明はピクセルシェーダー無し)
         };
 
         // 全画面のシェーダー (ファイルの VSFullscreen + entry)
@@ -263,11 +264,15 @@ namespace RHI
             //   範囲は重ねてよい (OffsetInDescriptorsFromTableStart = 0 で同じ場所を指す)。
             //   MSAA の深度を 1 サンプルの深度へ解決するシェーダー (PSResolveDepth) が使う
             //   (Texture2D の配列から MSAA のテクスチャは読めない。種類の違う SRV を同じ添え字で読むため)
-            D3D12_DESCRIPTOR_RANGE1 texRanges[2]           = { srvRangeTex, srvRangeTex };
+            //   t0, space3 : 同じ配列を Texture2D<float> として読む (シャドーマップを比較サンプラー (SampleCmp) で読むため)
+            D3D12_DESCRIPTOR_RANGE1 texRanges[3]           = { srvRangeTex, srvRangeTex, srvRangeTex };
             texRanges[0].OffsetInDescriptorsFromTableStart = 0;
             texRanges[1].NumDescriptors                    = MSAA_TEXTURE_COUNT;
             texRanges[1].RegisterSpace                     = 2;
             texRanges[1].OffsetInDescriptorsFromTableStart = 0;
+            texRanges[2].NumDescriptors                    = MSAA_TEXTURE_COUNT;
+            texRanges[2].RegisterSpace                     = 3;
+            texRanges[2].OffsetInDescriptorsFromTableStart = 0;
 
             // パラメータの設定 (番号は Pipeline.h の RootParameterIndex を参照)
             D3D12_ROOT_PARAMETER1 rootParams[ROOT_PARAM_COUNT] = {};
@@ -360,13 +365,19 @@ namespace RHI
 
             // s1 : 点 (補間しない)・端で止める … G-Buffer / 深度 を 1 ピクセルずつ読む
             // s2 : 線形・端で止める           … 全画面の縮小 / 拡大 (ポストエフェクト)
-            D3D12_STATIC_SAMPLER_DESC samplers[3] = { samplerDesc, samplerDesc, samplerDesc };
+            // s3 : 比較・線形・外は白 (影の PCF。深度を比べた結果を 2x2 で補間する。シャドーマップの外は「影なし」)
+            D3D12_STATIC_SAMPLER_DESC samplers[4] = { samplerDesc, samplerDesc, samplerDesc, samplerDesc };
             samplers[1].Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
             samplers[1].AddressU       = samplers[1].AddressV = samplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
             samplers[1].ShaderRegister = 1;
             samplers[2].Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
             samplers[2].AddressU       = samplers[2].AddressV = samplers[2].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
             samplers[2].ShaderRegister = 2;
+            samplers[3].Filter         = D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+            samplers[3].AddressU       = samplers[3].AddressV = samplers[3].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+            samplers[3].BorderColor    = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+            samplers[3].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;   // 自分の深度 <= シャドーマップ なら光が当たる
+            samplers[3].ShaderRegister = 3;
 
             D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc = {};
             rootSigDesc.Version                       = D3D_ROOT_SIGNATURE_VERSION_1_1;
@@ -406,6 +417,7 @@ namespace RHI
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",      Shader::Stage::Pixel,  shaders.PsGBuffer))      return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit", Shader::Stage::Pixel,  shaders.PsForwardSplit)) return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlphaSplit", Shader::Stage::Pixel, shaders.PsForwardAlphaSplit)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSShadowAlpha", Shader::Stage::Pixel, shaders.PsShadowAlpha)) return RHI_FAILED_COMPILED_SHADER;
 
             // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
             const DXGI_FORMAT hdr = HDR_FORMAT;
@@ -527,6 +539,7 @@ namespace RHI
             desc.VS = shaders.Vs.View();
             const bool gbuffer = scenePass == static_cast<uint32_t>(RHI::ScenePass::GBuffer);
             const bool split   = scenePass == static_cast<uint32_t>(RHI::ScenePass::ForwardSplitAmbient);
+            const bool shadow  = scenePass == static_cast<uint32_t>(RHI::ScenePass::Shadow);
             // 裏面カリング : 片面の不透明な物だけ (ピクセルシェーダーの実行が減る。見本のシーンで GPU 時間 -16%)
             //   面の向き : ローダーの頂点の並びは、カメラから見て時計回りが表 (OBJ / PMX とも。確認済み)
             //   両面の物 / 半透明 (描く順番を崩せないので両面のまま) はカリングしない
@@ -537,6 +550,17 @@ namespace RHI
             else if (gbuffer)                  desc.PS = shaders.PsGBuffer.View();
             else if (split)                    desc.PS = shaders.PsForwardSplit.View();
             else                               desc.PS = shaders.PsForward.View();
+
+            if (shadow)
+            {
+                // シャドーマップ : 深度だけ。不透明はピクセルシェーダー無し、半透明は透明な所を捨てる (アルファテスト)
+                //   両面とも描く (薄い物 / 両面の材質も影を落とす。裏面カリングの向きに関係しない)
+                //   傾いた面ほど深度をずらして、自分の影が縞になる (シャドーアクネ) のを抑える (残りは読む側の法線オフセット)
+                desc.PS = group == PIPELINE_ALPHA_BLEND ? shaders.PsShadowAlpha.View() : D3D12_SHADER_BYTECODE{};
+                desc.RasterizerState.CullMode             = D3D12_CULL_MODE_NONE;
+                desc.RasterizerState.SlopeScaledDepthBias = SHADOW_SLOPE_BIAS;
+                desc.RasterizerState.DepthBiasClamp       = 0.0f;
+            }
 
             // 頂点はシェーダーがメガ頂点バッファから読む (Programmable Vertex Fetch) ので、頂点の入力は無い。
             // 入力アセンブラに読ませるのは、描画番号 (DRAWID) のインスタンス単位の入力 1 つだけ。
@@ -549,7 +573,7 @@ namespace RHI
             desc.InputLayout = { inputElements, _countof(inputElements) };
 
             // 半透明 : アルファブレンド。深度は書く (MMD と同じ。完全に透明な所はピクセルシェーダーで捨てる)
-            if (group == PIPELINE_ALPHA_BLEND) setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            if (group == PIPELINE_ALPHA_BLEND && !shadow) setAlphaBlend(desc.BlendState.RenderTarget[0]);
             if (group == PIPELINE_ALPHA_BLEND && split)
             {
                 // RT1 (環境光) : 0 × 自分 + 描いてある環境光 × (1 - α) = 半透明に覆われた分だけ減らす
@@ -568,7 +592,7 @@ namespace RHI
             // MSAA : 描画先 (色と深度) と同じサンプル数。ピクセルシェーダーは 1 ピクセル 1 回のまま (縁のサンプルだけ増える)
             desc.SampleDesc.Count = (std::max)(1u, sampleCount);
 
-            return createPso(key, gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
+            return createPso(key, shadow ? L"SceneShadow" : gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
         }
 
         ID3D12PipelineState* Pipeline::GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount)

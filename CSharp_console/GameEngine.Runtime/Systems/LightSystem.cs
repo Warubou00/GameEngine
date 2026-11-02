@@ -18,11 +18,14 @@ internal sealed unsafe class LightSystem : ISystem
     private bool _warned;
 
     public int LightCount { get; private set; }
+    // 影を落とすライトの番号 (C++ へ送った並びの中。CastShadows の付いた最初の平行光源。無ければ -1)
+    public int ShadowLightIndex { get; private set; } = -1;
 
     public void Update(World world)
     {
         var transforms = world.GetPool<Transform>();
         var count = 0;
+        var shadowLight = -1;
 
         var directional = world.GetPool<DirectionalLight>();
         var entities    = directional.Entities;
@@ -31,6 +34,7 @@ internal sealed unsafe class LightSystem : ISystem
         {
             ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
             var forward = found ? transform.Forward : System.Numerics.Vector3.UnitZ;
+            if (shadowLight < 0 && lights[i].CastShadows) shadowLight = count;
             _lights[count++] = new NativeMethods.LightData
             {
                 Direction = System.Numerics.Vector3.Normalize(forward),
@@ -64,7 +68,8 @@ internal sealed unsafe class LightSystem : ISystem
             _warned = true;
         }
 
-        LightCount = count;
+        LightCount       = count;
+        ShadowLightIndex = shadowLight;
         var current = _lights.AsSpan(0, count);
         if (count == _sentCount && MemoryMarshal.AsBytes(current).SequenceEqual(MemoryMarshal.AsBytes(_sent.AsSpan(0, count)))) return;
 

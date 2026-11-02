@@ -110,6 +110,8 @@ namespace RHI
             static constexpr uint32_t PASS_CONSTANT_COUNT = 16;
             // テクスチャ配列を MSAA のテクスチャとして読む範囲 (t0, space2)。シェーダーの g_TexturesMS[] と同じ数
             static constexpr uint32_t MSAA_TEXTURE_COUNT  = 4096;
+            // シャドーマップを描く時の傾斜バイアス (面が傾くほど深度を奥へずらす)
+            static constexpr float    SHADOW_SLOPE_BIAS   = 2.0f;
 
             // HDR の色 (Forward / ディファードのライティングの描き先)。C# の RenderTextureFormat.RGBA16F と同じ
             static constexpr DXGI_FORMAT HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;

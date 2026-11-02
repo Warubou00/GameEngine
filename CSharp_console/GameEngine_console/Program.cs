@@ -23,12 +23,13 @@ namespace GameEngine_console;
 //   --ssao on|off|show          : SSAO (既定は on。show は遮蔽だけを白黒で出す)
 //   --ssao-scale S / --ssao-samples N : SSAO の解像度の倍率 (既定 0.5) / 点の数 (既定 12)
 //   --aa none|fxaa|msaa2|msaa4|msaa8 : アンチエイリアス (既定は fxaa。Deferred の MSAA は FXAA になる)
+//   --shadows on|off / --shadow-res N / --shadow-distance D : 影 (既定 on / 2048 / 30)
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
-//                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)
+//                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)、F11 で影
 //                     F7 で音を鳴らす / 止める、F8 で音量
 //                     F9 で DirectInput のパッドを探し直す、F10 で DirectInput のパッドのボタンの割り当て
 // ゲームパッド      : 右スティックで向き、左スティックで移動、RT / LT で上下、RB で速く、A で振動 (状態はプロファイラーとコンソール)
@@ -122,6 +123,9 @@ internal static class Program
         }
         if (options.TryGetValue("--ssao-scale", out var ssaoScale) && float.TryParse(ssaoScale, out var scale))       engine.Graphics.Ssao.ResolutionScale = scale;
         if (options.TryGetValue("--ssao-samples", out var ssaoSamples) && int.TryParse(ssaoSamples, out var samples)) engine.Graphics.Ssao.SampleCount     = samples;
+        if (options.TryGetValue("--shadows", out var shadows)) engine.Graphics.Shadows.Enabled = shadows != "off";
+        if (options.TryGetValue("--shadow-res", out var shadowRes) && int.TryParse(shadowRes, out var res)) engine.Graphics.Shadows.Resolution = res;
+        if (options.TryGetValue("--shadow-distance", out var shadowDistance) && float.TryParse(shadowDistance, out var distance)) engine.Graphics.Shadows.Distance = distance;
         if (options.TryGetValue("--aa", out var aaName) && GraphicsHotkeySystem.ParseAntiAliasing(aaName) is { } antiAliasing)
         {
             engine.Graphics.AntiAliasing = antiAliasing;

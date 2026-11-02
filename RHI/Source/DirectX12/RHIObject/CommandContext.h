@@ -166,6 +166,8 @@ namespace RHI
             void                    DestroyRenderTarget(RHI::RenderTargetHandle handle);
             // MSAA で使えるサンプル数の上限 (HDR / R11G11B10F / 深度 がどれも対応している数。Initialize で調べる)
             uint32_t                GetMaxSampleCount() const { return _maxSampleCount; }
+            // 影 : シャドーマップのレンダーターゲットを番号に直して Buffer に渡す (シャドーマップが消されたら影を止める)
+            void                    SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings);
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             /***********************************************************************************
@@ -467,6 +469,7 @@ namespace RHI
                 // MSAA (SampleCount > 1) : Resource は MSAA (描画先)、Resolved は 1 サンプルの写し (SRV はこちらを指す)
                 //   描画先にした後で全画面のシェーダーが読む時に、ResolveSubresource で写す (ResolveDirty)
                 uint32_t              SampleCount = 1;
+                bool                  IsDepth     = false;   // 深度だけ (Depth32。DSV + SRV。RTV は無い)
                 Microsoft::WRL::ComPtr<ID3D12Resource> Resolved;
                 D3D12_RESOURCE_STATES ResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
                 bool                  ResolveDirty  = false;
@@ -474,6 +477,12 @@ namespace RHI
             std::vector<RenderTarget>                            _renderTargets;
             std::vector<uint32_t>                                _freeRenderTargets;
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetRtvHeap;   // レンダーターゲットの RTV (MAX_RENDER_TARGETS 個)
+            std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetDsvHeap;   // 深度のレンダーターゲットの DSV (MAX_RENDER_TARGETS 個。初めて作る時に用意)
+            uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ
+            Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
+            // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)
+            uint32_t                                             _culledView      = 0xFFFFFFFFu;
+            D3D12_RESOURCE_STATES                                _culledState     = D3D12_RESOURCE_STATE_COMMON;
             RHI::DirectX12::DescriptorHeapManager*               _heapManager = nullptr;   // SRV の置き場 (Buffer が持つ。所有しない)
 
             // 今の描画先 (SetRenderTargets で決まる。PSO の形式もここから選ぶ)
@@ -516,7 +525,8 @@ namespace RHI
             SceneState                                           _scene;
 
             void setRenderTargets(const RHI::RenderCommand& command);
-            void drawScene(Buffer* buffer, uint32_t scenePass, uint32_t queue);
+            void drawScene(Buffer* buffer, uint32_t scenePass, uint32_t queue, uint32_t view);
+            void ensureShadowReadable();   // シャドーマップをピクセルシェーダーが読める状態へ (カメラの描画 / 全画面の前)
             void drawFullscreen(Buffer* buffer, const RHI::RenderCommand& command);
             bool createRenderTargetResource(RenderTarget& target, uint32_t index);
             bool ensureDepthSrv(Buffer* buffer);
@@ -544,7 +554,9 @@ namespace RHI
 
             // GPU カリングを記録する (Culled に映ったものだけの DrawData と引数ができる)
             //   phase : 0 = 視錐台だけ / 1 = オクルージョンの前段 / 2 = 後段 (Hi-Z を作った後)
-            void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility);
+            // planes : 視錐台 (視点ごと) / stats : 映った数をプロファイラー用に読み戻すか (カメラだけ)
+            void recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility,
+                               const ::DirectX::XMFLOAT4* planes, bool stats);
 
             // オクルージョンカリング : 深度の写しと Hi-Z を作る (リサイズ時) / 前段の深度から Hi-Z を作る (毎フレーム)
             bool createHiZ(uint32_t width, uint32_t height);

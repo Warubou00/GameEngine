@@ -248,6 +248,11 @@ namespace RHI
         if (_isInitialized) _commandContext->DestroyRenderTarget(handle);
     }
 
+    void RenderHardwareInterface::SetShadowSettings(const ShadowSettings& settings)
+    {
+        if (_isInitialized) _commandContext->SetShadowSettings(_buffer.get(), settings);
+    }
+
     uint32_t RenderHardwareInterface::GetMaxSampleCount() const
     {
         return _isInitialized ? _commandContext->GetMaxSampleCount() : 1;

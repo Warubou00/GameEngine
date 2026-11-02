@@ -80,6 +80,7 @@ namespace RHI
         FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry)override;
         void                   SetLights(const LightData* lights, uint32_t count)override;
         void                   SetLightingSettings(const LightingSettings& settings)override;
+        void                   SetShadowSettings(const ShadowSettings& settings)override;
         void WaitForGpu()override;
 
         void SetIndirectDrawEnabled(bool enabled)override;

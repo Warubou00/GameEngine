@@ -116,6 +116,8 @@ namespace RHI
 		// ライト (変わった時だけ呼べばよい) / ライティングの方法と環境光
 		virtual void SetLights(const LightData* lights, uint32_t count) = 0;
 		virtual void SetLightingSettings(const LightingSettings& settings) = 0;
+		// 影 (変わった時だけ呼べばよい。ライトの視点の行列は毎フレーム RHI が作る)
+		virtual void SetShadowSettings(const ShadowSettings& settings) = 0;
 
 		/***********************************************************************************
 		 * @brief 1 フレーム分の描画 (開始 → 描画パスの命令を順に実行 → UI → 表示)。GPU の完了は待たない

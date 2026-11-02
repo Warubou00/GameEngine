@@ -572,6 +572,126 @@ namespace RHI
 			return _frustumPlanes;
 		}
 
+		namespace
+		{
+			// 行ベクトル (p * M) の行列から視錐台の 6 平面 (GetFrustumPlanes と同じ方法)
+			void extractPlanes(const ::DirectX::XMMATRIX& viewProj, ::DirectX::XMFLOAT4* out)
+			{
+				::DirectX::XMFLOAT4X4 m;
+				::DirectX::XMStoreFloat4x4(&m, viewProj);
+				auto column = [&](int c) { return ::DirectX::XMVectorSet(m.m[0][c], m.m[1][c], m.m[2][c], m.m[3][c]); };
+				const ::DirectX::XMVECTOR c0 = column(0), c1 = column(1), c2 = column(2), c3 = column(3);
+				const ::DirectX::XMVECTOR planes[6] = {
+					::DirectX::XMVectorAdd(c3, c0), ::DirectX::XMVectorSubtract(c3, c0),
+					::DirectX::XMVectorAdd(c3, c1), ::DirectX::XMVectorSubtract(c3, c1),
+					c2,                             ::DirectX::XMVectorSubtract(c3, c2),
+				};
+				for (int i = 0; i < 6; ++i) ::DirectX::XMStoreFloat4(&out[i], ::DirectX::XMPlaneNormalize(planes[i]));
+			}
+
+			// 影を落とす物を、カスケードの範囲の外 (ライトの側) からも拾う距離 (ワールドの長さ)
+			// 高い所にある物の影が、範囲の手前で切れないように
+			constexpr float SHADOW_CASTER_DISTANCE = 60.0f;
+		}
+
+		void Buffer::SetShadowSettings(const RHI::ShadowSettings& settings, uint32_t shadowMapTexture, uint32_t resolution)
+		{
+			_shadowSettings   = settings;
+			_shadowMapTexture = shadowMapTexture;
+			_shadowResolution = (std::max)(1u, resolution);
+			_frameConstantsVersion++;
+		}
+
+		void Buffer::computeShadowViews()
+		{
+			// ==============================================================
+			// カスケードごとのライトの行列 (平行光源 → 正射影)
+			//   1. カメラの視錐台を奥行きで分ける (対数と均等の混ぜ合わせ : SplitLambda)
+			//   2. 各範囲を囲む球を作る (半径はカメラの向きに関係なく同じ = 回しても影の大きさが変わらない)
+			//   3. 球の中心をライトの視点のテクセル単位に丸める (カメラが動いても影の縁がちらつかない)
+			//   4. ライトの側へ SHADOW_CASTER_DISTANCE 伸ばして、範囲の外の物の影も拾う
+			// ==============================================================
+			_shadowViewCount = 0;
+			const RHI::ShadowSettings& s = _shadowSettings;
+			if (!s.Enabled || s.LightIndex >= _lights.size() || _lights[s.LightIndex].Type != RHI::LightType::Directional) return;
+
+			// カメラの行列 (保持しているのは転置済み) から、位置・向き・視野を取り出す
+			const ::DirectX::XMMATRIX view = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_viewMatrix));
+			const ::DirectX::XMMATRIX proj = ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_projMatrix));
+			::DirectX::XMFLOAT4X4 p;
+			::DirectX::XMStoreFloat4x4(&p, proj);
+			if (p._34 == 0.0f) return;   // 平行投影のカメラは未対応 (影なし)
+			const float nearZ = -p._43 / p._33;
+			const float tanX  = 1.0f / p._11;
+			const float tanY  = 1.0f / p._22;
+			const float k     = tanX * tanX + tanY * tanY;   // 奥行き d の断面の角までの距離² = d² × k
+			const ::DirectX::XMMATRIX invView = ::DirectX::XMMatrixInverse(nullptr, view);
+			const ::DirectX::XMVECTOR cameraPos     = invView.r[3];
+			const ::DirectX::XMVECTOR cameraForward = ::DirectX::XMVector3Normalize(invView.r[2]);
+
+			const uint32_t count = (std::min)((std::max)(s.CascadeCount, 1u), RHI::MAX_SHADOW_CASCADES);
+			const float farZ  = (std::max)(s.Distance, nearZ + 0.01f);
+			const float lambda = (std::min)((std::max)(s.SplitLambda, 0.0f), 1.0f);
+
+			// ライトの向き (光が進む向き) と、ライトの視点の回転 (位置なし)
+			const RHI::LightData& light = _lights[s.LightIndex];
+			::DirectX::XMVECTOR dir = ::DirectX::XMVector3Normalize(::DirectX::XMVectorSet(light.Direction[0], light.Direction[1], light.Direction[2], 0.0f));
+			const float upDot = std::fabs(::DirectX::XMVectorGetY(dir));
+			const ::DirectX::XMVECTOR up = upDot > 0.99f ? ::DirectX::XMVectorSet(1, 0, 0, 0) : ::DirectX::XMVectorSet(0, 1, 0, 0);
+			const ::DirectX::XMMATRIX lightRotation    = ::DirectX::XMMatrixLookToLH(::DirectX::XMVectorZero(), dir, up);
+			const ::DirectX::XMMATRIX lightRotationInv = ::DirectX::XMMatrixTranspose(lightRotation);   // 回転だけなので転置 = 逆
+
+			float splitNear = nearZ;
+			for (uint32_t c = 0; c < count; ++c)
+			{
+				// 1. 範囲の奥の端
+				const float t = static_cast<float>(c + 1) / static_cast<float>(count);
+				const float logSplit = nearZ * std::pow(farZ / nearZ, t);
+				const float uniSplit = nearZ + (farZ - nearZ) * t;
+				const float splitFar = lambda * logSplit + (1.0f - lambda) * uniSplit;
+
+				// 2. 範囲 [a, b] を囲む球 : 中心は視線の上。手前と奥の断面の角を通る位置 (奥の面より奥にはしない)
+				const float a = splitNear, b = splitFar;
+				float centerZ = 0.5f * (a + b) * (1.0f + k);
+				if (centerZ > b) centerZ = b;
+				float radius = std::sqrt((b - centerZ) * (b - centerZ) + b * b * k);
+				radius = std::ceil(radius * 16.0f) / 16.0f;   // 計算の誤差で半径が揺れないように丸める
+
+				// 3. 中心をライトの視点でテクセル単位に丸める
+				const float texelWorld = 2.0f * radius / static_cast<float>(_shadowResolution);
+				::DirectX::XMVECTOR center = ::DirectX::XMVectorMultiplyAdd(cameraForward, ::DirectX::XMVectorReplicate(centerZ), cameraPos);
+				::DirectX::XMVECTOR lightSpace = ::DirectX::XMVector3TransformNormal(center, lightRotation);
+				lightSpace = ::DirectX::XMVectorMultiply(::DirectX::XMVectorFloor(::DirectX::XMVectorDivide(lightSpace, ::DirectX::XMVectorReplicate(texelWorld))),
+					::DirectX::XMVectorReplicate(texelWorld));
+				center = ::DirectX::XMVector3TransformNormal(lightSpace, lightRotationInv);
+
+				// 4. ライトの視点 : 中心からライトの側へ下がった所から、光の向きに見る
+				const float back = radius + SHADOW_CASTER_DISTANCE;
+				const ::DirectX::XMVECTOR eye = ::DirectX::XMVectorSubtract(center, ::DirectX::XMVectorScale(dir, back));
+				const ::DirectX::XMMATRIX lightView = ::DirectX::XMMatrixLookToLH(eye, dir, up);
+				const ::DirectX::XMMATRIX lightProj = ::DirectX::XMMatrixOrthographicLH(2.0f * radius, 2.0f * radius, 0.0f, back + radius);
+				::DirectX::XMStoreFloat4x4(&_shadowView[c], lightView);
+				::DirectX::XMStoreFloat4x4(&_shadowProj[c], lightProj);
+				extractPlanes(::DirectX::XMMatrixMultiply(lightView, lightProj), _shadowPlanes[c]);
+				_shadowSplits[c]       = splitFar;
+				_shadowNormalOffset[c] = s.NormalBias * texelWorld;
+				splitNear = splitFar;
+			}
+			_shadowViewCount = count;
+		}
+
+		const ::DirectX::XMFLOAT4* Buffer::GetFrustumPlanes(uint32_t view)
+		{
+			if (view == 0 || view > _shadowViewCount) return GetFrustumPlanes();
+			return _shadowPlanes[view - 1];
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::GetViewConstants(uint32_t frameIndex, uint32_t view)const
+		{
+			if (!_commonCB || frameIndex >= CommandContext::FRAME_COUNT || view >= VIEW_COUNT) return 0;
+			return _commonCB->GetGPUVirtualAddress() + FRAME_SLOT_SIZE * (static_cast<uint64_t>(frameIndex) * VIEW_COUNT + view);
+		}
+
 		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteFrameConstants(uint32_t frameIndex)
 		{
 			if (!_commonCB || frameIndex >= CommandContext::FRAME_COUNT)
@@ -579,8 +699,9 @@ namespace RHI
 				return 0;
 			}
 
-			// フレームごとに 256byte ずつ領域を分けている (Root CBV は 256byte 境界が必須)
-			const uint64_t offset = CONSTANT_BUFFER_ALIGNMENT * frameIndex;
+			// フレームごとに 視点の数 × FRAME_SLOT_SIZE ずつ領域を分けている (Root CBV は 256byte 境界が必須)
+			// 以前はフレームごとに 256byte (カメラだけ)
+			const uint64_t offset = FRAME_SLOT_SIZE * VIEW_COUNT * frameIndex;
 
 			// 何も変わっていなければ書き込みを省く (UPLOAD ヒープは書き込みが遅いメモリなので、無駄に書かない)
 			// 以前は View / Projection だけだった。ライティングの情報も足した (シェーダーの cbuffer FrameData と同じ並び)
@@ -602,7 +723,37 @@ namespace RHI
 				constants.InvScreenSize[0] = 1.0f / static_cast<float>(_screenWidth);
 				constants.InvScreenSize[1] = 1.0f / static_cast<float>(_screenHeight);
 
-				if (_commonCB->WriteData(offset, &constants, sizeof(constants)))
+				// 影 : カメラ / ライトが変わった時だけ作り直す (ここに来るのはその時だけ)
+				computeShadowViews();
+				constants.ShadowLightIndex   = _shadowViewCount > 0 ? _shadowSettings.LightIndex : 0xFFFFFFFFu;
+				constants.ShadowMapTexture   = _shadowMapTexture;
+				constants.ShadowCascadeCount = _shadowViewCount;
+				constants.ShadowTexelSize    = 1.0f / static_cast<float>(_shadowResolution);
+				constants.ShadowDistance     = _shadowViewCount > 0 ? _shadowSplits[_shadowViewCount - 1] : 0.0f;
+				constants.ShadowFadeStart    = constants.ShadowDistance * 0.9f;
+				constants.ShadowSoftness     = _shadowSettings.Softness;
+				for (uint32_t c = 0; c < _shadowViewCount; ++c)
+				{
+					const ::DirectX::XMMATRIX viewProj = ::DirectX::XMMatrixMultiply(
+						::DirectX::XMLoadFloat4x4(&_shadowView[c]), ::DirectX::XMLoadFloat4x4(&_shadowProj[c]));
+					::DirectX::XMStoreFloat4x4(&constants.ShadowViewProj[c], ::DirectX::XMMatrixTranspose(viewProj));
+					constants.ShadowSplits[c]       = _shadowSplits[c];
+					constants.ShadowNormalOffset[c] = _shadowNormalOffset[c];
+				}
+
+				bool written = _commonCB->WriteData(offset, &constants, sizeof(constants));
+
+				// 影の視点 : カメラの定数を元に、View / Projection だけライトのものにする (影の項目は使わない)
+				for (uint32_t c = 0; c < _shadowViewCount && written; ++c)
+				{
+					FrameConstants shadowView = constants;
+					shadowView.View       = transposeForShader(_shadowView[c]);
+					shadowView.Projection = transposeForShader(_shadowProj[c]);
+					shadowView.ShadowCascadeCount = 0;
+					written = _commonCB->WriteData(offset + FRAME_SLOT_SIZE * (c + 1), &shadowView, sizeof(shadowView));
+				}
+
+				if (written)
 				{
 					_writtenVersion[frameIndex] = _frameConstantsVersion;
 				}

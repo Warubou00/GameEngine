@@ -9,6 +9,7 @@ public enum ScenePass : uint
     Forward = 0,   // ライティングまで 1 回で描く (HDR の色)
     GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ (3 枚に描く)
     ForwardSplitAmbient = 2,   // Forward + SSAO 用 : 1 枚目にライトの光、2 枚目に環境光 (後で 環境光 × 遮蔽 を足す)
+    Shadow  = 3,   // シャドーマップ : 深度だけ (DrawScene の view でライトの視点を選ぶ。半透明はアルファテスト)
 }
 
 // シーンのどの物を描くか (C++ の RHI::RenderQueue と同じ番号)
@@ -87,11 +88,13 @@ public sealed unsafe class RenderCommandBuffer
     // ---------- 描画 ----------
 
     /// <summary>シーン (MeshRenderer の付いた物) を今の描画先に描く</summary>
-    public void DrawScene(ScenePass pass, RenderQueue queue)
+    /// <param name="view">視点 (0 = カメラ / 1〜 = 影のカスケード。C++ が行列を作る)</param>
+    public void DrawScene(ScenePass pass, RenderQueue queue, int view = 0)
     {
         ref var command = ref Add(3);
         command.Arg0 = (uint)pass;
         command.Arg1 = (uint)queue;
+        command.Inputs[0] = (uint)view;
     }
 
     /// <summary>全画面の三角形を描く</summary>

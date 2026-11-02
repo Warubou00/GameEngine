@@ -20,6 +20,8 @@ public abstract class RenderPipeline : IDisposable
 
     // SSAO (Forward / Deferred 共通の部品)
     protected SsaoPass Ssao { get; } = new();
+    // 影 (Forward / Deferred 共通の部品。カメラの描画の前にシャドーマップを描く)
+    protected ShadowPass Shadows { get; } = new();
 
     public abstract string Name { get; }
 
@@ -29,6 +31,7 @@ public abstract class RenderPipeline : IDisposable
     public virtual void Dispose()
     {
         Ssao.Dispose();
+        Shadows.Dispose();
         _ldr?.Dispose();
         _ldr = null;
     }
@@ -153,6 +156,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
     {
         if (settings.BackgroundColor != _background || MsaaSamples(settings) != _samples) CreateTargets(settings);
         var hdr = _hdr!;
+        Shadows.Render(cmd, settings);   // シャドーマップ (影を使う時だけ)
         RenderTexture? ao = null;
 
         if (UseSsao(settings))
@@ -231,6 +235,7 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         var hdr = _hdr!;
 
         // 1. G-Buffer (不透明だけ)。消すのは深度だけでよい (何も描かれていない所はライティングが深度で見分ける)
+        Shadows.Render(cmd, settings);   // シャドーマップ (影はライティングの全画面パスが読む)
         cmd.SetRenderTargets([_albedo!, _normal!, _material!], RenderTexture.SceneDepth);
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.GBuffer, RenderQueue.Opaque);

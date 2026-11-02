@@ -83,6 +83,12 @@ public sealed class GraphicsSettings
     public SsaoSettings Ssao { get; } = new();
     private int _shownSsaoState = -1;
 
+    // 影 (CastShadows の付いた最初の DirectionalLight。Forward / Deferred の両方。Unlit では使わない)
+    public ShadowSettings Shadows { get; } = new();
+    // 影を落とすライトの番号 (LightSystem が決める。-1 なら影を落とすライトが無い)
+    public int ShadowLightIndex { get; internal set; } = -1;
+    private int _shownShadowState = -1;
+
     // アンチエイリアス (FXAA = ポストエフェクト / MSAA = 固定機能。Deferred では MSAA の代わりに FXAA)
     public AntiAliasing AntiAliasing { get; set; } = AntiAliasing.Fxaa;
     public FxaaSettings Fxaa { get; } = new();
@@ -116,14 +122,17 @@ public sealed class GraphicsSettings
         }
         // SSAO の ON / OFF も表示する (変わった時だけ文字列を作る)
         var ssaoState = !Ssao.Enabled ? 0 : Ssao.ShowOnly ? 2 : 1;
+        var shadowState = Shadows.Enabled && ShadowLightIndex >= 0 && _lightingModel != LightingModel.Unlit ? Shadows.Resolution : 0;
         var antiAliasing = _pipeline!.AntiAliasingName(this);   // 定数の文字列 (毎フレーム作らない)
-        if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing)
+        if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing || shadowState != _shownShadowState)
         {
-            var ssao = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
-            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao} / {antiAliasing}");
+            var ssao   = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
+            var shadow = shadowState > 0 ? $" / Shadows {shadowState}" : "";
+            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}{shadow} / {antiAliasing}");
             _infoDirty         = false;
             _shownSsaoState    = ssaoState;
             _shownAntiAliasing = antiAliasing;
+            _shownShadowState  = shadowState;
         }
     }
 
@@ -342,6 +351,7 @@ public sealed class Engine : IDisposable
             _audioSystem.Update(World);
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
+            Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;
             Graphics.BeginFrame();
 
             UpdateMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;

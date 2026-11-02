@@ -113,6 +113,7 @@ namespace RHI
 				case RHI::RenderTargetFormat::R8:         return DXGI_FORMAT_R8_UNORM;
 				case RHI::RenderTargetFormat::RGB10A2:    return DXGI_FORMAT_R10G10B10A2_UNORM;
 				case RHI::RenderTargetFormat::R11G11B10F: return DXGI_FORMAT_R11G11B10_FLOAT;
+				case RHI::RenderTargetFormat::Depth32:    return DXGI_FORMAT_R32_TYPELESS;   // DSV (D32_FLOAT) と SRV (R32_FLOAT) で使う
 				}
 				return DXGI_FORMAT_UNKNOWN;
 			}
@@ -562,6 +563,8 @@ namespace RHI
 			}
 			auto cmdList = _frameCommandList->GetCmdList();
 			_msaaDepthDirty = false;   // MSAA の深度は、このフレームで描いた時だけ解決する
+			_culledView     = 0xFFFFFFFFu;                       // カリングの結果はフレームごと
+			_culledState    = D3D12_RESOURCE_STATE_COMMON;       // 前のフレームの完了で COMMON に戻っている
 			_sceneDepthReadLastFrame = _sceneDepthReadThisFrame;
 			_sceneDepthReadThisFrame = false;
 
@@ -583,14 +586,14 @@ namespace RHI
 					break;
 
 				case RHI::RenderCommandType::ClearDepth:
-					if (_boundDepth == RHI::RenderTargetHandle::SCENE_DEPTH)
+					if (_boundDepth != RHI::RenderTargetHandle::INVALID)   // シーンの深度 / 深度のレンダーターゲット
 					{
 						cmdList->ClearDepthStencilView(boundDsv(), D3D12_CLEAR_FLAG_DEPTH, command.ClearDepth, 0, 0, nullptr);
 					}
 					break;
 
 				case RHI::RenderCommandType::DrawScene:
-					drawScene(buffer, command.Arg0, command.Arg1);
+					drawScene(buffer, command.Arg0, command.Arg1, command.Inputs[0]);   // Inputs[0] = 視点 (0 カメラ / 1〜 影)
 					break;
 
 				case RHI::RenderCommandType::DrawFullscreen:
@@ -646,6 +649,7 @@ namespace RHI
 				else if (index < _renderTargets.size() && _renderTargets[index].Alive)
 				{
 					RenderTarget& target = _renderTargets[index];
+					if (target.IsDepth) continue;   // 深度のレンダーターゲットは Depth に指定する
 					s = target.SampleCount;
 					if (samples != 0 && s != samples)
 					{
@@ -698,6 +702,19 @@ namespace RHI
 				}
 				if (width == 0) { width = _depthWidth; height = _depthHeight; }
 			}
+			else if (command.Depth < _renderTargets.size() && _renderTargets[command.Depth].Alive && _renderTargets[command.Depth].IsDepth)
+			{
+				// 深度のレンダーターゲット (シャドーマップ)
+				RenderTarget& target = _renderTargets[command.Depth];
+				if (target.State != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+				{
+					const auto barrier = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+					cmdList->ResourceBarrier(1, &barrier);
+					target.State = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+				}
+				_boundDepth = command.Depth;
+				if (width == 0) { width = target.Width; height = target.Height; }
+			}
 			const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = boundDsv();
 			cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE,
 				_boundDepth != RHI::RenderTargetHandle::INVALID ? &dsvHandle : nullptr);
@@ -714,7 +731,7 @@ namespace RHI
 			}
 		}
 
-		void CommandContext::drawScene(Buffer* buffer, uint32_t scenePass, uint32_t queue)
+		void CommandContext::drawScene(Buffer* buffer, uint32_t scenePass, uint32_t queue, uint32_t view)
 		{
 			// ==============================================================
 			// シーンを描く (今の描画先へ)
@@ -732,7 +749,11 @@ namespace RHI
 			const bool        opaque  = queue == static_cast<uint32_t>(RHI::RenderQueue::Opaque);
 			if (!opaque && gbuffer) return;   // 半透明は G-Buffer に書けない (ディファードでも Forward で重ねる)
 
-			const DXGI_FORMAT dsvFormat = _boundDepth == RHI::RenderTargetHandle::SCENE_DEPTH ? DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+			if (view > buffer->GetShadowViewCount()) return;   // 影の視点が無い (影なし / カスケードの数を超えた)
+			if (view == 0) ensureShadowReadable();              // カメラの描画は影を読む
+
+			// シーンの深度も深度のレンダーターゲットも D32_FLOAT (以前はシーンの深度だけ)
+			const DXGI_FORMAT dsvFormat = _boundDepth != RHI::RenderTargetHandle::INVALID ? DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
 			ID3D12CommandSignature* signature = _currentPipeline->GetIndirectDrawSignature();
 			constexpr uint32_t GROUP_OPAQUE = Pipeline::PIPELINE_OPAQUE;   // (OPAQUE は wingdi.h のマクロと重なるので使わない)
 			constexpr uint32_t GROUP_ALPHA  = Pipeline::PIPELINE_ALPHA_BLEND;
@@ -789,11 +810,45 @@ namespace RHI
 				draw(GROUP_DOUBLE);
 			};
 
+			// ==============================================================
+			// 影の視点 : その視点のフレームの定数 (ライトの View / Projection) に差し替えて描く
+			//   カリングはライトの直方体で 1 回 (視錐台だけ。オクルージョンはしない)。結果は Culled に入り、
+			//   カメラの描画が後で使う時はカメラで数え直す (_culledView で見分ける)
+			// ==============================================================
+			if (view > 0)
+			{
+				cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->GetViewConstants(_frameIndex, view));
+				if (!_scene.Culling)
+				{
+					if (opaque) drawOpaque(drawAll);
+					else        drawAll(GROUP_ALPHA);
+				}
+				else
+				{
+					if (_culledView != view)
+					{
+						recordCulling(frame, buffer, _scene.ObjectData, 0, true, buffer->GetFrustumPlanes(view), false);
+						_culledView = view;
+					}
+					if (opaque) drawOpaque(drawCulled);
+					else        drawCulled(GROUP_ALPHA);
+				}
+				cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->GetViewConstants(_frameIndex, 0));
+				return;
+			}
+
 			if (!_scene.Culling)
 			{
 				if (opaque) drawOpaque(drawAll);
 				else        drawAll(GROUP_ALPHA);
 				return;
+			}
+
+			if (_scene.Culled && _culledView != 0)
+			{
+				// カメラのカリングの後に影の視点で数え直していた : カメラの視錐台でもう一度 (オクルージョンの結果は使えない)
+				recordCulling(frame, buffer, _scene.ObjectData, 0, true, buffer->GetFrustumPlanes(), false);
+				_culledView = 0;
 			}
 
 			if (!_scene.Culled)
@@ -811,24 +866,25 @@ namespace RHI
 					//   前段は何も描かず、後段で全部を判定する (そのフレームだけ Hi-Z は空 = 何も隠れない)
 					// ==============================================================
 					const bool resetVisibility = !_scene.Reused || !_visibilityValid;
-					recordCulling(frame, buffer, _scene.ObjectData, 1, resetVisibility);
+					recordCulling(frame, buffer, _scene.ObjectData, 1, resetVisibility, buffer->GetFrustumPlanes(), true);
 					drawOpaque(drawCulled);
 					// MSAA : Hi-Z は MSAA の深度から直接作る (作れない環境では先に 1 サンプルの深度へ解決する)
 					// 以前は毎回解決していた (SSAO もあると 1 フレームに 2 回)
 					// (8x は先に解決する方が速い : HIZ_FROM_MSAA_MAX_SAMPLES)
 					if (_boundDepthMsaa && !hiZFromMsaa()) resolveSceneDepth(buffer);
 					buildHiZ(buffer);
-					recordCulling(frame, buffer, _scene.ObjectData, 2, resetVisibility);
+					recordCulling(frame, buffer, _scene.ObjectData, 2, resetVisibility, buffer->GetFrustumPlanes(), true);
 					_scene.OcclusionDone = true;
 				}
 				else
 				{
-					recordCulling(frame, buffer, _scene.ObjectData, 0, true);
+					recordCulling(frame, buffer, _scene.ObjectData, 0, true, buffer->GetFrustumPlanes(), true);
 				}
 				_scene.Culled = true;
+				_culledView   = 0;
 			}
 			// ※ 2 段階のオクルージョンの後に不透明をもう一度描くと、後段の分 (前段で描かなかった物) だけになる。
-			//    同じフレームで不透明を 2 回描く描画パス (影など) を作る時は、カリングをパスごとに分けること
+			//    同じフレームで不透明を 2 回描く描画パスを作る時は、カリングをパスごとに分けること (影は視点ごとに分けてある)
 			if (opaque) drawOpaque(drawCulled);
 			else        drawCulled(GROUP_ALPHA);
 		}
@@ -843,6 +899,7 @@ namespace RHI
 			ID3D12PipelineState* pso = _currentPipeline->GetFullscreenPso(command.Arg0, command.Arg1, _boundFormats, _boundColorCount, _boundSamples);
 			if (!pso) return;
 			auto cmdList = _frameCommandList->GetCmdList();
+			ensureShadowReadable();   // ディファードのライティングが影を読む
 
 			uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
 			D3D12_RESOURCE_BARRIER barriers[RHI::MAX_PASS_INPUTS] = {};
@@ -871,6 +928,12 @@ namespace RHI
 				else if (index < _renderTargets.size() && _renderTargets[index].Alive)
 				{
 					RenderTarget& target = _renderTargets[index];
+					if (_boundDepth == index)
+					{
+						// 深度のレンダーターゲットを描画先にしたまま読むことはできないので、色だけの描画先にする
+						cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE, nullptr);
+						_boundDepth = RHI::RenderTargetHandle::INVALID;
+					}
 					if (target.SampleCount > 1)
 					{
 						// MSAA : 1 サンプルの写し (Resolved) を読む。描いた後なら先に解決する
@@ -896,6 +959,37 @@ namespace RHI
 			cmdList->SetPipelineState(pso);
 			cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
 			cmdList->DrawInstanced(3, 1, 0, 0);   // 頂点はシェーダーが SV_VertexID から作る (入力レイアウト無し)
+		}
+
+		void CommandContext::ensureShadowReadable()
+		{
+			if (_shadowMapTarget >= _renderTargets.size() || _shadowMapTarget == _boundDepth) return;
+			RenderTarget& target = _renderTargets[_shadowMapTarget];
+			if (!target.Alive || target.State == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) return;
+			const auto barrier = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+			_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
+			target.State = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		}
+
+		void CommandContext::SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings)
+		{
+			if (!buffer) return;
+			RHI::ShadowSettings s = settings;
+			uint32_t texture = 0, resolution = 1;
+			_shadowMapTarget = RHI::RenderTargetHandle::INVALID;
+			if (s.Enabled && s.ShadowMap < _renderTargets.size() && _renderTargets[s.ShadowMap].Alive && _renderTargets[s.ShadowMap].IsDepth)
+			{
+				const RenderTarget& target = _renderTargets[s.ShadowMap];
+				texture          = target.SrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+				resolution       = target.Width;
+				_shadowMapTarget = s.ShadowMap;
+			}
+			else
+			{
+				s.Enabled = 0;   // シャドーマップが無い / 深度でない
+			}
+			_shadowBuffer = buffer;
+			buffer->SetShadowSettings(s, texture, resolution);
 		}
 
 		void CommandContext::transitionDepth(D3D12_RESOURCE_STATES after)
@@ -995,6 +1089,7 @@ namespace RHI
 
 		D3D12_CPU_DESCRIPTOR_HANDLE CommandContext::boundDsv() const
 		{
+			if (_boundDepth < _renderTargets.size() && _targetDsvHeap) return _targetDsvHeap->GetCpuHandle(_boundDepth);   // 深度のレンダーターゲット
 			return _dsvHeap->GetCpuHandle(_boundDepthMsaa ? 1 : 0);
 		}
 
@@ -1143,7 +1238,17 @@ namespace RHI
 			target.FixedWidth  = desc.Width;
 			target.FixedHeight = desc.Height;
 			std::memcpy(target.Clear, desc.ClearColor, sizeof(target.Clear));
-			target.SampleCount = desc.SampleCount > 1 ? supportedSampleCount(format, desc.SampleCount) : 1;
+			target.IsDepth     = desc.Format == RHI::RenderTargetFormat::Depth32;
+			target.SampleCount = (!target.IsDepth && desc.SampleCount > 1) ? supportedSampleCount(format, desc.SampleCount) : 1;
+			if (target.IsDepth && !_targetDsvHeap)
+			{
+				_targetDsvHeap = std::make_unique<DirectX12::DescriptorHeap>();
+				if (FAILED(_targetDsvHeap->Create(_device->GetDevice()->GetDevice(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, MAX_RENDER_TARGETS)))
+				{
+					Core::Logger::Log("[CommandContext] Failed create depth target heap.");
+					_targetDsvHeap.reset();
+				}
+			}
 			target.SrvIndex = _heapManager->AllocateSrv();
 			if (target.SrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX || !createRenderTargetResource(target, index))
 			{
@@ -1181,6 +1286,36 @@ namespace RHI
 			desc.SampleDesc.Count = target.SampleCount;
 			desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+
+			if (target.IsDepth)
+			{
+				// 深度だけ (シャドーマップ) : DSV (D32_FLOAT) で描き、SRV (R32_FLOAT) で読む
+				if (!_targetDsvHeap) return false;
+				desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+				D3D12_CLEAR_VALUE depthClear = {};
+				depthClear.Format             = DEPTH_FORMAT;
+				depthClear.DepthStencil.Depth = DEPTH_CLEAR_VALUE;
+				target.Resource.Reset();
+				const HRESULT depthHr = dx12Device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+					D3D12_RESOURCE_STATE_DEPTH_WRITE, &depthClear, IID_PPV_ARGS(&target.Resource));
+				if (FAILED(depthHr)) { logFailed("CreateRenderTarget (depth)", depthHr); return false; }
+				target.Resource->SetName(L"DepthTarget");
+				target.State  = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+				target.Width  = width;
+				target.Height = height;
+
+				D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+				dsvDesc.Format        = DEPTH_FORMAT;
+				dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+				dx12Device->CreateDepthStencilView(target.Resource.Get(), &dsvDesc, _targetDsvHeap->GetCpuHandle(index));
+				D3D12_SHADER_RESOURCE_VIEW_DESC depthSrv = {};
+				depthSrv.Format                  = DXGI_FORMAT_R32_FLOAT;
+				depthSrv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+				depthSrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				depthSrv.Texture2D.MipLevels     = 1;
+				dx12Device->CreateShaderResourceView(target.Resource.Get(), &depthSrv, _heapManager->GetSrvCpuHandle(target.SrvIndex));
+				return true;
+			}
 
 			// 最適化クリア値 : ClearColor で同じ色を使うと高速クリアになる
 			D3D12_CLEAR_VALUE clearValue = {};
@@ -1229,6 +1364,12 @@ namespace RHI
 
 			// GPU が使い終わってから消す (描画パスを切り替える時だけなので、待ってよい)
 			WaitForGpu();
+			if (handle.Index == _shadowMapTarget && _shadowBuffer)
+			{
+				// 影が読んでいるシャドーマップ : 消える SRV を読まないように影を止める (C# が次に設定し直すまで)
+				_shadowMapTarget = RHI::RenderTargetHandle::INVALID;
+				_shadowBuffer->SetShadowSettings(RHI::ShadowSettings(), 0, 1);
+			}
 			RenderTarget& target = _renderTargets[handle.Index];
 			if (_heapManager && target.SrvIndex != DirectX12::DescriptorHeapManager::INVALID_INDEX) _heapManager->FreeSrv(target.SrvIndex);
 			target = RenderTarget();
@@ -1389,7 +1530,8 @@ namespace RHI
 			return slot;
 		}
 
-		void CommandContext::recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility)
+		void CommandContext::recordCulling(DrawFrame& frame, Buffer* buffer, D3D12_GPU_VIRTUAL_ADDRESS objectData, uint32_t phase, bool resetVisibility,
+		                                   const ::DirectX::XMFLOAT4* planes, bool stats)
 		{
 			// ==============================================================
 			// GPU カリング (描画の前に、同じコマンドリストでコンピュートシェーダーを 2 回実行する)
@@ -1407,7 +1549,7 @@ namespace RHI
 			const D3D12_GPU_VIRTUAL_ADDRESS output = culled->GetGPUVirtualAddress();
 
 			CullConstants constants = {};
-			const ::DirectX::XMFLOAT4* planes = buffer->GetFrustumPlanes();
+			// 視錐台は視点ごと (以前はカメラだけ : buffer->GetFrustumPlanes())
 			for (int i = 0; i < 6; ++i)
 			{
 				constants.Planes[i][0] = planes[i].x; constants.Planes[i][1] = planes[i].y;
@@ -1432,8 +1574,14 @@ namespace RHI
 			// (この遷移バリアで、前段の ExecuteIndirect と頂点シェーダーの読み込みが終わるのを待つ)
 			const D3D12_RESOURCE_STATES culledRead =
 				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE;
-			const auto toUav = makeTransitionBarrier(culled, phase == 2 ? culledRead : D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+			// 状態は覚えておく (影の視点とカメラで 1 フレームに何度もカリングするため。以前は 前段 = COMMON / 後段 = 読む状態 に決め打ち)
+			// 描画のルート SRV (DrawData。DATA_STATIC_WHILE_SET_AT_EXECUTE) が Culled を指したままだと、書き換える前に付け直す必要がある
+			// (D3D12 のデバッグレイヤーのエラー。影の視点で描いた後にカメラでカリングし直す時に起きた)
+			// → 書き換えない入力のバッファへ付け替えておく (描く時は drawCulled / drawAll が設定し直す)
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, input);
+			const auto toUav = makeTransitionBarrier(culled, _culledState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 			cmdList->ResourceBarrier(1, &toUav);
+			_culledState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 			// Hi-Z と可視の記録は、使わない段階でもルートに設定するので、毎回その状態にしておく
 			// (デバッグレイヤーはルートに設定しただけで「使った」とみなし、暗黙の昇格をしたことにするため。
 			//  前段で状態を合わせないと、Hi-Z を作る時の遷移バリアが食い違っていた)
@@ -1494,12 +1642,16 @@ namespace RHI
 			const auto toRead = makeTransitionBarrier(culled, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
 				D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_SOURCE);
 			cmdList->ResourceBarrier(1, &toRead);
-			// 読み戻し : 1 回目 (視錐台だけ / 前段) は [0〜3]、後段は [4〜7] に写す
-			// (映った数 / 不透明 / 半透明 / 両面の不透明 の描画数。以前は 3 つ)
-			cmdList->CopyBufferRegion(frame.Readback->Get(), phase == 2 ? sizeof(uint32_t) * 4 : 0, culled,
-				DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 4);
-			frame.CullRecorded = true;
-			frame.CullPhases   = phase == 0 ? 1 : 2;
+			_culledState = culledRead;
+			if (stats)
+			{
+				// 読み戻し : 1 回目 (視錐台だけ / 前段) は [0〜3]、後段は [4〜7] に写す
+				// (映った数 / 不透明 / 半透明 / 両面の不透明 の描画数。以前は 3 つ)。影の視点は読まない
+				cmdList->CopyBufferRegion(frame.Readback->Get(), phase == 2 ? sizeof(uint32_t) * 4 : 0, culled,
+					DRAW_ARGS_OFFSET + CULL_COUNTER_OFFSET, sizeof(uint32_t) * 4);
+				frame.CullRecorded = true;
+				frame.CullPhases   = phase == 0 ? 1 : 2;
+			}
 
 			// 描画用の PSO に戻す (ルートシグネチャはグラフィックス用とコンピュート用で別なので、描画側の設定はそのまま)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
