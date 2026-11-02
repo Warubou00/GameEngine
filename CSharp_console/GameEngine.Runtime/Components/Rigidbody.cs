@@ -41,6 +41,9 @@ public enum ForceMode
 //   - 質量の分布 (慣性) は Collider の形と大きさから求める。重心は Collider の中心
 //   - 力 / 速度は FixedUpdate (IFixedSystem) で触るのがおすすめ (Update でかけた力は、次の 1 刻みだけかかる)
 //   - 摩擦 / 反発は Collider に持つ (動かない地面にも付けられるように)
+//   - 止まった物は眠る (P2) : 触れ合っている物のまとまり (島) が全部止まると、島ごと計算しなくなる。
+//     動いている物が触れる / 力や速度を与える / Transform を動かす / 支えが消える と島ごと起きる
+//     IsSleeping で分かる。CanSleep = false で眠らない (いつも計算する)
 //   使い方 : ref var body = ref world.Get<Rigidbody>(entity); body.AddForce(new Vector3(0, 10, 0));
 // ==========================================================================
 public struct Rigidbody
@@ -53,6 +56,7 @@ public struct Rigidbody
     public float InertiaScale   = 1.0f;    // 慣性の倍率 (大きいほど回りにくい)
     public RigidbodyConstraints Constraints = RigidbodyConstraints.None;
     public bool  Interpolate    = true;    // 描画のフレームに合わせて、前後の刻みの間の位置を出す (カクつかない)
+    public bool  CanSleep       = true;    // 止まったら眠ってよいか (P2)
 
     // ---------- 今の状態 (Physics が書く) ----------
     internal Vector3    _velocity;
@@ -60,10 +64,11 @@ public struct Rigidbody
     internal Vector3    _position;        // 最後の刻みの位置 (補間していない)
     internal Quaternion _rotation;
     internal Vector3    _centerOfMass;
+    internal bool       _sleeping;
 
     // ---------- 次の刻みへの命令 (CollisionSystem が送って消す) ----------
     internal Vector3    _force, _torque, _impulse, _angularImpulse, _angularVelocityChange;
-    internal bool       _setVelocity, _setAngularVelocity, _hasTarget, _hasCommand;
+    internal bool       _setVelocity, _setAngularVelocity, _hasTarget, _hasCommand, _wake, _sleep;
     internal Vector3    _targetPosition;
     internal Quaternion _targetRotation;
     internal bool       _targetRotationSet;
@@ -95,6 +100,20 @@ public struct Rigidbody
     public readonly Vector3    Position          => _position;
     public readonly Quaternion Rotation          => _rotation;
     public readonly Vector3    WorldCenterOfMass => _centerOfMass;
+    /// <summary>眠っているか (止まっていて計算していない。P2)</summary>
+    public readonly bool       IsSleeping        => _sleeping;
+
+    /// <summary>起こす (触れ合っている島ごと)。力 / 速度を与えた時は自動で起きる</summary>
+    public void WakeUp()
+    {
+        _wake = true; _sleep = false; _hasCommand = true;
+    }
+
+    /// <summary>今すぐ眠らせる (この体だけ。動いている物が触れれば起きる)</summary>
+    public void Sleep()
+    {
+        _sleep = true; _wake = false; _hasCommand = true;
+    }
 
     // ---------- 力 ----------
 
@@ -157,6 +176,6 @@ public struct Rigidbody
     internal void ClearCommands()
     {
         _force = _torque = _impulse = _angularImpulse = _angularVelocityChange = Vector3.Zero;
-        _setVelocity = _setAngularVelocity = _hasTarget = _hasCommand = _targetRotationSet = false;
+        _setVelocity = _setAngularVelocity = _hasTarget = _hasCommand = _targetRotationSet = _wake = _sleep = false;
     }
 }

@@ -55,6 +55,10 @@ namespace Physics
 		_solver.MaxLinearSpeed         = 400.0f;
 		_solver.Iterations             = 1;
 		_solver.RelaxIterations        = 1;
+		_solver.EnableSleep            = 1;
+		_solver.TimeToSleep            = 0.5f;
+		_solver.SleepLinearVelocity    = 0.1f;   // 重心の速さ + 回転で一番速い所の速さ (Unity の既定の眠りの基準 ≒ 0.1 m/s)
+		_solver.SleepAngularVelocity   = 2.0f;   // 角速度の上限 (小さな物が速く回っている時は眠らない)
 	}
 
 	PhysicsWorld::Body* PhysicsWorld::find(uint32_t handle)
@@ -133,6 +137,7 @@ namespace Physics
 		{
 			Pair& pair = _pairs[i];
 			if (pair.A != index && pair.B != index) { ++i; continue; }
+			wakeBody(pair.A == index ? pair.B : pair.A);   // 支えていた物が消えたら、触れていた眠った島は起きる (P2)
 			if (pair.Touching)
 			{
 				_pendingEvents.push_back({ handleOf(pair.A), handleOf(pair.B), 1u, 0u });
@@ -254,6 +259,9 @@ namespace Physics
 			if (!body) continue;
 			const Aabb& previous = _previousBoxes[i];
 			const uint32_t index = t.Handle & 0xFFFFu;
+			// 眠り (P2) : 眠った剛体を動かした (瞬間移動) → 島ごと起こす。動く剛体でない物を動かした → 触れている眠った島を起こす
+			if (isSleeping(*body)) wakeBody(index);
+			else if (body->Motion != MotionType::Dynamic && !_sleepGroups.empty()) _movedOthers.push_back(index);
 
 			// 木の葉 : 太らせた箱からはみ出した時だけ直す
 			// 動く物は箱を広げるだけにして、木の形は Step の始めにまとめて直す (fixDynamicTree)

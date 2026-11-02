@@ -106,7 +106,13 @@ namespace Physics
 		float    GravityScale;    // 重力の倍率 (0 で無重力)
 		uint32_t Locks;           // LockFlags
 		float    InertiaScale;    // 慣性の倍率 (0 以下なら 1。大きいほど回りにくい)
-		uint32_t Padding;
+		uint32_t Flags;           // DynamicsFlags (P2。以前は詰め物)
+	};
+
+	// 剛体の印 (BodyDynamics.Flags。P2)
+	enum DynamicsFlags : uint32_t
+	{
+		DYNAMICS_NO_SLEEP = 1u,   // 眠らない (止まっていても毎刻み解く。この体のいる島も眠らない)
 	};
 	static_assert(sizeof(BodyDynamics) == 32, "BodyDynamics must be 32 bytes (same as C#)");
 
@@ -118,6 +124,8 @@ namespace Physics
 		COMMAND_SET_VELOCITY     = 1u << 2,   // Velocity にする
 		COMMAND_SET_ANGULAR      = 1u << 3,   // AngularVelocity にする
 		COMMAND_KINEMATIC_TARGET = 1u << 4,   // キネマティック : 次の Simulate で TargetPosition / TargetRotation へ動く
+		COMMAND_WAKE             = 1u << 5,   // 起こす (島ごと。P2。力 / 速度などの命令は、これが無くても起こす)
+		COMMAND_SLEEP            = 1u << 6,   // 眠らせる (この体だけ。触れている物が動けば起きる。P2)
 	};
 	struct BodyCommand
 	{
@@ -140,7 +148,7 @@ namespace Physics
 	struct BodyState
 	{
 		uint32_t Handle;
-		uint32_t Flags;              // 0 (P2 で眠り)
+		uint32_t Flags;              // 1 : 眠っている (P2)
 		uint32_t Padding0;
 		uint32_t Padding1;
 		float    Position[3];        float Padding2;   // Transform の位置
@@ -166,10 +174,14 @@ namespace Physics
 		float    MaxLinearSpeed;         // 速度の上限 m/s (既定 400)
 		uint32_t Iterations;             // 1 つの小さな刻みで解く回数 (既定 1)
 		uint32_t RelaxIterations;        // 押し戻しの勢いを取る回数 (既定 1)
+		uint32_t EnableSleep;            // 1 : 止まった島を眠らせる (既定 1。P2。以前は詰め物)
+		float    TimeToSleep;            // 島の全部の体がこの秒数止まっていたら眠る (既定 0.5。以前は詰め物)
+		float    SleepLinearVelocity;    // 重心の速さ + 回転で一番速い所の速さ がこれより遅ければ「止まっている」(m/s。既定 0.1)
+		float    SleepAngularVelocity;   // 角速度もこれより遅いこと (rad/s。既定 2)
 		uint32_t Padding0;
 		uint32_t Padding1;
 	};
-	static_assert(sizeof(SolverSettings) == 64, "SolverSettings must be 64 bytes (same as C#)");
+	static_assert(sizeof(SolverSettings) == 80, "SolverSettings must be 80 bytes (same as C#)");
 
 	// ジョイント (C# の PhysicsNativeMethods.JointDesc と同じ並び : 64byte)
 	enum class JointType : uint32_t
@@ -287,8 +299,12 @@ namespace Physics
 		uint32_t RigidBodies;    // 剛体 (Dynamic / Kinematic) の数
 		uint32_t ContactConstraints;   // 解いた接触の組
 		uint32_t Joints;         // 働いているジョイント
+		uint32_t AwakeBodies;    // 起きている剛体 (P2。眠っている物は解かない)
+		uint32_t Islands;        // 起きている島 (触れ合っている / 繋いだ動く物のまとまり)
+		float    IslandMs;       // 島を作って眠らせるかを決めた時間
+		uint32_t Padding;
 	};
-	static_assert(sizeof(PhysicsStats) == 64, "PhysicsStats must be 64 bytes (same as C#)");
+	static_assert(sizeof(PhysicsStats) == 80, "PhysicsStats must be 80 bytes (same as C#)");
 }
 
 #endif // PHYSICS_COMMON_H_

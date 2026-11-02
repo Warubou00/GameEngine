@@ -213,6 +213,9 @@ internal sealed unsafe partial class CollisionSystem
         _settings.RigidBodies        = (int)stats.RigidBodies;
         _settings.ContactConstraints = (int)stats.ContactConstraints;
         _settings.Joints             = (int)stats.Joints;
+        _settings.AwakeBodies        = (int)stats.AwakeBodies;
+        _settings.Islands            = (int)stats.Islands;
+        _settings.IslandMs           = stats.IslandMs;
         _settings.SystemMs      = (float)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;   // 表示の線を描く前まで
 
         if (_settings.ShowColliders) { drawColliders(world); drawJoints(world); }
@@ -296,6 +299,7 @@ internal sealed unsafe partial class CollisionSystem
         var overlapColor = DebugDraw.Color(1.0f, 0.25f, 0.2f);
         var freeColor    = DebugDraw.Color(0.3f, 1.0f, 0.4f);
         var staticColor  = DebugDraw.Color(0.85f, 0.85f, 0.85f, 0.9f);
+        var sleepColor   = DebugDraw.Color(0.35f, 0.55f, 1.0f);   // 眠っている剛体 (P2)
         var colliders  = world.GetPool<Collider>();
         var transforms = world.GetPool<Transform>();
         var entities   = colliders.Entities;
@@ -307,7 +311,8 @@ internal sealed unsafe partial class CollisionSystem
             ref var state = ref _states[entities[i].Id];
             if (!state.Active) continue;
             ref var c = ref components[i];
-            var color  = state.Overlaps > 0 ? overlapColor : state.IsStatic ? staticColor : freeColor;
+            var sleeping = state.Rigid != 0 && (uint)entities[i].Id < (uint)_rigidStates.Length && _rigidStates[entities[i].Id].Sleeping;
+            var color  = sleeping ? sleepColor : state.Overlaps > 0 ? overlapColor : state.IsStatic ? staticColor : freeColor;
             var scale  = Vector3.Abs(transform.Scale);
             var center = transform.Position + Vector3.Transform(c.Center * transform.Scale, transform.Rotation);
             switch (c.Shape)

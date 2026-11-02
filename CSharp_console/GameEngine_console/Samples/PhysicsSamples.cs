@@ -8,7 +8,7 @@ namespace GameEngine_console;
 //   PhysicsDemo  : --scene physics。積み木 / 坂 (摩擦) / 反発 / 振り子の鎖 / ばね / 固く繋いだ物 / 壊れるジョイント /
 //                  動く床 (キネマティック) / トリガー。スペースでカメラから球を撃つ。R で積み木を作り直す
 //   PhysicsBench : --physics-bench N。箱を N 個落として積む (計測用。[PhysicsBench] を 120 フレームごとに出す)
-//   球のモデルは無いので、球はコライダーの線で見る (C で表示)
+//   球のモデルは無いので、球はコライダーの線で見る (C で表示)。眠っている剛体は青 (P2)
 // ==========================================================================
 internal static class PhysicsDemo
 {
@@ -251,7 +251,7 @@ public sealed class PhysicsBenchSystem : ISystem
         if (_physics.FixedSteps > 0) { _solver += _physics.SolverMs * _physics.FixedSteps; _step += _physics.StepMs * _physics.FixedSteps; }
         _steps += _physics.FixedSteps;
         if (++_frames < 120) return;
-        Console.WriteLine($"[PhysicsBench] rigid {_physics.RigidBodies} : per step solver {_solver / Math.Max(1, _steps):F3} ms, collision {_step / Math.Max(1, _steps):F3} ms " +
+        Console.WriteLine($"[PhysicsBench] rigid {_physics.RigidBodies} awake {_physics.AwakeBodies} islands {_physics.Islands} : per step solver {_solver / Math.Max(1, _steps):F3} ms, collision {_step / Math.Max(1, _steps):F3} ms " +
                           $"(contacts {_physics.ContactConstraints}), C# system {_system / _frames:F3} ms per frame, {_steps} steps / {_frames} frames");
         _system = _solver = _step = 0;
         _frames = _steps = 0;

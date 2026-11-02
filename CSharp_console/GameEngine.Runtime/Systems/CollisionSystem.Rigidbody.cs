@@ -23,6 +23,8 @@ internal sealed unsafe partial class CollisionSystem
         public PhysicsNativeMethods.BodyDynamics Dynamics;
         public bool       Interpolate;
         public bool       UserDriven;     // このフレームで自分で動かしたキネマティック (Transform に書かない)
+        public bool       Sleeping;       // 眠っている (P2)
+        public bool       SleepWritten;   // 眠った後の位置を Transform に書いた (その後は見回るだけで書かない)
         public Vector3    PrevPosition, CurPosition, WrittenPosition;      // 補間の前後と、最後に Transform に書いた値
         public Quaternion PrevRotation, CurRotation, WrittenRotation;
     }
@@ -72,6 +74,7 @@ internal sealed unsafe partial class CollisionSystem
         {
             Motion = motion, Mass = rb.Mass, LinearDamping = rb.LinearDamping, AngularDamping = rb.AngularDamping,
             GravityScale = rb.GravityScale, Locks = (uint)rb.Constraints, InertiaScale = rb.InertiaScale,
+            Flags = rb.CanSleep ? 0u : 1u,
         };
         if (!rigid.DynamicsSent || !dynamics.Same(rigid.Dynamics))
         {
@@ -108,9 +111,10 @@ internal sealed unsafe partial class CollisionSystem
             rigid.UserDriven = true;
             return false;
         }
-        // Dynamic : 瞬間移動 (速度はそのまま)。補間も今の位置から
+        // Dynamic : 瞬間移動 (速度はそのまま)。補間も今の位置から。眠っていれば C++ が起こす
         rigid.PrevPosition = rigid.CurPosition = transform.Position;
         rigid.PrevRotation = rigid.CurRotation = transform.Rotation;
+        rigid.Sleeping = false;
         return true;
     }
 
@@ -195,6 +199,8 @@ internal sealed unsafe partial class CollisionSystem
             var angular = rb._angularVelocity + rb._angularVelocityChange;
             if (rb._setAngularVelocity || rb._angularVelocityChange != Vector3.Zero) flags |= PhysicsNativeMethods.CommandSetAngular;
             if (rb._hasTarget) flags |= PhysicsNativeMethods.CommandKinematicTarget;
+            if (rb._wake)  flags |= PhysicsNativeMethods.CommandWake;
+            if (rb._sleep) flags  = PhysicsNativeMethods.CommandSleep;   // 眠らせる時は他の命令は送らない
             _commandList.Add(new PhysicsNativeMethods.BodyCommand
             {
                 Handle = _states[id].Body, Flags = flags,
@@ -215,14 +221,15 @@ internal sealed unsafe partial class CollisionSystem
     }
 
     // 1 刻みの後 : 剛体の状態を受け取る (補間の前後を 1 つずらす)
+    //   起きている剛体と、この刻みで眠った剛体だけ受け取る (眠っている物は位置が変わらない。P2。以前は全部の剛体)
     private void readBodyStates(World world)
     {
-        var count = (int)PhysicsNativeMethods.Physics_GetBodyStates(null, 0);
+        var count = (int)PhysicsNativeMethods.Physics_GetActiveBodyStates(null, 0);
         if (count == 0) return;
         if (_bodyStates.Length < count) _bodyStates = new PhysicsNativeMethods.BodyState[count * 2];
         fixed (PhysicsNativeMethods.BodyState* states = _bodyStates)
         {
-            count = (int)PhysicsNativeMethods.Physics_GetBodyStates(states, (uint)_bodyStates.Length);
+            count = (int)PhysicsNativeMethods.Physics_GetActiveBodyStates(states, (uint)_bodyStates.Length);
         }
         var rigidbodies = world.GetPool<Rigidbody>();
         for (int i = 0; i < count; i++)
@@ -231,10 +238,14 @@ internal sealed unsafe partial class CollisionSystem
             var entity = entityOf(s.Handle);
             if (entity.IsNull || (uint)entity.Id >= (uint)_states.Length) continue;
             ref var rigid = ref rigidStateOf(entity.Id);
-            rigid.PrevPosition = rigid.CurPosition;
-            rigid.PrevRotation = rigid.CurRotation;
+            var sleeping = (s.Flags & 1u) != 0;
+            // 眠った : 前後を同じにして補間を止める (最後に 1 回 Transform に書いて、その後は書かない)
+            rigid.PrevPosition = sleeping ? s.Position : rigid.CurPosition;
+            rigid.PrevRotation = sleeping ? s.Rotation : rigid.CurRotation;
             rigid.CurPosition  = s.Position;
             rigid.CurRotation  = s.Rotation;
+            rigid.Sleeping     = sleeping;
+            rigid.SleepWritten = false;
             ref var rb = ref rigidbodies.TryGet(entity.Id, out var has);
             if (!has) continue;
             rb._position        = s.Position;
@@ -242,6 +253,7 @@ internal sealed unsafe partial class CollisionSystem
             rb._velocity        = s.Velocity;
             rb._angularVelocity = s.AngularVelocity;
             rb._centerOfMass    = s.CenterOfMass;
+            rb._sleeping        = sleeping;
         }
     }
 
@@ -263,6 +275,11 @@ internal sealed unsafe partial class CollisionSystem
             if (!state.Active || state.Rigid == 0) continue;
             ref var rigid = ref rigidStateOf(id);
             if (rigid.UserDriven) { rigid.UserDriven = false; continue; }   // このフレームは自分で動かしたキネマティック
+            if (rigid.Sleeping)
+            {
+                if (rigid.SleepWritten) continue;   // 眠っている物は位置が変わらない (P2)
+                rigid.SleepWritten = true;
+            }
             ref var transform = ref transforms.TryGet(id, out var found);
             if (!found) continue;
             var position = rigid.Interpolate ? Vector3.Lerp(rigid.PrevPosition, rigid.CurPosition, alpha) : rigid.CurPosition;
