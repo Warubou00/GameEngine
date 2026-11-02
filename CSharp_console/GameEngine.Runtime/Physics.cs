@@ -57,6 +57,44 @@ public sealed class PhysicsSettings
     // 確認用 : 接触点を黄色の印と法線の線で描く
     public bool ShowContacts { get; set; }
 
+    // ---------- レイヤーの衝突の表 (Unity の Physics.IgnoreLayerCollision と同じ) ----------
+    //   既定は全部のレイヤーどうしを調べる。Collider.CollideWith (物ごと) と両方で許された組だけ調べる
+    //   C++ は木の節に「枝の中のレイヤー」をビットで持ち、当たりえない枝は箱を調べる前に飛ばす (速くなる)
+    //   表を変えると次の Step で全部の組を調べ直す (外れた組は Exit になる)。頻繁に変えるものではない
+
+    /// <summary>レイヤー a と b の物どうしを調べるか (a, b : 0〜31)</summary>
+    public void SetLayerCollision(int a, int b, bool collide)
+    {
+        if (!Available || (uint)a > 31 || (uint)b > 31) return;
+        PhysicsNativeMethods.Physics_SetLayerCollision((uint)a, (uint)b, collide);
+    }
+
+    public void IgnoreLayerCollision(int a, int b, bool ignore = true) => SetLayerCollision(a, b, !ignore);
+
+    public bool GetLayerCollision(int a, int b) =>
+        Available && (uint)a <= 31 && (uint)b <= 31 && (PhysicsNativeMethods.Physics_GetLayerCollisionMask((uint)a) & (1u << b)) != 0;
+
+    // 比べる用 : 木の節のレイヤーのビットで枝を飛ばすか (既定 true)
+    public void SetLayerPruning(bool enabled)
+    {
+        if (Available) PhysicsNativeMethods.Physics_SetOption(1, enabled ? 1u : 0u);
+    }
+
+    /// <summary>
+    /// 衝突判定を並列に行う追加のスレッドの数 (0 = 呼んだスレッドだけ)。
+    /// 既定は 論理コアの数 - 1 (3 本まで)。描画や他の処理とコアを取り合う時は減らす
+    /// </summary>
+    public void SetWorkerCount(int count)
+    {
+        if (Available) PhysicsNativeMethods.Physics_SetOption(2, (uint)Math.Clamp(count, 0, 63));
+    }
+
+    // 比べる用 : 多く動いた時に動く物の木を作り直すか (既定 true。false なら 1 つずつ入れ直す)
+    public void SetTreeRebuild(bool enabled)
+    {
+        if (Available) PhysicsNativeMethods.Physics_SetOption(3, enabled ? 1u : 0u);
+    }
+
     // 体のハンドル → エンティティ (CollisionSystem が設定する)
     internal Func<uint, Entity>? EntityOf { get; set; }
 
@@ -153,4 +191,9 @@ public sealed class PhysicsSettings
     public float BroadphaseMs  { get; internal set; }
     public float NarrowphaseMs { get; internal set; }
     public float StepMs        { get; internal set; }
+    public float TreeMs        { get; internal set; }   // 動く物の木を直した時間 (BroadphaseMs に含む)
+    public float SyncMs        { get; internal set; }   // 動いた体の位置を C++ が受け取った時間 (木を直す分)
+    public float EventsMs      { get; internal set; }   // 重なりの記録とイベント
+    public int   Workers       { get; internal set; }   // 並列に使ったスレッドの数
+    public float SystemMs      { get; internal set; }   // C# の CollisionSystem 全体 (P/Invoke と C++ の時間を含む)
 }

@@ -88,6 +88,7 @@
     <ClInclude Include="Source\meshShape.h" />
     <ClInclude Include="Source\contacts.h" />
     <ClInclude Include="Source\raycast.h" />
+    <ClInclude Include="Source\jobSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\dynamicTree.cpp" />
@@ -97,6 +98,7 @@
     <ClCompile Include="Source\meshShape.cpp" />
     <ClCompile Include="Source\contacts.cpp" />
     <ClCompile Include="Source\raycast.cpp" />
+    <ClCompile Include="Source\jobSystem.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

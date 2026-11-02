@@ -29,6 +29,8 @@ namespace GameEngine_console;
 //   --colliders on|off          : コライダーを線で表示 (既定 on。見本のシーンで重なると赤)
 //   --collision-bench N         : コライダーだけの物を N 個動かして衝突判定を計測 (--broadphase bvh|brute|grid)
 //                                 --bench-moving P : 毎フレーム動く物の割合 (%。既定 100)
+//                                 --bench-layers N : レイヤーを N 個に分け、違うレイヤーどうしを調べない (--layer-pruning off で木での間引きを切る)
+//                                 --physics-workers N : 衝突判定の追加のスレッドの数 (既定 論理コア - 1、3 本まで) / --tree-rebuild off
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -88,7 +90,15 @@ internal static class Program
         if (benchCount > 0)
         {
             var moving = options.TryGetValue("--bench-moving", out var movingText) && int.TryParse(movingText, out var m) ? m : 100;
-            var half = CollisionBench.Spawn(world, benchCount, moving);
+            var layerCount = options.TryGetValue("--bench-layers", out var layerText) && int.TryParse(layerText, out var l) ? Math.Clamp(l, 1, 32) : 1;
+            var half = CollisionBench.Spawn(world, benchCount, moving, layerCount);
+            // レイヤーを分けた時 : 同じレイヤーどうしだけ調べる (床のレイヤー 0 とは全部当たる)
+            for (int a = 1; a < layerCount; a++)
+                for (int c = 1; c < layerCount; c++)
+                    if (a != c) engine.Physics.SetLayerCollision(a, c, false);
+            if (options.GetValueOrDefault("--layer-pruning", "on") == "off") engine.Physics.SetLayerPruning(false);
+            if (options.GetValueOrDefault("--tree-rebuild", "on") == "off") engine.Physics.SetTreeRebuild(false);
+            if (options.TryGetValue("--physics-workers", out var workerText) && int.TryParse(workerText, out var workers)) engine.Physics.SetWorkerCount(workers);
             engine.AddSystem(new BenchMoverSystem(half, engine.Physics));
         }
         if (options.TryGetValue("--colliders", out var colliders)) engine.Physics.ShowColliders = colliders == "on";

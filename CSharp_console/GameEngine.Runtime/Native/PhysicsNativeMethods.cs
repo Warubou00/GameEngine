@@ -92,7 +92,7 @@ internal static unsafe class PhysicsNativeMethods
         public float   Padding2;
     }
 
-    // 32byte
+    // 48byte (以前は 32byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct PhysicsStats
     {
@@ -104,6 +104,10 @@ internal static unsafe class PhysicsNativeMethods
         public float NarrowphaseMs;
         public float StepMs;
         public uint  Broadphase;
+        public float SyncMs;
+        public float EventsMs;
+        public uint  Workers;
+        public float TreeMs;
     }
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -127,6 +131,15 @@ internal static unsafe class PhysicsNativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Physics_Step();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_SetLayerCollision(uint a, uint b, [MarshalAs(UnmanagedType.I1)] bool collide);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_GetLayerCollisionMask(uint layer);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_SetOption(uint option, uint value);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Physics_GetEvents(CollisionEvent* events, uint capacity);
