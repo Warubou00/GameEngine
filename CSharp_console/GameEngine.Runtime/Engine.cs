@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Numerics;
 using GameEngine.Native;
+using GameEngine.Rendering;
 
 namespace GameEngine;
 
@@ -17,6 +19,20 @@ public sealed class EngineSettings
 // ==========================================================================
 // 描画の設定 (プロファイラー (F1) のチェックボックスでも切り替えられる)
 // ==========================================================================
+public enum LightingModel : uint
+{
+    Unlit   = 0,   // ライト無し (テクスチャの色そのまま。以前の見た目)
+    Lambert = 1,   // 拡散反射だけ
+    PBR     = 2,   // 物理ベース (GGX / 金属・粗さ)
+}
+
+public enum Tonemapper : uint
+{
+    None     = 0,   // 1 を超えた所は白く飛ぶ
+    Reinhard = 1,
+    ACES     = 2,   // 映画の色 (明るい所をなだらかに丸める)
+}
+
 public sealed class GraphicsSettings
 {
     private bool _indirectDraw = true;
@@ -24,8 +40,81 @@ public sealed class GraphicsSettings
     private bool _gpuCulling   = true;
     private bool _occlusion    = true;
 
+    // 描画パイプライン : 切り替えは次のフレームの始めに行う (C++ の準備ができる前に設定してもよいように)
+    private RenderPipeline? _pipeline;
+    private RenderPipeline? _pendingPipeline = new ForwardRenderPipeline();
+    private LightingModel   _lightingModel   = LightingModel.PBR;
+    private Vector3         _ambient         = new(0.25f, 0.27f, 0.30f);
+    private bool            _lightingDirty   = true;
+    private bool            _infoDirty       = true;
+
     internal GraphicsSettings()
     {
+    }
+
+    // ---------- 描画パイプライン / ライティング ----------
+
+    // 1 フレームの描き方 (Forward / Deferred / 自作)。前のパイプラインは Dispose される
+    public RenderPipeline Pipeline
+    {
+        get => _pendingPipeline ?? _pipeline!;
+        set => _pendingPipeline = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    public LightingModel LightingModel
+    {
+        get => _lightingModel;
+        set { _lightingModel = value; _lightingDirty = true; }
+    }
+
+    // 環境光 (空の明るさ。線形)
+    public Vector3 AmbientColor
+    {
+        get => _ambient;
+        set { _ambient = value; _lightingDirty = true; }
+    }
+
+    public float      Exposure        { get; set; } = 1.0f;     // HDR の明るさの倍率
+    public Tonemapper Tonemapper      { get; set; } = Tonemapper.ACES;
+    public float      Gamma           { get; set; } = 2.2f;
+    public Vector3    BackgroundColor { get; set; } = new(0.1f, 0.2f, 0.4f);   // 何も無い所の色 (sRGB。以前のクリア色)
+
+    // フレームの始め : パイプラインの切り替えとライティングの設定を C++ へ (変わった時だけ)
+    internal void BeginFrame()
+    {
+        if (_pendingPipeline != null)
+        {
+            _pipeline?.Dispose();
+            _pipeline = _pendingPipeline;
+            _pendingPipeline = null;
+            _pipeline.Initialize(this);
+            _infoDirty = true;
+        }
+        if (_lightingDirty)
+        {
+            var settings = new NativeMethods.LightingSettings { Model = (uint)_lightingModel, Ambient = _ambient };
+            NativeMethods.Renderer_SetLightingSettings(ref settings);
+            _lightingDirty = false;
+            _infoDirty     = true;
+        }
+        if (_infoDirty)
+        {
+            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}");
+            _infoDirty = false;
+        }
+    }
+
+    internal void RenderFrame(RenderCommandBuffer commands)
+    {
+        commands.Clear();
+        _pipeline!.Render(commands, this);
+        commands.Submit();
+    }
+
+    internal void Shutdown()
+    {
+        _pipeline?.Dispose();
+        _pipeline = null;
     }
 
     // ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)
@@ -70,7 +159,7 @@ public sealed class GraphicsSettings
 //
 //   毎フレームの順番 :
 //     ウィンドウのメッセージ → Time → 登録した System (登録順) → Transform の行列 → カメラ → 描画オブジェクトへ反映
-//     → C++ で描画 → 入力のフレーム終わりの処理
+//     → ライト → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
 //   以前 (GameEngine_console の RHI.cs) は、ウィンドウ・P/Invoke・テスト用の関数が 1 つのクラスに入っていた
 // ==========================================================================
 public sealed class Engine : IDisposable
@@ -80,6 +169,8 @@ public sealed class Engine : IDisposable
     private readonly TransformSystem  _transformSystem = new();
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
+    private readonly LightSystem      _lightSystem     = new();
+    private readonly RenderCommandBuffer _commands     = new();
     private bool _closed;
     private bool _disposed;
     private double _updateTotalMs;
@@ -171,13 +262,19 @@ public sealed class Engine : IDisposable
             _transformSystem.Update(World);
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
+            _lightSystem.Update(World);
+
+            // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
+            Graphics.BeginFrame();
 
             UpdateMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             if (Time.TotalTime >= 1.0) { _updateTotalMs += UpdateMilliseconds; _updateFrames++; }   // 起動直後は除く
             NativeMethods.Renderer_ReportProfilerValue("C# update (ms)", UpdateMilliseconds);
             NativeMethods.Renderer_ReportProfilerValue("C# transforms sent", _renderSyncSystem.TransformsSentLastFrame);
+            NativeMethods.Renderer_ReportProfilerValue("Lights", _lightSystem.LightCount);
 
-            NativeMethods.Renderer_Render();
+            Graphics.RenderFrame(_commands);
+            NativeMethods.Renderer_ReportProfilerValue("Render commands", _commands.Count);
             Input.EndFrame();
         }
     }
@@ -198,6 +295,7 @@ public sealed class Engine : IDisposable
         {
             Console.WriteLine($"[Engine] C# update average {_updateTotalMs / _updateFrames:F3} ms ({_updateFrames} frames, entities {World.EntityCount})");
         }
+        Graphics.Shutdown();                // レンダーターゲットを先に返す
         NativeMethods.Renderer_CleanUp();   // GPU の完了を待ってから解放される
         if (!_window.IsDisposed) _window.Dispose();
     }

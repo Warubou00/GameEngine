@@ -158,6 +158,18 @@ namespace RHI
 			// 既定のマテリアル (0 番) : 白・既定テクスチャ・不透明。マテリアルを指定しない DrawItem はこれで描かれる
 			CreateMaterial(RHI::MaterialDesc());
 
+			// ライト : マテリアルと同じく、フレームごとの UPLOAD 領域と VRAM 側
+			{
+				const UINT64 size = static_cast<UINT64>(MAX_LIGHTS) * sizeof(RHI::LightData) * CommandContext::FRAME_COUNT;
+				_lightUpload = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				_lightGpu    = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				if (!makeBuffer(device, _lightUpload.get(), size, D3D12_HEAP_TYPE_UPLOAD) || FAILED(_lightUpload->Map()) ||
+					!makeBuffer(device, _lightGpu.get(), size, D3D12_HEAP_TYPE_DEFAULT))
+				{
+					return RHI_FAILED_INITIALIZED;
+				}
+			}
+
 			return RHI_SUCCEEDED;
 		}
 
@@ -304,6 +316,17 @@ namespace RHI
 			_viewMatrix = transposeForShader(view);
 			_projMatrix = transposeForShader(projection);
 
+			// ディファードのライティングで、深度から位置を戻すための逆行列と、カメラの位置 (反射の計算に使う)
+			const ::DirectX::XMMATRIX v = ::DirectX::XMLoadFloat4x4(&view);
+			const ::DirectX::XMMATRIX p = ::DirectX::XMLoadFloat4x4(&projection);
+			const ::DirectX::XMMATRIX invViewProj = ::DirectX::XMMatrixInverse(nullptr, ::DirectX::XMMatrixMultiply(v, p));
+			::DirectX::XMStoreFloat4x4(&_invViewProj, ::DirectX::XMMatrixTranspose(invViewProj));
+			::DirectX::XMFLOAT4X4 invView;
+			::DirectX::XMStoreFloat4x4(&invView, ::DirectX::XMMatrixInverse(nullptr, v));
+			_cameraPosition[0] = invView._41;
+			_cameraPosition[1] = invView._42;
+			_cameraPosition[2] = invView._43;
+
 			// 全フレームの領域に書き直しが必要になる
 			_frameConstantsVersion++;
 		}
@@ -345,6 +368,53 @@ namespace RHI
 			return handle;
 		}
 
+		void Buffer::SetScreenSize(uint32_t width, uint32_t height)
+		{
+			if (width == 0 || height == 0 || (width == _screenWidth && height == _screenHeight)) return;
+			_screenWidth  = width;
+			_screenHeight = height;
+			_frameConstantsVersion++;
+		}
+
+		void Buffer::SetLights(const RHI::LightData* lights, uint32_t count)
+		{
+			count = (std::min)(count, MAX_LIGHTS);
+			_lights.assign(lights, lights + (lights ? count : 0));
+			_lightsVersion++;
+			_frameConstantsVersion++;   // ライトの数がフレームの定数に入っている
+		}
+
+		void Buffer::SetLightingSettings(const RHI::LightingSettings& settings)
+		{
+			_lightingSettings = settings;
+			_frameConstantsVersion++;
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteLights(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList)
+		{
+			// マテリアルと同じ : 変わった時だけフレームの領域に書いて VRAM へ写す (ピクセルシェーダーが読むので VRAM に置く)
+			const UINT64 frameOffset = static_cast<UINT64>(MAX_LIGHTS) * sizeof(RHI::LightData) * frameIndex;
+			if (_lightsWritten[frameIndex] != _lightsVersion && cmdList)
+			{
+				if (!_lights.empty())
+				{
+					const UINT64 bytes = static_cast<UINT64>(_lights.size()) * sizeof(RHI::LightData);
+					if (!_lightUpload->WriteData(frameOffset, _lights.data(), static_cast<size_t>(bytes))) return _lightGpu->GetGPUVirtualAddress() + frameOffset;
+					cmdList->CopyBufferRegion(_lightGpu->Get(), frameOffset, _lightUpload->Get(), frameOffset, bytes);
+
+					D3D12_RESOURCE_BARRIER barrier = {};
+					barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+					barrier.Transition.pResource   = _lightGpu->Get();
+					barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+					barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+					cmdList->ResourceBarrier(1, &barrier);
+				}
+				_lightsWritten[frameIndex] = _lightsVersion;
+			}
+			return _lightGpu->GetGPUVirtualAddress() + frameOffset;
+		}
+
 		RHI::MaterialHandle Buffer::CreateMaterial(const RHI::MaterialDesc& desc)
 		{
 			RHI::MaterialHandle handle;
@@ -358,6 +428,8 @@ namespace RHI
 			for (int i = 0; i < 4; ++i) data.Color[i] = desc.Color[i];
 			data.TextureIndex = desc.Texture.Index;
 			data.Blend        = static_cast<uint32_t>(desc.Blend);
+			data.Metallic     = desc.Metallic;
+			data.Roughness    = desc.Roughness;
 
 			handle.Index = static_cast<uint32_t>(_materials.size());
 			_materials.push_back(data);
@@ -376,14 +448,15 @@ namespace RHI
 				{
 					cmdList->CopyBufferRegion(_materialGpu->Get(), frameOffset, _materialUpload->Get(), frameOffset, bytes);
 
-					// コピーで COMMON → COPY_DEST に暗黙で昇格する。頂点シェーダーが読む状態へ移す
-					// (写さないフレームは COMMON → NON_PIXEL_SHADER_RESOURCE に暗黙で昇格する)
+					// コピーで COMMON → COPY_DEST に暗黙で昇格する。ピクセルシェーダーが読む状態へ移す
+					// (以前は頂点シェーダーが読んでいた。補間する値を減らすため、今はピクセルシェーダーが引く)
+					// (写さないフレームは COMMON → 読む状態に暗黙で昇格する)
 					D3D12_RESOURCE_BARRIER barrier = {};
 					barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 					barrier.Transition.pResource   = _materialGpu->Get();
 					barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-					barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+					barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 					cmdList->ResourceBarrier(1, &barrier);
 					_materialsWritten[frameIndex] = _materialsVersion;
 				}
@@ -508,18 +581,33 @@ namespace RHI
 			// フレームごとに 256byte ずつ領域を分けている (Root CBV は 256byte 境界が必須)
 			const uint64_t offset = CONSTANT_BUFFER_ALIGNMENT * frameIndex;
 
-			// 行列が変わっていなければ書き込みを省く (UPLOAD ヒープは書き込みが遅いメモリなので、無駄に書かない)
+			// 何も変わっていなければ書き込みを省く (UPLOAD ヒープは書き込みが遅いメモリなので、無駄に書かない)
+			// 以前は View / Projection だけだった。ライティングの情報も足した (シェーダーの cbuffer FrameData と同じ並び)
 			if (_writtenVersion[frameIndex] != _frameConstantsVersion)
 			{
-				// View行列 → Projection行列 の順に詰める (シェーダーの cbuffer GlobalData と同じ並び)
-				if (_commonCB->WriteData(offset, &_viewMatrix, sizeof(_viewMatrix)) &&
-					_commonCB->WriteData(offset + sizeof(_viewMatrix), &_projMatrix, sizeof(_projMatrix)))
+				FrameConstants constants = {};
+				constants.View             = _viewMatrix;
+				constants.Projection       = _projMatrix;
+				constants.InvViewProj      = _invViewProj;
+				for (int i = 0; i < 3; ++i)
+				{
+					constants.CameraPosition[i] = _cameraPosition[i];
+					constants.Ambient[i]        = _lightingSettings.Ambient[i];
+				}
+				constants.LightCount       = static_cast<uint32_t>(_lights.size());
+				constants.LightingModel    = static_cast<uint32_t>(_lightingSettings.Model);
+				constants.ScreenSize[0]    = static_cast<float>(_screenWidth);
+				constants.ScreenSize[1]    = static_cast<float>(_screenHeight);
+				constants.InvScreenSize[0] = 1.0f / static_cast<float>(_screenWidth);
+				constants.InvScreenSize[1] = 1.0f / static_cast<float>(_screenHeight);
+
+				if (_commonCB->WriteData(offset, &constants, sizeof(constants)))
 				{
 					_writtenVersion[frameIndex] = _frameConstantsVersion;
 				}
 				else
 				{
-					Core::Logger::Log("[Buffer] Failed write view / projection matrix.");
+					Core::Logger::Log("[Buffer] Failed write frame constants.");
 				}
 			}
 
@@ -536,6 +624,10 @@ namespace RHI
 			if (_globalCB) _globalCB->Unmap();
 			if (_sceneCB)  _sceneCB->Unmap();
 			_objectGpu.reset();
+			if (_lightUpload) _lightUpload->Unmap();
+			_lightUpload.reset();
+			_lightGpu.reset();
+			_lights.clear();
 			if (_materialUpload) _materialUpload->Unmap();
 			_materialUpload.reset();
 			_materialGpu.reset();

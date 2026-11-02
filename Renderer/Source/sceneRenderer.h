@@ -122,8 +122,20 @@ namespace Renderer
 		// カメラの設定 (View / Projection 行列を作って RHI に渡す)
 		void SetCamera(const CameraDesc& camera);
 
-		// 1 フレーム描画する (描画オブジェクトが増減していたら、描画リストを作り直してから渡す)
-		bool Render();
+		/***********************************************************************************
+		 * @brief 1 フレーム描画する (描画オブジェクトが増減していたら、描画リストを作り直してから渡す)
+		 * @param commands C# の描画パスが組み立てた命令 (描画先 / クリア / シーン / 全画面)
+		 *        以前は引数が無く、シーンをバックバッファに 1 回描くだけだった
+		 ************************************************************************************/
+		bool Render(const RHI::RenderCommand* commands, uint32_t commandCount);
+
+		// 描画パス用 (RHI に渡すだけ)
+		RHI::RenderTargetHandle     CreateRenderTarget(const RHI::RenderTargetDesc& desc);
+		void                        DestroyRenderTarget(RHI::RenderTargetHandle handle);
+		RHI::FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry);
+		void SetLights(const RHI::LightData* lights, uint32_t count);
+		void SetLightingSettings(const RHI::LightingSettings& settings);
+		void SetProfilerInfo(const char* name, const char* text);
 
 		// GPU の処理が全て終わるまで待つ (計測用)
 		void WaitForGpu();

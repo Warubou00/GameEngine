@@ -100,8 +100,27 @@ namespace RHI
 		// 描画
 		// ======================================================================
 
-		// 1 フレーム分の描画 (開始 → 描画 → 表示)。GPU の完了は待たない
-		virtual bool Render(const DrawItem* items, uint32_t count) = 0;
+		// ======================================================================
+		// 描画パス (レンダーターゲット / 全画面のシェーダー / ライト)
+		// ======================================================================
+
+		// レンダーターゲットを作る (画面に合わせる物はリサイズで自動で作り直す)
+		virtual RenderTargetHandle CreateRenderTarget(const RenderTargetDesc& desc) = 0;
+		virtual void               DestroyRenderTarget(RenderTargetHandle handle) = 0;
+
+		// 全画面のシェーダーを読み込む (ファイルの VSFullscreen と entry のピクセルシェーダー)。失敗時は無効なハンドル
+		virtual FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry) = 0;
+
+		// ライト (変わった時だけ呼べばよい) / ライティングの方法と環境光
+		virtual void SetLights(const LightData* lights, uint32_t count) = 0;
+		virtual void SetLightingSettings(const LightingSettings& settings) = 0;
+
+		/***********************************************************************************
+		 * @brief 1 フレーム分の描画 (開始 → 描画パスの命令を順に実行 → UI → 表示)。GPU の完了は待たない
+		 * @details items は描くシーン (DrawScene で使う)。commands は C# が組み立てた描画パス
+		 *          以前は「シーンをバックバッファに 1 回描く」だけだった
+		 ************************************************************************************/
+		virtual bool Render(const DrawItem* items, uint32_t count, const RenderCommand* commands, uint32_t commandCount) = 0;
 
 		// GPU の処理 (描画 + 転送) が全て終わるまで待つ (計測・終了処理用)
 		virtual void WaitForGpu() = 0;
@@ -135,6 +154,9 @@ namespace RHI
 
 		// 任意の値をプロファイラーに表示する (例: "LoadModel (ms)")。同じ名前なら上書き
 		virtual void ReportProfilerValue(const char* name, double value) = 0;
+
+		// 任意の文字列をプロファイラーに表示する (例: "Render pipeline" → "Deferred / PBR")
+		virtual void SetProfilerInfo(const char* name, const char* text) = 0;
 	};
 }
 

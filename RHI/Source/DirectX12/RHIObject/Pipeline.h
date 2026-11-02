@@ -23,6 +23,10 @@
 ******************************************************************/
 #include <vector>
 #include <string>
+#include <memory>
+#include <unordered_map>
+#include <d3d12.h>
+#include <wrl/client.h>
 
 #include "../../RHIObject/IPipeline.h"
 
@@ -99,8 +103,14 @@ namespace RHI
                 ROOT_PARAM_OBJECT_DATA_SRV     = 3,  // t2        : オブジェクトごとのデータ (Root SRV)
                 ROOT_PARAM_TEXTURE_TABLE       = 4,  // t0,space1 : テクスチャ配列 (ディスクリプタテーブル)
                 ROOT_PARAM_MATERIAL_SRV        = 5,  // t3        : マテリアル (Root SRV)
+                ROOT_PARAM_LIGHT_SRV           = 6,  // t4        : ライト (Root SRV)
+                ROOT_PARAM_PASS_CONSTANTS      = 7,  // b1        : パスごとの値 (ルート定数 16 個 : 読むテクスチャの番号 8 + 値 8)
                 ROOT_PARAM_COUNT
             };
+            static constexpr uint32_t PASS_CONSTANT_COUNT = 16;
+
+            // HDR の色 (Forward / ディファードのライティングの描き先)。C# の RenderTextureFormat.RGBA16F と同じ
+            static constexpr DXGI_FORMAT HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
             // ----------------------------------------------------------
             // 描き方のまとまり (PSO)。この順番に描く (不透明 → 半透明)。RHI::BlendMode と同じ番号
@@ -175,8 +185,24 @@ namespace RHI
 
         public:          /*---アクセッサー関数群---*/
 
-            ID3D12PipelineState* GetPipelineState()const;                 // 不透明
-            ID3D12PipelineState* GetPipelineState(uint32_t group)const;   // PipelineGroup ごと
+            ID3D12PipelineState* GetPipelineState()const;   // 既定 (Forward / 不透明 / HDR)。コマンドリストのリセット用
+
+            /***********************************************************************************
+             * @brief シーンを描く PSO (シェーダーの種類 × 描き方 × 描画先の形式 ごとに、初めて使う時に作る)
+             * @param scenePass RHI::ScenePass (Forward / GBuffer)
+             * @param group     PipelineGroup (不透明 / 半透明)
+             * @details 作った PSO は覚えておき、PSO のディスクキャッシュにも入れる (2 回目の起動からは読むだけ)
+             ************************************************************************************/
+            ID3D12PipelineState* GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat);
+
+            // 全画面を描く PSO (blend : 0 なし / 1 加算 / 2 アルファ)。シーンと同じく初めて使う時に作る
+            ID3D12PipelineState* GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount);
+
+            /***********************************************************************************
+             * @brief 全画面のシェーダーを読み込む (ファイルの VSFullscreen と、entry のピクセルシェーダー)
+             * @return uint32_t 番号 (失敗時 0xFFFFFFFF)。同じファイル・同じ entry は同じ番号を返す
+             ************************************************************************************/
+            uint32_t LoadFullscreenShader(const std::wstring& filePath, const std::string& entry);
             ID3D12RootSignature* GetRootSignature()const;
 
             // ExecuteIndirect 用のコマンドシグネチャ (作れなかった環境では nullptr = 通常の描画だけ)
@@ -198,8 +224,16 @@ namespace RHI
             const std::string& GetDescription()const { return _description; }
 
         private:         /*---メンバ変数---*/
-            std::unique_ptr<DirectX12::PipelineState>    _pipelineState;           // 不透明
-            std::unique_ptr<DirectX12::PipelineState>    _blendPipelineState;      // 半透明 (アルファブレンド)
+            std::unique_ptr<DirectX12::PipelineState>    _pipelineState;           // 既定 (Forward / 不透明 / HDR)
+
+            // シーンのシェーダー (起動時に 1 回コンパイル) / 全画面のシェーダー (C# から読み込む)
+            struct SceneShaders;
+            struct FullscreenShader;
+            std::unique_ptr<SceneShaders>                  _sceneShaders;
+            std::vector<std::unique_ptr<FullscreenShader>> _fullscreenShaders;
+            // 作った PSO (鍵 = シェーダー / 描き方 / 描画先の形式 のハッシュ)
+            std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D12PipelineState>> _psoMap;
+            Device*                                        _device = nullptr;   // PSO を後から作るのに使う (所有しない)
             std::unique_ptr<DirectX12::RootSignature>    _rootSignature;
             std::unique_ptr<DirectX12::CommandSignature> _indirectDrawSignature;   // ExecuteIndirect 用
             std::unique_ptr<DirectX12::RootSignature>    _cullRootSignature;       // GPU カリング用
@@ -215,6 +249,7 @@ namespace RHI
 
             RHI_RESULT makeRootSignature(Device* device);
             RHI_RESULT makePipeline(Device* device);
+            ID3D12PipelineState* createPso(uint64_t key, const wchar_t* prefix, D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc);
             void       makeIndirectDrawSignature(Device* device);
             void       makeCullingPipeline(Device* device);
             void       makeHiZPipeline(Device* device);
