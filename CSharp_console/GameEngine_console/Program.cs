@@ -22,9 +22,11 @@ namespace GameEngine_console;
 //   --lighting unlit|lambert|pbr: ライティング (既定は pbr)
 //   --ssao on|off|show          : SSAO (既定は on。show は遮蔽だけを白黒で出す)
 //   --ssao-scale S / --ssao-samples N : SSAO の解像度の倍率 (既定 0.5) / 点の数 (既定 12)
+//   --aa none|fxaa|msaa2|msaa4|msaa8 : アンチエイリアス (既定は fxaa。Deferred の MSAA は FXAA になる)
 //
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
+//                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)
 // ==========================================================================
 internal static class Program
 {
@@ -115,6 +117,10 @@ internal static class Program
         }
         if (options.TryGetValue("--ssao-scale", out var ssaoScale) && float.TryParse(ssaoScale, out var scale))       engine.Graphics.Ssao.ResolutionScale = scale;
         if (options.TryGetValue("--ssao-samples", out var ssaoSamples) && int.TryParse(ssaoSamples, out var samples)) engine.Graphics.Ssao.SampleCount     = samples;
+        if (options.TryGetValue("--aa", out var aaName) && GraphicsHotkeySystem.ParseAntiAliasing(aaName) is { } antiAliasing)
+        {
+            engine.Graphics.AntiAliasing = antiAliasing;
+        }
         engine.AddSystem(new GraphicsHotkeySystem(engine.Graphics));
 
         engine.Run();

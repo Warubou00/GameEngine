@@ -76,6 +76,7 @@ namespace RHI
 
         RenderTargetHandle     CreateRenderTarget(const RenderTargetDesc& desc)override;
         void                   DestroyRenderTarget(RenderTargetHandle handle)override;
+        uint32_t               GetMaxSampleCount() const override;
         FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry)override;
         void                   SetLights(const LightData* lights, uint32_t count)override;
         void                   SetLightingSettings(const LightingSettings& settings)override;

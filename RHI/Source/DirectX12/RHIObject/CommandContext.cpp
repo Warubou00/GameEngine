@@ -208,11 +208,24 @@ namespace RHI
 			if (FAILED(hr)) { logFailed("CreateDescriptorHeap(RTV)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
 			_dsvHeap = std::make_unique<DirectX12::DescriptorHeap>();
-			hr = _dsvHeap->Create(dx12Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1);
+			hr = _dsvHeap->Create(dx12Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 2);   // 0 = シーンの深度 / 1 = MSAA の深度 (以前は 1 個)
 			if (FAILED(hr)) { logFailed("CreateDescriptorHeap(DSV)", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 
 			if (!createRenderTargetViews())     return RHI_FAILED_CREATE_ANY_OBJECT;
 			if (!createDepthBuffer(width, height)) return RHI_FAILED_CREATE_ANY_OBJECT;
+
+			// MSAA で使えるサンプル数 (Forward が使う HDR / 環境光 / 深度 がどれも対応している数)
+			_maxSampleCount = 1;
+			for (uint32_t samples = 8; samples >= 2; samples /= 2)
+			{
+				if (supportedSampleCount(Pipeline::HDR_FORMAT, samples) == samples &&
+					supportedSampleCount(DXGI_FORMAT_R11G11B10_FLOAT, samples) == samples &&
+					supportedSampleCount(DEPTH_FORMAT, samples) == samples)
+				{
+					_maxSampleCount = samples;
+					break;
+				}
+			}
 
 			// ---------- 描画ごとのデータと ExecuteIndirect の引数 (フレームごと) ----------
 			// シェーダーが描画番号で DrawData を読むので、通常の描画でも必須
@@ -548,6 +561,7 @@ namespace RHI
 				return;
 			}
 			auto cmdList = _frameCommandList->GetCmdList();
+			_msaaDepthDirty = false;   // MSAA の深度は、このフレームで描いた時だけ解決する
 
 			for (uint32_t i = 0; i < count; ++i)
 			{
@@ -569,7 +583,7 @@ namespace RHI
 				case RHI::RenderCommandType::ClearDepth:
 					if (_boundDepth == RHI::RenderTargetHandle::SCENE_DEPTH)
 					{
-						cmdList->ClearDepthStencilView(_dsvHeap->GetCpuHandle(0), D3D12_CLEAR_FLAG_DEPTH, command.ClearDepth, 0, 0, nullptr);
+						cmdList->ClearDepthStencilView(boundDsv(), D3D12_CLEAR_FLAG_DEPTH, command.ClearDepth, 0, 0, nullptr);
 					}
 					break;
 
@@ -589,6 +603,9 @@ namespace RHI
 
 			// 後片付け : 深度は DEPTH_WRITE に (次のフレームの前提)、描画先はバックバッファに (この後 ImGui を描く)
 			transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			transitionMsaaDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			_boundSamples   = 1;
+			_boundDepthMsaa = false;
 			const UINT width  = _swapChain->GetWidth();
 			const UINT height = _swapChain->GetHeight();
 			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
@@ -610,12 +627,13 @@ namespace RHI
 			D3D12_RESOURCE_BARRIER barriers[RHI::MAX_PASS_COLOR_TARGETS] = {};
 			UINT barrierCount = 0;
 			uint32_t width = 0, height = 0;
+			uint32_t samples = 0;   // 0 = まだ決まっていない (最初の色の描画先で決まる)
 			_boundColorCount = 0;
 			const uint32_t colorCount = (std::min)(command.ColorCount, RHI::MAX_PASS_COLOR_TARGETS);
 			for (uint32_t c = 0; c < colorCount; ++c)
 			{
 				const uint32_t index = command.Colors[c];
-				uint32_t w = 0, h = 0;
+				uint32_t w = 0, h = 0, s = 1;
 				if (index == RHI::RenderTargetHandle::BACK_BUFFER)
 				{
 					_boundRtvs[_boundColorCount]    = _rtvHeap->GetCpuHandle(_swapChain->GetCurrentBackBufferIndex());
@@ -626,6 +644,14 @@ namespace RHI
 				else if (index < _renderTargets.size() && _renderTargets[index].Alive)
 				{
 					RenderTarget& target = _renderTargets[index];
+					s = target.SampleCount;
+					if (samples != 0 && s != samples)
+					{
+						// 同時に描く描画先はサンプル数が揃っていないといけない (D3D12 の決まり)。揃わない物は付けない
+						Core::Logger::Log("[CommandContext] Render targets with different sample counts are bound together. Skipped.");
+						continue;
+					}
+					target.ResolveDirty = s > 1;   // 描いたかもしれないので、次に読む時に解決し直す
 					if (target.State != D3D12_RESOURCE_STATE_RENDER_TARGET)
 					{
 						barriers[barrierCount++] = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -641,23 +667,42 @@ namespace RHI
 					continue;   // 消されたレンダーターゲット (描かない)
 				}
 				_boundColors[_boundColorCount++] = index;
+				if (samples == 0) samples = s;
 				if (width == 0) { width = w; height = h; }
 			}
 			if (barrierCount > 0) cmdList->ResourceBarrier(barrierCount, barriers);
+			_boundSamples = (std::max)(1u, samples);
 
-			_boundDepth = RHI::RenderTargetHandle::INVALID;
-			D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
+			// シーンの深度 : 描画先が MSAA なら、同じサンプル数の MSAA の深度を付ける (C# からは同じ SCENE_DEPTH に見える)
+			_boundDepth     = RHI::RenderTargetHandle::INVALID;
+			_boundDepthMsaa = false;
 			if (command.Depth == RHI::RenderTargetHandle::SCENE_DEPTH && _depthBuffer)
 			{
-				transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
-				_boundDepth = RHI::RenderTargetHandle::SCENE_DEPTH;
-				dsvHandle   = _dsvHeap->GetCpuHandle(0);
+				if (_boundSamples > 1)
+				{
+					if (ensureMsaaDepth(_boundSamples))
+					{
+						transitionMsaaDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+						_boundDepth     = RHI::RenderTargetHandle::SCENE_DEPTH;
+						_boundDepthMsaa = true;
+						_msaaDepthDirty = true;   // 描くかもしれないので、次に読む時に解決し直す
+					}
+				}
+				else
+				{
+					transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+					_boundDepth     = RHI::RenderTargetHandle::SCENE_DEPTH;
+					_msaaDepthDirty = false;  // 1 サンプルの深度に直接描く (MSAA の深度は古くなる)
+				}
 				if (width == 0) { width = _depthWidth; height = _depthHeight; }
 			}
+			const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = boundDsv();
 			cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE,
 				_boundDepth != RHI::RenderTargetHandle::INVALID ? &dsvHandle : nullptr);
 
 			// ビューポートは描画先の大きさ (縮小バッファに描くパスもあるため)
+			_boundWidth  = width;
+			_boundHeight = height;
 			if (width > 0 && height > 0)
 			{
 				const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
@@ -692,7 +737,7 @@ namespace RHI
 
 			auto setPso = [&](uint32_t group) -> bool
 			{
-				ID3D12PipelineState* pso = _currentPipeline->GetScenePso(scenePass, group, _boundFormats, _boundColorCount, dsvFormat);
+				ID3D12PipelineState* pso = _currentPipeline->GetScenePso(scenePass, group, _boundFormats, _boundColorCount, dsvFormat, _boundSamples);
 				if (pso) cmdList->SetPipelineState(pso);
 				return pso != nullptr;
 			};
@@ -757,6 +802,8 @@ namespace RHI
 					const bool resetVisibility = !_scene.Reused || !_visibilityValid;
 					recordCulling(frame, buffer, _scene.ObjectData, 1, resetVisibility);
 					drawCulled(GROUP_OPAQUE);
+					// MSAA : Hi-Z は 1 サンプルの深度から作るので、前段の深度を先に解決する
+					if (_boundDepthMsaa) resolveSceneDepth(buffer);
 					buildHiZ(buffer);
 					recordCulling(frame, buffer, _scene.ObjectData, 2, resetVisibility);
 					_scene.OcclusionDone = true;
@@ -779,7 +826,7 @@ namespace RHI
 			//   読むテクスチャはテクスチャの配列 (バインドレス) の番号でルート定数に渡す。
 			//   レンダーターゲットの SRV もテクスチャと同じヒープに置いてあるので、ディスクリプタを並べ直さなくてよい
 			// ==============================================================
-			ID3D12PipelineState* pso = _currentPipeline->GetFullscreenPso(command.Arg0, command.Arg1, _boundFormats, _boundColorCount);
+			ID3D12PipelineState* pso = _currentPipeline->GetFullscreenPso(command.Arg0, command.Arg1, _boundFormats, _boundColorCount, _boundSamples);
 			if (!pso) return;
 			auto cmdList = _frameCommandList->GetCmdList();
 
@@ -798,15 +845,28 @@ namespace RHI
 					{
 						// 深度を描画先にしたまま読むことはできないので、色だけの描画先にする
 						cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE, nullptr);
-						_boundDepth = RHI::RenderTargetHandle::INVALID;
+						_boundDepth     = RHI::RenderTargetHandle::INVALID;
+						_boundDepthMsaa = false;
 					}
+					// MSAA の深度に描いていたら、1 サンプルの深度へ解決してから読む (このフレームで 1 回だけ)
+					if (_msaaDepthDirty) resolveSceneDepth(buffer);
 					transitionDepth(readState);
 					constants[i] = _depthSrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
 				}
 				else if (index < _renderTargets.size() && _renderTargets[index].Alive)
 				{
 					RenderTarget& target = _renderTargets[index];
-					if (target.State != readState)
+					if (target.SampleCount > 1)
+					{
+						// MSAA : 1 サンプルの写し (Resolved) を読む。描いた後なら先に解決する
+						if (target.ResolveDirty) resolveTarget(target);
+						if (target.ResolvedState != readState)
+						{
+							barriers[barrierCount++] = makeTransitionBarrier(target.Resolved.Get(), target.ResolvedState, readState);
+							target.ResolvedState = readState;
+						}
+					}
+					else if (target.State != readState)
 					{
 						barriers[barrierCount++] = makeTransitionBarrier(target.Resource.Get(), target.State, readState);
 						target.State = readState;
@@ -829,6 +889,179 @@ namespace RHI
 			const auto barrier = makeTransitionBarrier(_depthBuffer->Get(), _depthState, after);
 			_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
 			_depthState = after;
+		}
+
+		// ==============================================================
+		// MSAA (マルチサンプル アンチエイリアス。ハードウェアの固定機能)
+		//   描画先 (色・深度) を 1 ピクセル N サンプルにして、物の縁だけ N 回分の塗り分けを持つ。
+		//   ピクセルシェーダーは 1 ピクセル 1 回のまま (縁のサンプルに同じ色が書かれる) なので、
+		//   SSAA (N 倍の解像度で描く) より軽い。読む時に 1 サンプルへ解決 (平均) する
+		//   C# からは「サンプル数を指定した RenderTexture」に見え、解決は RHI が自動で行う
+		// ==============================================================
+
+		uint32_t CommandContext::supportedSampleCount(DXGI_FORMAT format, uint32_t requested) const
+		{
+			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
+			// 色は解決 (ResolveSubresource) もできる形式に限る (深度はシェーダーで解決するので要らない)
+			const bool depth = format == DEPTH_FORMAT;
+			if (!depth)
+			{
+				D3D12_FEATURE_DATA_FORMAT_SUPPORT support = { format };
+				if (FAILED(dx12Device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support))) ||
+					!(support.Support1 & D3D12_FORMAT_SUPPORT1_MULTISAMPLE_RESOLVE))
+				{
+					return 1;
+				}
+			}
+			for (uint32_t samples = (std::min)(requested, 8u); samples >= 2; samples /= 2)
+			{
+				D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS levels = {};
+				levels.Format      = format;
+				levels.SampleCount = samples;
+				if (SUCCEEDED(dx12Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &levels, sizeof(levels))) &&
+					levels.NumQualityLevels > 0)
+				{
+					return samples;
+				}
+			}
+			return 1;
+		}
+
+		bool CommandContext::ensureMsaaDepth(uint32_t samples)
+		{
+			// MSAA の深度 (シーンの深度と同じ大きさ)。サンプル数が変わった時 / リサイズの後に作り直す
+			if (_msaaDepth && _msaaDepthSamples == samples) return true;
+			if (_msaaDepth)
+			{
+				WaitForGpu();   // 前のサンプル数の深度を GPU が使い終わってから (AA の切り替えの時だけ)
+				_msaaDepth.Reset();
+			}
+			_msaaDepthSamples = 0;
+			if (_depthWidth == 0 || _depthHeight == 0) return false;
+
+			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
+			D3D12_HEAP_PROPERTIES heapProps = {};
+			heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+			D3D12_RESOURCE_DESC desc = {};
+			desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+			desc.Width            = _depthWidth;
+			desc.Height           = _depthHeight;
+			desc.DepthOrArraySize = 1;
+			desc.MipLevels        = 1;
+			desc.Format           = DXGI_FORMAT_R32_TYPELESS;   // DSV (D32_FLOAT) と SRV (R32_FLOAT) の両方で使う
+			desc.SampleDesc.Count = samples;
+			desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+			D3D12_CLEAR_VALUE clearValue = {};
+			clearValue.Format             = DEPTH_FORMAT;
+			clearValue.DepthStencil.Depth = DEPTH_CLEAR_VALUE;
+			const HRESULT hr = dx12Device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+				D3D12_RESOURCE_STATE_DEPTH_WRITE, &clearValue, IID_PPV_ARGS(&_msaaDepth));
+			if (FAILED(hr)) { logFailed("Create MSAA depth", hr); _msaaDepth.Reset(); return false; }
+			_msaaDepth->SetName(L"MsaaDepth");
+			_msaaDepthState    = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+			_msaaDepthSamples  = samples;
+			_msaaDepthSrvDirty = true;
+
+			D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
+			dsvDesc.Format        = DEPTH_FORMAT;
+			dsvDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+			dx12Device->CreateDepthStencilView(_msaaDepth.Get(), &dsvDesc, _dsvHeap->GetCpuHandle(1));
+			return true;
+		}
+
+		void CommandContext::transitionMsaaDepth(D3D12_RESOURCE_STATES after)
+		{
+			if (!_msaaDepth || _msaaDepthState == after) return;
+			const auto barrier = makeTransitionBarrier(_msaaDepth.Get(), _msaaDepthState, after);
+			_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
+			_msaaDepthState = after;
+		}
+
+		D3D12_CPU_DESCRIPTOR_HANDLE CommandContext::boundDsv() const
+		{
+			return _dsvHeap->GetCpuHandle(_boundDepthMsaa ? 1 : 0);
+		}
+
+		void CommandContext::resolveSceneDepth(Buffer* buffer)
+		{
+			// ==============================================================
+			// MSAA の深度 → 1 サンプルの深度 (_depthBuffer)
+			//   全画面の三角形で、ピクセルごとにサンプルの一番奥を SV_Depth に書く (PSResolveDepth)
+			//   Hi-Z の前 (オクルージョンの前段の後) と、全画面のシェーダーが SCENE_DEPTH を読む前に呼ばれる
+			//   終わったら描画先とビューポートを元に戻す (この後もシーンの描画が続くことがある)
+			// ==============================================================
+			if (!_msaaDepth || !_msaaDepthDirty) return;
+			ID3D12PipelineState* pso = _currentPipeline->GetDepthResolvePso();
+			if (!pso) return;
+			auto heapManager = buffer->GetDescHeapManager();
+			if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX)
+			{
+				_msaaDepthSrvIndex = heapManager->AllocateSrv();
+				if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX) return;   // 満杯
+				_msaaDepthSrvDirty = true;
+			}
+			if (_msaaDepthSrvDirty)
+			{
+				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+				srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;
+				srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				_device->GetDevice()->GetDevice()->CreateShaderResourceView(_msaaDepth.Get(), &srvDesc, heapManager->GetSrvCpuHandle(_msaaDepthSrvIndex));
+				_msaaDepthSrvDirty = false;
+			}
+
+			auto cmdList = _frameCommandList->GetCmdList();
+			transitionMsaaDepth(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+			transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			const D3D12_CPU_DESCRIPTOR_HANDLE dsv = _dsvHeap->GetCpuHandle(0);
+			cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(_depthWidth), static_cast<float>(_depthHeight), 0.0f, 1.0f };
+			const D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(_depthWidth), static_cast<LONG>(_depthHeight) };
+			cmdList->RSSetViewports(1, &viewport);
+			cmdList->RSSetScissorRects(1, &scissorRect);
+
+			uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
+			constants[0] = _msaaDepthSrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;   // g_Inputs[0].x : MSAA の深度
+			constants[1] = _msaaDepthSamples;                                       // g_Inputs[0].y : サンプル数
+			cmdList->SetPipelineState(pso);
+			cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
+			cmdList->DrawInstanced(3, 1, 0, 0);
+			_msaaDepthDirty = false;
+
+			// 元の描画先に戻す (MSAA の深度を付けていたなら、描ける状態に戻して付け直す)
+			if (_boundDepthMsaa) transitionMsaaDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			const D3D12_CPU_DESCRIPTOR_HANDLE bound = boundDsv();
+			cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE,
+				_boundDepth != RHI::RenderTargetHandle::INVALID ? &bound : nullptr);
+			if (_boundWidth > 0 && _boundHeight > 0)
+			{
+				const D3D12_VIEWPORT boundViewport = { 0.0f, 0.0f, static_cast<float>(_boundWidth), static_cast<float>(_boundHeight), 0.0f, 1.0f };
+				const D3D12_RECT boundRect         = { 0, 0, static_cast<LONG>(_boundWidth), static_cast<LONG>(_boundHeight) };
+				cmdList->RSSetViewports(1, &boundViewport);
+				cmdList->RSSetScissorRects(1, &boundRect);
+			}
+		}
+
+		void CommandContext::resolveTarget(RenderTarget& target)
+		{
+			// MSAA の色 → 1 サンプルの写し (ハードウェアの解決 = サンプルの平均)
+			auto cmdList = _frameCommandList->GetCmdList();
+			D3D12_RESOURCE_BARRIER barriers[2] = {};
+			UINT count = 0;
+			if (target.State != D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
+			{
+				barriers[count++] = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+				target.State = D3D12_RESOURCE_STATE_RESOLVE_SOURCE;
+			}
+			if (target.ResolvedState != D3D12_RESOURCE_STATE_RESOLVE_DEST)
+			{
+				barriers[count++] = makeTransitionBarrier(target.Resolved.Get(), target.ResolvedState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+				target.ResolvedState = D3D12_RESOURCE_STATE_RESOLVE_DEST;
+			}
+			if (count > 0) cmdList->ResourceBarrier(count, barriers);
+			cmdList->ResolveSubresource(target.Resolved.Get(), 0, target.Resource.Get(), 0, target.Format);
+			target.ResolveDirty = false;
 		}
 
 		// ==============================================================
@@ -879,6 +1112,7 @@ namespace RHI
 			target.FixedWidth  = desc.Width;
 			target.FixedHeight = desc.Height;
 			std::memcpy(target.Clear, desc.ClearColor, sizeof(target.Clear));
+			target.SampleCount = desc.SampleCount > 1 ? supportedSampleCount(format, desc.SampleCount) : 1;
 			target.SrvIndex = _heapManager->AllocateSrv();
 			if (target.SrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX || !createRenderTargetResource(target, index))
 			{
@@ -913,7 +1147,7 @@ namespace RHI
 			desc.DepthOrArraySize = 1;
 			desc.MipLevels        = 1;
 			desc.Format           = target.Format;
-			desc.SampleDesc.Count = 1;
+			desc.SampleDesc.Count = target.SampleCount;
 			desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 			desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
@@ -926,19 +1160,35 @@ namespace RHI
 			const HRESULT hr = dx12Device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
 				D3D12_RESOURCE_STATE_RENDER_TARGET, &clearValue, IID_PPV_ARGS(&target.Resource));
 			if (FAILED(hr)) { logFailed("CreateRenderTarget", hr); return false; }
-			target.Resource->SetName(L"RenderTarget");
+			target.Resource->SetName(target.SampleCount > 1 ? L"RenderTargetMsaa" : L"RenderTarget");
 			target.State  = D3D12_RESOURCE_STATE_RENDER_TARGET;
 			target.Width  = width;
 			target.Height = height;
 
+			// MSAA : 読む時の 1 サンプルの写し (解決の書き先。描画先にはしない)
+			target.Resolved.Reset();
+			target.ResolveDirty = false;
+			if (target.SampleCount > 1)
+			{
+				desc.SampleDesc.Count = 1;
+				desc.Flags            = D3D12_RESOURCE_FLAG_NONE;
+				const HRESULT resolvedHr = dx12Device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+					D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, IID_PPV_ARGS(&target.Resolved));
+				if (FAILED(resolvedHr)) { logFailed("CreateRenderTarget (resolve)", resolvedHr); return false; }
+				target.Resolved->SetName(L"RenderTargetResolved");
+				target.ResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			}
+
 			// RTV (描画先) と SRV (後のパスで読む)。番号はリサイズで作り直しても変わらない
+			// (MSAA の RTV は nullptr の既定で TEXTURE2DMS になる。SRV は 1 サンプルの写しを指す)
 			dx12Device->CreateRenderTargetView(target.Resource.Get(), nullptr, _targetRtvHeap->GetCpuHandle(index));
 			D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 			srvDesc.Format                  = target.Format;
 			srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
 			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			srvDesc.Texture2D.MipLevels     = 1;
-			dx12Device->CreateShaderResourceView(target.Resource.Get(), &srvDesc, _heapManager->GetSrvCpuHandle(target.SrvIndex));
+			ID3D12Resource* readable = target.SampleCount > 1 ? target.Resolved.Get() : target.Resource.Get();
+			dx12Device->CreateShaderResourceView(readable, &srvDesc, _heapManager->GetSrvCpuHandle(target.SrvIndex));
 			return true;
 		}
 
@@ -1444,6 +1694,8 @@ namespace RHI
 			// 2. バックバッファへの参照を手放す (残っていると ResizeBuffers が失敗する)
 			_currentBackBuffer = nullptr;
 			_depthBuffer.reset();
+			_msaaDepth.Reset();        // MSAA の深度は次に使う時に新しい大きさで作る
+			_msaaDepthSamples = 0;
 
 			// 3. スワップチェーンを作り直して、RTV と深度バッファも作り直す
 			HRESULT hr = _swapChain->Resize(width, height);
@@ -1501,6 +1753,8 @@ namespace RHI
 			_heapManager = nullptr;
 			_currentPipeline = nullptr;
 			_depthBuffer.reset();
+			_msaaDepth.Reset();
+			_msaaDepthSamples = 0;
 			_dsvHeap.reset();
 			_rtvHeap.reset();
 			_swapChain.reset();

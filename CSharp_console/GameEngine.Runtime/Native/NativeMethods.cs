@@ -74,6 +74,7 @@ internal static unsafe class NativeMethods
         public uint    Width;
         public uint    Height;
         public Vector4 ClearColor;
+        public uint    SampleCount;  // MSAA のサンプル数 (1 / 2 / 4 / 8)
     }
 
     // 120byte (C++ 側は static_assert で確かめている)
@@ -187,6 +188,9 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_DestroyRenderTarget(uint handle);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetMaxSampleCount();
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_LoadFullscreenShader([MarshalAs(UnmanagedType.LPWStr)] string filePath, [MarshalAs(UnmanagedType.LPStr)] string entry);

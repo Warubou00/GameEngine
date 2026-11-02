@@ -164,6 +164,8 @@ namespace RHI
             // レンダーターゲット (画面に合わせる物は Resize で作り直す)。SRV はテクスチャと同じ配列に入る
             RHI::RenderTargetHandle CreateRenderTarget(Buffer* buffer, const RHI::RenderTargetDesc& desc);
             void                    DestroyRenderTarget(RHI::RenderTargetHandle handle);
+            // MSAA で使えるサンプル数の上限 (HDR / R11G11B10F / 深度 がどれも対応している数。Initialize で調べる)
+            uint32_t                GetMaxSampleCount() const { return _maxSampleCount; }
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             /***********************************************************************************
@@ -460,6 +462,13 @@ namespace RHI
                 uint32_t              SrvIndex    = 0xFFFFFFFFu;   // ヒープの番号 (テクスチャの番号 = SrvIndex - SRV_INDEX_TEXTURE_BEGIN)
                 D3D12_RESOURCE_STATES State       = D3D12_RESOURCE_STATE_RENDER_TARGET;   // フレームをまたいで持ち越す
                 bool                  Alive       = false;
+
+                // MSAA (SampleCount > 1) : Resource は MSAA (描画先)、Resolved は 1 サンプルの写し (SRV はこちらを指す)
+                //   描画先にした後で全画面のシェーダーが読む時に、ResolveSubresource で写す (ResolveDirty)
+                uint32_t              SampleCount = 1;
+                Microsoft::WRL::ComPtr<ID3D12Resource> Resolved;
+                D3D12_RESOURCE_STATES ResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+                bool                  ResolveDirty  = false;
             };
             std::vector<RenderTarget>                            _renderTargets;
             std::vector<uint32_t>                                _freeRenderTargets;
@@ -473,6 +482,21 @@ namespace RHI
             uint32_t                                             _boundColorCount = 0;
             uint32_t                                             _boundDepth      = RHI::RenderTargetHandle::INVALID;
             D3D12_RESOURCE_STATES                                _depthState      = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            uint32_t                                             _boundSamples    = 1;       // 描画先の MSAA のサンプル数 (PSO の選択に使う)
+            uint32_t                                             _boundWidth      = 0;       // 描画先の大きさ (ビューポートを戻す時に使う)
+            uint32_t                                             _boundHeight     = 0;
+            bool                                                 _boundDepthMsaa  = false;   // SCENE_DEPTH として MSAA の深度を付けている
+
+            // ---------- MSAA の深度 (シーンの深度と同じ大きさ。MSAA の描画先に SCENE_DEPTH を付けた時に使う) ----------
+            //   Hi-Z / SSAO / ディファードは 1 サンプルの深度 (_depthBuffer) を読むので、読む前に解決する
+            //   (PSResolveDepth。サンプルの一番奥を _depthBuffer へ書く)
+            Microsoft::WRL::ComPtr<ID3D12Resource>               _msaaDepth;
+            uint32_t                                             _msaaDepthSamples  = 0;     // 0 = 未作成 (リサイズで作り直す)
+            D3D12_RESOURCE_STATES                                _msaaDepthState    = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            uint32_t                                             _msaaDepthSrvIndex = 0xFFFFFFFFu;
+            bool                                                 _msaaDepthSrvDirty = true;
+            bool                                                 _msaaDepthDirty    = false; // _depthBuffer より新しい (解決が要る)
+            uint32_t                                             _maxSampleCount    = 1;
 
             // このフレームのシーン (PrepareScene で決まり、DrawScene が使う)
             struct SceneState
@@ -494,6 +518,14 @@ namespace RHI
             bool createRenderTargetResource(RenderTarget& target, uint32_t index);
             bool ensureDepthSrv(Buffer* buffer);
             void transitionDepth(D3D12_RESOURCE_STATES after);
+
+            // MSAA
+            uint32_t supportedSampleCount(DXGI_FORMAT format, uint32_t requested) const;   // requested 以下で使える一番大きい数
+            bool ensureMsaaDepth(uint32_t samples);
+            void transitionMsaaDepth(D3D12_RESOURCE_STATES after);
+            void resolveSceneDepth(Buffer* buffer);    // MSAA の深度 → _depthBuffer (描画先とビューポートは元に戻す)
+            void resolveTarget(RenderTarget& target);  // MSAA の色 → Resolved
+            D3D12_CPU_DESCRIPTOR_HANDLE boundDsv() const;
 
             // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
             bool updateDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);

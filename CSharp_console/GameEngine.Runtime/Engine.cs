@@ -83,9 +83,22 @@ public sealed class GraphicsSettings
     public SsaoSettings Ssao { get; } = new();
     private int _shownSsaoState = -1;
 
+    // アンチエイリアス (FXAA = ポストエフェクト / MSAA = 固定機能。Deferred では MSAA の代わりに FXAA)
+    public AntiAliasing AntiAliasing { get; set; } = AntiAliasing.Fxaa;
+    public FxaaSettings Fxaa { get; } = new();
+    // GPU が MSAA で使えるサンプル数の上限 (1 なら MSAA は使えない。C++ の準備ができた後に分かる)
+    public int MaxMsaaSamples { get; private set; } = 1;
+    private bool _maxSamplesQueried;
+    private string _shownAntiAliasing = "";
+
     // フレームの始め : パイプラインの切り替えとライティングの設定を C++ へ (変わった時だけ)
     internal void BeginFrame()
     {
+        if (!_maxSamplesQueried)
+        {
+            MaxMsaaSamples     = (int)Math.Max(1u, NativeMethods.Renderer_GetMaxSampleCount());
+            _maxSamplesQueried = true;
+        }
         if (_pendingPipeline != null)
         {
             _pipeline?.Dispose();
@@ -103,12 +116,14 @@ public sealed class GraphicsSettings
         }
         // SSAO の ON / OFF も表示する (変わった時だけ文字列を作る)
         var ssaoState = !Ssao.Enabled ? 0 : Ssao.ShowOnly ? 2 : 1;
-        if (_infoDirty || ssaoState != _shownSsaoState)
+        var antiAliasing = _pipeline!.AntiAliasingName(this);   // 定数の文字列 (毎フレーム作らない)
+        if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing)
         {
             var ssao = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
-            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}");
-            _infoDirty      = false;
-            _shownSsaoState = ssaoState;
+            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao} / {antiAliasing}");
+            _infoDirty         = false;
+            _shownSsaoState    = ssaoState;
+            _shownAntiAliasing = antiAliasing;
         }
     }
 

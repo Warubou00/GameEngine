@@ -132,6 +132,7 @@ namespace Renderer
 		// 描画パス用 (RHI に渡すだけ)
 		RHI::RenderTargetHandle     CreateRenderTarget(const RHI::RenderTargetDesc& desc);
 		void                        DestroyRenderTarget(RHI::RenderTargetHandle handle);
+		uint32_t                    GetMaxSampleCount() const;
 		RHI::FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry);
 		void SetLights(const RHI::LightData* lights, uint32_t count);
 		void SetLightingSettings(const RHI::LightingSettings& settings);

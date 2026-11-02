@@ -108,6 +108,8 @@ namespace RHI
                 ROOT_PARAM_COUNT
             };
             static constexpr uint32_t PASS_CONSTANT_COUNT = 16;
+            // テクスチャ配列を MSAA のテクスチャとして読む範囲 (t0, space2)。シェーダーの g_TexturesMS[] と同じ数
+            static constexpr uint32_t MSAA_TEXTURE_COUNT  = 4096;
 
             // HDR の色 (Forward / ディファードのライティングの描き先)。C# の RenderTextureFormat.RGBA16F と同じ
             static constexpr DXGI_FORMAT HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -193,10 +195,14 @@ namespace RHI
              * @param group     PipelineGroup (不透明 / 半透明)
              * @details 作った PSO は覚えておき、PSO のディスクキャッシュにも入れる (2 回目の起動からは読むだけ)
              ************************************************************************************/
-            ID3D12PipelineState* GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat);
+            //   sampleCount : MSAA のサンプル数 (描画先と同じ。1 なら MSAA なし)
+            ID3D12PipelineState* GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount);
 
             // 全画面を描く PSO (blend : 0 なし / 1 加算 / 2 アルファ)。シーンと同じく初めて使う時に作る
-            ID3D12PipelineState* GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount);
+            ID3D12PipelineState* GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount);
+
+            // MSAA の深度を 1 サンプルの深度に解決する PSO (antiAliasing.shader の PSResolveDepth。初めて使う時に作る)
+            ID3D12PipelineState* GetDepthResolvePso();
 
             /***********************************************************************************
              * @brief 全画面のシェーダーを読み込む (ファイルの VSFullscreen と、entry のピクセルシェーダー)
@@ -231,6 +237,7 @@ namespace RHI
             struct FullscreenShader;
             std::unique_ptr<SceneShaders>                  _sceneShaders;
             std::vector<std::unique_ptr<FullscreenShader>> _fullscreenShaders;
+            uint32_t                                       _depthResolveShader = 0xFFFFFFFFu;   // _fullscreenShaders の番号
             // 作った PSO (鍵 = シェーダー / 描き方 / 描画先の形式 のハッシュ)
             std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D12PipelineState>> _psoMap;
             Device*                                        _device = nullptr;   // PSO を後から作るのに使う (所有しない)
