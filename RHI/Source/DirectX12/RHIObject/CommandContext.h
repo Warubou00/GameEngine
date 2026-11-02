@@ -168,6 +168,8 @@ namespace RHI
             uint32_t                GetMaxSampleCount() const { return _maxSampleCount; }
             // 影 : シャドーマップのレンダーターゲットを番号に直して Buffer に渡す (シャドーマップが消されたら影を止める)
             void                    SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings);
+            // 確認用の線 (このフレームの描画の最後に、バックバッファへ描く)
+            void                    SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             /***********************************************************************************
@@ -481,6 +483,9 @@ namespace RHI
             std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetDsvHeap;   // 深度のレンダーターゲットの DSV (MAX_RENDER_TARGETS × MAX_DEPTH_SLICES 個。初めて作る時に用意)
             uint32_t                                             _boundDepthSlice = 0;   // 深度のレンダーターゲットの何枚目に描いているか
             static constexpr uint32_t                            SHADOW_UNION_VIEW = 0xFFFFFFF0u;   // _culledView : 全カスケードを囲む箱で数えた
+            std::vector<RHI::DebugLineVertex>                    _debugLines;      // 確認用の線 (CPU 側の写し)
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _debugLineBuffer[FRAME_COUNT];   // UPLOAD (フレームごと。初めて使う時に作る)
+            void drawDebugLines();
             uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ
             Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
             // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)

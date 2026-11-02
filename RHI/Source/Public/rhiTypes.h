@@ -288,6 +288,17 @@ namespace RHI
 	// ==========================================================================
 	static constexpr uint32_t MAX_SHADOW_CASCADES = 4;
 
+	// ==========================================================================
+	// 確認用の線 (C# の DebugDraw。2 頂点で 1 本)。トーンマップの後に、物に隠れずに描く
+	// ==========================================================================
+	struct DebugLineVertex
+	{
+		float    Position[3];
+		uint32_t Color;          // R8G8B8A8 (下位バイトが R)
+	};
+	static_assert(sizeof(DebugLineVertex) == 16, "DebugLineVertex must be 16 bytes (same as C#)");
+	static constexpr uint32_t MAX_DEBUG_LINE_VERTICES = 256 * 1024;
+
 	struct ShadowSettings
 	{
 		uint32_t Enabled      = 0;

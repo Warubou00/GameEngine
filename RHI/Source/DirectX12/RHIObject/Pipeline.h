@@ -210,6 +210,9 @@ namespace RHI
             // MSAA の深度を 1 サンプルの深度に解決する PSO (antiAliasing.shader の PSResolveDepth。初めて使う時に作る)
             ID3D12PipelineState* GetDepthResolvePso();
 
+            // 確認用の線の PSO (debug.shader。バックバッファへ、深度なし、アルファブレンド。初めて使う時に作る)
+            ID3D12PipelineState* GetDebugLinePso();
+
             /***********************************************************************************
              * @brief 全画面のシェーダーを読み込む (ファイルの VSFullscreen と、entry のピクセルシェーダー)
              * @return uint32_t 番号 (失敗時 0xFFFFFFFF)。同じファイル・同じ entry は同じ番号を返す
@@ -245,6 +248,8 @@ namespace RHI
             std::unique_ptr<SceneShaders>                  _sceneShaders;
             std::vector<std::unique_ptr<FullscreenShader>> _fullscreenShaders;
             uint32_t                                       _depthResolveShader = 0xFFFFFFFFu;   // _fullscreenShaders の番号
+            Microsoft::WRL::ComPtr<ID3D12PipelineState>    _debugLinePso;
+            bool                                           _debugLineFailed = false;
             // 作った PSO (鍵 = シェーダー / 描き方 / 描画先の形式 のハッシュ)
             std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D12PipelineState>> _psoMap;
             Device*                                        _device = nullptr;   // PSO を後から作るのに使う (所有しない)

@@ -233,6 +233,8 @@ public sealed class Engine : IDisposable
     private readonly LightSystem      _lightSystem     = new();
     private readonly AudioSystem      _audioSystem;
     private readonly bool             _audioLoaded;
+    private readonly CollisionSystem  _collisionSystem;
+    private readonly bool             _physicsLoaded;
     private readonly RenderCommandBuffer _commands     = new();
     private bool _closed;
     private bool _disposed;
@@ -247,6 +249,7 @@ public sealed class Engine : IDisposable
     public AssetManager     Assets   { get; } = new();
     public GraphicsSettings Graphics { get; } = new();
     public AudioSettings    Audio    { get; }
+    public PhysicsSettings  Physics  { get; }
 
     // エンジンが毎フレーム C# 側でかけた時間 (System の更新 + C++ への反映。描画は含まない)
     public double UpdateMilliseconds { get; private set; }
@@ -309,6 +312,18 @@ public sealed class Engine : IDisposable
         Assets.AudioLoaded = _audioLoaded;
         _audioSystem = new AudioSystem(World, _audioLoaded);
 
+        // 衝突判定 (Physics.dll)。無い時も描画はそのまま動かす (衝突判定だけしない)
+        try
+        {
+            _physicsLoaded = PhysicsNativeMethods.Physics_Initialize();
+        }
+        catch (DllNotFoundException)
+        {
+            Console.WriteLine("[Engine] Physics.dll was not found. Collision detection is disabled.");
+        }
+        Physics = new PhysicsSettings(_physicsLoaded);
+        _collisionSystem = new CollisionSystem(World, Physics, _physicsLoaded);
+
         Input.Attach(_window);
         // ゲームパッド (Core.dll。XInput + DirectInput)。パッドが無くてもそのまま動く (何も繋がっていない扱い)
         Gamepad.Initialize();
@@ -345,6 +360,7 @@ public sealed class Engine : IDisposable
 
             foreach (var system in _systems) system.Update(World);
             _transformSystem.Update(World);
+            _collisionSystem.Update(World);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
@@ -360,6 +376,17 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_ReportProfilerValue("C# transforms sent", _renderSyncSystem.TransformsSentLastFrame);
             NativeMethods.Renderer_ReportProfilerValue("Lights", _lightSystem.LightCount);
             NativeMethods.Renderer_ReportProfilerValue("Sounds playing", _audioSystem.PlayingCount);
+            if (_physicsLoaded)
+            {
+                NativeMethods.Renderer_ReportProfilerValue("Physics step (ms)", Physics.StepMs);
+                NativeMethods.Renderer_ReportProfilerValue("Physics broadphase (ms)", Physics.BroadphaseMs);
+                NativeMethods.Renderer_ReportProfilerValue("Physics narrowphase (ms)", Physics.NarrowphaseMs);
+                NativeMethods.Renderer_ReportProfilerValue("Physics bodies", Physics.Bodies);
+                NativeMethods.Renderer_ReportProfilerValue("Physics moved", Physics.MovedBodies);
+                NativeMethods.Renderer_ReportProfilerValue("Physics candidates", Physics.Candidates);
+                NativeMethods.Renderer_ReportProfilerValue("Physics overlaps", Physics.Overlaps);
+            }
+            DebugDraw.Flush();   // 確認用の線 (このフレームの描画の最後に描かれる)
 
             Graphics.RenderFrame(_commands);
             NativeMethods.Renderer_ReportProfilerValue("Render commands", _commands.Count);
@@ -385,6 +412,7 @@ public sealed class Engine : IDisposable
         }
         Gamepad.Shutdown();                 // 振動を止めてから解放される
         if (_audioLoaded) AudioNativeMethods.Audio_Shutdown();   // ボイス → XAudio2 → PCM の順に解放される
+        if (_physicsLoaded) PhysicsNativeMethods.Physics_Shutdown();
         Graphics.Shutdown();                // レンダーターゲットを先に返す
         NativeMethods.Renderer_CleanUp();   // GPU の完了を待ってから解放される
         if (!_window.IsDisposed) _window.Dispose();

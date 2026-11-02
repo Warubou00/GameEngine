@@ -21,6 +21,7 @@ internal static class Showcase
         world.Add(ground, new Transform(new Vector3(0, -0.1f, 1.0f)) { Scale = new Vector3(12.0f, 0.05f, 10.0f) });
         world.Add(ground, new MeshRenderer(engine.Assets.LoadModel("../Model/obj/box.obj")));
         world.Add(ground, new Static());
+        world.Add(ground, Collider.Box(new Vector3(1, 1, 1), new Vector3(0, 1, 0)));   // box.obj は x, z : -1〜1 / y : 0〜2
 
         // ---------- 岩 (小さいモデルなので大きくして、原点の箱の周りに置く) ----------
         var stopwatch = Stopwatch.StartNew();
@@ -45,6 +46,8 @@ internal static class Showcase
             });
             world.Add(entity, new MeshRenderer(rock));
             world.Add(entity, new Static());
+            // rock.obj の範囲 (x -0.45〜0.26 / y 0〜0.24 / z -0.31〜0.35) を囲む箱
+            world.Add(entity, Collider.Box(new Vector3(0.353f, 0.121f, 0.333f), new Vector3(-0.093f, 0.121f, 0.018f)));
         }
 
         // ---------- PMX のキャラクター (MMD の 1 単位 ≒ 8cm。身長 20 前後なので小さくして箱の横に立たせる) ----------
@@ -59,6 +62,8 @@ internal static class Showcase
             Scale = new Vector3(0.25f),
         });
         world.Add(character, new MeshRenderer(tomimi));
+        // 縦長のカプセル (モデルの単位 : 高さ約 11。大きさ 0.25 が掛かる)。地面に触れないよう少し浮かせる
+        world.Add(character, Collider.Capsule(2.0f, 3.5f, new Vector3(0, 5.6f, 0)));
         // ゆっくり回す (マテリアルごとの描画と半透明が、向きを変えても崩れないか見る。SpinSystem は Program が登録する)
         world.Add(character, new Spin { DegreesPerSecond = 20.0f });
 

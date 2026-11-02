@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source">
+      <UniqueIdentifier>{6b1d9f2e-3c4a-4f5b-9e8d-7a6c5b4d3e2f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\common.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\mathTypes.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\dynamicTree.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\shapes.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\physicsWorld.h">
+      <Filter>Source</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\dynamicTree.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\shapes.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\physicsWorld.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\physicsDll.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

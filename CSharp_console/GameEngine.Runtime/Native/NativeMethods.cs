@@ -138,6 +138,14 @@ internal static unsafe class NativeMethods
             CascadeBlend == o.CascadeBlend && Flags == o.Flags && FrozenMask == o.FrozenMask;
     }
 
+    // C++ の RHI::DebugLineVertex と同じ並び (16byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DebugLineVertex
+    {
+        public Vector3 Position;
+        public uint    Color;   // R8G8B8A8
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void LogCallback([MarshalAs(UnmanagedType.LPStr)] string message);
 
@@ -228,4 +236,7 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetShadowSettings(ref ShadowSettings settings);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetDebugLines(DebugLineVertex* vertices, uint count);
 }

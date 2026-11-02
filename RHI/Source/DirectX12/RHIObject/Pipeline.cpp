@@ -75,6 +75,7 @@ namespace RHI
 			constexpr const wchar_t* CULLING_SHADER_PATH = L"../Shader/gpuCulling.shader";
 			constexpr const wchar_t* HIZ_SHADER_PATH     = L"../Shader/hiZ.shader";
 			constexpr const wchar_t* ANTI_ALIASING_SHADER_PATH = L"../Shader/antiAliasing.shader";   // MSAA の深度の解決
+			constexpr const wchar_t* DEBUG_SHADER_PATH         = L"../Shader/debug.shader";          // 確認用の線
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -632,6 +633,39 @@ namespace RHI
             desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
             desc.SampleDesc.Count = (std::max)(1u, sampleCount);   // MSAA の描画先に足す時 (Forward + SSAO の環境光)
             return createPso(key, L"Fullscreen", desc);
+        }
+
+        ID3D12PipelineState* Pipeline::GetDebugLinePso()
+        {
+            if (_debugLinePso) return _debugLinePso.Get();
+            if (_debugLineFailed) return nullptr;
+            Shader::CompiledShader vs, ps;
+            if (!_shaderCompiler->Compile(DEBUG_SHADER_PATH, "VSDebugLine", Shader::Stage::Vertex, vs) ||
+                !_shaderCompiler->Compile(DEBUG_SHADER_PATH, "PSDebugLine", Shader::Stage::Pixel, ps))
+            {
+                Core::Logger::Log("[Pipeline] Failed compile debug line shader.");
+                _debugLineFailed = true;
+                return nullptr;
+            }
+            static const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            };
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = vs.View();
+            desc.PS = ps.View();
+            desc.InputLayout = { inputElements, _countof(inputElements) };
+            desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+            desc.DepthStencilState.DepthEnable    = FALSE;
+            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            desc.NumRenderTargets = 1;
+            desc.RTVFormats[0]    = DirectX12::SwapChain::FORMAT;
+            desc.DSVFormat        = DXGI_FORMAT_UNKNOWN;
+            ID3D12PipelineState* pso = createPso(fnv1a("DebugLine", 9, 0xDEB61Eull), L"DebugLine", desc);
+            if (!pso) { _debugLineFailed = true; return nullptr; }
+            _debugLinePso = pso;
+            return pso;
         }
 
         ID3D12PipelineState* Pipeline::GetDepthResolvePso()

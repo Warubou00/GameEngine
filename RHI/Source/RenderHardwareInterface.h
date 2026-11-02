@@ -81,6 +81,7 @@ namespace RHI
         void                   SetLights(const LightData* lights, uint32_t count)override;
         void                   SetLightingSettings(const LightingSettings& settings)override;
         void                   SetShadowSettings(const ShadowSettings& settings)override;
+        void                   SetDebugLines(const DebugLineVertex* vertices, uint32_t count)override;
         void WaitForGpu()override;
 
         void SetIndirectDrawEnabled(bool enabled)override;

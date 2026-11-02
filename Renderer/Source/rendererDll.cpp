@@ -115,6 +115,12 @@ extern "C"
 		if (g_renderer) g_renderer->DestroyRenderTarget(target);
 	}
 
+	// 確認用の線 (2 頂点で 1 本)。毎フレーム呼ぶ (0 本で消える)
+	RENDERER_API void Renderer_SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
+	{
+		if (g_renderer) g_renderer->SetDebugLines(vertices, vertices ? count : 0);
+	}
+
 	// 影 (平行光源 1 つのシャドーマップ)。変わった時だけ呼べばよい
 	RENDERER_API void Renderer_SetShadowSettings(const RHI::ShadowSettings* settings)
 	{

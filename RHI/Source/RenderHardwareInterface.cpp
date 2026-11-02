@@ -248,6 +248,11 @@ namespace RHI
         if (_isInitialized) _commandContext->DestroyRenderTarget(handle);
     }
 
+    void RenderHardwareInterface::SetDebugLines(const DebugLineVertex* vertices, uint32_t count)
+    {
+        if (_isInitialized) _commandContext->SetDebugLines(vertices, count);
+    }
+
     void RenderHardwareInterface::SetShadowSettings(const ShadowSettings& settings)
     {
         if (_isInitialized) _commandContext->SetShadowSettings(_buffer.get(), settings);

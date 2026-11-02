@@ -26,12 +26,16 @@ namespace GameEngine_console;
 //   --shadows on|off / --shadow-res N / --shadow-distance D : 影 (既定 on / 2048 / 60)
 //   --shadow-cascades N (1〜4。既定 4) / --shadow-union on (全段で 1 回のカリング) / --shadow-throttle on (遠い段を間引く)
 //   --shadow-show on : 段ごとに色を付ける
+//   --colliders on|off          : コライダーを線で表示 (既定 on。見本のシーンで重なると赤)
+//   --collision-bench N         : コライダーだけの物を N 個動かして衝突判定を計測 (--broadphase bvh|brute|grid)
+//                                 --bench-moving P : 毎フレーム動く物の割合 (%。既定 100)
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
 //                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)、F11 で影、F12 で影の段の色分け
+//                     C でコライダーの表示、B で衝突判定の探し方 (BVH → 総当たり → グリッド)
 //                     F7 で音を鳴らす / 止める、F8 で音量
 //                     F9 で DirectInput のパッドを探し直す、F10 で DirectInput のパッドのボタンの割り当て
 // ゲームパッド      : 右スティックで向き、左スティックで移動、RT / LT で上下、RB で速く、A で振動 (状態はプロファイラーとコンソール)
@@ -62,17 +66,35 @@ internal static class Program
 
         var world = engine.World;
 
+        var benchCount = options.TryGetValue("--collision-bench", out var bench) && int.TryParse(bench, out var b) ? b : 0;
+
         // 原点に 1 個 (動かないので Static)
         var origin = world.CreateEntity();
         world.Add(origin, new Transform());
         world.Add(origin, new MeshRenderer(box));
         world.Add(origin, new Static());
+        world.Add(origin, Collider.Box(new Vector3(1, 1, 1), new Vector3(0, 1, 0)));
 
-        // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン
-        if (stressCount == 0)
+        // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン + 衝突判定の見本
+        if (stressCount == 0 && benchCount == 0)
         {
             Showcase.Spawn(engine);
+            CollisionDemo.Spawn(world);
+            engine.AddSystem(new OrbitMoverSystem());
+            engine.Physics.ShowColliders = true;
         }
+        if (benchCount > 0)
+        {
+            var moving = options.TryGetValue("--bench-moving", out var movingText) && int.TryParse(movingText, out var m) ? m : 100;
+            var half = CollisionBench.Spawn(world, benchCount, moving);
+            engine.AddSystem(new BenchMoverSystem(half, engine.Physics));
+        }
+        if (options.TryGetValue("--colliders", out var colliders)) engine.Physics.ShowColliders = colliders == "on";
+        if (options.TryGetValue("--broadphase", out var broadphaseName) && PhysicsHotkeySystem.Parse(broadphaseName) is { } broadphase)
+        {
+            engine.Physics.Broadphase = broadphase;
+        }
+        engine.AddSystem(new PhysicsHotkeySystem(engine.Physics));
 
         // ---------- カメラ ----------
         var camera = world.CreateEntity();
