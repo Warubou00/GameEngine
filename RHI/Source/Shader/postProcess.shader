@@ -56,13 +56,24 @@ float3 acesFilm(float3 x)
 
 // ==============================================================
 // トーンマップ
-//   g_Inputs[0].x : HDR の色
+//   g_Inputs[0]   : x = HDR の色 / y = 環境光 / z = 遮蔽 (y, z は g_Params[1].x = 1 の時だけ)
 //   g_Params[0]   : x = 露出 (倍率) / y = 方法 (0 なし / 1 Reinhard / 2 ACES) / z = ガンマ (2.2)
 //                   w = 1 ならアルファに明るさ (luma) を書く (FXAA が GatherAlpha で 4 ピクセル分をまとめて読む)
+//   g_Params[1]   : x = 1 なら「環境光 × 遮蔽」を足す (Forward + SSAO。環境光とライトの光を分けて描いた時)
+//                   以前は全画面のパス (ssao.shader の PSApplyAmbient) で HDR に足してからトーンマップしていた。
+//                   ここで足すと HDR の読み書き (加算のブレンド) が 1 回減る (MSAA では 4 サンプル分)
 // ==============================================================
 float4 PSTonemap(FullscreenOutput input) : SV_TARGET
 {
-    float3 color = g_Textures[g_Inputs[0].x].Load(int3(input.Position.xy, 0)).rgb * g_Params[0].x;
+    const int3 pixel = int3(input.Position.xy, 0);
+    float3 color = g_Textures[g_Inputs[0].x].Load(pixel).rgb;
+    if (g_Params[1].x > 0.5f)
+    {
+        const float3 ambient = g_Textures[g_Inputs[0].y].Load(pixel).rgb;
+        const float  ao      = g_Textures[g_Inputs[0].z].SampleLevel(g_LinearClamp, input.UV, 0).r;   // 縮小したバッファでもよい
+        color += ambient * ao;
+    }
+    color *= g_Params[0].x;
 
     const uint method = (uint)g_Params[0].y;
     if (method == 1)      color = color / (1.0f + color);

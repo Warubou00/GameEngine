@@ -62,7 +62,8 @@ public abstract class RenderPipeline : IDisposable
 
     // HDR (線形) → 画面 (露出 / トーンマップ / ガンマ)。最後にバックバッファへ描く
     //   ao があり Ssao.ShowOnly なら、代わりに遮蔽を白黒で出す (確認用)
-    protected void Tonemap(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings, RenderTexture? ao = null)
+    //   ambient を渡すと「環境光 × 遮蔽 (ao)」を足してからトーンマップする (Forward + SSAO)
+    protected void Tonemap(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings, RenderTexture? ao = null, RenderTexture? ambient = null)
     {
         if (ao != null && settings.Ssao.ShowOnly)
         {
@@ -81,7 +82,16 @@ public abstract class RenderPipeline : IDisposable
         if (fxaa) _ldr ??= RenderTexture.Create(RenderTextureFormat.RGBA8);
         cmd.SetRenderTarget(fxaa ? _ldr! : RenderTexture.BackBuffer);
         // FXAA の時はアルファに明るさを書いてもらう (FXAA が 4 ピクセル分をまとめて読む)
-        cmd.DrawFullscreen(_tonemap, [hdr], [unlit ? 1.0f : settings.Exposure, (float)method, settings.Gamma, fxaa ? 1.0f : 0.0f]);
+        var exposure = unlit ? 1.0f : settings.Exposure;
+        var luma     = fxaa ? 1.0f : 0.0f;
+        if (ambient != null && ao != null)
+        {
+            cmd.DrawFullscreen(_tonemap, [hdr, ambient, ao], [exposure, (float)method, settings.Gamma, luma, 1.0f]);
+        }
+        else
+        {
+            cmd.DrawFullscreen(_tonemap, [hdr], [exposure, (float)method, settings.Gamma, luma]);
+        }
         if (!fxaa) return;
 
         _fxaa ??= FullscreenShader.Load(ShaderPaths.AntiAliasing, "PSFxaa");
@@ -106,7 +116,9 @@ internal static class ShaderPaths
 // フォワード : 物を描く時にライティングまで済ませる (HDR に描いてトーンマップ)
 //   ライトが少ない / 半透明が多い場面向き。G-Buffer が要らないのでメモリと帯域が少ない
 //   SSAO あり : ライトの光 (HDR) と環境光 (R11G11B10F) を分けて描き、深度から遮蔽を求めて
-//               「環境光 × 遮蔽」を HDR に足す (遮蔽が環境光にだけ掛かる。深度のプリパスも要らない)
+//               トーンマップが「ライトの光 + 環境光 × 遮蔽」にする (遮蔽が環境光にだけ掛かる。深度のプリパスも要らない)
+//               (以前は全画面のパスで HDR に足してからトーンマップしていた。HDR の読み書きが 1 回減る)
+//               半透明は環境光の RT を、覆った分だけ減らす (後ろの物の環境光が半透明の上に足されないように)
 //   MSAA あり : HDR (と環境光) を MSAA にする。深度も C++ が同じサンプル数にする。
 //               遮蔽 / トーンマップは C++ が 1 サンプルへ解決した物を読む
 // ==========================================================================
@@ -157,21 +169,23 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
 
             ao = Ssao.Render(cmd, settings.Ssao, normal: null);   // 法線は深度から作る
-            Ssao.ApplyAmbient(cmd, hdr, _ambient, ao);
-        }
-        else
-        {
-            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
-            cmd.ClearColor(hdr.ClearColor);
-            cmd.ClearDepth();
-            cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+
+            // 半透明 (遮蔽は掛けない)。環境光の RT も一緒に描画先にして、覆った分だけ減らす
+            cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
+            cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
+            Tonemap(cmd, hdr, settings, ao, _ambient);
+            return;
         }
 
-        // 半透明 (遮蔽は掛けない)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+        cmd.ClearColor(hdr.ClearColor);
+        cmd.ClearDepth();
+        cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+
+        // 半透明
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
 
-        Tonemap(cmd, hdr, settings, ao);
+        Tonemap(cmd, hdr, settings);
     }
 
     public override void Dispose()

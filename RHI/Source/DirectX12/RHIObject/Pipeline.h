@@ -229,6 +229,7 @@ namespace RHI
             bool                 IsHiZAvailable()const;
             ID3D12RootSignature* GetHiZRootSignature()const;
             ID3D12PipelineState* GetHiZPipeline()const;          // CSDownsample
+            ID3D12PipelineState* GetHiZPipelineMs()const;        // CSDownsampleMS (MSAA の深度から段 0 を作る。無ければ nullptr)
 
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
@@ -253,6 +254,7 @@ namespace RHI
             std::unique_ptr<DirectX12::PipelineState>    _cullCompactPipeline;
             std::unique_ptr<DirectX12::RootSignature>    _hiZRootSignature;        // Hi-Z 用
             std::unique_ptr<DirectX12::PipelineState>    _hiZPipeline;
+            std::unique_ptr<DirectX12::PipelineState>    _hiZPipelineMs;
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;

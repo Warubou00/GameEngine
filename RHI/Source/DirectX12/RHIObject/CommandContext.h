@@ -497,6 +497,8 @@ namespace RHI
             uint32_t                                             _msaaDepthSrvIndex = 0xFFFFFFFFu;
             bool                                                 _msaaDepthSrvDirty = true;
             bool                                                 _msaaDepthDirty    = false; // _depthBuffer より新しい (解決が要る)
+            bool                                                 _sceneDepthReadThisFrame = false;   // 全画面のシェーダーが SCENE_DEPTH を読んだ
+            bool                                                 _sceneDepthReadLastFrame = false;   // (Hi-Z を MSAA の深度から直接作るかの判断に使う)
             uint32_t                                             _maxSampleCount    = 1;
 
             // このフレームのシーン (PrepareScene で決まり、DrawScene が使う)
@@ -525,6 +527,11 @@ namespace RHI
             bool ensureMsaaDepth(uint32_t samples);
             void transitionMsaaDepth(D3D12_RESOURCE_STATES after);
             void resolveSceneDepth(Buffer* buffer);    // MSAA の深度 → _depthBuffer (描画先とビューポートは元に戻す)
+            bool ensureMsaaDepthSrv(Buffer* buffer);   // MSAA の深度の SRV (解決 / Hi-Z が読む)
+            bool hiZFromMsaa() const;                  // Hi-Z を MSAA の深度から直接作るか
+            // Hi-Z を MSAA の深度から直接作るサンプル数の上限。8x では先に解決する方が速かった
+            // (RTX 2070 / 1280x720 / SSAO なし : 2x 0.285 → 0.265 / 4x 0.309 → 0.294 / 8x 0.369 → 0.413 ms)
+            static constexpr uint32_t HIZ_FROM_MSAA_MAX_SAMPLES = 4;
             void resolveTarget(RenderTarget& target);  // MSAA の色 → Resolved
             D3D12_CPU_DESCRIPTOR_HANDLE boundDsv() const;
 

@@ -96,6 +96,7 @@ namespace RHI
             Shader::CompiledShader PsForwardAlpha;   // PSForwardAlpha : ライティングまで (半透明。透明な所を捨てる)
             Shader::CompiledShader PsGBuffer;        // PSGBuffer      : ディファード用の G-Buffer
             Shader::CompiledShader PsForwardSplit;   // PSForwardSplit : ライトの光と環境光を分けて書く (Forward + SSAO)
+            Shader::CompiledShader PsForwardAlphaSplit;   // PSForwardAlphaSplit : 半透明 (Forward + SSAO)。環境光を覆った分だけ減らす
         };
 
         // 全画面のシェーダー (ファイルの VSFullscreen + entry)
@@ -119,6 +120,7 @@ namespace RHI
 			_shaderCompiler.reset();
 			_indirectDrawSignature.reset();
 			_hiZPipeline.reset();
+			_hiZPipelineMs.reset();
 			_hiZRootSignature.reset();
 			_cullCompactPipeline.reset();
 			_cullPipeline.reset();
@@ -219,6 +221,11 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetHiZPipeline()const
         {
             return _hiZPipeline ? _hiZPipeline->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetHiZPipelineMs()const
+        {
+            return _hiZPipelineMs ? _hiZPipelineMs->Get() : nullptr;
         }
 
         RHI_RESULT Pipeline::makeRootSignature(Device* device)
@@ -398,6 +405,7 @@ namespace RHI
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlpha", Shader::Stage::Pixel,  shaders.PsForwardAlpha)) return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",      Shader::Stage::Pixel,  shaders.PsGBuffer))      return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit", Shader::Stage::Pixel,  shaders.PsForwardSplit)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlphaSplit", Shader::Stage::Pixel, shaders.PsForwardAlphaSplit)) return RHI_FAILED_COMPILED_SHADER;
 
             // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
             const DXGI_FORMAT hdr = HDR_FORMAT;
@@ -524,8 +532,8 @@ namespace RHI
             //   両面の物 / 半透明 (描く順番を崩せないので両面のまま) はカリングしない
             if (group == PIPELINE_OPAQUE) desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
 
-            // 半透明は環境光を分けない (SSAO を掛けない。RT1 には書かない)
-            if (group == PIPELINE_ALPHA_BLEND) desc.PS = shaders.PsForwardAlpha.View();
+            // 半透明は遮蔽を掛けない。環境光を分けて描く時 (split) は、環境光の RT を覆った分だけ減らす
+            if (group == PIPELINE_ALPHA_BLEND) desc.PS = split ? shaders.PsForwardAlphaSplit.View() : shaders.PsForwardAlpha.View();
             else if (gbuffer)                  desc.PS = shaders.PsGBuffer.View();
             else if (split)                    desc.PS = shaders.PsForwardSplit.View();
             else                               desc.PS = shaders.PsForward.View();
@@ -542,6 +550,16 @@ namespace RHI
 
             // 半透明 : アルファブレンド。深度は書く (MMD と同じ。完全に透明な所はピクセルシェーダーで捨てる)
             if (group == PIPELINE_ALPHA_BLEND) setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            if (group == PIPELINE_ALPHA_BLEND && split)
+            {
+                // RT1 (環境光) : 0 × 自分 + 描いてある環境光 × (1 - α) = 半透明に覆われた分だけ減らす
+                desc.BlendState.IndependentBlendEnable = TRUE;
+                auto& ambient = desc.BlendState.RenderTarget[1];
+                ambient.BlendEnable = TRUE;
+                ambient.SrcBlend    = D3D12_BLEND_ZERO;
+                ambient.DestBlend   = D3D12_BLEND_INV_SRC_ALPHA;
+                ambient.BlendOp     = D3D12_BLEND_OP_ADD;
+            }
 
             desc.NumRenderTargets = rtvCount;
             for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
@@ -764,14 +782,17 @@ namespace RHI
             depthRange.RegisterSpace                     = 0;
             depthRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             depthRange.OffsetInDescriptorsFromTableStart = 0;
+            // 同じディスクリプタを MSAA の深度 (Texture2DMS) としても読む (t1。範囲を重ねる)
+            D3D12_DESCRIPTOR_RANGE1 depthRanges[2] = { depthRange, depthRange };
+            depthRanges[1].BaseShaderRegister = 1;
 
             D3D12_ROOT_PARAMETER1 params[HIZ_PARAM_COUNT] = {};
             params[HIZ_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
             params[HIZ_PARAM_CONSTANTS].Constants.ShaderRegister = 0;
             params[HIZ_PARAM_CONSTANTS].Constants.Num32BitValues = HIZ_CONSTANT_COUNT;
             params[HIZ_PARAM_DEPTH].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            params[HIZ_PARAM_DEPTH].DescriptorTable.NumDescriptorRanges = 1;
-            params[HIZ_PARAM_DEPTH].DescriptorTable.pDescriptorRanges   = &depthRange;
+            params[HIZ_PARAM_DEPTH].DescriptorTable.NumDescriptorRanges = _countof(depthRanges);   // 以前は 1 (t0 だけ)
+            params[HIZ_PARAM_DEPTH].DescriptorTable.pDescriptorRanges   = depthRanges;
             params[HIZ_PARAM_HIZ].ParameterType               = D3D12_ROOT_PARAMETER_TYPE_UAV;
             params[HIZ_PARAM_HIZ].Descriptor.ShaderRegister   = 0;
             params[HIZ_PARAM_HIZ].Descriptor.Flags            = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
@@ -815,6 +836,23 @@ namespace RHI
             _hiZRootSignature = std::move(rootSignature);
             _hiZPipeline      = std::make_unique<DirectX12::PipelineState>();
             _hiZPipeline->Attach(pso);
+
+            // MSAA の深度から作る版 (作れなくても、MSAA の時に先に深度を解決するだけ)
+            Shader::CompiledShader csMs;
+            if (_shaderCompiler->Compile(HIZ_SHADER_PATH, "CSDownsampleMS", Shader::Stage::Compute, csMs))
+            {
+                psoDesc.pRootSignature = _hiZRootSignature->Get();
+                psoDesc.CS             = csMs.View();
+                hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+                hash = fnv1a(csMs.Bytecode.data(), csMs.Bytecode.size(), hash);
+                swprintf_s(psoName, L"HiZMS_%016llx", hash);
+                Microsoft::WRL::ComPtr<ID3D12PipelineState> psoMs;
+                if (SUCCEEDED(_pipelineCache->GetOrCreateComputePipeline(psoName, psoDesc, psoMs)))
+                {
+                    _hiZPipelineMs = std::make_unique<DirectX12::PipelineState>();
+                    _hiZPipelineMs->Attach(psoMs);
+                }
+            }
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)

@@ -15,6 +15,7 @@
 //   PSForward          : ライティングまで 1 回で描く (不透明)
 //   PSForwardAlpha     : 同じ (半透明。完全に透明な所は捨てる)
 //   PSForwardSplit     : ライトの光と環境光を分けて書く (Forward + SSAO)
+//   PSForwardAlphaSplit: 半透明 (Forward + SSAO)。環境光の RT を、自分が覆った分だけ減らす
 //   PSGBuffer          : ディファード用の G-Buffer (アルベド / 法線 / 金属・粗さ)
 //   VSFullscreen       : 全画面の三角形
 //   PSDeferredLighting : G-Buffer と深度からライティングする
@@ -371,8 +372,9 @@ float4 PSForwardAlpha(VSOutput input) : SV_TARGET
 // ==============================================================
 // Forward (SSAO あり) : ライトの光と環境光を別々に書く
 //   RT0 : ライトの光 (HDR) / RT1 : 環境光 (R11G11B10F)
-//   SSAO を作った後に「環境光 × 遮蔽」を RT0 に足す (ssao.shader の PSApplyAmbient)
+//   トーンマップが「ライトの光 + 環境光 × 遮蔽」にする (postProcess.shader の PSTonemap)
 //   こうすると Forward でも遮蔽が環境光にだけ掛かり、深度だけを先に描く (プリパス) も要らない
+//   (以前は SSAO の後に全画面のパス (PSApplyAmbient) で RT0 に足していた)
 // ==============================================================
 struct ForwardSplitOutput
 {
@@ -386,6 +388,23 @@ ForwardSplitOutput PSForwardSplit(VSOutput input)
     ForwardSplitOutput output;
     output.Lights  = float4(shadeLights(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness), 1.0f);
     output.Ambient = float4(shadeAmbient(surface.Albedo, surface.Normal, surface.View, surface.Metallic, surface.Roughness), 1.0f);
+    return output;
+}
+
+// ==============================================================
+// 半透明 (Forward + SSAO)
+//   RT0 : 色 (遮蔽なし。PSForwardAlpha と同じ) をアルファブレンド
+//   RT1 : 環境光の RT を (1 - α) 倍にする (ブレンド : 0 × 自分 + 環境光 × (1 - α)。Pipeline.cpp)
+//   環境光 × 遮蔽 はトーンマップで足すので、半透明の後ろの物の環境光は、半透明に覆われた分だけ減らしておく
+//   (しないと、後ろの物の環境光が半透明の上に透けて足される)
+// ==============================================================
+ForwardSplitOutput PSForwardAlphaSplit(VSOutput input)
+{
+    const Surface surface = getSurface(input);
+    clip(surface.Alpha - 1.0f / 255.0f);
+    ForwardSplitOutput output;
+    output.Lights  = float4(shade(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness, 1.0f), surface.Alpha);
+    output.Ambient = float4(0.0f, 0.0f, 0.0f, surface.Alpha);
     return output;
 }
 
