@@ -46,11 +46,11 @@ internal static unsafe class PhysicsNativeMethods
         public float GravityScale;
         public uint  Locks;           // RigidbodyConstraints
         public float InertiaScale;
-        public uint  Padding;
+        public uint  Flags;           // 1 : 眠らない (P2。以前は詰め物)
 
         public readonly bool Same(in BodyDynamics o) =>
             Motion == o.Motion && Mass == o.Mass && LinearDamping == o.LinearDamping && AngularDamping == o.AngularDamping &&
-            GravityScale == o.GravityScale && Locks == o.Locks && InertiaScale == o.InertiaScale;
+            GravityScale == o.GravityScale && Locks == o.Locks && InertiaScale == o.InertiaScale && Flags == o.Flags;
     }
 
     public const uint CommandForce           = 1u << 0;
@@ -58,6 +58,8 @@ internal static unsafe class PhysicsNativeMethods
     public const uint CommandSetVelocity     = 1u << 2;
     public const uint CommandSetAngular      = 1u << 3;
     public const uint CommandKinematicTarget = 1u << 4;
+    public const uint CommandWake            = 1u << 5;   // P2
+    public const uint CommandSleep           = 1u << 6;
 
     // 144byte
     [StructLayout(LayoutKind.Sequential)]
@@ -82,7 +84,7 @@ internal static unsafe class PhysicsNativeMethods
     public struct BodyState
     {
         public uint       Handle;
-        public uint       Flags;
+        public uint       Flags;           // 1 : 眠っている (P2)
         public uint       Padding0;
         public uint       Padding1;
         public Vector3    Position;        public float Padding2;
@@ -92,7 +94,7 @@ internal static unsafe class PhysicsNativeMethods
         public Vector3    CenterOfMass;    public float Padding5;
     }
 
-    // 64byte
+    // 80byte (以前は 64byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct SolverSettings
     {
@@ -108,6 +110,10 @@ internal static unsafe class PhysicsNativeMethods
         public float   MaxLinearSpeed;
         public uint    Iterations;
         public uint    RelaxIterations;
+        public uint    EnableSleep;            // P2
+        public float   TimeToSleep;
+        public float   SleepLinearVelocity;
+        public float   SleepAngularVelocity;
         public uint    Padding0;
         public uint    Padding1;
     }
@@ -199,7 +205,7 @@ internal static unsafe class PhysicsNativeMethods
         public float   Padding2;
     }
 
-    // 64byte (以前は 48byte)
+    // 80byte (以前は 64byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct PhysicsStats
     {
@@ -219,6 +225,10 @@ internal static unsafe class PhysicsNativeMethods
         public uint  RigidBodies;
         public uint  ContactConstraints;
         public uint  Joints;
+        public uint  AwakeBodies;     // P2
+        public uint  Islands;
+        public float IslandMs;
+        public uint  Padding;
     }
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
@@ -291,6 +301,10 @@ internal static unsafe class PhysicsNativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Physics_GetBodyStates(BodyState* states, uint capacity);
+
+    // 起きている剛体 + 最後の刻みで眠った剛体だけ (P2)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_GetActiveBodyStates(BodyState* states, uint capacity);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Physics_SetSolverSettings(ref SolverSettings settings);

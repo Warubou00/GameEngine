@@ -203,6 +203,9 @@ public sealed class PhysicsSettings
     public int   ContactConstraints { get; internal set; }   // 解いた接触の組
     public int   Joints             { get; internal set; }   // 働いているジョイント
     public int   FixedSteps         { get; internal set; }   // このフレームで進めた固定の刻み
+    public int   AwakeBodies        { get; internal set; }   // 起きている剛体 (眠っている物は計算しない。P2)
+    public int   Islands            { get; internal set; }   // 起きている島 (触れ合っている / 繋いだ動く物のまとまり)
+    public float IslandMs           { get; internal set; }
 
     /// <summary>剛体の解き方の設定 (変えると次の刻みから効く)</summary>
     public PhysicsSolverSettings Solver { get; } = new();
@@ -218,6 +221,8 @@ public sealed class PhysicsSolverSettings
     private float _contactHertz = 30.0f, _contactDampingRatio = 10.0f, _contactPushMaxVelocity = 3.0f;
     private float _restitutionThreshold = 1.0f, _speculativeDistance = 0.02f;
     private float _jointHertz = 60.0f, _jointDampingRatio = 2.0f, _maxLinearSpeed = 400.0f;
+    private bool  _enableSleep = true;
+    private float _timeToSleep = 0.5f, _sleepLinearVelocity = 0.1f, _sleepAngularVelocity = 2.0f;
 
     internal bool Dirty { get; set; } = true;
 
@@ -239,11 +244,23 @@ public sealed class PhysicsSolverSettings
     public float JointDampingRatio      { get => _jointDampingRatio;      set { _jointDampingRatio = MathF.Max(0.0f, value); Dirty = true; } }
     public float MaxLinearSpeed         { get => _maxLinearSpeed;         set { _maxLinearSpeed = MathF.Max(0.1f, value); Dirty = true; } }
 
+    // ---------- 眠り (P2) ----------
+    /// <summary>止まった島を眠らせる (計算しない)。切ると全部の剛体を毎刻み計算する</summary>
+    public bool  EnableSleep            { get => _enableSleep;            set { _enableSleep = value; Dirty = true; } }
+    /// <summary>島の全部の体がこの秒数止まっていたら眠る</summary>
+    public float TimeToSleep            { get => _timeToSleep;            set { _timeToSleep = MathF.Max(0.0f, value); Dirty = true; } }
+    /// <summary>重心の速さ + 回転で一番速く動く所の速さ がこれより遅ければ止まっている (m/s。Unity の既定と同じくらい)</summary>
+    public float SleepLinearVelocity    { get => _sleepLinearVelocity;    set { _sleepLinearVelocity = MathF.Max(0.0f, value); Dirty = true; } }
+    /// <summary>角速度もこれより遅いこと (rad/s。小さな物が速く回っている時は眠らない)</summary>
+    public float SleepAngularVelocity   { get => _sleepAngularVelocity;   set { _sleepAngularVelocity = MathF.Max(0.0f, value); Dirty = true; } }
+
     internal PhysicsNativeMethods.SolverSettings ToNative() => new()
     {
         Gravity = _gravity, SubSteps = (uint)_subSteps, ContactHertz = _contactHertz, ContactDampingRatio = _contactDampingRatio,
         ContactPushMaxVelocity = _contactPushMaxVelocity, RestitutionThreshold = _restitutionThreshold, SpeculativeDistance = _speculativeDistance,
         JointHertz = _jointHertz, JointDampingRatio = _jointDampingRatio, MaxLinearSpeed = _maxLinearSpeed,
         Iterations = (uint)_iterations, RelaxIterations = (uint)_relaxIterations,
+        EnableSleep = _enableSleep ? 1u : 0u, TimeToSleep = _timeToSleep,
+        SleepLinearVelocity = _sleepLinearVelocity, SleepAngularVelocity = _sleepAngularVelocity,
     };
 }

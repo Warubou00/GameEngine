@@ -71,6 +71,45 @@ namespace Physics
 			p1 = s.Center + up;
 		}
 
+		// ==============================================================
+		// 点が 5 つ以上ある時、面積が一番大きくなる 4 点を残す (P2)
+		//   1. 一番深い点 / 2. 1 から一番遠い点 / 3. 1-2 と三角形の面積が一番大きい点 / 4. 三角形の外で面積が一番増える点
+		//   以前は「一番浅い点と入れ替え」(入れた順で決まる) だったので、止まった箱 (深さがほぼ同じ) で
+		//   刻みごとに選ぶ点が変わり、前の力積の引き継ぎが外れて、ゆっくりずれ続けていた (積んだ山が眠れなかった)
+		// ==============================================================
+		void addReduced(Manifold& out, const Float3* points, const float* depths, int count, Float3 n)
+		{
+			if (count <= Manifold::MAX_POINTS)
+			{
+				for (int i = 0; i < count; ++i) out.Add(points[i], n, depths[i]);
+				return;
+			}
+			int chosen[4];
+			chosen[0] = 0;
+			for (int i = 1; i < count; ++i) if (depths[i] > depths[chosen[0]] + 1e-5f) chosen[0] = i;
+			float best = -1.0f;
+			for (int i = 0; i < count; ++i)
+			{
+				const float d = lengthSq(points[i] - points[chosen[0]]);
+				if (d > best) { best = d; chosen[1] = i; }
+			}
+			auto area = [&](int a, int b, int c) { return lengthSq(cross(points[b] - points[a], points[c] - points[a])); };
+			best = -1.0f;
+			for (int i = 0; i < count; ++i)
+			{
+				const float s = area(chosen[0], chosen[1], i);
+				if (s > best) { best = s; chosen[2] = i; }
+			}
+			best = -1.0f;
+			for (int i = 0; i < count; ++i)
+			{
+				if (i == chosen[0] || i == chosen[1] || i == chosen[2]) continue;
+				const float s = area(chosen[0], chosen[1], i) + area(chosen[1], chosen[2], i) + area(chosen[2], chosen[0], i);
+				if (s > best) { best = s; chosen[3] = i; }
+			}
+			for (int k = 0; k < 4; ++k) out.Add(points[chosen[k]], n, depths[chosen[k]]);
+		}
+
 		Float3 closestOnSegment(Float3 p, Float3 a, Float3 b)
 		{
 			const Float3 ab = b - a;
@@ -360,11 +399,18 @@ namespace Physics
 			// 参照面より下 (めり込んでいる) 点だけ。法線は A → B
 			const Float3 refFace = ref.c + refN * ref.e[axis];
 			const Float3 n = refIsA ? refN : -refN;
+			Float3 points[16];
+			float  depths[16];
+			int    candidates = 0;
 			for (int i = 0; i < count; ++i)
 			{
 				const float separation = dot(poly[i] - refFace, refN);
-				if (separation <= 0.0f) out.Add(poly[i] - refN * (separation * 0.5f), n, -separation);
+				if (separation > 0.0f) continue;
+				points[candidates] = poly[i] - refN * (separation * 0.5f);
+				depths[candidates] = -separation;
+				candidates++;
 			}
+			addReduced(out, points, depths, candidates, n);
 		}
 
 		bool boxBox(const WorldShape& sa, const WorldShape& sb, Manifold& out)

@@ -113,6 +113,12 @@ extern "C"
 		return g_world ? g_world->GetBodyStates(out, capacity) : 0u;
 	}
 
+	// 起きている剛体 + 最後の Simulate で眠った剛体だけ (P2。毎刻み読むならこちら)
+	PHYSICS_API uint32_t Physics_GetActiveBodyStates(Physics::BodyState* out, uint32_t capacity)
+	{
+		return g_world ? g_world->GetActiveBodyStates(out, capacity) : 0u;
+	}
+
 	PHYSICS_API void Physics_SetSolverSettings(const Physics::SolverSettings* settings)
 	{
 		if (g_world && settings) g_world->SetSolverSettings(*settings);

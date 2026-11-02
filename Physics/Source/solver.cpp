@@ -122,6 +122,7 @@ namespace Physics
 		const uint32_t index = handle & 0xFFFFu;
 		MotionType motion = dynamics.Motion <= 2 ? static_cast<MotionType>(dynamics.Motion) : MotionType::None;
 		if (body->IsStatic) motion = MotionType::None;   // 動かない物 (Static) は剛体にしない
+		wakeBody(index);   // 値を変えたら起こす (P2)
 		setMotion(index, motion);
 		if (motion == MotionType::None) return;
 		rigidOf(*body).Dynamics = dynamics;
@@ -190,6 +191,9 @@ namespace Physics
 			Body* body = find(c.Handle);
 			if (!body || body->Motion == MotionType::None) continue;
 			const bool dynamic = body->Motion == MotionType::Dynamic;
+			// 眠り (P2) : 命令が来たら起こす (眠らせる命令だけは眠らせる)
+			if (c.Flags & COMMAND_SLEEP) { if (dynamic) sleepBody(c.Handle & 0xFFFFu); continue; }
+			if (c.Flags != 0) wakeBody(c.Handle & 0xFFFFu);
 			if ((c.Flags & COMMAND_FORCE) && dynamic)
 			{
 				rigidOf(*body).Force  = rigidOf(*body).Force  + toFloat3(c.Force);
@@ -231,6 +235,7 @@ namespace Physics
 			BodyState& s = out[i];
 			s = BodyState();
 			s.Handle = handleOf(index);
+			s.Flags  = isSleeping(body) ? 1u : 0u;
 			store(s.Position, body.Position);
 			s.Rotation[0] = body.Rotation.x; s.Rotation[1] = body.Rotation.y; s.Rotation[2] = body.Rotation.z; s.Rotation[3] = body.Rotation.w;
 			store(s.Velocity, rigidOf(body).Velocity);
@@ -238,6 +243,214 @@ namespace Physics
 			store(s.CenterOfMass, body.World.Center);
 		}
 		return count;
+	}
+
+	uint32_t PhysicsWorld::GetActiveBodyStates(BodyState* out, uint32_t capacity) const
+	{
+		const uint32_t count = static_cast<uint32_t>(_awakeSlots.size() + _justSlept.size());
+		if (!out) return count;
+		uint32_t n = 0;
+		auto write = [&](uint32_t index)
+		{
+			if (n >= capacity) return;
+			const Body& body = _bodies[index];
+			BodyState& s = out[n++];
+			s = BodyState();
+			s.Handle = handleOf(index);
+			s.Flags  = isSleeping(body) ? 1u : 0u;
+			store(s.Position, body.Position);
+			s.Rotation[0] = body.Rotation.x; s.Rotation[1] = body.Rotation.y; s.Rotation[2] = body.Rotation.z; s.Rotation[3] = body.Rotation.w;
+			store(s.Velocity, rigidOf(body).Velocity);
+			store(s.AngularVelocity, rigidOf(body).AngularVelocity);
+			store(s.CenterOfMass, body.World.Center);
+		};
+		for (const uint32_t slot : _awakeSlots) write(_rigidBodies[slot]);
+		for (const uint32_t index : _justSlept)
+		{
+			if (_bodies[index].Alive && _bodies[index].RigidSlot >= 0) write(index);
+		}
+		return count;
+	}
+
+	// ==============================================================
+	// 眠りと島 (P2)
+	//   - 毎刻み、起きている動く剛体を「接触 (少し先の点も) / ジョイント」で繋いだ島にまとめる (union-find)
+	//     動かない物とキネマティックは島を繋がない (床に置いた別々の山は別の島)
+	//   - 体ごとに「速さが SleepLinearVelocity / SleepAngularVelocity より遅い秒数」を数え、
+	//     島の全部の体が TimeToSleep 以上止まっていたら、島ごと眠らせる (速度を 0 にして、解かない / 位置を進めない)
+	//   - 眠った物は動かないので、木も形の判定も触らない (組の表と接触はそのまま残る。起きた時に前の力積から始まる)
+	//   - 起きる : 起きている動く物 / 動いたキネマティック / 動かされた物 (Transform) に触れた / 力や速度の命令 /
+	//              値を変えた / 支えていた物が消えた / ジョイントの相手が起きている
+	// ==============================================================
+
+	void PhysicsWorld::wakeBody(uint32_t index)
+	{
+		if (index >= _bodies.size()) return;
+		Body& body = _bodies[index];
+		if (!body.Alive || !isSleeping(body)) return;
+		const uint32_t group = rigidOf(body).SleepGroup;
+		auto it = _sleepGroups.find(group);
+		if (it == _sleepGroups.end())
+		{
+			rigidOf(body).Asleep = false;
+			rigidOf(body).SleepTime = 0.0f;
+			return;
+		}
+		for (const uint32_t member : it->second)
+		{
+			Body& other = _bodies[member];
+			if (!other.Alive || other.RigidSlot < 0 || other.Motion != MotionType::Dynamic) continue;
+			RigidData& rigid = rigidOf(other);
+			if (!rigid.Asleep || rigid.SleepGroup != group) continue;   // 番号を使い回した体 / 別の島
+			rigid.Asleep    = false;
+			rigid.SleepTime = 0.0f;
+		}
+		_sleepGroups.erase(it);
+	}
+
+	void PhysicsWorld::sleepBody(uint32_t index)
+	{
+		Body& body = _bodies[index];
+		if (body.Motion != MotionType::Dynamic || rigidOf(body).Asleep) return;
+		RigidData& rigid = rigidOf(body);
+		rigid.Asleep = true;
+		rigid.Velocity = rigid.AngularVelocity = rigid.Force = rigid.Torque = Float3();
+		rigid.SleepGroup = _nextSleepGroup++;
+		if (_nextSleepGroup == 0) _nextSleepGroup = 1;
+		_sleepGroups[rigid.SleepGroup].push_back(index);
+		_justSlept.push_back(index);
+	}
+
+	void PhysicsWorld::wakeTouching()
+	{
+		if (_sleepGroups.empty()) { _movedOthers.clear(); return; }
+		// 動かされた物 (Transform) の印
+		if (_moverStamp.size() < _bodies.size()) _moverStamp.resize(_bodies.size(), 0u);
+		_moverMark++;
+		for (const uint32_t index : _movedOthers) _moverStamp[index] = _moverMark;
+		_movedOthers.clear();
+
+		auto isMover = [&](uint32_t index)
+		{
+			const Body& body = _bodies[index];
+			if (_moverStamp[index] == _moverMark) return true;
+			if (body.Motion == MotionType::Dynamic) return !rigidOf(body).Asleep;
+			if (body.Motion == MotionType::Kinematic)
+			{
+				const RigidData& rigid = rigidOf(body);
+				return lengthSq(rigid.Velocity) > 0.0f || lengthSq(rigid.AngularVelocity) > 0.0f;
+			}
+			return false;
+		};
+		for (const Pair& pair : _pairs)
+		{
+			const bool aSleep = isSleeping(_bodies[pair.A]), bSleep = isSleeping(_bodies[pair.B]);
+			if (aSleep == bSleep) continue;
+			const uint32_t other = aSleep ? pair.B : pair.A;
+			// 動かされた物 (Transform) は、太らせた箱が重なっているだけでも起こす (離れていく時も起こしたい)
+			// 動いている剛体は、触れている (接触の点がある) 時だけ (近くを通るだけで山を起こさない)
+			const bool touching = pair.Contact.Count > 0 || pair.Touching;
+			if (_moverStamp[other] == _moverMark || (touching && isMover(other))) wakeBody(aSleep ? pair.A : pair.B);
+		}
+		// ジョイント : 片方が起きていれば両方起こす (同じ島にいるべき物)
+		for (const std::unique_ptr<Joint>& joint : _joints)
+		{
+			if (!joint || joint->Broken || joint->B.Handle == INVALID_HANDLE) continue;
+			Body* a = find(joint->A.Handle);
+			Body* b = find(joint->B.Handle);
+			if (!a || !b) continue;
+			const bool aSleep = isSleeping(*a), bSleep = isSleeping(*b);
+			if (aSleep == bSleep) continue;
+			const uint32_t ia = joint->A.Handle & 0xFFFFu, ib = joint->B.Handle & 0xFFFFu;
+			if (aSleep ? isMover(ib) : isMover(ia)) wakeBody(aSleep ? ia : ib);
+		}
+	}
+
+	void PhysicsWorld::updateIslands(float dt)
+	{
+		const uint32_t count = static_cast<uint32_t>(_awakeSlots.size());
+		_stats.Islands = 0;
+		if (count == 0) return;
+		// 止まっている秒数
+		//   速さ = 重心の速さ + 回転で一番速く動く所の速さ (角速度 × 重心から一番遠い所。Box2D v3 と同じ)
+		//   以前 (作った時) は速さと角速度を別々に比べていた : 小さな物は回転の基準が厳しく、大きな山が眠れなかった
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			Body& body = _bodies[_rigidBodies[_awakeSlots[j]]];
+			RigidData& rigid = rigidOf(body);
+			const Float3 extent = (body.Box.max - body.Box.min) * 0.5f;
+			const float  reach  = length(extent);
+			const float  speed  = length(rigid.Velocity) + reach * length(rigid.AngularVelocity);
+			const bool still = body.Motion == MotionType::Dynamic && _solver.EnableSleep != 0 && !(rigid.Dynamics.Flags & DYNAMICS_NO_SLEEP) &&
+			                   speed < _solver.SleepLinearVelocity && length(rigid.AngularVelocity) < _solver.SleepAngularVelocity;
+			rigid.SleepTime = still ? rigid.SleepTime + dt : 0.0f;
+		}
+
+		// 島 (union-find。動く剛体どうしの接触とジョイントで繋ぐ)
+		_islandParent.resize(count);
+		for (uint32_t j = 0; j < count; ++j) _islandParent[j] = static_cast<int>(j);
+		auto findRoot = [&](int x)
+		{
+			while (_islandParent[x] != x) { _islandParent[x] = _islandParent[_islandParent[x]]; x = _islandParent[x]; }
+			return x;
+		};
+		auto unite = [&](int a, int b)
+		{
+			a = findRoot(a); b = findRoot(b);
+			if (a != b) _islandParent[(std::max)(a, b)] = (std::min)(a, b);
+		};
+		const SolverBody* base = _solverBodies.data();
+		for (const ContactConstraint& c : _contacts)
+		{
+			if (c.A->Dynamic && c.B->Dynamic) unite(static_cast<int>(c.A - base), static_cast<int>(c.B - base));
+		}
+		for (const Joint* joint : _activeJointList)
+		{
+			const SolverBody* a = joint->A.Body;
+			const SolverBody* b = joint->B.Body;
+			if (a->Dynamic && b->Dynamic && a >= base && a < base + count && b >= base && b < base + count)
+				unite(static_cast<int>(a - base), static_cast<int>(b - base));
+		}
+
+		// 島の一番短い止まっている秒数 (キネマティックは島に入れない : 動いている物は SleepTime 0 で島を起こしておく)
+		_islandSleep.assign(count, FLT_MAX);
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			const Body& body = _bodies[_rigidBodies[_awakeSlots[j]]];
+			if (body.Motion != MotionType::Dynamic) continue;
+			const int root = findRoot(static_cast<int>(j));
+			_islandSleep[root] = (std::min)(_islandSleep[root], rigidOf(body).SleepTime);
+		}
+		uint32_t islands = 0;
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			if (findRoot(static_cast<int>(j)) == static_cast<int>(j) && _islandSleep[j] != FLT_MAX) islands++;
+		}
+		_stats.Islands = islands;
+		if (_solver.EnableSleep == 0) return;
+
+		// 止まった島を眠らせる (島ごとに番号を付け、起きる時は島ごと)
+		std::unordered_map<int, uint32_t> groupOf;
+		for (uint32_t j = 0; j < count; ++j)
+		{
+			const uint32_t index = _rigidBodies[_awakeSlots[j]];
+			Body& body = _bodies[index];
+			if (body.Motion != MotionType::Dynamic) continue;
+			const int root = findRoot(static_cast<int>(j));
+			if (_islandSleep[root] < _solver.TimeToSleep) continue;
+			auto [it, inserted] = groupOf.try_emplace(root, 0u);
+			if (inserted)
+			{
+				it->second = _nextSleepGroup++;
+				if (_nextSleepGroup == 0) _nextSleepGroup = 1;
+			}
+			RigidData& rigid = rigidOf(body);
+			rigid.Asleep = true;
+			rigid.SleepGroup = it->second;
+			rigid.Velocity = rigid.AngularVelocity = Float3();
+			_sleepGroups[it->second].push_back(index);
+			_justSlept.push_back(index);
+		}
 	}
 
 	// ==============================================================
@@ -261,8 +474,17 @@ namespace Physics
 			rigidOf(body).ClearVelocityAfterStep = true;
 		}
 
+		// 眠った島に、動いている物が触れていたら起こす (P2)。重なりを調べ直す前に行う
+		// (動かされた台などは、調べ直すと接触が消えて、上で眠っている物が分からなくなるため)
+		wakeTouching();
+
 		// 2. 重なり (イベントも作る)
 		const uint32_t eventCount = Step();
+		_justSlept.clear();
+
+		// 重なりを調べた後にも、もう一度 : この刻みで初めて触れた物 (速く飛んできた球など) で起こす
+		// (以前は前でだけ起こしていたので、眠った塔に当たった球は、動かない壁に当たったように跳ね返っていた)
+		wakeTouching();
 
 		// 3〜5. 解く
 		const Clock::time_point start = Clock::now();
@@ -294,6 +516,13 @@ namespace Physics
 			_poseBuffer.push_back(t);
 		}
 		if (!_poseBuffer.empty()) SetTransforms(_poseBuffer.data(), static_cast<uint32_t>(_poseBuffer.size()));
+		_movedOthers.clear();   // 上の SetTransforms で入ったキネマティック (速度で起こすので要らない)
+
+		// 7. 島を作り、止まった島を眠らせる (P2)
+		const Clock::time_point islandStart = Clock::now();
+		updateIslands(dt);
+		_stats.IslandMs           = elapsedMs(islandStart, Clock::now());
+		_stats.AwakeBodies        = static_cast<uint32_t>(_awakeSlots.size() - _justSlept.size());
 
 		_stats.SolverMs           = elapsedMs(start, Clock::now());
 		_stats.RigidBodies        = static_cast<uint32_t>(_rigidBodies.size());
@@ -312,13 +541,20 @@ namespace Physics
 		step.JointSoftness = makeSoft((std::min)(_solver.JointHertz, 0.25f * step.InvH), _solver.JointDampingRatio, step.H);
 		const Float3 gravity = toFloat3(_solver.Gravity);
 
-		// 体の値
-		_solverBodies.resize(_rigidBodies.size());
-		for (size_t k = 0; k < _rigidBodies.size(); ++k)
+		// 体の値 (起きている剛体だけ。眠っている物は動かない物と同じ扱いで、解かない)
+		_awakeSlots.clear();
+		for (uint32_t k = 0; k < _rigidBodies.size(); ++k)
 		{
 			Body& body = _bodies[_rigidBodies[k]];
-			body.Solver = static_cast<int>(k);
-			SolverBody& s = _solverBodies[k];
+			if (isSleeping(body)) { body.Solver = -1; continue; }
+			_awakeSlots.push_back(k);
+		}
+		_solverBodies.resize(_awakeSlots.size());
+		for (size_t j = 0; j < _awakeSlots.size(); ++j)
+		{
+			Body& body = _bodies[_rigidBodies[_awakeSlots[j]]];
+			body.Solver = static_cast<int>(j);
+			SolverBody& s = _solverBodies[j];
 			s.V       = rigidOf(body).Velocity;
 			s.W       = rigidOf(body).AngularVelocity;
 			s.DP      = Float3();
@@ -339,12 +575,14 @@ namespace Physics
 		_staticBody = SolverBody();
 
 		// ジョイントの準備 (壊れた / 体の無いジョイントは飛ばす)
-		std::vector<Joint*> active;
-		active.reserve(_joints.size());
+		std::vector<Joint*>& active = _activeJointList;
+		active.clear();
 		for (const std::unique_ptr<Joint>& joint : _joints)
 		{
 			if (joint && !joint->Broken && prepareJoint(*joint))
 			{
+				// 両方とも眠っている / 動かない物なら解かない (力は眠る前の値のまま。P2)
+				if (!joint->A.Body->Dynamic && !joint->B.Body->Dynamic) continue;
 				joint->Prepare(step);
 				active.push_back(joint.get());
 			}
@@ -360,11 +598,11 @@ namespace Physics
 		for (uint32_t sub = 0; sub < subSteps; ++sub)
 		{
 			// 速度を進める (体ごとに別なので並列)
-			_jobs.ParallelFor(static_cast<uint32_t>(_rigidBodies.size()), 256, [&](uint32_t begin, uint32_t end)
+			_jobs.ParallelFor(static_cast<uint32_t>(_awakeSlots.size()), 256, [&](uint32_t begin, uint32_t end)
 			{
 			for (uint32_t k = begin; k < end; ++k)
 			{
-				const Body& body = _bodies[_rigidBodies[k]];
+				const Body& body = _bodies[_rigidBodies[_awakeSlots[k]]];
 				if (body.Motion != MotionType::Dynamic) continue;
 				SolverBody& s = _solverBodies[k];
 				const float linearDamping  = 1.0f / (1.0f + step.H * rigidOf(body).Dynamics.LinearDamping);
@@ -445,6 +683,8 @@ namespace Physics
 			const Body& a = _bodies[pair.A];
 			const Body& b = _bodies[pair.B];
 			if (!isPhysicalPair(a, b)) continue;
+			// 起きている動く物が無い組 (眠った物どうし / 眠った物と床) は解かない (P2)
+			if (!((a.Motion == MotionType::Dynamic && a.Solver >= 0) || (b.Motion == MotionType::Dynamic && b.Solver >= 0))) continue;
 			if (!_noCollidePairs.empty() && _noCollidePairs.count(pair.Key)) continue;   // ジョイントで繋いだ組
 
 			ContactConstraint c;

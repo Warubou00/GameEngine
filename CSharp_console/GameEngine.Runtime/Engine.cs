@@ -402,6 +402,8 @@ public sealed class Engine : IDisposable
                 {
                     NativeMethods.Renderer_ReportProfilerValue("Physics solver (ms)", Physics.SolverMs);
                     NativeMethods.Renderer_ReportProfilerValue("Physics rigid bodies", Physics.RigidBodies);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics awake bodies", Physics.AwakeBodies);
+                    NativeMethods.Renderer_ReportProfilerValue("Physics islands", Physics.Islands);
                     NativeMethods.Renderer_ReportProfilerValue("Physics contacts solved", Physics.ContactConstraints);
                     NativeMethods.Renderer_ReportProfilerValue("Physics joints", Physics.Joints);
                     NativeMethods.Renderer_ReportProfilerValue("Physics fixed steps", Physics.FixedSteps);

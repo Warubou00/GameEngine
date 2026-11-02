@@ -86,6 +86,8 @@ namespace Physics
 		uint32_t Simulate(float dt);
 		// 剛体の今の状態 (out が nullptr なら数だけ)
 		uint32_t GetBodyStates(BodyState* out, uint32_t capacity) const;
+		// 起きている剛体 + 最後の Simulate で眠った剛体だけ (C# が毎刻み読む。眠っている物は位置が変わらないので送らない。P2)
+		uint32_t GetActiveBodyStates(BodyState* out, uint32_t capacity) const;
 		void     SetSolverSettings(const SolverSettings& settings) { _solver = settings; }
 		const SolverSettings& GetSolverSettings() const { return _solver; }
 
@@ -144,6 +146,10 @@ namespace Physics
 			Quat       TargetRotation;
 			Float3     LinearMask  = Float3(1.0f, 1.0f, 1.0f);   // 固定した軸は 0
 			Float3     AngularMask = Float3(1.0f, 1.0f, 1.0f);
+			// 眠り (P2)
+			bool       Asleep     = false;
+			float      SleepTime  = 0.0f;     // 止まっている秒数
+			uint32_t   SleepGroup = 0;        // 一緒に眠った島の番号 (起きる時は島ごと)
 		};
 
 		std::vector<Body>     _bodies;
@@ -315,11 +321,28 @@ namespace Physics
 		std::unordered_map<uint64_t, int>  _noCollidePairs;   // ジョイントで繋いで、押し戻さない組 (数)
 		uint32_t                           _activeJoints = 0;
 
+		// ---------- 眠りと島 (P2) ----------
+		std::vector<uint32_t>              _awakeSlots;       // 起きている剛体の _rigidBodies の場所 (_solverBodies と同じ並び)
+		std::unordered_map<uint32_t, std::vector<uint32_t>> _sleepGroups;   // 眠っている島 → 体の番号
+		uint32_t                           _nextSleepGroup = 1;
+		std::vector<uint32_t>              _justSlept;        // 最後の Simulate で眠った体 (GetActiveBodyStates で 1 回だけ返す)
+		std::vector<uint32_t>              _movedOthers;      // 前の Simulate から動かされた、動く剛体でない物 (触れている眠った物を起こす)
+		std::vector<uint32_t>              _moverStamp;       // 作業用 (体ごと。_moverMark の Simulate で動かされたか)
+		uint32_t                           _moverMark = 0;
+		std::vector<int>                   _islandParent;     // 作業用 (union-find)
+		std::vector<float>                 _islandSleep;      // 作業用 (島の一番短い止まっている秒数)
+		std::vector<Joint*>                _activeJointList;
+
 		bool  isPhysicalPair(const Body& a, const Body& b) const
 		{
 			return !a.IsTrigger && !b.IsTrigger && (a.Motion == MotionType::Dynamic || b.Motion == MotionType::Dynamic);
 		}
 		void  updateMass(Body& body);
+		bool  isSleeping(const Body& body) const { return body.Motion == MotionType::Dynamic && rigidOf(body).Asleep; }
+		void  wakeBody(uint32_t index);             // 眠っていれば、一緒に眠った島ごと起こす
+		void  sleepBody(uint32_t index);            // この体だけ眠らせる
+		void  wakeTouching();                       // 動いている物に触れた眠った島を起こす
+		void  updateIslands(float dt);              // 島を作り、止まった島を眠らせる
 		void  collidePhysical(Pair& pair, PairImpulse& impulse, const Body& a, const Body& b) const;   // 剛体の組の形の判定 (少し先の点も)
 		RigidData&       rigidOf(const Body& body)       { return _rigidData[body.RigidSlot]; }
 		const RigidData& rigidOf(const Body& body) const { return _rigidData[body.RigidSlot]; }

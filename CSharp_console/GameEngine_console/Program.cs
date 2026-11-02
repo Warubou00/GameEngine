@@ -32,7 +32,7 @@ namespace GameEngine_console;
 //                                 --bench-layers N : レイヤーを N 個に分け、違うレイヤーどうしを調べない (--layer-pruning off で木での間引きを切る)
 //                                 --physics-workers N : 衝突判定の追加のスレッドの数 (既定 論理コア - 1、3 本まで) / --tree-rebuild off
 //   --scene physics             : 物理 (剛体 / ジョイント) の見本のシーン。スペースで球を撃つ / R で積み木を作り直す
-//   --physics-bench N           : 箱を N 個落として積む (物理の計測。--physics-workers N も使える)
+//   --physics-bench N           : 箱を N 個落として積む (物理の計測。--physics-workers N / --sleep off も使える)
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -95,6 +95,7 @@ internal static class Program
         {
             PhysicsBench.Spawn(engine, box, physicsBench);
             if (options.TryGetValue("--physics-workers", out var pworkerText) && int.TryParse(pworkerText, out var pworkers)) engine.Physics.SetWorkerCount(pworkers);
+            if (options.GetValueOrDefault("--sleep", "on") == "off") engine.Physics.Solver.EnableSleep = false;
         }
 
         // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン + 衝突判定の見本
