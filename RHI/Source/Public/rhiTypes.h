@@ -108,6 +108,8 @@ namespace RHI
 		TextureHandle Texture;                          // 既定 (0) は白 1x1
 		float         Color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };   // テクスチャ × 頂点の色 × この色
 		BlendMode     Blend    = BlendMode::Opaque;
+		float         Metallic  = 0.0f;   // PBR : 金属らしさ (0 = 非金属)
+		float         Roughness = 0.6f;   // PBR : 表面の粗さ (0 = つるつる / 1 = ざらざら)
 	};
 
 	struct MaterialHandle
@@ -142,6 +144,126 @@ namespace RHI
 		uint32_t       IndexCount = 0;   // IndexRange::Count
 		ObjectHandle   Object;           // ワールド行列
 		MaterialHandle Material;         // テクスチャ / 色 / ブレンドの方法 (以前はオブジェクトがテクスチャを持っていた)
+	};
+
+	// ==========================================================================
+	// 描画パス (C# が毎フレーム組み立てて、Render に渡す)
+	//   C# のレンダーパイプライン (Forward / Deferred / ポストエフェクト) は、
+	//   「描画先を決める → 消す → シーンを描く / 全画面を描く」を RenderCommand の列として並べる
+	// ==========================================================================
+
+	// レンダーターゲットの形式 (C# の RenderTextureFormat と同じ番号)
+	enum class RenderTargetFormat : uint32_t
+	{
+		RGBA8      = 0,   // 色 (0〜1)
+		RGBA8_SRGB = 1,   // 色 (書く時に sRGB に、読む時に線形に自動で変換。アルベドなど)
+		RGBA16F    = 2,   // HDR の色 / 法線など
+		RG16F      = 3,
+		R16F       = 4,
+		R32F       = 5,
+		R8         = 6,   // 1 成分 (遮蔽など)
+		RGB10A2    = 7,
+	};
+
+	struct RenderTargetDesc
+	{
+		RenderTargetFormat Format = RenderTargetFormat::RGBA8;
+		float    Scale  = 1.0f;   // 画面の大きさに対する倍率 (0 なら Width / Height で固定の大きさ)。リサイズで自動で作り直す
+		uint32_t Width  = 0;
+		uint32_t Height = 0;
+		float    ClearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // 最適化クリア値 (同じ色で消すと速い)
+	};
+
+	struct RenderTargetHandle
+	{
+		static constexpr uint32_t INVALID     = 0xFFFFFFFFu;
+		static constexpr uint32_t BACK_BUFFER = 0xFFFFFFFEu;   // 画面 (スワップチェーン)
+		static constexpr uint32_t SCENE_DEPTH = 0xFFFFFFFDu;   // シーンの深度 (GPU カリングのオクルージョンもこれを使う)
+		uint32_t Index = INVALID;
+	};
+
+	// 全画面に描くシェーダー (ライティング / ポストエフェクト)。LoadFullscreenShader で読み込む
+	struct FullscreenShaderHandle
+	{
+		uint32_t Index = INVALID_HANDLE_INDEX;
+		bool IsValid()const { return Index != INVALID_HANDLE_INDEX; }
+	};
+
+	// シーンを描く時のシェーダー
+	enum class ScenePass : uint32_t
+	{
+		Forward = 0,   // ライティングまで 1 回で描く (HDR の色)
+		GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ を書く (半透明は描けないので Forward で)
+	};
+
+	// シーンのどの物を描くか
+	enum class RenderQueue : uint32_t
+	{
+		Opaque      = 0,   // 不透明 (GPU カリング / オクルージョンはここで行う)
+		Transparent = 1,   // 半透明 (Opaque の後に描くこと)
+	};
+
+	enum class RenderCommandType : uint32_t
+	{
+		SetRenderTargets = 0,   // Colors[0..ColorCount) と Depth を描画先にする
+		ClearColor       = 1,   // 描画先の色を ClearColor で消す
+		ClearDepth       = 2,   // 描画先の深度を ClearDepth で消す
+		DrawScene        = 3,   // Arg0 = ScenePass / Arg1 = RenderQueue
+		DrawFullscreen   = 4,   // Arg0 = シェーダー / Arg1 = ブレンド (0 なし / 1 加算 / 2 アルファ) / Inputs / Params
+	};
+
+	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
+	constexpr uint32_t MAX_PASS_INPUTS        = 8;
+	constexpr uint32_t MAX_PASS_PARAMS        = 8;
+
+	// 描画パスの命令 1 個 (C# の Native.RenderCommand と同じ並び : 120byte)
+	struct RenderCommand
+	{
+		RenderCommandType Type = RenderCommandType::SetRenderTargets;
+		uint32_t ColorCount = 0;
+		uint32_t Colors[MAX_PASS_COLOR_TARGETS] = {};      // RenderTargetHandle::Index
+		uint32_t Depth = RenderTargetHandle::INVALID;
+		uint32_t Arg0  = 0;
+		uint32_t Arg1  = 0;
+		float    ClearColor[4] = {};
+		float    ClearDepth    = 1.0f;
+		uint32_t Inputs[MAX_PASS_INPUTS] = {};             // 全画面シェーダーが読むテクスチャ (RenderTargetHandle::Index)
+		float    Params[MAX_PASS_PARAMS] = {};             // 全画面シェーダーに渡す値
+	};
+	static_assert(sizeof(RenderCommand) == 120, "RenderCommand must be 120 bytes (same as C#)");
+
+	// ==========================================================================
+	// ライト / ライティング
+	// ==========================================================================
+	enum class LightType : uint32_t
+	{
+		Directional = 0,   // 太陽 (向きだけ)
+		Point       = 1,   // 点光源 (位置と届く距離)
+	};
+
+	// シェーダーの struct LightData と同じ並び (48byte)
+	struct LightData
+	{
+		float     Position[3] = {};
+		float     Range       = 10.0f;
+		float     Direction[3] = { 0.0f, -1.0f, 0.0f };   // 光が進む向き (Directional)
+		LightType Type        = LightType::Directional;
+		float     Color[3]    = { 1.0f, 1.0f, 1.0f };
+		float     Intensity   = 1.0f;
+	};
+	static_assert(sizeof(LightData) == 48, "LightData must be 48 bytes (same as HLSL)");
+
+	enum class LightingModel : uint32_t
+	{
+		Unlit   = 0,   // ライト無し (テクスチャの色そのまま)
+		Lambert = 1,   // 拡散反射だけ
+		PBR     = 2,   // 物理ベース (GGX / 金属・粗さ)
+	};
+
+	struct LightingSettings
+	{
+		LightingModel Model      = LightingModel::PBR;
+		float         Ambient[3] = { 0.25f, 0.27f, 0.30f };   // 環境光 (空の明るさ)
 	};
 
 	// ==========================================================================

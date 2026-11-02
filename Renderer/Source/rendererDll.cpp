@@ -91,9 +91,45 @@ extern "C"
 	}
 
 	// 1 フレーム描画する (描画オブジェクトの位置やカメラは、先に設定しておく)
-	RENDERER_API void Renderer_Render()
+	// commands : C# の描画パス (RenderPipeline) が組み立てた命令の列 (RHI::RenderCommand × commandCount)
+	// 以前は引数が無く、シーンをバックバッファに描くだけだった
+	RENDERER_API void Renderer_Render(const RHI::RenderCommand* commands, uint32_t commandCount)
 	{
-		if (g_renderer) g_renderer->Render();
+		if (g_renderer) g_renderer->Render(commands, commandCount);
+	}
+
+	// ==========================================================================
+	// 描画パス (レンダーターゲット / 全画面のシェーダー) とライト
+	// ==========================================================================
+
+	// レンダーターゲットを作る。戻り値はハンドル (失敗時 INVALID_HANDLE)
+	RENDERER_API uint32_t Renderer_CreateRenderTarget(const RHI::RenderTargetDesc* desc)
+	{
+		return (g_renderer && desc) ? g_renderer->CreateRenderTarget(*desc).Index : Renderer::INVALID_HANDLE;
+	}
+
+	RENDERER_API void Renderer_DestroyRenderTarget(uint32_t handle)
+	{
+		RHI::RenderTargetHandle target;
+		target.Index = handle;
+		if (g_renderer) g_renderer->DestroyRenderTarget(target);
+	}
+
+	// 全画面のシェーダー (filePath の VSFullscreen と entry)。戻り値はハンドル (失敗時 INVALID_HANDLE)
+	RENDERER_API uint32_t Renderer_LoadFullscreenShader(const wchar_t* filePath, const char* entry)
+	{
+		return (g_renderer && filePath && entry) ? g_renderer->LoadFullscreenShader(filePath, entry).Index : Renderer::INVALID_HANDLE;
+	}
+
+	// ライト (変わった時だけ呼べばよい)
+	RENDERER_API void Renderer_SetLights(const RHI::LightData* lights, uint32_t count)
+	{
+		if (g_renderer) g_renderer->SetLights(lights, count);
+	}
+
+	RENDERER_API void Renderer_SetLightingSettings(const RHI::LightingSettings* settings)
+	{
+		if (g_renderer && settings) g_renderer->SetLightingSettings(*settings);
 	}
 
 	// GPU の処理 (描画 + 転送) が全て終わるまで待つ (読み込み時間の計測など)
@@ -169,6 +205,12 @@ extern "C"
 	RENDERER_API void Renderer_ReportProfilerValue(const char* name, double value)
 	{
 		if (g_renderer && name) g_renderer->ReportProfilerValue(name, value);
+	}
+
+	// プロファイラー (F1) に任意の文字列を表示する (例 : 描画パイプラインの名前)
+	RENDERER_API void Renderer_SetProfilerInfo(const char* name, const char* text)
+	{
+		if (g_renderer && name && text) g_renderer->SetProfilerInfo(name, text);
 	}
 }
 

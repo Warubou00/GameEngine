@@ -1,0 +1,73 @@
+// ==============================================================
+// postProcess.shader
+//
+// ポストエフェクト (全画面のシェーダー)。C# の描画パスが LoadFullscreenShader で読み込む
+//   VSFullscreen : 全画面の三角形
+//   PSTonemap    : HDR (線形) → 画面の色 (露出 / トーンマップ / ガンマ)
+//
+// ルートシグネチャはシーンと同じ (Pipeline.cpp)。読むテクスチャは g_Inputs の番号で受け取る
+// ※この文字コードは UTF-8 (BOMなし)。FXC は BOM を読めないため BOM を付けないこと
+// ==============================================================
+
+Texture2D    g_Textures[4096] : register(t0, space1);
+SamplerState g_PointClamp     : register(s1);
+SamplerState g_LinearClamp    : register(s2);
+
+// フレームの定数 (hlslTemplate.shader の FrameData と同じ並び)
+cbuffer FrameData : register(b0)
+{
+    matrix g_ViewMatrix;
+    matrix g_ProjectionMatrix;
+    matrix g_InvViewProj;
+    float3 g_CameraPosition;
+    uint   g_LightCount;
+    float3 g_Ambient;
+    uint   g_LightingModel;
+    float2 g_ScreenSize;
+    float2 g_InvScreenSize;
+};
+
+// パスの値 (RenderCommand.Inputs / Params)
+cbuffer PassConstants : register(b1)
+{
+    uint4  g_Inputs[2];
+    float4 g_Params[2];
+};
+
+struct FullscreenOutput
+{
+    float4 Position : SV_POSITION;
+    float2 UV       : TEXCOORD;
+};
+
+FullscreenOutput VSFullscreen(uint vertexID : SV_VertexID)
+{
+    FullscreenOutput output;
+    output.UV       = float2((vertexID << 1) & 2, vertexID & 2);
+    output.Position = float4(output.UV * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
+    return output;
+}
+
+// ACES (Narkowicz の近似)。明るい所を白く飛ばさず、なだらかに丸める
+float3 acesFilm(float3 x)
+{
+    return saturate((x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f));
+}
+
+// ==============================================================
+// トーンマップ
+//   g_Inputs[0].x : HDR の色
+//   g_Params[0]   : x = 露出 (倍率) / y = 方法 (0 なし / 1 Reinhard / 2 ACES) / z = ガンマ (2.2)
+// ==============================================================
+float4 PSTonemap(FullscreenOutput input) : SV_TARGET
+{
+    float3 color = g_Textures[g_Inputs[0].x].Load(int3(input.Position.xy, 0)).rgb * g_Params[0].x;
+
+    const uint method = (uint)g_Params[0].y;
+    if (method == 1)      color = color / (1.0f + color);
+    else if (method == 2) color = acesFilm(color);
+
+    // 線形 → 画面 (バックバッファは UNORM なので自分でガンマをかける)
+    color = pow(saturate(color), 1.0f / max(g_Params[0].z, 0.01f));
+    return float4(color, 1.0f);
+}

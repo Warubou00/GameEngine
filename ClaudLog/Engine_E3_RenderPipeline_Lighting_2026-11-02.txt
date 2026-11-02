@@ -1,0 +1,143 @@
+﻿====================================================================
+ エンジン化 E3 (1/3) : C# の描画パイプライン / Forward・Deferred / Lambert・PBR
+ 日付   : 2026-11-02
+ ブランチ : feature/e3-lighting
+====================================================================
+
+■ 概要
+  E3 は 3 段階に分けて進める (確認 → マージ を段階ごとに行う)
+    ① C# で組み立てる描画パス + Forward / Deferred + ライティング (Unlit / Lambert / PBR)   ← 今回
+    ② SSAO (ポストエフェクト。切り替え可能)
+    ③ アンチエイリアス (FXAA = ポストエフェクト / MSAA = 固定機能。切り替え可能)
+
+  - 描き方 (どの描画先に、何を、どの順番で描くか) を C# で組み立てるようにした (Unity の SRP に当たる)
+      以前は C++ の中で「シーンをバックバッファに 1 回描く」に決まっていて、C# からは描画先も作れなかった
+  - Forward / Deferred の 2 つのパイプラインを C# で書き、実行中に切り替えられる (F2)
+  - ライティング Unlit / Lambert / PBR (GGX) を実行中に切り替えられる (F3)
+  - 平行光源 / 点光源をコンポーネントにした (ECS)。HDR で描いてトーンマップ (ACES) する
+
+■ 仕組み (C# → C++)
+  C# : RenderPipeline.Render が RenderCommandBuffer に命令を積む
+       → エンジンがフレームの最後に 1 回の P/Invoke (Renderer_Render(commands, count)) で渡す
+  C++: RHI::Render(items, count, commands, commandCount)
+         PrepareScene         : オブジェクト / マテリアル / ライトを GPU へ、DrawData と描画の引数を用意 (以前の Render の前半)
+         ExecuteRenderCommands: 命令を順に実行
+           SetRenderTargets : 描画先 (最大 4 枚 + 深度)。レンダーターゲットの状態 (バリア) は C++ が追う
+           ClearColor / ClearDepth
+           DrawScene(pass, queue)   : pass = Forward / GBuffer、queue = Opaque / Transparent
+                                      不透明の時に GPU カリング (2 段階のオクルージョンも) を行い、半透明はその結果を使う
+                                      オクルージョンはシーンの深度 (SceneDepth) に描く時だけ (Hi-Z をその深度から作るため)
+           DrawFullscreen(shader, blend, inputs[8], params[8]) : 全画面の三角形 (ライティング / ポストエフェクト)
+
+  命令は 120 byte の固定の構造体 (C++ は static_assert、C# は同じ並び)。毎フレームの確保は無い
+
+■ レンダーターゲット (RHI : CommandContext)
+  - CreateRenderTarget(format, scale | width/height, clearColor) / DestroyRenderTarget
+      形式 : RGBA8 / RGBA8_SRGB / RGBA16F / RG16F / R16F / R32F / R8 / RGB10A2
+      scale > 0 は画面の大きさに合わせ、リサイズで自動で作り直す (RTV / SRV の番号は変わらない)
+      消す時は GPU の完了を待つ (パイプラインを切り替える時だけなので)
+  - SRV はテクスチャと同じヒープ (バインドレスの配列) に置く。シェーダーへは「テクスチャの番号」をルート定数で渡すだけ
+      → パスごとにディスクリプタを並べ直す必要が無い
+  - シーンの深度 (SceneDepth) も同じ配列から読める (Hi-Z 用に作っていた SRV を共通にした : ensureDepthSrv)
+  - 特別なハンドル : BackBuffer (画面) / SceneDepth (シーンの深度)
+
+■ PSO (RHI : Pipeline)
+  - 描画先の形式ごとに PSO が要るので、「シェーダー × 不透明 / 半透明 × 描画先の形式」で初めて使う時に作り、覚えておく
+    (PSO のディスクキャッシュ pipeline.cache にも入るので、2 回目の起動からは読むだけ)
+    以前は「バックバッファに描く」PSO を不透明 / 半透明の 2 つだけ起動時に作っていた
+  - 全画面のシェーダー : LoadFullscreenShader(ファイル, entry)。ファイルの VSFullscreen と entry を使う
+  - ルートシグネチャに追加
+      [6] t4 ライト (Root SRV) / [7] b1 パスの値 (ルート定数 16 個 : テクスチャの番号 8 + 値 8)
+      静的サンプラー s1 (点・端で止める) / s2 (線形・端で止める)
+      フレームの定数 (b0) はピクセルシェーダーからも読む (カメラの位置 / ライトの数 / 逆行列 / 画面の大きさ)
+
+■ ライティング (hlslTemplate.shader)
+  - Unlit   : テクスチャ × 色 (以前の見た目。トーンマップも掛けない)
+  - Lambert : 拡散反射 + 環境光
+  - PBR     : Cook-Torrance (GGX 分布 / Smith-Schlick 遮蔽 / Schlick フレネル)、金属・粗さ
+              環境光の鏡面反射は環境マップ無しの近似 (Karis の EnvBRDF 近似)
+  - 光の強さは「真上から当たった白い面がその明るさ」の単位 (Lambert と PBR を切り替えても明るさが大きく変わらない)
+  - 点光源の減衰 : 距離の 2 乗で弱くなり、Range でちょうど 0 (UE4 と同じ形)
+  - 色は線形で計算 (テクスチャ・マテリアルの色は sRGB → pow 2.2)。HDR (RGBA16F) に描いてトーンマップ
+  - カリングせず両面を描くので、裏から見た面は法線を裏返す (裏側が真っ暗にならない)
+  - OBJ / PMX は金属・粗さを持たないので、鏡面の鋭さ (OBJ の Ns / PMX の反射強度) から粗さを決める
+      roughness = sqrt(2 / (n + 2)) を 0.3〜1 に収める (無ければ 0.6)。金属らしさは 0
+  - マテリアル (MaterialData) の詰め物だった所に Metallic / Roughness を入れた (32 byte のまま)
+
+■ Deferred
+  - G-Buffer : RT0 RGBA8_SRGB アルベド / RT1 RGBA16F 法線 / RT2 RGBA8 金属・粗さ (位置は深度から戻す)
+  - ライティングは全画面で 1 ピクセル 1 回 (PSDeferredLighting)。背景もここで塗る
+  - 半透明は G-Buffer に書けないので、ライティングの後に Forward で重ねる (深度は G-Buffer のものを使う)
+  - Forward と同じ絵になることを確認 (静止部分の画素の差 : 最大 1/255)
+
+■ ポストエフェクト (postProcess.shader)
+  - PSTonemap : 露出 / トーンマップ (なし / Reinhard / ACES) / ガンマ。バックバッファ (UNORM) へ
+
+■ C# (GameEngine.Runtime)
+  - Rendering/RenderTexture.cs       : RenderTexture (Create / CreateFixed / BackBuffer / SceneDepth)、FullscreenShader.Load
+  - Rendering/RenderCommandBuffer.cs : SetRenderTarget(s) / ClearColor / ClearDepth / DrawScene / DrawFullscreen
+  - Rendering/RenderPipeline.cs      : RenderPipeline (Initialize / Render / Dispose)、ForwardRenderPipeline、DeferredRenderPipeline
+  - Components/Light.cs              : DirectionalLight (Transform の向き) / PointLight (Transform の位置 + Range)
+  - Systems/LightSystem.cs           : ライトを集め、前のフレームと同じなら送らない (最大 256)
+  - Engine.cs (GraphicsSettings)     : Pipeline / LightingModel / AmbientColor / Exposure / Tonemapper / Gamma / BackgroundColor
+      パイプラインの切り替えは次のフレームの始めに行う (C++ の準備前に設定してもよい)
+      プロファイラー (F1) に "Render pipeline : Forward / PBR" などを出す
+  - サンプル : 太陽 + 点光源 2 個、F2 / F3、引数 --pipeline forward|deferred / --lighting unlit|lambert|pbr
+
+  自作のパイプラインの例 :
+      public sealed class MyPipeline : RenderPipeline
+      {
+          RenderTexture _hdr;
+          public override string Name => "Mine";
+          protected internal override void Initialize(GraphicsSettings s) => _hdr = RenderTexture.Create(RenderTextureFormat.RGBA16F);
+          protected internal override void Render(RenderCommandBuffer cmd, GraphicsSettings s)
+          {
+              cmd.SetRenderTarget(_hdr, RenderTexture.SceneDepth);
+              cmd.ClearColor(default); cmd.ClearDepth();
+              cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+              Tonemap(cmd, _hdr, s);
+          }
+      }
+      engine.Graphics.Pipeline = new MyPipeline();
+
+■ 高速化 (計測して決めたこと)
+  RTX 2070 / Release / 1280x720 / GPU 時間 (ms)。E3 前 = feature/multi-model のマージ時点
+                                              E3 前    Forward                     Deferred
+                                                       Unlit   Lambert  PBR        PBR
+    見本のシーン (34 描画)                    0.114    0.125   0.138    0.140      0.176
+    負荷テスト 20002 個 (既定の視点)          0.245    0.254   -        0.266      0.294
+    負荷テスト ground (1010 個が見える)       0.111    -       -        0.149      0.199
+    負荷テスト inside                         0.11     -       -        0.181      -
+    CPU (記録) : 見本 約 0.04 ms / 負荷テスト 約 0.09 ms (E3 前と同程度。命令は 1 回の P/Invoke で渡す)
+
+  1. 補間する値を減らした (一番効いた)
+     ライティングで法線とワールド座標をピクセルシェーダーが使うようになり、負荷テストが 0.245 → 0.336 ms に増えた。
+     切り分け : ライティングの方法 (Unlit / Lambert / PBR) では差が無い (0.336 / 0.337 / 0.338)、
+               HDR を RGBA8 にしても同じ (0.335)、ピクセルシェーダーを最小にすると 0.248 に戻る、
+               「表面の情報を作るだけ」でも 0.336 → 原因は計算ではなく、頂点 → ピクセルへ渡す値 (補間の準備) だった
+               (小さい箱が 2 万個 = 小さい三角形が多い場面ほど効く)
+     対策 : ワールド座標は渡さず、ピクセルシェーダーが SV_Position (画面の位置 + 深度) と逆行列から戻す
+            マテリアルは番号 1 個だけ渡し、ピクセルシェーダーが g_Materials を引く (以前は色・テクスチャの番号を渡していた)
+     結果 : Forward 0.336 → 0.265 ms、Deferred 0.376 → 0.294 ms (画素は変わらないことを確認)
+  2. HDR (RGBA16F) とトーンマップの固定の負担は 約 0.01 ms (見本のシーン : E3 前 0.114 → Unlit 0.125)
+  3. Deferred はこのシーン (ライト 1〜3 個) では Forward より 0.03〜0.05 ms 遅い (G-Buffer 3 枚の書き込み + 全画面 1 回)。
+     ライトが多い / 重なりが多い場面で得になるので、切り替えられるようにしてある
+  4. PSO は初めて使う組み合わせだけ作り、ディスクキャッシュにも入れる (起動時に全部は作らない)
+  5. ライトは変わった時だけ C++ へ送り、GPU へも変わった時だけ写す。パイプラインの切り替えは次のフレームの始め
+
+■ 確認
+  - Debug (D3D12 デバッグレイヤー有効) で D3D12 のエラー / 警告 0
+      Forward / Deferred / 負荷テスト ground / F2・F3 での切り替え (Forward ⇔ Deferred を 4 回) / ウィンドウのリサイズ (Deferred)
+  - Forward と Deferred の画像の差 : 静止部分で最大 1/255 (同じ結果)
+  - Deferred → Forward に戻すと VRAM が 315.6 → 300.6 MB に戻る (レンダーターゲットが解放されている)
+  - Unlit は以前と同じ見た目 (トーンマップを掛けない)
+  - 気になった点 : 検証中に 1 度、Deferred で起動したプロセスがウィンドウを閉じても終わらないことがあった
+                  (描画は続いていた)。同じ手順を 8 回 + PSO キャッシュ無しで試したが再現しなかった。
+                  もう 1 度は D3D12 のエラーを毎フレーム出していた修正前のビルドだったので、そちらは原因が分かっている
+
+■ 残り / 次
+  - ② SSAO (深度 + 法線から。Forward でも使えるよう、深度だけからでも作れる形にする)
+  - ③ アンチエイリアス (FXAA / MSAA)
+  - 影 (シャドウマップ) は E3 の範囲外。同じ描画パスの仕組みで足せる
+    ※ 同じフレームで不透明を 2 回描く (影など) 時は、カリングをパスごとに分ける必要がある (今は 1 フレーム 1 回)
+  - シーンは画面と同じ大きさに描く前提 (ピクセルシェーダーが SV_Position からワールド座標を戻すため)

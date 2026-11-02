@@ -55,5 +55,18 @@ internal static class Showcase
         world.Add(character, new MeshRenderer(tomimi));
         // ゆっくり回す (マテリアルごとの描画と半透明が、向きを変えても崩れないか見る。SpinSystem は Program が登録する)
         world.Add(character, new Spin { DegreesPerSecond = 20.0f });
+
+        // ---------- 点光源 (暖色 / 寒色。PBR のハイライトと距離の減衰を見る) ----------
+        var lights = new (Vector3 Position, Vector3 Color, float Intensity, float Range)[]
+        {
+            (new Vector3( 6.0f, 2.0f, -1.0f), new Vector3(1.0f, 0.55f, 0.25f), 10.0f, 8.0f),
+            (new Vector3(-5.5f, 2.5f, -1.5f), new Vector3(0.3f, 0.55f, 1.0f),  10.0f, 9.0f),
+        };
+        foreach (var (position, color, intensity, range) in lights)
+        {
+            var light = world.CreateEntity();
+            world.Add(light, new Transform(position));
+            world.Add(light, new PointLight { Color = color, Intensity = intensity, Range = range });
+        }
     }
 }

@@ -72,7 +72,13 @@ namespace RHI
         void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;
         void         SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)override;
 
-        bool Render(const DrawItem* items, uint32_t count)override;
+        bool Render(const DrawItem* items, uint32_t count, const RenderCommand* commands, uint32_t commandCount)override;
+
+        RenderTargetHandle     CreateRenderTarget(const RenderTargetDesc& desc)override;
+        void                   DestroyRenderTarget(RenderTargetHandle handle)override;
+        FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry)override;
+        void                   SetLights(const LightData* lights, uint32_t count)override;
+        void                   SetLightingSettings(const LightingSettings& settings)override;
         void WaitForGpu()override;
 
         void SetIndirectDrawEnabled(bool enabled)override;
@@ -87,6 +93,7 @@ namespace RHI
         void SetProfilerVisible(bool visible)override { _debugUI.SetVisible(visible); }
         bool IsProfilerVisible()const override         { return _debugUI.IsVisible(); }
         void ReportProfilerValue(const char* name, double value)override { _profiler.SetValue(name, value); }
+        void SetProfilerInfo(const char* name, const char* text)override { if (name && text) _profiler.SetInfo(name, text); }
 
     private:         /*---メンバ変数---*/
         // 破棄は Shutdown で「GPU 完了待ち → Pipeline / Buffer / CommandContext → Device」の順に行う

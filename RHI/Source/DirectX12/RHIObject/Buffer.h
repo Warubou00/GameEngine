@@ -106,10 +106,27 @@ namespace RHI
                 float    Color[4];
                 uint32_t TextureIndex;
                 uint32_t Blend;          // RHI::BlendMode
-                uint32_t Padding[2];
+                float    Metallic;       // PBR (以前は詰め物だった所を使う)
+                float    Roughness;
             };
             static_assert(sizeof(MaterialData) == 32, "MaterialData must be 32 bytes (same as HLSL)");
             static constexpr uint32_t MAX_MATERIALS = 4096;
+            static constexpr uint32_t MAX_LIGHTS    = 256;
+
+            // ---------- フレームの定数 (シェーダーの cbuffer FrameData と同じ並び : 240byte。1 フレーム 256byte の枠に入る) ----------
+            struct FrameConstants
+            {
+                ::DirectX::XMFLOAT4X4 View;            // シェーダー用に転置済み
+                ::DirectX::XMFLOAT4X4 Projection;
+                ::DirectX::XMFLOAT4X4 InvViewProj;     // 深度から位置を戻す (ディファードのライティング)
+                float                 CameraPosition[3];
+                uint32_t              LightCount;
+                float                 Ambient[3];
+                uint32_t              LightingModel;   // RHI::LightingModel
+                float                 ScreenSize[2];
+                float                 InvScreenSize[2];
+            };
+            static_assert(sizeof(FrameConstants) <= CONSTANT_BUFFER_ALIGNMENT, "FrameConstants must fit in 256 bytes");
 
             // Scene定数バッファの容量 (フレームの数で等分して使う)
             static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
@@ -233,6 +250,16 @@ namespace RHI
              ************************************************************************************/
             D3D12_GPU_VIRTUAL_ADDRESS WriteFrameConstants(uint32_t frameIndex);
 
+            // 画面の大きさ (フレームの定数に入れる。全画面のシェーダーが使う)
+            void SetScreenSize(uint32_t width, uint32_t height);
+
+            // ライト / ライティングの方法と環境光 (変わった時だけ呼ばれる。GPU へは次のフレームから)
+            void SetLights(const RHI::LightData* lights, uint32_t count);
+            void SetLightingSettings(const RHI::LightingSettings& settings);
+
+            // ライトをこのフレームの領域に書いて VRAM へ写し、その先頭アドレスを返す (変わった時だけ書く)
+            D3D12_GPU_VIRTUAL_ADDRESS WriteLights(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList);
+
             void Dispose()override;
 
         public:          /*---アクセッサー関数群---*/
@@ -291,6 +318,18 @@ namespace RHI
             std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;            // BaseVertex → 境界球
             ::DirectX::XMFLOAT4                 _frustumPlanes[6] = {};
             uint64_t                            _frustumVersion   = 0;                      // 計算した時の _frameConstantsVersion
+
+            // ---------- ライト (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
+            std::vector<RHI::LightData>                     _lights;
+            uint64_t                                        _lightsVersion = 1;
+            uint64_t                                        _lightsWritten[CommandContext::FRAME_COUNT] = {};
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _lightUpload;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _lightGpu;
+            RHI::LightingSettings                           _lightingSettings;
+            ::DirectX::XMFLOAT4X4                           _invViewProj = {};
+            float                                           _cameraPosition[3] = {};
+            uint32_t                                        _screenWidth  = 1;
+            uint32_t                                        _screenHeight = 1;
 
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
             std::vector<MaterialData>                       _materials;

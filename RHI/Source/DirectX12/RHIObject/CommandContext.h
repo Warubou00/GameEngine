@@ -39,6 +39,7 @@
 #include <vector>
 #include <memory>
 #include <d3d12.h>
+#include <wrl/client.h>
 
 
 #include "../../RHIObject/ICommandContext.h"
@@ -69,6 +70,7 @@ namespace RHI
         class SwapChain;
         class Fence;
         class DescriptorHeap;
+        class DescriptorHeapManager;
         class ResourceBuffer;
         class UploadManager;
         class GpuTimer;
@@ -141,13 +143,28 @@ namespace RHI
             bool RenderEnd();
 
             /***********************************************************************************
-             * @brief 描画命令を積む (RenderStart と RenderEnd の間で、1 フレームに 1 回呼ぶ)
-             * @details 描画ごとのルート引数は設定しない。DrawData を並べ、各描画は StartInstanceLocation = その先頭の番号で描き、
+             * @brief シーンの準備 (RenderStart と ExecuteRenderCommands の間で、1 フレームに 1 回呼ぶ)
+             * @details オブジェクト / マテリアル / ライトを GPU へ送り、DrawData と描画の引数を用意する。
+             *          描画ごとのルート引数は設定しない。各描画は StartInstanceLocation = DrawData の先頭の番号で描き、
              *          シェーダーが DrawData[DRAWID] (頂点の開始位置 / オブジェクトの番号) を読む。
              *          インスタンシングが有効なら、同じメッシュを最大 INSTANCE_BATCH_SIZE 個ずつ 1 回の描画にまとめる。
              *          描画リストが前回このフレームで描いたものと同じなら、DrawData と引数の書き込みも省く
+             *          (以前は Render で、準備とバックバッファへの描画を一緒に行っていた)
              ************************************************************************************/
-            void Render(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+            void PrepareScene(Buffer* buffer, const RHI::DrawItem* items, uint32_t count);
+
+            /***********************************************************************************
+             * @brief 描画パスの命令 (C# が組み立てた RenderCommand の列) を順に実行する
+             * @details DrawScene の不透明で GPU カリング (2 段階のオクルージョン) を行い、半透明はその結果を使う。
+             *          オクルージョンはシーンの深度 (SCENE_DEPTH) に描く時だけ (Hi-Z をその深度から作るため)
+             *          終わると深度は DEPTH_WRITE に、描画先はバックバッファに戻る (この後に ImGui を描く)
+             ************************************************************************************/
+            void ExecuteRenderCommands(Buffer* buffer, const RHI::RenderCommand* commands, uint32_t count);
+
+            // レンダーターゲット (画面に合わせる物は Resize で作り直す)。SRV はテクスチャと同じ配列に入る
+            RHI::RenderTargetHandle CreateRenderTarget(Buffer* buffer, const RHI::RenderTargetDesc& desc);
+            void                    DestroyRenderTarget(RHI::RenderTargetHandle handle);
+            static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             /***********************************************************************************
              * @brief ExecuteIndirect で描くか (false なら 1 個ずつ DrawIndexedInstanced)
@@ -428,6 +445,55 @@ namespace RHI
             std::vector<InstanceBatch>                           _batches;
             std::vector<uint32_t>                                _itemBatch;        // DrawItem ごとの _batches の番号
             Pipeline*                                            _currentPipeline = nullptr;   // RenderStart で受け取ったもの (所有しない)
+
+            // ---------- レンダーターゲット (C# の RenderTexture) ----------
+            struct RenderTarget
+            {
+                Microsoft::WRL::ComPtr<ID3D12Resource> Resource;
+                DXGI_FORMAT           Format      = DXGI_FORMAT_UNKNOWN;
+                float                 Scale       = 1.0f;     // 画面に対する倍率 (0 なら FixedWidth / FixedHeight)
+                uint32_t              FixedWidth  = 0;
+                uint32_t              FixedHeight = 0;
+                uint32_t              Width       = 0;
+                uint32_t              Height      = 0;
+                float                 Clear[4]    = {};
+                uint32_t              SrvIndex    = 0xFFFFFFFFu;   // ヒープの番号 (テクスチャの番号 = SrvIndex - SRV_INDEX_TEXTURE_BEGIN)
+                D3D12_RESOURCE_STATES State       = D3D12_RESOURCE_STATE_RENDER_TARGET;   // フレームをまたいで持ち越す
+                bool                  Alive       = false;
+            };
+            std::vector<RenderTarget>                            _renderTargets;
+            std::vector<uint32_t>                                _freeRenderTargets;
+            std::unique_ptr<RHI::DirectX12::DescriptorHeap>      _targetRtvHeap;   // レンダーターゲットの RTV (MAX_RENDER_TARGETS 個)
+            RHI::DirectX12::DescriptorHeapManager*               _heapManager = nullptr;   // SRV の置き場 (Buffer が持つ。所有しない)
+
+            // 今の描画先 (SetRenderTargets で決まる。PSO の形式もここから選ぶ)
+            uint32_t                                             _boundColors[RHI::MAX_PASS_COLOR_TARGETS] = {};
+            DXGI_FORMAT                                          _boundFormats[RHI::MAX_PASS_COLOR_TARGETS] = {};
+            D3D12_CPU_DESCRIPTOR_HANDLE                          _boundRtvs[RHI::MAX_PASS_COLOR_TARGETS] = {};
+            uint32_t                                             _boundColorCount = 0;
+            uint32_t                                             _boundDepth      = RHI::RenderTargetHandle::INVALID;
+            D3D12_RESOURCE_STATES                                _depthState      = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+
+            // このフレームのシーン (PrepareScene で決まり、DrawScene が使う)
+            struct SceneState
+            {
+                D3D12_GPU_VIRTUAL_ADDRESS ObjectData    = 0;
+                bool                      Valid         = false;
+                bool                      Reused        = false;   // DrawData を前回から使い回したか
+                bool                      Indirect      = false;
+                bool                      Culling       = false;
+                bool                      Occlusion     = false;   // オクルージョンカリングできるか
+                bool                      Culled        = false;   // このフレームでカリングを済ませたか (半透明はその結果を使う)
+                bool                      OcclusionDone = false;   // 2 段階のオクルージョンを行ったか
+            };
+            SceneState                                           _scene;
+
+            void setRenderTargets(const RHI::RenderCommand& command);
+            void drawScene(Buffer* buffer, uint32_t scenePass, uint32_t queue);
+            void drawFullscreen(Buffer* buffer, const RHI::RenderCommand& command);
+            bool createRenderTargetResource(RenderTarget& target, uint32_t index);
+            bool ensureDepthSrv(Buffer* buffer);
+            void transitionDepth(D3D12_RESOURCE_STATES after);
 
             // DrawData と引数をこのフレームの領域に書いて VRAM へコピーする。戻り値 = 前回の内容を使い回したか
             bool updateDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count);

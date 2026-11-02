@@ -237,7 +237,36 @@ namespace RHI
         _buffer->SetViewProjection(view, projection);
     }
 
-    bool RenderHardwareInterface::Render(const DrawItem* items, uint32_t count)
+    RenderTargetHandle RenderHardwareInterface::CreateRenderTarget(const RenderTargetDesc& desc)
+    {
+        if (!_isInitialized) return RenderTargetHandle();
+        return _commandContext->CreateRenderTarget(_buffer.get(), desc);
+    }
+
+    void RenderHardwareInterface::DestroyRenderTarget(RenderTargetHandle handle)
+    {
+        if (_isInitialized) _commandContext->DestroyRenderTarget(handle);
+    }
+
+    FullscreenShaderHandle RenderHardwareInterface::LoadFullscreenShader(const wchar_t* filePath, const char* entry)
+    {
+        FullscreenShaderHandle handle;
+        if (!_isInitialized || !filePath || !entry) return handle;
+        handle.Index = _pipeline->LoadFullscreenShader(filePath, entry);
+        return handle;
+    }
+
+    void RenderHardwareInterface::SetLights(const LightData* lights, uint32_t count)
+    {
+        if (_isInitialized) _buffer->SetLights(lights, count);
+    }
+
+    void RenderHardwareInterface::SetLightingSettings(const LightingSettings& settings)
+    {
+        if (_isInitialized) _buffer->SetLightingSettings(settings);
+    }
+
+    bool RenderHardwareInterface::Render(const DrawItem* items, uint32_t count, const RenderCommand* commands, uint32_t commandCount)
     {
         if (!_isInitialized) return false;
 
@@ -252,9 +281,11 @@ namespace RHI
             return false;
         }
 
-        // シーン
+        // シーン : 描くものを用意してから、C# が組み立てた描画パスの命令を順に実行する
+        // (以前はここでシーンをバックバッファに 1 回描くだけだった)
         const auto sceneStart = std::chrono::steady_clock::now();
-        _commandContext->Render(_buffer.get(), items, count);
+        _commandContext->PrepareScene(_buffer.get(), items, count);
+        _commandContext->ExecuteRenderCommands(_buffer.get(), commands, commandCount);
         _commandContext->MarkGpuSceneEnd();
         const double sceneMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - sceneStart).count();
 

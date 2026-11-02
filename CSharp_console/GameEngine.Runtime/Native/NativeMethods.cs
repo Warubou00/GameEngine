@@ -61,6 +61,57 @@ internal static unsafe class NativeMethods
         public override readonly int GetHashCode() => HashCode.Combine(Position, Forward, Up, FieldOfViewY, NearZ, FarZ, Orthographic);
     }
 
+    // ---------- 描画パス (C++ の RHI::RenderTargetDesc / RenderCommand と同じ並び) ----------
+    public const int MaxPassColorTargets = 4;
+    public const int MaxPassInputs       = 8;
+    public const int MaxPassParams       = 8;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenderTargetDesc
+    {
+        public uint    Format;       // RenderTextureFormat
+        public float   Scale;        // 画面に対する倍率 (0 なら Width / Height)
+        public uint    Width;
+        public uint    Height;
+        public Vector4 ClearColor;
+    }
+
+    // 120byte (C++ 側は static_assert で確かめている)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenderCommand
+    {
+        public uint         Type;          // RHI::RenderCommandType
+        public uint         ColorCount;
+        public fixed uint   Colors[MaxPassColorTargets];
+        public uint         Depth;
+        public uint         Arg0;
+        public uint         Arg1;
+        public Vector4      ClearColor;
+        public float        ClearDepth;
+        public fixed uint   Inputs[MaxPassInputs];
+        public fixed float  Params[MaxPassParams];
+    }
+
+    // C++ の RHI::LightData と同じ並び (48byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LightData
+    {
+        public Vector3 Position;
+        public float   Range;
+        public Vector3 Direction;
+        public uint    Type;        // 0 : 平行光源 / 1 : 点光源
+        public Vector3 Color;
+        public float   Intensity;
+    }
+
+    // C++ の RHI::LightingSettings と同じ並び (16byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LightingSettings
+    {
+        public uint    Model;       // LightingModel
+        public Vector3 Ambient;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void LogCallback([MarshalAs(UnmanagedType.LPStr)] string message);
 
@@ -84,8 +135,9 @@ internal static unsafe class NativeMethods
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Renderer_Resize(uint width, uint height);
 
+    // commands : 描画パイプラインが積んだ命令 (以前は引数が無く、シーンをバックバッファに描くだけだった)
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
-    public static extern void Renderer_Render();
+    public static extern void Renderer_Render(RenderCommand* commands, uint commandCount);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_WaitForGpu();
@@ -124,4 +176,24 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_ReportProfilerValue([MarshalAs(UnmanagedType.LPStr)] string name, double value);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetProfilerInfo([MarshalAs(UnmanagedType.LPStr)] string name, [MarshalAs(UnmanagedType.LPStr)] string text);
+
+    // ---------- 描画パス / ライト ----------
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateRenderTarget(ref RenderTargetDesc desc);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_DestroyRenderTarget(uint handle);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_LoadFullscreenShader([MarshalAs(UnmanagedType.LPWStr)] string filePath, [MarshalAs(UnmanagedType.LPStr)] string entry);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetLights(LightData* lights, uint count);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetLightingSettings(ref LightingSettings settings);
 }

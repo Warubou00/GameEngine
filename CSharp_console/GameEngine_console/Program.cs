@@ -18,8 +18,11 @@ namespace GameEngine_console;
 //   --culling on|off            : GPU カリング (既定は on。ExecuteIndirect の時だけ効く)
 //   --occlusion on|off          : オクルージョンカリング (既定は on。GPU カリングの時だけ効く)
 //   --animate on|off            : 並べたモデルを全部回し続ける (毎フレーム全部の行列を C++ へ送る負荷テスト)
+//   --pipeline forward|deferred : 描画パイプライン (既定は forward)
+//   --lighting unlit|lambert|pbr: ライティング (既定は pbr)
 //
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
+//                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR を切り替え
 // ==========================================================================
 internal static class Program
 {
@@ -88,6 +91,22 @@ internal static class Program
         if (options.TryGetValue("--instancing", out var inst))     engine.Graphics.Instancing       = inst != "off";
         if (options.TryGetValue("--culling", out var culling))     engine.Graphics.GpuCulling       = culling != "off";
         if (options.TryGetValue("--occlusion", out var occlusion)) engine.Graphics.OcclusionCulling = occlusion != "off";
+
+        // ---------- ライト / 描画パイプライン ----------
+        // 太陽 (斜め上から)。見本のシーンには点光源も置く (Showcase)
+        var sun = world.CreateEntity();
+        world.Add(sun, Transform.LookingAt(Vector3.Zero, new Vector3(0.4f, -1.0f, 0.6f)));
+        world.Add(sun, new DirectionalLight { Color = new Vector3(1.0f, 0.95f, 0.88f), Intensity = 1.6f });
+
+        if (options.TryGetValue("--pipeline", out var pipelineName) && GraphicsHotkeySystem.ParsePipeline(pipelineName) is { } pipeline)
+        {
+            engine.Graphics.Pipeline = pipeline;
+        }
+        if (options.TryGetValue("--lighting", out var lightingName) && GraphicsHotkeySystem.ParseLighting(lightingName) is { } lighting)
+        {
+            engine.Graphics.LightingModel = lighting;
+        }
+        engine.AddSystem(new GraphicsHotkeySystem(engine.Graphics));
 
         engine.Run();
     }

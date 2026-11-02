@@ -86,8 +86,26 @@ namespace RHI
 			}
 		}
 
-		Pipeline::Pipeline() = default;
-		Pipeline::~Pipeline() = default;
+        // シーンのシェーダー (hlslTemplate.shader)
+        struct Pipeline::SceneShaders
+        {
+            Shader::CompiledShader Vs;               // VSMain
+            Shader::CompiledShader PsForward;        // PSForward      : ライティングまで (不透明)
+            Shader::CompiledShader PsForwardAlpha;   // PSForwardAlpha : ライティングまで (半透明。透明な所を捨てる)
+            Shader::CompiledShader PsGBuffer;        // PSGBuffer      : ディファード用の G-Buffer
+        };
+
+        // 全画面のシェーダー (ファイルの VSFullscreen + entry)
+        struct Pipeline::FullscreenShader
+        {
+            std::wstring           Path;
+            std::string            Entry;
+            Shader::CompiledShader Vs;
+            Shader::CompiledShader Ps;
+        };
+
+        Pipeline::Pipeline() = default;
+        Pipeline::~Pipeline() = default;
 
 		void Pipeline::Dispose()
 		{
@@ -104,7 +122,9 @@ namespace RHI
 			_cullClearPipeline.reset();
 			_cullRootSignature.reset();
 			_customPipeline.clear();
-			_blendPipelineState.reset();
+			_psoMap.clear();
+			_fullscreenShaders.clear();
+			_sceneShaders.reset();
 			_pipelineState.reset();
 			_rootSignature.reset();
 		}
@@ -118,6 +138,7 @@ namespace RHI
 
             auto device = static_cast<RHI::ObjectInterface::Device*>(iDevice);
             ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
+            _device = device;
 
             // シェーダーのコンパイラ (DXC / 無ければ FXC) と PSO キャッシュ
             _shaderCompiler = std::make_unique<Shader::ShaderCompiler>();
@@ -145,12 +166,6 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetPipelineState()const
         {
             return _pipelineState ? _pipelineState->Get() : nullptr;
-        }
-
-        ID3D12PipelineState* Pipeline::GetPipelineState(uint32_t group)const
-        {
-            if (group == PIPELINE_ALPHA_BLEND && _blendPipelineState) return _blendPipelineState->Get();
-            return GetPipelineState();
         }
 
         ID3D12RootSignature* Pipeline::GetRootSignature()const
@@ -251,7 +266,7 @@ namespace RHI
             globalCbv.Descriptor.ShaderRegister            = 0;
             globalCbv.Descriptor.RegisterSpace             = 0;
             globalCbv.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-            globalCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_VERTEX;
+            globalCbv.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_ALL;   // ライティング (ピクセル) もカメラの位置などを読む
 
             // [2]: 描画ごとのデータ (t1) - Root SRV (StructuredBuffer<DrawData>)
             //      描画リストが変わった時だけ描画前にコピーで書き換える
@@ -287,7 +302,25 @@ namespace RHI
             materialData.Descriptor.ShaderRegister         = 3;
             materialData.Descriptor.RegisterSpace          = 0;
             materialData.Descriptor.Flags                  = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
-            materialData.ShaderVisibility                  = D3D12_SHADER_VISIBILITY_VERTEX;
+            materialData.ShaderVisibility                  = D3D12_SHADER_VISIBILITY_PIXEL;   // ピクセルシェーダーが引く (以前は頂点シェーダーが読んで値を渡していた)
+
+            // [6]: ライト (t4) - Root SRV (StructuredBuffer<LightData>)。ピクセルシェーダーが全部のライトを回す
+            auto& lightData = rootParams[ROOT_PARAM_LIGHT_SRV];
+            lightData.ParameterType                        = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            lightData.Descriptor.ShaderRegister            = 4;
+            lightData.Descriptor.RegisterSpace             = 0;
+            lightData.Descriptor.Flags                     = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            lightData.ShaderVisibility                     = D3D12_SHADER_VISIBILITY_PIXEL;
+
+            // [7]: パスごとの値 (b1) - ルート定数 16 個
+            //      全画面のシェーダー : [0〜7] 読むテクスチャの番号 (g_Textures の添え字) / [8〜15] 値 (float)
+            //      (レンダーターゲットもテクスチャと同じ配列に入れてあるので、番号だけで読める。ディスクリプタの並べ直しが要らない)
+            auto& passConstants = rootParams[ROOT_PARAM_PASS_CONSTANTS];
+            passConstants.ParameterType                    = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            passConstants.Constants.ShaderRegister         = 1;
+            passConstants.Constants.RegisterSpace          = 0;
+            passConstants.Constants.Num32BitValues         = PASS_CONSTANT_COUNT;
+            passConstants.ShaderVisibility                 = D3D12_SHADER_VISIBILITY_ALL;
 
             // 静的サンプラーの設定 (s0)
             D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
@@ -305,12 +338,22 @@ namespace RHI
             samplerDesc.RegisterSpace             = 0;
             samplerDesc.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
 
+            // s1 : 点 (補間しない)・端で止める … G-Buffer / 深度 を 1 ピクセルずつ読む
+            // s2 : 線形・端で止める           … 全画面の縮小 / 拡大 (ポストエフェクト)
+            D3D12_STATIC_SAMPLER_DESC samplers[3] = { samplerDesc, samplerDesc, samplerDesc };
+            samplers[1].Filter         = D3D12_FILTER_MIN_MAG_MIP_POINT;
+            samplers[1].AddressU       = samplers[1].AddressV = samplers[1].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            samplers[1].ShaderRegister = 1;
+            samplers[2].Filter         = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+            samplers[2].AddressU       = samplers[2].AddressV = samplers[2].AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            samplers[2].ShaderRegister = 2;
+
             D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSigDesc = {};
             rootSigDesc.Version                       = D3D_ROOT_SIGNATURE_VERSION_1_1;
             rootSigDesc.Desc_1_1.NumParameters        = ROOT_PARAM_COUNT;
             rootSigDesc.Desc_1_1.pParameters          = rootParams;
-            rootSigDesc.Desc_1_1.NumStaticSamplers    = 1;
-            rootSigDesc.Desc_1_1.pStaticSamplers      = &samplerDesc;
+            rootSigDesc.Desc_1_1.NumStaticSamplers    = _countof(samplers);
+            rootSigDesc.Desc_1_1.pStaticSamplers      = samplers;
             // 使わないシェーダーステージからのアクセスを禁止すると、ドライバーが少し最適化できる
             // 入力レイアウトは DRAWID (描画番号) の 1 つだけ使うので ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT が必要
             rootSigDesc.Desc_1_1.Flags                = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
@@ -331,122 +374,79 @@ namespace RHI
         RHI_RESULT Pipeline::makePipeline(Device* device)
         {
             // ==============================================================
-            // パイプラインステート (PSO)
+            // シーンのシェーダーをコンパイルし (DXC / FXC。ShaderCache/ にあれば読むだけ)、既定の PSO を作る
+            // PSO は描画先の形式ごとに要るので、C# の描画パスが使う組み合わせを初めて使う時に作る (GetScenePso)
+            // 以前は「バックバッファに描く」PSO を不透明 / 半透明の 2 つだけ持っていた
             // ==============================================================
-            // シェーダーのコンパイル (DXC / FXC。ShaderCache/ にあれば読むだけ)
-            Shader::CompiledShader vs, ps;
-            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "VSMain", Shader::Stage::Vertex, vs)) return RHI_FAILED_COMPILED_SHADER;
-            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSMain", Shader::Stage::Pixel,  ps)) return RHI_FAILED_COMPILED_SHADER;
+            _sceneShaders = std::make_unique<SceneShaders>();
+            auto& shaders = *_sceneShaders;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "VSMain",         Shader::Stage::Vertex, shaders.Vs))             return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForward",      Shader::Stage::Pixel,  shaders.PsForward))      return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlpha", Shader::Stage::Pixel,  shaders.PsForwardAlpha)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",      Shader::Stage::Pixel,  shaders.PsGBuffer))      return RHI_FAILED_COMPILED_SHADER;
 
-            D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {};
-            psoDesc.pRootSignature = _rootSignature->Get();
-            psoDesc.VS = vs.View();
-            psoDesc.PS = ps.View();
-
-            // 頂点はシェーダーがメガ頂点バッファから読む (Programmable Vertex Fetch) ので、頂点の入力は無い。
-            // 入力アセンブラに読ませるのは、描画番号 (DRAWID) のインスタンス単位の入力 1 つだけ。
-            //   中身は 0, 1, 2, ... を並べただけのバッファで、各描画の StartInstanceLocation = 描画番号 にしておくと
-            //   その番号から読み始めるので、シェーダーが「自分が何番目の描画か」を知れる
-            //   (SV_InstanceID には StartInstanceLocation が加算されないため、この方法を使う)
-            // 以前は入力レイアウトが空で、描画ごとにルート引数で情報を渡していた
-            const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
-                { "DRAWID", 0, DXGI_FORMAT_R32_UINT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
-            };
-            psoDesc.InputLayout = { inputElements, _countof(inputElements) };
-
-            // ==============================================================
-            // ラスタライザステート (RasterizerState) の設定
-            // ==============================================================
-            D3D12_RASTERIZER_DESC rasterizerDesc = {};
-            rasterizerDesc.FillMode = D3D12_FILL_MODE_SOLID; // ポリゴンを塗りつぶす (ワイヤーフレームなら D3D12_FILL_MODE_WIREFRAME)
-            // カリングしない (両面とも描画する)
-            // TODO(高速化) : 閉じたメッシュなら BACK にするとピクセルシェーダーの実行が約半分になる。
-            //               OBJ(右手系) と DirectXMath(左手系) で面の向きが逆になるため、ローダー側で揃えてから有効にする
-            rasterizerDesc.CullMode = D3D12_CULL_MODE_NONE;
-            rasterizerDesc.FrontCounterClockwise = TRUE;      // 反時計回りを表面とする
-            rasterizerDesc.DepthBias = D3D12_DEFAULT_DEPTH_BIAS;
-            rasterizerDesc.DepthBiasClamp = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-            rasterizerDesc.SlopeScaledDepthBias = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-            rasterizerDesc.DepthClipEnable = TRUE;                  // 深度クリッピングを有効化
-            rasterizerDesc.MultisampleEnable = FALSE;                 // MSAAを無効化
-            rasterizerDesc.AntialiasedLineEnable = FALSE;
-            rasterizerDesc.ForcedSampleCount = 0;
-            rasterizerDesc.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
-
-            // ==============================================================
-            // ブレンドステート (BlendState) の設定 (不透明 : 上書き)
-            // ==============================================================
-            D3D12_BLEND_DESC blendDesc = {};
-            blendDesc.AlphaToCoverageEnable = FALSE;
-            blendDesc.IndependentBlendEnable = FALSE; // 複数のレンダーターゲットで同じブレンド設定を使う
-
-            const D3D12_RENDER_TARGET_BLEND_DESC defaultRenderTargetBlendDesc = {
-                FALSE, FALSE,                     // BlendEnable, LogicOpEnable
-                D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,       // RGBのブレンド設定
-                D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,       // Alphaのブレンド設定
-                D3D12_LOGIC_OP_NOOP,                                         // 論理演算
-                D3D12_COLOR_WRITE_ENABLE_ALL                                 // RGBA全てに書き込む
-            };
-            for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
-            {
-                blendDesc.RenderTarget[i] = defaultRenderTargetBlendDesc;
-            }
-
-            psoDesc.RasterizerState = rasterizerDesc;
-            psoDesc.BlendState = blendDesc;
-            // ==============================================================
-            // 深度ステンシルステート (以前は深度バッファが無く、奥の面が手前に描かれていた : 2-6)
-            // ==============================================================
-            psoDesc.DepthStencilState.DepthEnable    = TRUE;
-            psoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-            psoDesc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;  // 手前(値が小さい)ものが残る。クリア値は 1.0
-            psoDesc.DepthStencilState.StencilEnable  = FALSE;
-            psoDesc.DSVFormat = CommandContext::DEPTH_FORMAT;                     // 深度バッファと必ず一致させる
-
-            psoDesc.SampleMask = UINT_MAX;
-            psoDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-            psoDesc.NumRenderTargets = 1;
-            psoDesc.RTVFormats[0] = RHI::DirectX12::SwapChain::FORMAT;  // スワップチェーンと必ず一致させる
-            psoDesc.SampleDesc.Count = 1;
-
-            // PSO キャッシュの名前 : ルートシグネチャ・シェーダー・主な設定から作る (どれかが変われば別の PSO として作り直される)
-            const uint64_t rootSignatureHash = _rootSignature->GetHash();
-            uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
-            hash = fnv1a(vs.Bytecode.data(), vs.Bytecode.size(), hash);
-            hash = fnv1a(ps.Bytecode.data(), ps.Bytecode.size(), hash);
-            hash = fnv1a(&rasterizerDesc, sizeof(rasterizerDesc), hash);
-            hash = fnv1a(&psoDesc.DepthStencilState, sizeof(psoDesc.DepthStencilState), hash);
-            hash = fnv1a(&psoDesc.RTVFormats[0], sizeof(psoDesc.RTVFormats[0]), hash);
-            hash = fnv1a(&psoDesc.DSVFormat, sizeof(psoDesc.DSVFormat), hash);
-            wchar_t psoName[64] = {};
-            swprintf_s(psoName, L"Default_%016llx", hash);
-
-            // キャッシュにあれば読み込み、無ければ作成して登録する
-            Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-            bool fromCache = false;
-            const HRESULT hr = _pipelineCache->GetOrCreateGraphicsPipeline(psoName, psoDesc, pso, &fromCache);
-            if (FAILED(hr))
+            // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
+            const DXGI_FORMAT hdr = HDR_FORMAT;
+            ID3D12PipelineState* pso = GetScenePso(static_cast<uint32_t>(RHI::ScenePass::Forward), PIPELINE_OPAQUE, &hdr, 1, CommandContext::DEPTH_FORMAT);
+            if (!pso)
             {
                 Core::Logger::Log("[Pipeline] Failed create pipeline state.");
                 return RHI_FAILED_CREATE_ANY_OBJECT;
             }
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> defaultPso(pso);
             _pipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
-            _pipelineState->Attach(pso);
+            _pipelineState->Attach(defaultPso);
 
-            // ==============================================================
-            // 半透明用の PSO (アルファブレンド)。シェーダー・ルートシグネチャ・深度は不透明と同じ
-            //   色 = 自分 × α + 描いてある色 × (1 - α)
-            //   深度は書く (MMD と同じ。キャラクターの髪やまつ毛を材質の順番に重ねる描き方)
-            //   完全に透明な所はピクセルシェーダーで捨てるので、深度で後ろを隠すことは無い
-            // ==============================================================
+            // プロファイラー / ログ用の説明
+            const bool shaderCached = shaders.Vs.FromCache && shaders.PsForward.FromCache && shaders.PsGBuffer.FromCache;
+            _description = std::string(_shaderCompiler->GetBackendName()) + " / SM " + _shaderCompiler->GetShaderModel() +
+                           " / shader " + (shaderCached ? "from cache" : "compiled");
+            Core::Logger::Log(("[Pipeline] " + _description).c_str());
+            return RHI_SUCCEEDED;
+        }
+
+        namespace
+        {
+            // シーン / 全画面に共通の設定 (塗りつぶし・カリングなし・深度あり・ブレンドなし)
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC makeBaseDesc(ID3D12RootSignature* rootSignature)
             {
-                // ピクセルシェーダーは透明な所を捨てる版 (不透明用は early-Z が効くよう clip を入れていない)
-                Shader::CompiledShader blendPs;
-                if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSAlphaBlend", Shader::Stage::Pixel, blendPs)) return RHI_FAILED_COMPILED_SHADER;
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+                desc.pRootSignature = rootSignature;
 
-                D3D12_GRAPHICS_PIPELINE_STATE_DESC blendPsoDesc = psoDesc;
-                blendPsoDesc.PS = blendPs.View();
-                auto& target = blendPsoDesc.BlendState.RenderTarget[0];
+                // カリングしない (両面とも描画する)
+                // TODO(高速化) : 閉じたメッシュなら BACK にするとピクセルシェーダーの実行が約半分になる。
+                //               OBJ(右手系) と DirectXMath(左手系) で面の向きが逆になるため、ローダー側で揃えてから有効にする
+                desc.RasterizerState.FillMode              = D3D12_FILL_MODE_SOLID;
+                desc.RasterizerState.CullMode              = D3D12_CULL_MODE_NONE;
+                desc.RasterizerState.FrontCounterClockwise = TRUE;
+                desc.RasterizerState.DepthBias             = D3D12_DEFAULT_DEPTH_BIAS;
+                desc.RasterizerState.DepthBiasClamp        = D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
+                desc.RasterizerState.SlopeScaledDepthBias  = D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
+                desc.RasterizerState.DepthClipEnable       = TRUE;
+
+                for (UINT i = 0; i < D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i)
+                {
+                    desc.BlendState.RenderTarget[i] = {
+                        FALSE, FALSE,
+                        D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+                        D3D12_BLEND_ONE, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD,
+                        D3D12_LOGIC_OP_NOOP, D3D12_COLOR_WRITE_ENABLE_ALL };
+                }
+
+                // 深度 (以前は深度バッファが無く、奥の面が手前に描かれていた : 2-6)
+                desc.DepthStencilState.DepthEnable    = TRUE;
+                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+                desc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS;   // 手前 (値が小さい) ものが残る。クリア値は 1.0
+
+                desc.SampleMask            = UINT_MAX;
+                desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                desc.SampleDesc.Count      = 1;
+                return desc;
+            }
+
+            void setAlphaBlend(D3D12_RENDER_TARGET_BLEND_DESC& target)
+            {
+                // 色 = 自分 × α + 描いてある色 × (1 - α)
                 target.BlendEnable    = TRUE;
                 target.SrcBlend       = D3D12_BLEND_SRC_ALPHA;
                 target.DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
@@ -454,29 +454,130 @@ namespace RHI
                 target.SrcBlendAlpha  = D3D12_BLEND_ONE;
                 target.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
                 target.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
-
-                uint64_t blendHash = fnv1a(&blendPsoDesc.BlendState, sizeof(blendPsoDesc.BlendState), hash);
-                blendHash = fnv1a(blendPs.Bytecode.data(), blendPs.Bytecode.size(), blendHash);
-                wchar_t blendName[64] = {};
-                swprintf_s(blendName, L"AlphaBlend_%016llx", blendHash);
-
-                Microsoft::WRL::ComPtr<ID3D12PipelineState> blendPso;
-                if (FAILED(_pipelineCache->GetOrCreateGraphicsPipeline(blendName, blendPsoDesc, blendPso)))
-                {
-                    Core::Logger::Log("[Pipeline] Failed create alpha blend pipeline state.");
-                    return RHI_FAILED_CREATE_ANY_OBJECT;
-                }
-                _blendPipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
-                _blendPipelineState->Attach(blendPso);
             }
 
-            // プロファイラー / ログ用の説明
-            _description = std::string(_shaderCompiler->GetBackendName()) + " / SM " + _shaderCompiler->GetShaderModel() +
-                           " / shader " + (vs.FromCache && ps.FromCache ? "from cache" : "compiled") +
-                           " / PSO " + (fromCache ? "from cache" : "created");
-            Core::Logger::Log(("[Pipeline] " + _description).c_str());
+            uint64_t hashFormats(uint64_t hash, const DXGI_FORMAT* formats, uint32_t count, DXGI_FORMAT dsv)
+            {
+                hash = fnv1a(&count, sizeof(count), hash);
+                if (count > 0) hash = fnv1a(formats, sizeof(DXGI_FORMAT) * count, hash);
+                return fnv1a(&dsv, sizeof(dsv), hash);
+            }
+        }
 
-            return RHI_SUCCEEDED;
+        ID3D12PipelineState* Pipeline::createPso(uint64_t key, const wchar_t* prefix, D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc)
+        {
+            // PSO キャッシュの名前 : ルートシグネチャ・シェーダー・設定 (鍵) から作る (どれかが変われば別の PSO として作り直される)
+            const uint64_t rootSignatureHash = _rootSignature->GetHash();
+            uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash), key);
+            hash = fnv1a(desc.VS.pShaderBytecode, desc.VS.BytecodeLength, hash);
+            hash = fnv1a(desc.PS.pShaderBytecode, desc.PS.BytecodeLength, hash);
+            hash = fnv1a(&desc.BlendState, sizeof(desc.BlendState), hash);
+            hash = fnv1a(&desc.DepthStencilState, sizeof(desc.DepthStencilState), hash);
+            wchar_t name[96] = {};
+            swprintf_s(name, L"%s_%016llx", prefix, hash);
+
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+            if (FAILED(_pipelineCache->GetOrCreateGraphicsPipeline(name, desc, pso)))
+            {
+                Core::Logger::Log(L"[Pipeline] Failed create pipeline state.");
+                Core::Logger::Log(name);
+                return nullptr;
+            }
+            _psoMap[key] = pso;
+            return pso.Get();
+        }
+
+        ID3D12PipelineState* Pipeline::GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat)
+        {
+            if (!_sceneShaders || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
+
+            uint64_t key = fnv1a(&scenePass, sizeof(scenePass), 0x5CE7E0ull);
+            key = fnv1a(&group, sizeof(group), key);
+            key = hashFormats(key, rtvFormats, rtvCount, dsvFormat);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            const auto& shaders = *_sceneShaders;
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = shaders.Vs.View();
+            const bool gbuffer = scenePass == static_cast<uint32_t>(RHI::ScenePass::GBuffer);
+            desc.PS = gbuffer ? shaders.PsGBuffer.View() : (group == PIPELINE_ALPHA_BLEND ? shaders.PsForwardAlpha.View() : shaders.PsForward.View());
+
+            // 頂点はシェーダーがメガ頂点バッファから読む (Programmable Vertex Fetch) ので、頂点の入力は無い。
+            // 入力アセンブラに読ませるのは、描画番号 (DRAWID) のインスタンス単位の入力 1 つだけ。
+            //   中身は 0, 1, 2, ... を並べただけのバッファで、各描画の StartInstanceLocation = 描画番号 にしておくと
+            //   その番号から読み始めるので、シェーダーが「自分が何番目の描画か」を知れる
+            //   (SV_InstanceID には StartInstanceLocation が加算されないため、この方法を使う)
+            static const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "DRAWID", 0, DXGI_FORMAT_R32_UINT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+            };
+            desc.InputLayout = { inputElements, _countof(inputElements) };
+
+            // 半透明 : アルファブレンド。深度は書く (MMD と同じ。完全に透明な所はピクセルシェーダーで捨てる)
+            if (group == PIPELINE_ALPHA_BLEND) setAlphaBlend(desc.BlendState.RenderTarget[0]);
+
+            desc.NumRenderTargets = rtvCount;
+            for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
+            desc.DSVFormat = dsvFormat;
+            if (dsvFormat == DXGI_FORMAT_UNKNOWN) desc.DepthStencilState.DepthEnable = FALSE;
+
+            return createPso(key, gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
+        }
+
+        ID3D12PipelineState* Pipeline::GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount)
+        {
+            if (shader >= _fullscreenShaders.size() || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
+
+            uint64_t key = fnv1a(&shader, sizeof(shader), 0xF0115C2Eull);
+            key = fnv1a(&blend, sizeof(blend), key);
+            key = hashFormats(key, rtvFormats, rtvCount, DXGI_FORMAT_UNKNOWN);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            // 全画面の三角形 1 枚 (頂点はシェーダーが SV_VertexID から作る)。深度は使わない
+            const auto& fullscreen = *_fullscreenShaders[shader];
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = fullscreen.Vs.View();
+            desc.PS = fullscreen.Ps.View();
+            desc.InputLayout = { nullptr, 0 };
+            desc.DepthStencilState.DepthEnable    = FALSE;
+            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            if (blend == 1)
+            {
+                // 加算 (光を足す)
+                auto& target = desc.BlendState.RenderTarget[0];
+                target.BlendEnable = TRUE;
+                target.SrcBlend    = D3D12_BLEND_ONE;
+                target.DestBlend   = D3D12_BLEND_ONE;
+            }
+            else if (blend == 2)
+            {
+                setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            }
+            desc.NumRenderTargets = rtvCount;
+            for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
+            desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+            return createPso(key, L"Fullscreen", desc);
+        }
+
+        uint32_t Pipeline::LoadFullscreenShader(const std::wstring& filePath, const std::string& entry)
+        {
+            for (uint32_t i = 0; i < _fullscreenShaders.size(); ++i)
+            {
+                if (_fullscreenShaders[i]->Path == filePath && _fullscreenShaders[i]->Entry == entry) return i;
+            }
+
+            auto shader = std::make_unique<FullscreenShader>();
+            shader->Path  = filePath;
+            shader->Entry = entry;
+            if (!_shaderCompiler->Compile(filePath, "VSFullscreen", Shader::Stage::Vertex, shader->Vs) ||
+                !_shaderCompiler->Compile(filePath, entry, Shader::Stage::Pixel, shader->Ps))
+            {
+                Core::Logger::Log(("[Pipeline] Failed compile fullscreen shader : " + entry).c_str());
+                return 0xFFFFFFFFu;
+            }
+            _fullscreenShaders.push_back(std::move(shader));
+            return static_cast<uint32_t>(_fullscreenShaders.size() - 1);
         }
 
         void Pipeline::makeIndirectDrawSignature(Device* device)

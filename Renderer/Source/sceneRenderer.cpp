@@ -19,6 +19,7 @@
 #include "sceneRenderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
@@ -210,6 +211,13 @@ namespace Renderer
 				desc.Color[2] = textured ? 1.0f : material->Diffuse._z;
 				desc.Color[3] = material->Transparent ? material->Diffuse._w : 1.0f;
 				desc.Blend    = material->Transparent ? RHI::BlendMode::AlphaBlend : RHI::BlendMode::Opaque;
+
+				// PBR : OBJ / PMX は金属・粗さを持たないので、鏡面の鋭さ (OBJ の Ns / PMX の反射強度) から粗さを決める
+				//       Blinn-Phong の指数 n と GGX の粗さの対応 : roughness = sqrt(2 / (n + 2))
+				//       (キャラクターの肌などが光りすぎないよう 0.3 〜 1 に収める。指数が無ければ 0.6)
+				const float power = material->Specular._w;
+				desc.Metallic  = 0.0f;
+				desc.Roughness = power > 0.0f ? (std::min)(1.0f, (std::max)(0.3f, std::sqrt(2.0f / (power + 2.0f)))) : 0.6f;
 			}
 
 			RHI::DrawItem item;
@@ -383,14 +391,44 @@ namespace Renderer
 		updateViewProjection();
 	}
 
-	bool SceneRenderer::Render()
+	bool SceneRenderer::Render(const RHI::RenderCommand* commands, uint32_t commandCount)
 	{
 		if (!IsInitialized()) return false;
 
 		// 描画リストは描画オブジェクトが増減した時だけ作り直す (位置が変わっただけなら同じリストのまま)
 		// RHI は描画リストが前回と同じなら、GPU 用の描画データも書き直さない
 		if (_drawListDirty) rebuildDrawList();
-		return _rhi->Render(_drawItems.data(), static_cast<uint32_t>(_drawItems.size()));
+		return _rhi->Render(_drawItems.data(), static_cast<uint32_t>(_drawItems.size()), commands, commandCount);
+	}
+
+	RHI::RenderTargetHandle SceneRenderer::CreateRenderTarget(const RHI::RenderTargetDesc& desc)
+	{
+		return IsInitialized() ? _rhi->CreateRenderTarget(desc) : RHI::RenderTargetHandle();
+	}
+
+	void SceneRenderer::DestroyRenderTarget(RHI::RenderTargetHandle handle)
+	{
+		if (IsInitialized()) _rhi->DestroyRenderTarget(handle);
+	}
+
+	RHI::FullscreenShaderHandle SceneRenderer::LoadFullscreenShader(const wchar_t* filePath, const char* entry)
+	{
+		return IsInitialized() ? _rhi->LoadFullscreenShader(filePath, entry) : RHI::FullscreenShaderHandle();
+	}
+
+	void SceneRenderer::SetLights(const RHI::LightData* lights, uint32_t count)
+	{
+		if (IsInitialized()) _rhi->SetLights(lights, count);
+	}
+
+	void SceneRenderer::SetLightingSettings(const RHI::LightingSettings& settings)
+	{
+		if (IsInitialized()) _rhi->SetLightingSettings(settings);
+	}
+
+	void SceneRenderer::SetProfilerInfo(const char* name, const char* text)
+	{
+		if (_rhi) _rhi->SetProfilerInfo(name, text);
 	}
 
 	void SceneRenderer::WaitForGpu()
