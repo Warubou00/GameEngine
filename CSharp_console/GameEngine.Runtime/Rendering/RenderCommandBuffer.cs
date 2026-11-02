@@ -8,6 +8,7 @@ public enum ScenePass : uint
 {
     Forward = 0,   // ライティングまで 1 回で描く (HDR の色)
     GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ (3 枚に描く)
+    ForwardSplitAmbient = 2,   // Forward + SSAO 用 : 1 枚目にライトの光、2 枚目に環境光 (後で 環境光 × 遮蔽 を足す)
 }
 
 // シーンのどの物を描くか (C++ の RHI::RenderQueue と同じ番号)

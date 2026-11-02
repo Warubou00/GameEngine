@@ -16,6 +16,12 @@ internal static class Showcase
     {
         var world = engine.World;
 
+        // ---------- 地面 (箱を平たく伸ばしたもの。上の面が y = 0。物が接する所に SSAO の影が出る) ----------
+        var ground = world.CreateEntity();
+        world.Add(ground, new Transform(new Vector3(0, -0.1f, 1.0f)) { Scale = new Vector3(12.0f, 0.05f, 10.0f) });
+        world.Add(ground, new MeshRenderer(engine.Assets.LoadModel("../Model/obj/box.obj")));
+        world.Add(ground, new Static());
+
         // ---------- 岩 (小さいモデルなので大きくして、原点の箱の周りに置く) ----------
         var stopwatch = Stopwatch.StartNew();
         var rock = engine.Assets.LoadModel("../Model/obj/rock.obj");

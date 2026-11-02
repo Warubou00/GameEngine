@@ -112,6 +112,7 @@ namespace RHI
 				case RHI::RenderTargetFormat::R32F:       return DXGI_FORMAT_R32_FLOAT;
 				case RHI::RenderTargetFormat::R8:         return DXGI_FORMAT_R8_UNORM;
 				case RHI::RenderTargetFormat::RGB10A2:    return DXGI_FORMAT_R10G10B10A2_UNORM;
+				case RHI::RenderTargetFormat::R11G11B10F: return DXGI_FORMAT_R11G11B10_FLOAT;
 				}
 				return DXGI_FORMAT_UNKNOWN;
 			}
