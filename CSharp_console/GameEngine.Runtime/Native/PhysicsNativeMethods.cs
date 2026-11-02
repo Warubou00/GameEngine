@@ -23,7 +23,7 @@ internal static unsafe class PhysicsNativeMethods
         public uint       CollideMask;
         public uint       IsStatic;
         public Vector3    Center;
-        public float      Padding0;
+        public uint       Mesh;          // CollisionMesh のハンドル (Shape = Mesh の時)
         public Vector3    Size;
         public float      Padding1;
         public Vector3    Position;
@@ -52,6 +52,44 @@ internal static unsafe class PhysicsNativeMethods
         public uint BodyB;
         public uint Type;   // 0 : Enter / 1 : Exit
         public uint Padding;
+    }
+
+    // 32byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Ray
+    {
+        public Vector3 Origin;
+        public float   MaxDistance;
+        public Vector3 Direction;
+        public uint    LayerMask;
+    }
+
+    // 48byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RaycastHit
+    {
+        public uint    Body;
+        public uint    Hit;
+        public float   Distance;
+        public float   Padding0;
+        public Vector3 Point;
+        public float   Padding1;
+        public Vector3 Normal;
+        public float   Padding2;
+    }
+
+    // 48byte。法線は BodyA → BodyB
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ContactPoint
+    {
+        public uint    BodyA;
+        public uint    BodyB;
+        public float   Depth;
+        public float   Padding0;
+        public Vector3 Position;
+        public float   Padding1;
+        public Vector3 Normal;
+        public float   Padding2;
     }
 
     // 32byte
@@ -95,4 +133,26 @@ internal static unsafe class PhysicsNativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Physics_GetStats(out PhysicsStats stats);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_CreateMesh(float* positions, uint vertexCount, uint* indices, uint indexCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_DestroyMesh(uint mesh);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Physics_Raycast(ref Ray ray, out RaycastHit hit);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_RaycastBatch(Ray* rays, uint count, RaycastHit* hits);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_OverlapSphere(Vector3* center, float radius, uint layerMask, uint* bodies, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_OverlapBox(Vector3* center, Vector3* halfExtents, Quaternion* rotation, uint layerMask, uint* bodies, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Physics_GetContacts(ContactPoint* contacts, uint capacity);
 }

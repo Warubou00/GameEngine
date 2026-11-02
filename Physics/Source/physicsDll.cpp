@@ -84,6 +84,74 @@ extern "C"
 	{
 		if (g_world && out) *out = g_world->GetStats();
 	}
+
+	// ==============================================================
+	// メッシュ (動かない物の形)
+	// ==============================================================
+
+	// positions : xyz × vertexCount / indices : 3 つで三角形 1 つ。戻り値はハンドル (BodyDesc.Mesh に入れる)
+	PHYSICS_API uint32_t Physics_CreateMesh(const float* positions, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount)
+	{
+		return g_world ? g_world->CreateMesh(positions, vertexCount, indices, indexCount) : Physics::INVALID_HANDLE;
+	}
+
+	PHYSICS_API void Physics_DestroyMesh(uint32_t mesh)
+	{
+		if (g_world) g_world->DestroyMesh(mesh);
+	}
+
+	// ==============================================================
+	// 問い合わせ (Step の後の位置で答える)
+	// ==============================================================
+
+	// 一番近い当たり。当たらなければ false (hit->Body = INVALID_HANDLE)
+	PHYSICS_API bool Physics_Raycast(const Physics::Ray* ray, Physics::RaycastHit* hit)
+	{
+		if (!g_world || !ray || !hit) return false;
+		return g_world->Raycast(*ray, *hit);
+	}
+
+	// まとめて (count 本)。戻り値は当たった数
+	PHYSICS_API uint32_t Physics_RaycastBatch(const Physics::Ray* rays, uint32_t count, Physics::RaycastHit* hits)
+	{
+		if (!g_world || !rays || !hits) return 0;
+		uint32_t hitCount = 0;
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			if (g_world->Raycast(rays[i], hits[i])) hitCount++;
+		}
+		return hitCount;
+	}
+
+	// 球と重なる体 (out に最大 capacity 個)。戻り値は重なっている全部の数
+	PHYSICS_API uint32_t Physics_OverlapSphere(const float center[3], float radius, uint32_t layerMask, uint32_t* out, uint32_t capacity)
+	{
+		if (!g_world || !center) return 0;
+		Physics::WorldShape shape;
+		shape.Type   = Physics::ShapeType::Sphere;
+		shape.Center = Physics::Float3(center[0], center[1], center[2]);
+		shape.Radius = radius;
+		return g_world->OverlapShape(shape, layerMask, out, capacity);
+	}
+
+	// 回した箱と重なる体
+	PHYSICS_API uint32_t Physics_OverlapBox(const float center[3], const float halfExtents[3], const float rotation[4], uint32_t layerMask,
+	                                        uint32_t* out, uint32_t capacity)
+	{
+		if (!g_world || !center || !halfExtents || !rotation) return 0;
+		Physics::WorldShape shape;
+		shape.Type        = Physics::ShapeType::Box;
+		shape.Center      = Physics::Float3(center[0], center[1], center[2]);
+		shape.HalfExtents = Physics::Float3(halfExtents[0], halfExtents[1], halfExtents[2]);
+		shape.Rotation    = Physics::Rotation3::FromQuaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+		return g_world->OverlapShape(shape, layerMask, out, capacity);
+	}
+
+	// 今重なっている組の接触点 (法線は BodyA → BodyB)。out が nullptr なら数だけ返す
+	PHYSICS_API uint32_t Physics_GetContacts(Physics::ContactOut* out, uint32_t capacity)
+	{
+		return g_world ? g_world->GetContacts(out, capacity) : 0;
+	}
 }
 
 /************************************

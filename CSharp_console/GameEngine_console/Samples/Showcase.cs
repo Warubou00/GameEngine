@@ -26,6 +26,7 @@ internal static class Showcase
         // ---------- 岩 (小さいモデルなので大きくして、原点の箱の周りに置く) ----------
         var stopwatch = Stopwatch.StartNew();
         var rock = engine.Assets.LoadModel("../Model/obj/rock.obj");
+        var rockMesh = engine.Assets.LoadCollisionMesh(rock);
         engine.WaitForGpu();
         engine.ReportProfilerValue("Load rock.obj (ms)", stopwatch.Elapsed.TotalMilliseconds);
 
@@ -46,8 +47,8 @@ internal static class Showcase
             });
             world.Add(entity, new MeshRenderer(rock));
             world.Add(entity, new Static());
-            // rock.obj の範囲 (x -0.45〜0.26 / y 0〜0.24 / z -0.31〜0.35) を囲む箱
-            world.Add(entity, Collider.Box(new Vector3(0.353f, 0.121f, 0.333f), new Vector3(-0.093f, 0.121f, 0.018f)));
+            // 岩は形どおりに当てる (メッシュコライダー。rock.obj は岩 3 つの塊なので、箱だと隙間にも当たっていた)
+            world.Add(entity, Collider.FromMesh(rockMesh));
         }
 
         // ---------- PMX のキャラクター (MMD の 1 単位 ≒ 8cm。身長 20 前後なので小さくして箱の横に立たせる) ----------

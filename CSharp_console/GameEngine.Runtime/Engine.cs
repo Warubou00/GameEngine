@@ -322,6 +322,7 @@ public sealed class Engine : IDisposable
             Console.WriteLine("[Engine] Physics.dll was not found. Collision detection is disabled.");
         }
         Physics = new PhysicsSettings(_physicsLoaded);
+        Assets.PhysicsLoaded = _physicsLoaded;
         _collisionSystem = new CollisionSystem(World, Physics, _physicsLoaded);
 
         Input.Attach(_window);

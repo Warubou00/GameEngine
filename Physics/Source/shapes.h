@@ -25,6 +25,8 @@
 
 namespace Physics
 {
+	struct MeshInstance;
+
 	// ワールドに置いた形 (大きさ・回転を掛けた後)
 	struct WorldShape
 	{
@@ -34,13 +36,14 @@ namespace Physics
 		Float3    HalfExtents;  // 箱 : 半分の大きさ
 		float     Radius     = 0.0f;   // 球 / カプセル
 		float     HalfHeight = 0.0f;   // カプセル : 円柱の半分の高さ (ローカルの Y)
+		const MeshInstance* Mesh = nullptr;   // メッシュ : ワールドの三角形と BVH (体が持つ)
 
 		Aabb ComputeAabb() const;
 		// 方向 d に一番遠い点 (GJK で使う)
 		Float3 Support(Float3 d) const;
 	};
 
-	// 重なっているか (接していても重なり)
+	// 重なっているか (接していても重なり)。接触の情報が要らない問い合わせ (OverlapSphere など) で使う
 	bool Overlap(const WorldShape& a, const WorldShape& b);
 }
 

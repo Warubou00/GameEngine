@@ -19,6 +19,7 @@ internal sealed unsafe class CollisionSystem
         public ColliderShape Shape;
         public Vector3       Size;
         public Vector3       Center;
+        public uint          Mesh;
         public int           Layer;
         public uint          Mask;
         public bool          IsStatic;
@@ -42,6 +43,7 @@ internal sealed unsafe class CollisionSystem
     {
         _settings = settings;
         _enabled  = enabled;
+        _settings.EntityOf = entityOf;
         world.GetPool<Collider>().Removed += (entity, _) =>
         {
             if ((uint)entity.Id >= (uint)_states.Length) return;
@@ -81,9 +83,10 @@ internal sealed unsafe class CollisionSystem
             if (entity.Id >= _states.Length) Array.Resize(ref _states, Math.Max(_states.Length * 2, entity.Id + 1));
             ref var state = ref _states[entity.Id];
             var isStatic = statics.Has(entity.Id);
+            var mesh     = collider.Shape == ColliderShape.Mesh && collider.Mesh != null ? collider.Mesh.Handle : 0u;
 
             var changedShape = !state.Active || state.Shape != collider.Shape || state.Size != collider.Size || state.Center != collider.Center ||
-                               state.Layer != collider.Layer || state.Mask != collider.CollideWith || state.IsStatic != isStatic;
+                               state.Mesh != mesh || state.Layer != collider.Layer || state.Mask != collider.CollideWith || state.IsStatic != isStatic;
             if (changedShape)
             {
                 if (state.Active) PhysicsNativeMethods.Physics_DestroyBody(state.Body);
@@ -94,6 +97,7 @@ internal sealed unsafe class CollisionSystem
                     CollideMask = collider.CollideWith,
                     IsStatic    = isStatic ? 1u : 0u,
                     Center      = collider.Center,
+                    Mesh        = mesh,
                     Size        = collider.Size,
                     Position    = transform.Position,
                     Rotation    = transform.Rotation,
@@ -102,7 +106,7 @@ internal sealed unsafe class CollisionSystem
                 var body = PhysicsNativeMethods.Physics_CreateBody(ref desc);
                 state = new BodyState
                 {
-                    Body = body, Shape = collider.Shape, Size = collider.Size, Center = collider.Center, Layer = collider.Layer,
+                    Body = body, Shape = collider.Shape, Size = collider.Size, Center = collider.Center, Mesh = mesh, Layer = collider.Layer,
                     Mask = collider.CollideWith, IsStatic = isStatic, Sent = transform.LocalToWorld, Active = body != PhysicsNativeMethods.InvalidHandle,
                 };
                 if (state.Active)
@@ -168,6 +172,25 @@ internal sealed unsafe class CollisionSystem
         _settings.StepMs        = stats.StepMs;
 
         if (_settings.ShowColliders) drawColliders(world);
+        if (_settings.ShowContacts)  drawContacts();
+    }
+
+    private readonly List<Contact> _contacts = new();
+
+    // 確認用 : 接触点 (黄色の小さな十字) と法線 (A → B の向きに 0.3 の線)
+    private void drawContacts()
+    {
+        var pointColor  = DebugDraw.Color(1.0f, 0.9f, 0.1f);
+        var normalColor = DebugDraw.Color(1.0f, 0.6f, 0.1f);
+        _settings.GetContacts(_contacts);
+        foreach (var c in _contacts)
+        {
+            const float s = 0.05f;
+            DebugDraw.Line(c.Position - Vector3.UnitX * s, c.Position + Vector3.UnitX * s, pointColor);
+            DebugDraw.Line(c.Position - Vector3.UnitY * s, c.Position + Vector3.UnitY * s, pointColor);
+            DebugDraw.Line(c.Position - Vector3.UnitZ * s, c.Position + Vector3.UnitZ * s, pointColor);
+            DebugDraw.Line(c.Position, c.Position + c.Normal * 0.3f, normalColor);
+        }
     }
 
     private Entity entityOf(uint body)
@@ -213,6 +236,10 @@ internal sealed unsafe class CollisionSystem
                 break;
             case ColliderShape.Capsule:
                 DebugDraw.WireCapsule(center, transform.Rotation, c.Size.X * MathF.Max(scale.X, scale.Z), c.Size.Y * scale.Y, color);
+                break;
+            case ColliderShape.Mesh:
+                // メッシュは三角形が多いので、形は描かない (モデルそのものが見えている)。位置に小さな印だけ
+                DebugDraw.WireBox(transform.Position, transform.Rotation, new Vector3(0.1f), color);
                 break;
             }
         }

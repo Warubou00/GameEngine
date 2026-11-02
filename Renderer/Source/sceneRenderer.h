@@ -91,6 +91,9 @@ namespace Renderer
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)。outSubMeshCount にサブメッシュの数
 		 ************************************************************************************/
 		uint32_t LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount);
+		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)
+		bool GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
+		                      uint32_t* outVertexCount, uint32_t* outIndexCount) const;
 
 		// ==========================================================
 		// 描画オブジェクト (モデル 1 個を 1 か所に置いたもの)
@@ -159,6 +162,10 @@ namespace Renderer
 		struct ModelResource
 		{
 			std::vector<RHI::DrawItem> SubMeshes;
+			// 衝突判定のメッシュ用に残す CPU 側の形 (位置 xyz と、全サブメッシュをつないだインデックス)
+			// 以前は GPU へ送った後に CPU 側のメッシュを全部捨てていた
+			std::vector<float>    Positions;
+			std::vector<uint32_t> Indices;
 		};
 
 		// 描画オブジェクト : どのモデルを、どの RHI のオブジェクト (ワールド行列) で描くか

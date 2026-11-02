@@ -85,12 +85,18 @@
     <ClInclude Include="Source\dynamicTree.h" />
     <ClInclude Include="Source\shapes.h" />
     <ClInclude Include="Source\physicsWorld.h" />
+    <ClInclude Include="Source\meshShape.h" />
+    <ClInclude Include="Source\contacts.h" />
+    <ClInclude Include="Source\raycast.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\dynamicTree.cpp" />
     <ClCompile Include="Source\shapes.cpp" />
     <ClCompile Include="Source\physicsWorld.cpp" />
     <ClCompile Include="Source\physicsDll.cpp" />
+    <ClCompile Include="Source\meshShape.cpp" />
+    <ClCompile Include="Source\contacts.cpp" />
+    <ClCompile Include="Source\raycast.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

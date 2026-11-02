@@ -9,7 +9,9 @@
 *                         動いた物が動く物の 1/4 以上の時は、1 個ずつ問い合わせずに、木の節の組を 1 回たどって全部の組を探す
 *                 Brute : 全部の組 (比べる用)
 *                 Grid  : 動く物を均一なグリッドに入れて、同じマスの物どうし (比べる用)
-*            3. ナローフェーズ : 候補の形が本当に重なっているか (shapes.cpp)
+*            3. ナローフェーズ : 候補の形の接触 (法線 / めり込み量 / 接触点) を求める (contacts.cpp)
+*               重なっている組の接触はこの表に残す (動いていない組は前の接触のまま。物理 (P1) が使う)
+*               以前 (C1) は「重なっているか」だけだった
 *            4. 前の Step の「重なっている組」と比べて、重なり始め (Enter) / 離れた (Exit) をイベントにする
 *          体はハンドル (番号 16bit + 世代 16bit) で渡す。古いハンドルは世代が違うので何もしない
 *
@@ -27,10 +29,14 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <memory>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
 #include "common.h"
 #include "shapes.h"
+#include "contacts.h"
+#include "meshShape.h"
 #include "dynamicTree.h"
 
 namespace Physics
@@ -48,6 +54,17 @@ namespace Physics
 		const std::vector<CollisionEvent>& GetEvents() const { return _events; }
 		const PhysicsStats& GetStats() const { return _stats; }
 
+		// メッシュ (動かない物の形)。同じメッシュを複数の体で使える
+		uint32_t CreateMesh(const float* positions, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount);
+		void     DestroyMesh(uint32_t mesh);
+
+		// 問い合わせ (Step の後の位置で答える)
+		bool     Raycast(const Ray& ray, RaycastHit& hit) const;
+		uint32_t OverlapShape(const WorldShape& shape, uint32_t layerMask, uint32_t* out, uint32_t capacity) const;
+
+		// 今重なっている組の接触点 (out が nullptr なら数だけ)
+		uint32_t GetContacts(ContactOut* out, uint32_t capacity) const;
+
 	private:
 		struct Body
 		{
@@ -63,6 +80,8 @@ namespace Physics
 			Aabb       Box;
 			int        Proxy     = DynamicTree::NULL_NODE;
 			uint32_t   MovedStep = 0;   // この Step で動いたか (= _stepIndex)
+			std::shared_ptr<const TriangleMesh> MeshData;   // メッシュの形 (共有)
+			std::unique_ptr<MeshInstance>       MeshInst;   // この体のワールドの三角形と BVH
 		};
 
 		std::vector<Body>     _bodies;
@@ -75,8 +94,13 @@ namespace Physics
 		uint32_t              _dynamicCount = 0;   // 動く物の数 (動いた割合で、木の調べ方を選ぶ)
 		bool                  _fullPass = false;   // この Step は全部の組を調べ直したか (イベントを全部と比べる)
 
-		// 今重なっている組 (番号の小さい方 << 32 | 大きい方)
+		// 今重なっている組 (番号の小さい方 << 32 | 大きい方) と、その接触 (法線は小さい番号 → 大きい番号)
 		std::unordered_set<uint64_t> _overlaps;
+		std::unordered_map<uint64_t, Manifold> _manifolds;
+		std::vector<Manifold>        _candidateManifolds;   // ナローフェーズの結果 (_candidates と同じ並び。使い回す)
+
+		// メッシュ (番号 + 1 をハンドルにする。0 は無し)
+		std::vector<std::shared_ptr<TriangleMesh>> _meshes;
 		std::vector<uint64_t>        _candidates;  // この Step で箱が重なった組 (形の判定をする。使い回す)
 		std::vector<uint64_t>        _found;       // この Step で重なっていた組 (使い回す)
 		std::vector<uint64_t>        _exits;

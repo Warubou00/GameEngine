@@ -14,6 +14,8 @@
 * Include Headers
 ******************************************************************/
 #include "shapes.h"
+#include "contacts.h"
+#include "meshShape.h"
 
 namespace Physics
 {
@@ -200,6 +202,8 @@ namespace Physics
 			extent = up + Float3(Radius, Radius, Radius);
 			break;
 		}
+		case ShapeType::Mesh:
+			return Mesh ? Mesh->Box : Aabb{ Center, Center };
 		}
 		return { Center - extent, Center + extent };
 	}
@@ -235,6 +239,13 @@ namespace Physics
 	bool Overlap(const WorldShape& a, const WorldShape& b)
 	{
 		const ShapeType ta = a.Type, tb = b.Type;
+
+		// メッシュは三角形ごとに調べる (接触の計算と同じ)
+		if (ta == ShapeType::Mesh || tb == ShapeType::Mesh)
+		{
+			Manifold m;
+			return Collide(a, b, m);
+		}
 
 		// 球 / カプセル どうし : 芯 (点 / 線分) の距離 <= 半径の和
 		if (ta != ShapeType::Box && tb != ShapeType::Box)

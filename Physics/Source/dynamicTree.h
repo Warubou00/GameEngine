@@ -72,6 +72,47 @@ namespace Physics
 			}
 		}
 
+		// レイが通る葉ごとに callback(userData, limit) を呼ぶ。callback は当たった距離で limit を縮める
+		// (近い当たりが見つかると、それより遠い枝はたどらない)。invDir = 1 / 向き
+		template<typename Callback>
+		void RayCast(const Float3& origin, const Float3& invDir, float maxDistance, Callback&& callback) const
+		{
+			if (_root == NULL_NODE) return;
+			float limit = maxDistance;
+			std::vector<int>& stack = _stack;
+			stack.clear();
+			stack.push_back(_root);
+			while (!stack.empty())
+			{
+				const int id = stack.back();
+				stack.pop_back();
+				const Node& node = _nodes[id];
+				if (!rayHitsBox(node.Box, origin, invDir, limit)) continue;
+				if (node.IsLeaf()) callback(node.UserData, limit);
+				else
+				{
+					stack.push_back(node.Child1);
+					stack.push_back(node.Child2);
+				}
+			}
+		}
+
+		static bool rayHitsBox(const Aabb& box, const Float3& o, const Float3& inv, float limit)
+		{
+			float t0 = 0.0f, t1 = limit;
+			const float bmin[3] = { box.min.x, box.min.y, box.min.z }, bmax[3] = { box.max.x, box.max.y, box.max.z };
+			const float oo[3] = { o.x, o.y, o.z }, ii[3] = { inv.x, inv.y, inv.z };
+			for (int i = 0; i < 3; ++i)
+			{
+				float a = (bmin[i] - oo[i]) * ii[i], b = (bmax[i] - oo[i]) * ii[i];
+				if (a > b) std::swap(a, b);
+				if (a > t0) t0 = a;
+				if (b < t1) t1 = b;
+				if (t0 > t1) return false;
+			}
+			return true;
+		}
+
 		// 木の中で、太らせた箱が重なる葉の組を全部 (各組 1 回)。callback(userDataA, userDataB)
 		template<typename Callback>
 		void QueryAllPairs(Callback&& callback) const
