@@ -64,13 +64,14 @@ namespace RHI
 	static_assert(offsetof(Vertex, UV)     == 48, "Vertex::UV offset must be 48");
 
 	// ==========================================================================
-	// オブジェクトごとの定数 (シェーダーの cbuffer ObjectData と同じ並び)
+	// オブジェクトごとの定数 (シェーダーの struct ObjectData と同じ並び)
 	// 行列は DirectXMath の普通の行列のまま渡す (転置は RHI の中で行う)
+	// 以前はテクスチャの番号も持っていたが、マテリアル (MaterialHandle) に移した。
+	// オブジェクトは「置く場所」だけになり、1 つのモデルの全サブメッシュで 1 個を共有できる
 	// ==========================================================================
 	struct ObjectConstants
 	{
-		::DirectX::XMFLOAT4X4 World        = {};   // ワールド行列
-		uint32_t              TextureIndex = 0;    // テクスチャのハンドル番号 (0 = 既定テクスチャ(白))
+		::DirectX::XMFLOAT4X4 World = {};   // ワールド行列
 	};
 
 	// ==========================================================================
@@ -90,6 +91,29 @@ namespace RHI
 	{
 		uint32_t Index = INVALID_HANDLE_INDEX;
 		bool IsValid()const { return Index != INVALID_HANDLE_INDEX; }
+	};
+
+	// ==========================================================================
+	// マテリアル (テクスチャ・色・ブレンドの方法)
+	//   描き方 (ブレンド) ごとに PSO を分けて、まとめて描く : 不透明 → 半透明 の順
+	// ==========================================================================
+	enum class BlendMode : uint32_t
+	{
+		Opaque     = 0,   // 不透明 (先に描く。GPU カリング / オクルージョンの対象)
+		AlphaBlend = 1,   // 半透明 (不透明の後に、DrawItem の順番で描く。深度は書く = MMD と同じ)
+	};
+
+	struct MaterialDesc
+	{
+		TextureHandle Texture;                          // 既定 (0) は白 1x1
+		float         Color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };   // テクスチャ × 頂点の色 × この色
+		BlendMode     Blend    = BlendMode::Opaque;
+	};
+
+	struct MaterialHandle
+	{
+		static constexpr uint32_t DEFAULT = 0;          // 既定のマテリアル (白・不透明)
+		uint32_t Index = DEFAULT;
 	};
 
 	// メガ頂点バッファ内の範囲
@@ -115,8 +139,9 @@ namespace RHI
 	{
 		uint32_t     BaseVertex = 0;   // VertexRange::BaseVertex
 		uint32_t     FirstIndex = 0;   // IndexRange::FirstIndex
-		uint32_t     IndexCount = 0;   // IndexRange::Count
-		ObjectHandle Object;           // ワールド行列 / テクスチャ
+		uint32_t       IndexCount = 0;   // IndexRange::Count
+		ObjectHandle   Object;           // ワールド行列
+		MaterialHandle Material;         // テクスチャ / 色 / ブレンドの方法 (以前はオブジェクトがテクスチャを持っていた)
 	};
 
 	// ==========================================================================

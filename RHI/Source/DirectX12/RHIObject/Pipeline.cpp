@@ -104,6 +104,7 @@ namespace RHI
 			_cullClearPipeline.reset();
 			_cullRootSignature.reset();
 			_customPipeline.clear();
+			_blendPipelineState.reset();
 			_pipelineState.reset();
 			_rootSignature.reset();
 		}
@@ -144,6 +145,12 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetPipelineState()const
         {
             return _pipelineState ? _pipelineState->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetPipelineState(uint32_t group)const
+        {
+            if (group == PIPELINE_ALPHA_BLEND && _blendPipelineState) return _blendPipelineState->Get();
+            return GetPipelineState();
         }
 
         ID3D12RootSignature* Pipeline::GetRootSignature()const
@@ -272,6 +279,15 @@ namespace RHI
             texTable.DescriptorTable.NumDescriptorRanges   = 1;
             texTable.DescriptorTable.pDescriptorRanges     = &srvRangeTex;
             texTable.ShaderVisibility                      = D3D12_SHADER_VISIBILITY_PIXEL; // テクスチャはピクセルシェーダーで読む
+
+            // [5]: マテリアル (t3) - Root SRV (StructuredBuffer<MaterialData>)
+            //      テクスチャの番号・色・ブレンドの方法。DrawData.MaterialIndex で引く (以前はオブジェクトがテクスチャを持っていた)
+            auto& materialData = rootParams[ROOT_PARAM_MATERIAL_SRV];
+            materialData.ParameterType                     = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            materialData.Descriptor.ShaderRegister         = 3;
+            materialData.Descriptor.RegisterSpace          = 0;
+            materialData.Descriptor.Flags                  = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            materialData.ShaderVisibility                  = D3D12_SHADER_VISIBILITY_VERTEX;
 
             // 静的サンプラーの設定 (s0)
             D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
@@ -416,6 +432,43 @@ namespace RHI
             }
             _pipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
             _pipelineState->Attach(pso);
+
+            // ==============================================================
+            // 半透明用の PSO (アルファブレンド)。シェーダー・ルートシグネチャ・深度は不透明と同じ
+            //   色 = 自分 × α + 描いてある色 × (1 - α)
+            //   深度は書く (MMD と同じ。キャラクターの髪やまつ毛を材質の順番に重ねる描き方)
+            //   完全に透明な所はピクセルシェーダーで捨てるので、深度で後ろを隠すことは無い
+            // ==============================================================
+            {
+                // ピクセルシェーダーは透明な所を捨てる版 (不透明用は early-Z が効くよう clip を入れていない)
+                Shader::CompiledShader blendPs;
+                if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSAlphaBlend", Shader::Stage::Pixel, blendPs)) return RHI_FAILED_COMPILED_SHADER;
+
+                D3D12_GRAPHICS_PIPELINE_STATE_DESC blendPsoDesc = psoDesc;
+                blendPsoDesc.PS = blendPs.View();
+                auto& target = blendPsoDesc.BlendState.RenderTarget[0];
+                target.BlendEnable    = TRUE;
+                target.SrcBlend       = D3D12_BLEND_SRC_ALPHA;
+                target.DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+                target.BlendOp        = D3D12_BLEND_OP_ADD;
+                target.SrcBlendAlpha  = D3D12_BLEND_ONE;
+                target.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+                target.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+
+                uint64_t blendHash = fnv1a(&blendPsoDesc.BlendState, sizeof(blendPsoDesc.BlendState), hash);
+                blendHash = fnv1a(blendPs.Bytecode.data(), blendPs.Bytecode.size(), blendHash);
+                wchar_t blendName[64] = {};
+                swprintf_s(blendName, L"AlphaBlend_%016llx", blendHash);
+
+                Microsoft::WRL::ComPtr<ID3D12PipelineState> blendPso;
+                if (FAILED(_pipelineCache->GetOrCreateGraphicsPipeline(blendName, blendPsoDesc, blendPso)))
+                {
+                    Core::Logger::Log("[Pipeline] Failed create alpha blend pipeline state.");
+                    return RHI_FAILED_CREATE_ANY_OBJECT;
+                }
+                _blendPipelineState = std::make_unique<RHI::DirectX12::PipelineState>();
+                _blendPipelineState->Attach(blendPso);
+            }
 
             // プロファイラー / ログ用の説明
             _description = std::string(_shaderCompiler->GetBackendName()) + " / SM " + _shaderCompiler->GetShaderModel() +

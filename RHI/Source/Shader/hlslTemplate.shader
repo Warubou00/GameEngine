@@ -30,20 +30,30 @@ struct Vertex
     float2 UV;          // offset 48
 };                      // 合計 56byte
 
-// 描画 1 回分のデータ (CommandContext::DrawData と同じ並び : 8byte)
+// 描画 1 回分のデータ (CommandContext::DrawData と同じ並び : 16byte)
 struct DrawData
 {
-    uint ObjectIndex;   // g_Objects[] の添え字
-    uint BaseVertex;    // メガ頂点バッファ内の開始位置
+    uint ObjectIndex;     // g_Objects[] の添え字
+    uint BaseVertex;      // メガ頂点バッファ内の開始位置
+    uint MaterialIndex;   // g_Materials[] の添え字 (以前はオブジェクトがテクスチャを持っていた)
+    uint Padding;
 };
 
-// オブジェクトごとのデータ (RHI::ObjectConstants + 詰め物 : Buffer::OBJECT_DATA_STRIDE = 80byte)
+// オブジェクトごとのデータ (RHI::ObjectConstants : Buffer::OBJECT_DATA_STRIDE = 64byte)
 // 以前は cbuffer ObjectData (b2) だった。StructuredBuffer の行列も cbuffer と同じ列優先で読まれる
+// テクスチャの番号はマテリアルに移した (80 → 64byte)
 struct ObjectData
 {
     matrix World;
+};
+
+// マテリアル (Buffer::MaterialData と同じ並び : 32byte)
+struct MaterialData
+{
+    float4 Color;       // テクスチャ × 頂点の色 × この色
     uint   TextureID;   // g_Textures[] の添え字 (ディスクリプタヒープの番号ではない)
-    uint3  Padding;
+    uint   Blend;       // RHI::BlendMode (PSO で分けて描くので、シェーダーでは使わない)
+    uint2  Padding;
 };
 
 struct VSOutput
@@ -52,7 +62,8 @@ struct VSOutput
     float3 Normal   : NORMAL;      // ワールド空間の法線 (ライティング用。今は未使用)
     float4 Color    : COLOR;
     float2 UV       : TEXCOORD;
-    nointerpolation uint TextureID : TEXTUREID;   // 3 頂点とも同じ値なので補間しない
+    nointerpolation uint   TextureID     : TEXTUREID;   // 3 頂点とも同じ値なので補間しない
+    nointerpolation float4 MaterialColor : MATCOLOR;
 };
 
 // ==============================================================
@@ -68,6 +79,9 @@ StructuredBuffer<DrawData>   g_Draws   : register(t1);
 
 // [ROOT_PARAM_OBJECT_DATA_SRV]: オブジェクトごとのデータ (Root SRV)。このフレームの領域の先頭を指す
 StructuredBuffer<ObjectData> g_Objects : register(t2);
+
+// [ROOT_PARAM_MATERIAL_SRV]: マテリアル (Root SRV)。DrawData.MaterialIndex 番目を読む
+StructuredBuffer<MaterialData> g_Materials : register(t3);
 
 // [ROOT_PARAM_TEXTURE_TABLE]: バインドレス・テクスチャ配列 (Descriptor Table)
 // [0] は既定テクスチャ(白 1x1)。テクスチャを持たないマテリアルはこれを使う
@@ -97,6 +111,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint drawID : DRAWID)
     VSOutput output;
     const DrawData   draw   = g_Draws[drawID];
     const ObjectData object = g_Objects[draw.ObjectIndex];
+    const MaterialData material = g_Materials[draw.MaterialIndex];
     Vertex v = g_MegaVB[draw.BaseVertex + vertexID];
 
     // ローカル → ワールド → ビュー → クリップ の順に変換する
@@ -111,7 +126,8 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint drawID : DRAWID)
 
     output.Color = v.Color;
     output.UV    = v.UV;
-    output.TextureID = object.TextureID;
+    output.TextureID     = material.TextureID;
+    output.MaterialColor = material.Color;
 
     return output;
 }
@@ -124,7 +140,19 @@ float4 PSMain(VSOutput input) : SV_TARGET
     // テクスチャIDを使って配列から対象画像を選び、色をサンプリングする
     float4 texColor = g_Textures[input.TextureID].Sample(g_Sampler, input.UV);
 
-    // 頂点カラーとテクスチャカラーを掛け合わせる
-    // (頂点カラーが白ならテクスチャそのままの色、既定テクスチャ(白)なら頂点カラーそのままになる)
-    return input.Color * texColor;
+    // 頂点カラー × テクスチャカラー × マテリアルの色
+    // (頂点カラーとマテリアルが白ならテクスチャそのままの色、既定テクスチャ(白)なら色だけになる)
+    return input.Color * texColor * input.MaterialColor;
+}
+
+// ==============================================================
+// Pixel Shader (半透明用。アルファブレンドの PSO で使う)
+//   完全に透明な所は描かない (半透明のマテリアルは深度も書くので、透明な所で後ろを隠さないように)
+//   不透明用 (PSMain) に clip を入れると、GPU が描く前の深度テスト (early-Z) を使えなくなるので分けている
+// ==============================================================
+float4 PSAlphaBlend(VSOutput input) : SV_TARGET
+{
+    const float4 color = PSMain(input);
+    clip(color.a - 1.0f / 255.0f);
+    return color;
 }

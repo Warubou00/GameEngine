@@ -98,7 +98,18 @@ namespace RHI
                 ROOT_PARAM_DRAW_DATA_SRV       = 2,  // t1        : 描画ごとのデータ (Root SRV)
                 ROOT_PARAM_OBJECT_DATA_SRV     = 3,  // t2        : オブジェクトごとのデータ (Root SRV)
                 ROOT_PARAM_TEXTURE_TABLE       = 4,  // t0,space1 : テクスチャ配列 (ディスクリプタテーブル)
+                ROOT_PARAM_MATERIAL_SRV        = 5,  // t3        : マテリアル (Root SRV)
                 ROOT_PARAM_COUNT
+            };
+
+            // ----------------------------------------------------------
+            // 描き方のまとまり (PSO)。この順番に描く (不透明 → 半透明)。RHI::BlendMode と同じ番号
+            // ----------------------------------------------------------
+            enum PipelineGroup : unsigned int
+            {
+                PIPELINE_OPAQUE      = 0,
+                PIPELINE_ALPHA_BLEND = 1,
+                PIPELINE_GROUP_COUNT
             };
 
             // ----------------------------------------------------------
@@ -119,10 +130,10 @@ namespace RHI
                 CULL_PARAM_FRAME       = 10, // b1 : フレームの定数 (View / Projection。Root CBV)
                 CULL_PARAM_COUNT
             };
-            // float4 ×6 + uint ×8
-            // ルートシグネチャの上限は 64 DWORD : 32 + ルート CBV / SRV / UAV 10 個 × 2 = 52
+            // float4 ×6 + uint ×9
+            // ルートシグネチャの上限は 64 DWORD : 33 + ルート CBV / SRV / UAV 10 個 × 2 = 53
             // (以前は Hi-Z のカメラの行列もルート定数で渡していて 63 だった。今はフレームの定数を Root CBV で読む)
-            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 8;
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 9;
             static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
 
             // ----------------------------------------------------------
@@ -164,7 +175,8 @@ namespace RHI
 
         public:          /*---アクセッサー関数群---*/
 
-            ID3D12PipelineState* GetPipelineState()const;
+            ID3D12PipelineState* GetPipelineState()const;                 // 不透明
+            ID3D12PipelineState* GetPipelineState(uint32_t group)const;   // PipelineGroup ごと
             ID3D12RootSignature* GetRootSignature()const;
 
             // ExecuteIndirect 用のコマンドシグネチャ (作れなかった環境では nullptr = 通常の描画だけ)
@@ -186,7 +198,8 @@ namespace RHI
             const std::string& GetDescription()const { return _description; }
 
         private:         /*---メンバ変数---*/
-            std::unique_ptr<DirectX12::PipelineState>    _pipelineState;
+            std::unique_ptr<DirectX12::PipelineState>    _pipelineState;           // 不透明
+            std::unique_ptr<DirectX12::PipelineState>    _blendPipelineState;      // 半透明 (アルファブレンド)
             std::unique_ptr<DirectX12::RootSignature>    _rootSignature;
             std::unique_ptr<DirectX12::CommandSignature> _indirectDrawSignature;   // ExecuteIndirect 用
             std::unique_ptr<DirectX12::RootSignature>    _cullRootSignature;       // GPU カリング用

@@ -23,19 +23,19 @@
 // ※バインディングは Pipeline.cpp の makeCullingPipeline と一致させること
 // ==============================================================
 
-// hlslTemplate.shader / CommandContext::DrawData と同じ (8byte)
+// hlslTemplate.shader / CommandContext::DrawData と同じ (16byte)
 struct DrawData
 {
     uint ObjectIndex;
     uint BaseVertex;
+    uint MaterialIndex;
+    uint Padding;
 };
 
-// hlslTemplate.shader / Buffer::OBJECT_DATA_STRIDE と同じ (80byte)
+// hlslTemplate.shader / Buffer::OBJECT_DATA_STRIDE と同じ (64byte)
 struct ObjectData
 {
     matrix World;
-    uint   TextureID;
-    uint3  Padding;
 };
 
 // CommandContext::CullInstance と同じ (20byte)
@@ -59,6 +59,9 @@ cbuffer CullConstants : register(b0)
     uint   g_HiZLevels;        // 段の数 (後段で使う)
     uint   g_Phase;            // 0 : 視錐台だけ / 1 : 前段 / 2 : 後段
     uint   g_ResetVisibility;  // 1 : g_Visibility が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
+    uint   g_AlphaDrawStart;   // この番号以降の描画は半透明 (64 の倍数。無ければ 0xFFFFFFFF)
+                               // 半透明は不透明の後に描くので、前段では描かず、後段で (前段で描いたかに関係なく) 描く
+                               // 詰め直しも不透明 / 半透明で分ける (カウンターと書く場所が別)
 };
 
 // [1] フレームの定数 (描画用の GlobalData と同じもの。後段で Hi-Z と比べる時に、このフレームのカメラで投影する)
@@ -92,7 +95,7 @@ void CSClear(uint3 id : SV_DispatchThreadID)
     const uint draw = id.x;
     if (draw == 0)
     {
-        g_OutArgs.Store2(g_CounterOffset, uint2(0, 0));   // 映ったオブジェクトの数 / 詰めた描画の数
+        g_OutArgs.Store3(g_CounterOffset, uint3(0, 0, 0));   // 映ったオブジェクトの数 / 詰めた描画の数 (不透明 / 半透明)
     }
     if (draw >= g_DrawCount) return;
 
@@ -222,20 +225,22 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             if (g_Phase == 2 && inFrustum && isOccluded(center, radius)) occluded = true;
         }
 
+        const bool transparent = cull.Draw >= g_AlphaDrawStart;
         if (g_Phase == 0)
         {
-            visible = inFrustum;                         // 視錐台だけ
+            visible = inFrustum;                                    // 視錐台だけ
         }
         else if (g_Phase == 1)
         {
-            visible = inFrustum && wasVisible;           // 前段 : 前のフレームで見えていた物
+            visible = inFrustum && wasVisible && !transparent;      // 前段 : 前のフレームで見えていた不透明な物
         }
         else
         {
             // 後段 : 見えているかを記録し (次のフレームの前段で使う)、前段で描かなかった物だけ描く
+            // 半透明は前段で描かないので、見えていれば必ずここで描く
             const bool nowVisible = inFrustum && !occluded;
             g_Visibility[index] = nowVisible ? 1 : 0;
-            visible = nowVisible && !wasVisible;
+            visible = nowVisible && (transparent || !wasVisible);
         }
     }
 
@@ -286,6 +291,11 @@ void CSCompact(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
     gs_Flag[groupIndex] = visible ? 1 : 0;
     GroupMemoryBarrierWithGroupSync();
 
+    // 不透明 / 半透明のどちらの描画か (半透明の先頭は 64 の倍数なので、64 個のまとまりはどちらか一方だけ)
+    // それぞれ別のカウンターに数え、別の場所 (自分の描き方の先頭から) に詰める
+    const uint pipelineGroup = (id.x - groupIndex) >= g_AlphaDrawStart ? 1 : 0;
+    const uint groupFirst    = pipelineGroup == 1 ? g_AlphaDrawStart : 0;
+
     // グループ内の書き込み位置 (前にある「映った描画」の数) と、全体の中の先頭をまとめて決める
     if (groupIndex == 0)
     {
@@ -296,14 +306,14 @@ void CSCompact(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
             sum += gs_Flag[i];
         }
         uint base = 0;
-        if (sum > 0) g_OutArgs.InterlockedAdd(g_CounterOffset + 4, sum, base);
+        if (sum > 0) g_OutArgs.InterlockedAdd(g_CounterOffset + 4 + pipelineGroup * 4, sum, base);
         gs_Base = base;
     }
     GroupMemoryBarrierWithGroupSync();
 
     if (visible)
     {
-        const uint dest = (gs_Base + gs_Offset[groupIndex]) * ARGS_STRIDE;
+        const uint dest = (groupFirst + gs_Base + gs_Offset[groupIndex]) * ARGS_STRIDE;
         g_Compact.Store4(dest, args);
         g_Compact.Store(dest + 16, start);
     }

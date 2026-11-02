@@ -20,11 +20,14 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwctype>
+#include <filesystem>
 #include <memory>
 
 #include "mesh.h"
 #include "material.h"
 #include "Loader/objLoader.h"
+#include "Loader/pmxLoader.h"
 
 #include "../../Core/Source/Log/logger.h"
 
@@ -117,9 +120,19 @@ namespace Renderer
 		if (outSubMeshCount) *outSubMeshCount = 0;
 		if (!IsInitialized()) return INVALID_HANDLE;
 
-		// 1. OBJ を読む (CPU 側)
-		ObjLoader loader;
-		MeshPtr mesh(loader.LoadModel(filePath));
+		// 1. ファイルを読む (CPU 側)。拡張子でローダーを選ぶ
+		std::wstring extension = std::filesystem::path(filePath).extension().wstring();
+		std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+		std::unique_ptr<IModelLoader> loader;
+		if      (extension == L".obj") loader = std::make_unique<ObjLoader>();
+		else if (extension == L".pmx") loader = std::make_unique<PmxLoader>();
+		else
+		{
+			Core::Logger::Log(L"[SceneRenderer] Unsupported model format (.obj / .pmx only).");
+			Core::Logger::Log(filePath.c_str());
+			return INVALID_HANDLE;
+		}
+		MeshPtr mesh(loader->LoadModel(filePath));
 		if (!mesh)
 		{
 			Core::Logger::Log(L"[SceneRenderer] Failed load model.");
@@ -136,37 +149,49 @@ namespace Renderer
 		}
 
 		// 3. テクスチャ : 使うものだけ集めてまとめて読み込む (デコードは RHI の中で並列に行われる)
+		//    同じパスは 1 回だけ読む (PMX は多くの材質が同じテクスチャを使う)
 		std::vector<RHI::TextureHandle> materialTextures(mesh->Materials.size());
 		{
-			std::vector<const wchar_t*> paths;
-			std::vector<size_t>         owners;     // paths[i] が何番目のマテリアルのものか
+			std::vector<std::wstring> paths;
+			std::vector<size_t>       owners;     // マテリアル m のテクスチャは paths[owners[m]]
+			owners.assign(mesh->Materials.size(), SIZE_MAX);
 			for (size_t m = 0; m < mesh->Materials.size(); ++m)
 			{
 				const Material* material = mesh->Materials[m];
-				if (material && material->UseTexture && !material->TexturePath.empty())
+				if (!material || !material->UseTexture || material->TexturePath.empty()) continue;
+
+				const std::wstring path = resolveTexturePath(material->TexturePath);
+				auto found = std::find(paths.begin(), paths.end(), path);
+				if (found == paths.end())
 				{
-					paths.push_back(material->TexturePath.c_str());
-					owners.push_back(m);
+					paths.push_back(path);
+					found = paths.end() - 1;
 				}
+				owners[m] = static_cast<size_t>(found - paths.begin());
 			}
 
 			if (!paths.empty())
 			{
+				std::vector<const wchar_t*> pathPointers;
+				for (const auto& path : paths) pathPointers.push_back(path.c_str());
 				std::vector<RHI::TextureHandle> loaded(paths.size());
-				_rhi->LoadTextures(paths.data(), static_cast<uint32_t>(paths.size()), loaded.data());
-				for (size_t i = 0; i < loaded.size(); ++i)
+				_rhi->LoadTextures(pathPointers.data(), static_cast<uint32_t>(pathPointers.size()), loaded.data());
+				for (size_t m = 0; m < owners.size(); ++m)
 				{
-					materialTextures[owners[i]] = loaded[i];
+					if (owners[m] != SIZE_MAX) materialTextures[m] = loaded[owners[m]];
 				}
 			}
 		}
 
-		// 4. サブメッシュごとにインデックスを登録する (サブメッシュ i はマテリアル i を使う。OBJ の usemtl の順番)
+		// 4. サブメッシュごとに、インデックスとマテリアルを登録する (サブメッシュ i はマテリアル i を使う)
+		//    マテリアル : テクスチャがあれば色は白 (テクスチャそのまま。不透明度だけ材質から)、無ければ材質の色
+		//    半透明の材質 (PMX は全部) は、不透明な物の後にブレンドして描く
 		//    描画オブジェクトはまだ作らない (以前は読み込みと同時に原点に 1 個置いていた)
 		ModelResource model;
 		for (size_t i = 0; i < mesh->Indecies.size(); ++i)
 		{
 			const auto& indices = mesh->Indecies[i];
+			if (indices.empty()) continue;
 			const RHI::IndexRange range = _rhi->UploadIndices(indices.data(), static_cast<uint32_t>(indices.size()));
 			if (!range.IsValid())
 			{
@@ -174,12 +199,25 @@ namespace Renderer
 				continue;
 			}
 
+			RHI::MaterialDesc desc;
+			const Material* material = i < mesh->Materials.size() ? mesh->Materials[i] : nullptr;
+			if (material)
+			{
+				const bool textured = i < materialTextures.size() && materialTextures[i].Index != RHI::TextureHandle::DEFAULT;
+				desc.Texture  = textured ? materialTextures[i] : RHI::TextureHandle();
+				desc.Color[0] = textured ? 1.0f : material->Diffuse._x;
+				desc.Color[1] = textured ? 1.0f : material->Diffuse._y;
+				desc.Color[2] = textured ? 1.0f : material->Diffuse._z;
+				desc.Color[3] = material->Transparent ? material->Diffuse._w : 1.0f;
+				desc.Blend    = material->Transparent ? RHI::BlendMode::AlphaBlend : RHI::BlendMode::Opaque;
+			}
+
 			RHI::DrawItem item;
 			item.BaseVertex = vertices.BaseVertex;
 			item.FirstIndex = range.FirstIndex;
 			item.IndexCount = range.Count;
+			item.Material   = _rhi->CreateMaterial(desc);
 			model.SubMeshes.push_back(item);
-			model.Textures.push_back(i < materialTextures.size() ? materialTextures[i].Index : RHI::TextureHandle::DEFAULT);
 		}
 		if (model.SubMeshes.empty())
 		{
@@ -189,7 +227,7 @@ namespace Renderer
 		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
 		_models.push_back(std::move(model));
 
-		// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
+				// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
 		return static_cast<uint32_t>(_models.size() - 1);
 	}
 
@@ -203,29 +241,16 @@ namespace Renderer
 		for (uint32_t i = 0; i < count; ++i) outHandles[i] = INVALID_HANDLE;
 		if (!IsInitialized() || model >= _models.size()) return;
 
-		const ModelResource& resource = _models[model];
 		for (uint32_t n = 0; n < count; ++n)
 		{
-			// サブメッシュごとに RHI のオブジェクトを作る (初期値は原点・そのサブメッシュのテクスチャ)
+			// RHI のオブジェクト (ワールド行列) を 1 個作り、全サブメッシュで共有する (初期値は原点)
 			RenderObject object;
-			object.Model = model;
-			object.Objects.reserve(resource.SubMeshes.size());
-			for (size_t i = 0; i < resource.SubMeshes.size(); ++i)
+			object.Model  = model;
+			object.Object = _rhi->CreateObject();
+			if (!object.Object.IsValid())
 			{
-				const RHI::ObjectHandle handle = _rhi->CreateObject();
-				if (!handle.IsValid()) break;
-
-				RHI::ObjectConstants constants;
-				::DirectX::XMStoreFloat4x4(&constants.World, ::DirectX::XMMatrixIdentity());
-				constants.TextureIndex = resource.Textures[i];
-				_rhi->UpdateObject(handle, constants);
-				object.Objects.push_back(handle);
-			}
-			if (object.Objects.size() != resource.SubMeshes.size())
-			{
-				// RHI のオブジェクトの上限 (作った分は戻す)
-				for (const auto& handle : object.Objects) _rhi->DestroyObject(handle);
 				Core::Logger::Log("[SceneRenderer] Object limit reached.");
+				_drawListDirty = true;   // ここまでに作った分は描く
 				return;
 			}
 
@@ -256,7 +281,7 @@ namespace Renderer
 			const uint32_t handle = handles[n];
 			if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) continue;
 
-			for (const auto& object : _renderObjects[handle].Objects) _rhi->DestroyObject(object);
+			_rhi->DestroyObject(_renderObjects[handle].Object);
 			_renderObjects[handle] = RenderObject();
 			_freeRenderObjects.push_back(handle);
 			_aliveRenderObjects--;
@@ -275,16 +300,33 @@ namespace Renderer
 			if (object.Model == INVALID_HANDLE) continue;
 
 			// C# の Matrix4x4 と XMFLOAT4X4 は同じ並び (行優先・行ベクトル) なのでそのまま写す
+			// (オブジェクトは全サブメッシュで共有しているので 1 回で済む。以前はサブメッシュの数だけ書いていた)
 			RHI::ObjectConstants constants;
 			std::memcpy(&constants.World, matrices + static_cast<size_t>(n) * 16, sizeof(constants.World));
+			_rhi->UpdateObject(object.Object, constants);
+		}
+	}
 
-			const ModelResource& resource = _models[object.Model];
-			for (size_t i = 0; i < object.Objects.size(); ++i)
+	std::wstring SceneRenderer::resolveTexturePath(const std::wstring& path)
+	{
+		namespace fs = std::filesystem;
+		std::error_code error;
+		if (fs::exists(path, error)) return path;
+
+		// マテリアルに書かれた拡張子と、実際のファイルの拡張子が違うことがある (例 : .png と書いてあるが .jpg)
+		static const wchar_t* const EXTENSIONS[] = { L".png", L".jpg", L".jpeg", L".tga", L".bmp", L".dds" };
+		for (const wchar_t* extension : EXTENSIONS)
+		{
+			fs::path candidate(path);
+			candidate.replace_extension(extension);
+			if (fs::exists(candidate, error))
 			{
-				constants.TextureIndex = resource.Textures[i];
-				_rhi->UpdateObject(object.Objects[i], constants);
+				Core::Logger::Log((L"[SceneRenderer] Texture not found. Use " + candidate.wstring() + L" instead of " + path).c_str());
+				return candidate.wstring();
 			}
 		}
+		Core::Logger::Log((L"[SceneRenderer] Texture not found : " + path).c_str());
+		return path;
 	}
 
 	void SceneRenderer::rebuildDrawList()
@@ -295,11 +337,9 @@ namespace Renderer
 		for (const auto& object : _renderObjects)
 		{
 			if (object.Model == INVALID_HANDLE) continue;
-			const ModelResource& resource = _models[object.Model];
-			for (size_t i = 0; i < object.Objects.size(); ++i)
+			for (RHI::DrawItem item : _models[object.Model].SubMeshes)
 			{
-				RHI::DrawItem item = resource.SubMeshes[i];
-				item.Object = object.Objects[i];
+				item.Object = object.Object;
 				_drawItems.push_back(item);
 			}
 		}

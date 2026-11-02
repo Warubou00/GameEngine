@@ -144,6 +144,20 @@ namespace RHI
 				return RHI_FAILED_INITIALIZED;
 			}
 
+			// マテリアル : フレームごとの UPLOAD 領域と、同じ並びの VRAM 側 (GPU は VRAM 側を読む)
+			{
+				const UINT64 size = static_cast<UINT64>(MAX_MATERIALS) * sizeof(MaterialData) * CommandContext::FRAME_COUNT;
+				_materialUpload = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				_materialGpu    = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				if (!makeBuffer(device, _materialUpload.get(), size, D3D12_HEAP_TYPE_UPLOAD) || FAILED(_materialUpload->Map()) ||
+					!makeBuffer(device, _materialGpu.get(), size, D3D12_HEAP_TYPE_DEFAULT))
+				{
+					return RHI_FAILED_INITIALIZED;
+				}
+			}
+			// 既定のマテリアル (0 番) : 白・既定テクスチャ・不透明。マテリアルを指定しない DrawItem はこれで描かれる
+			CreateMaterial(RHI::MaterialDesc());
+
 			return RHI_SUCCEEDED;
 		}
 
@@ -298,10 +312,9 @@ namespace RHI
 		{
 			RHI::ObjectHandle handle;
 
-			// 初期値 : 原点に置いて既定テクスチャ(白)
+			// 初期値 : 原点に置く
 			RHI::ObjectConstants initial;
 			::DirectX::XMStoreFloat4x4(&initial.World, ::DirectX::XMMatrixIdentity());
-			initial.TextureIndex = RHI::TextureHandle::DEFAULT;
 
 			// 削除された番号があれば使い回す (オブジェクトの配列が増え続けないように)
 			if (!_freeObjects.empty())
@@ -330,6 +343,52 @@ namespace RHI
 			}
 			_objectsVersion++;
 			return handle;
+		}
+
+		RHI::MaterialHandle Buffer::CreateMaterial(const RHI::MaterialDesc& desc)
+		{
+			RHI::MaterialHandle handle;
+			if (_materials.size() >= MAX_MATERIALS)
+			{
+				Core::Logger::Log("[Buffer] Too many materials. Use the default material.");
+				return handle;
+			}
+
+			MaterialData data = {};
+			for (int i = 0; i < 4; ++i) data.Color[i] = desc.Color[i];
+			data.TextureIndex = desc.Texture.Index;
+			data.Blend        = static_cast<uint32_t>(desc.Blend);
+
+			handle.Index = static_cast<uint32_t>(_materials.size());
+			_materials.push_back(data);
+			_materialsVersion++;   // 全部のフレームの領域に書き直す
+			return handle;
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteMaterials(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList)
+		{
+			const UINT64 frameOffset = static_cast<UINT64>(MAX_MATERIALS) * sizeof(MaterialData) * frameIndex;
+			if (_materialsWritten[frameIndex] != _materialsVersion && cmdList && !_materials.empty())
+			{
+				// マテリアルは数が少ないので、変わった時は全部書いて全部写す
+				const UINT64 bytes = static_cast<UINT64>(_materials.size()) * sizeof(MaterialData);
+				if (_materialUpload->WriteData(frameOffset, _materials.data(), static_cast<size_t>(bytes)))
+				{
+					cmdList->CopyBufferRegion(_materialGpu->Get(), frameOffset, _materialUpload->Get(), frameOffset, bytes);
+
+					// コピーで COMMON → COPY_DEST に暗黙で昇格する。頂点シェーダーが読む状態へ移す
+					// (写さないフレームは COMMON → NON_PIXEL_SHADER_RESOURCE に暗黙で昇格する)
+					D3D12_RESOURCE_BARRIER barrier = {};
+					barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+					barrier.Transition.pResource   = _materialGpu->Get();
+					barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+					barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+					barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+					cmdList->ResourceBarrier(1, &barrier);
+					_materialsWritten[frameIndex] = _materialsVersion;
+				}
+			}
+			return _materialGpu->GetGPUVirtualAddress() + frameOffset;
 		}
 
 		void Buffer::DestroyObject(RHI::ObjectHandle object)
@@ -477,6 +536,10 @@ namespace RHI
 			if (_globalCB) _globalCB->Unmap();
 			if (_sceneCB)  _sceneCB->Unmap();
 			_objectGpu.reset();
+			if (_materialUpload) _materialUpload->Unmap();
+			_materialUpload.reset();
+			_materialGpu.reset();
+			_materials.clear();
 		}
 
 		RHI::DirectX12::DescriptorHeapManager* Buffer::GetDescHeapManager()const

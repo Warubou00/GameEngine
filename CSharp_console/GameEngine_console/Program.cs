@@ -33,9 +33,15 @@ internal static class Program
             Height = 720,
         });
 
+        // ---------- 引数 ----------
+        var options     = ParseArguments(args);
+        var stressCount = options.TryGetValue("--stress", out var stress) && int.TryParse(stress, out var n) ? n : 0;
+        var view        = options.GetValueOrDefault("--view", "");
+
         // ---------- モデル (読み込み〜 GPU への転送完了までの時間をプロファイラーに出す) ----------
+        // モデルは Model/obj と Model/pmx/<モデル名> に分けて置く (以前は Model の直下)
         var stopwatch = Stopwatch.StartNew();
-        var box = engine.Assets.LoadModel("../Model/box.obj");
+        var box = engine.Assets.LoadModel("../Model/obj/box.obj");
         engine.WaitForGpu();
         engine.ReportProfilerValue("LoadModel (ms)", stopwatch.Elapsed.TotalMilliseconds);
 
@@ -47,18 +53,19 @@ internal static class Program
         world.Add(origin, new MeshRenderer(box));
         world.Add(origin, new Static());
 
+        // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン
+        if (stressCount == 0)
+        {
+            Showcase.Spawn(engine);
+        }
+
         // ---------- カメラ ----------
         var camera = world.CreateEntity();
         world.Add(camera, Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
         world.Add(camera, new Camera());
 
-        // ---------- 引数 ----------
-        var options     = ParseArguments(args);
-        var stressCount = options.TryGetValue("--stress", out var stress) && int.TryParse(stress, out var n) ? n : 0;
-        var view        = options.GetValueOrDefault("--view", "");
-
         var animate = options.GetValueOrDefault("--animate", "off") == "on";
-        if (animate) engine.AddSystem(new SpinSystem());
+        if (animate || stressCount == 0) engine.AddSystem(new SpinSystem());   // 見本のシーンのキャラクターも回す
 
         if (stressCount > 0)
         {

@@ -1,14 +1,14 @@
-/************************************************
+ï»¿/************************************************
 * objLoader.cpp
-* objƒ‚ƒfƒ‹‚ğ“Ç‚İ‚ŞƒNƒ‰ƒX
+* objãƒ¢ãƒ‡ãƒ«ã‚’èª­ã¿è¾¼ã‚€ã‚¯ãƒ©ã‚¹
 *
-* ÅIXV“ú:2026/09/24
-* ì¬ÒFKeigo Onari
+* æœ€çµ‚æ›´æ–°æ—¥:2026/09/24
+* ä½œæˆè€…ï¼šKeigo Onari
 *
 *************************************************/
 
 // =============================================================
-// ƒCƒ“ƒNƒ‹[ƒh
+// ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰
 // =============================================================
 #include "objLoader.h"
 #include <sstream>
@@ -21,7 +21,7 @@
 #include "../mesh.h"
 #include "../material.h"
 
-// ‰¼
+// ä»®
 #include "../../../Core/Source/Log/logger.h"
 
 namespace Renderer
@@ -30,7 +30,7 @@ namespace Renderer
     ObjLoader::~ObjLoader() {}
 
     // =============================================================
-    // –Ê‚Ì1’¸“_(v/vt/vn)‚ğƒp[ƒX‚·‚éƒwƒ‹ƒp[ŠÖ”
+    // é¢ã®1é ‚ç‚¹(v/vt/vn)ã‚’ãƒ‘ãƒ¼ã‚¹ã™ã‚‹ãƒ˜ãƒ«ãƒ‘ãƒ¼é–¢æ•°
     // =============================================================
     static void ParseFaceVertex(const std::string& vertexStr, int& v, int& vt, int& vn)
     {
@@ -50,7 +50,7 @@ namespace Renderer
     }
 
     // =============================================================
-    // ƒ‚ƒfƒ‹‚Ìƒ[ƒh
+    // ãƒ¢ãƒ‡ãƒ«ã®ãƒ­ãƒ¼ãƒ‰
     // =============================================================
     Mesh* ObjLoader::LoadModel(const std::wstring& fName)
     {
@@ -89,7 +89,7 @@ namespace Renderer
 
         unsigned int indicesIndex = 0;
 
-        // ¶ƒ|ƒCƒ“ƒ^‚Åƒ}ƒeƒŠƒAƒ‹‚ğ•Û
+        // ç”Ÿãƒã‚¤ãƒ³ã‚¿ã§ãƒãƒ†ãƒªã‚¢ãƒ«ã‚’ä¿æŒ
         std::vector<Material*> materials;
 
         _newmtlName.clear();
@@ -105,7 +105,7 @@ namespace Renderer
             {
                 str.erase(0, KEY_MTLLIB.length());
 
-                // •¡”‚Ìmtllib‚ªŒÄ‚Î‚ê‚½ê‡AˆÈ‘O‚Ìƒ}ƒeƒŠƒAƒ‹‚ğ”jŠü‚µ‚Äƒƒ‚ƒŠƒŠ[ƒN‚ğ–h‚®
+                // è¤‡æ•°ã®mtllibãŒå‘¼ã°ã‚ŒãŸå ´åˆã€ä»¥å‰ã®ãƒãƒ†ãƒªã‚¢ãƒ«ã‚’ç ´æ£„ã—ã¦ãƒ¡ãƒ¢ãƒªãƒªãƒ¼ã‚¯ã‚’é˜²ã
                 for (Material* m : materials) {
                     delete m;
                 }
@@ -197,7 +197,7 @@ namespace Renderer
 
         _file.CloseFile();
 
-        // ƒ}ƒeƒŠƒAƒ‹‚Ì‡˜‚Ì®—‚ÆŠ—LŒ ‚ÌˆÚ“®
+        // ãƒãƒ†ãƒªã‚¢ãƒ«ã®é †åºã®æ•´ç†ã¨æ‰€æœ‰æ¨©ã®ç§»å‹•
         mesh->Materials.resize(newmtlName.size());
         int matIndex = 0;
         for (const auto& name : newmtlName)
@@ -209,14 +209,27 @@ namespace Renderer
                 if (index < materials.size() && materials[index] != nullptr)
                 {
                     mesh->Materials[matIndex] = materials[index];
-                    // mesh‘¤‚ÉŠ—LŒ ‚ğ“n‚µ‚½‚½‚ßA‰ğ•ú‚³‚ê‚È‚¢‚æ‚¤nullptr‚É‚·‚é
+                    // meshå´ã«æ‰€æœ‰æ¨©ã‚’æ¸¡ã—ãŸãŸã‚ã€è§£æ”¾ã•ã‚Œãªã„ã‚ˆã†nullptrã«ã™ã‚‹
                     materials[index] = nullptr;
+                }
+                else if (index < materials.size())
+                {
+                    // åŒã˜ãƒãƒ†ãƒªã‚¢ãƒ«ã‚’ 2 å›ç›®ä»¥é™ã«ä½¿ã† (usemtl ãŒåŒã˜åå‰ã§ä½•åº¦ã‚‚å‡ºã¦ãã‚‹) æ™‚ã¯ã€
+                    // æœ€åˆã«æ¸¡ã—ãŸã‚‚ã®ã‚’å†™ã—ã¦ä½¿ã† (ä»¥å‰ã¯æ‰€æœ‰æ¨©ã‚’æ¸¡ã—ãŸå¾Œã® nullptr ã«ãªã‚Šã€ãƒ†ã‚¯ã‚¹ãƒãƒ£ãŒä»˜ã‹ãªã‹ã£ãŸ)
+                    for (int prev = 0; prev < matIndex; ++prev)
+                    {
+                        if (newmtlName[prev] == name && mesh->Materials[prev] != nullptr)
+                        {
+                            mesh->Materials[matIndex] = new Material(*mesh->Materials[prev]);
+                            break;
+                        }
+                    }
                 }
             }
             matIndex++;
         }
 
-        // mesh‚É“n‚³‚ê‚¸Ag‚í‚ê‚È‚©‚Á‚½—]èƒ}ƒeƒŠƒAƒ‹‚ğ”jŠü‚·‚é
+        // meshã«æ¸¡ã•ã‚Œãšã€ä½¿ã‚ã‚Œãªã‹ã£ãŸä½™å‰°ãƒãƒ†ãƒªã‚¢ãƒ«ã‚’ç ´æ£„ã™ã‚‹
         for (Material* mat : materials)
         {
             if (mat != nullptr)
@@ -249,7 +262,7 @@ namespace Renderer
     }
 
     // =============================================================
-    // ƒ}ƒeƒŠƒAƒ‹‚Ìƒ[ƒh
+    // ãƒãƒ†ãƒªã‚¢ãƒ«ã®ãƒ­ãƒ¼ãƒ‰
     // =============================================================
     std::vector<Material*> ObjLoader::loadMaterial(const std::string& fName)
     {
@@ -266,7 +279,7 @@ namespace Renderer
         const std::string KEY_KS = "Ks ";
 
         std::vector<Material*> materials;
-        Material* material = nullptr; // ¶ƒ|ƒCƒ“ƒ^‚É•ÏX
+        Material* material = nullptr; // ç”Ÿãƒã‚¤ãƒ³ã‚¿ã«å¤‰æ›´
 
         while (std::getline(ifs, str))
         {
@@ -282,7 +295,7 @@ namespace Renderer
                 {
                     materials.push_back(material);
                 }
-                // new‚Åƒƒ‚ƒŠ‚ğŠm•Û
+                // newã§ãƒ¡ãƒ¢ãƒªã‚’ç¢ºä¿
                 material = new Material();
             }
             else if (material != nullptr)
@@ -328,7 +341,7 @@ namespace Renderer
     }
 
     // =============================================================
-    // ƒ†[ƒeƒBƒŠƒeƒBŒn
+    // ãƒ¦ãƒ¼ãƒ†ã‚£ãƒªãƒ†ã‚£ç³»
     // =============================================================
     bool ObjLoader::containsSlashesCount(const std::wstring& line, const int count) {
         return std::count(line.begin(), line.end(), '/') == count;
