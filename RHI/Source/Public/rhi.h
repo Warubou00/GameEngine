@@ -118,6 +118,8 @@ namespace RHI
 		virtual void SetLightingSettings(const LightingSettings& settings) = 0;
 		// 影 (変わった時だけ呼べばよい。ライトの視点の行列は毎フレーム RHI が作る)
 		virtual void SetShadowSettings(const ShadowSettings& settings) = 0;
+		// 確認用の線 (毎フレーム呼ぶ。0 本で消える)。描くのはこのフレームの描画の最後
+		virtual void SetDebugLines(const DebugLineVertex* vertices, uint32_t count) = 0;
 
 		/***********************************************************************************
 		 * @brief 1 フレーム分の描画 (開始 → 描画パスの命令を順に実行 → UI → 表示)。GPU の完了は待たない

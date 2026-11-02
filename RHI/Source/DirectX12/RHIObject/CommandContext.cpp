@@ -621,7 +621,51 @@ namespace RHI
 			cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 			_boundColorCount = 0;
 			_boundDepth      = RHI::RenderTargetHandle::INVALID;
+			drawDebugLines();   // 確認用の線 (トーンマップ / FXAA の後のバックバッファへ。ImGui の下)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
+		}
+
+		void CommandContext::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
+		{
+			count = (std::min)(count, RHI::MAX_DEBUG_LINE_VERTICES) & ~1u;   // 2 頂点で 1 本
+			_debugLines.assign(vertices, vertices + (vertices ? count : 0));
+		}
+
+		void CommandContext::drawDebugLines()
+		{
+			// ==============================================================
+			// 確認用の線 : このフレームの UPLOAD バッファへ写して、入力アセンブラで読む (線のリスト)
+			//   深度は使わない (コライダーが物に隠れても見えるように)。カメラのフレームの定数で画面へ
+			// ==============================================================
+			if (_debugLines.empty()) return;
+			ID3D12PipelineState* pso = _currentPipeline->GetDebugLinePso();
+			if (!pso) return;
+			auto& upload = _debugLineBuffer[_frameIndex];
+			if (!upload)
+			{
+				upload = std::make_unique<DirectX12::ResourceBuffer>();
+				if (FAILED(upload->Create(_device->GetDevice()->GetDevice(), static_cast<UINT64>(RHI::MAX_DEBUG_LINE_VERTICES) * sizeof(RHI::DebugLineVertex),
+					D3D12_HEAP_TYPE_UPLOAD)) || FAILED(upload->Map()))
+				{
+					Core::Logger::Log("[CommandContext] Failed create debug line buffer.");
+					upload.reset();
+					_debugLines.clear();
+					return;
+				}
+			}
+			const UINT bytes = static_cast<UINT>(_debugLines.size() * sizeof(RHI::DebugLineVertex));
+			std::memcpy(upload->GetMappedData(), _debugLines.data(), bytes);
+
+			D3D12_VERTEX_BUFFER_VIEW view = {};
+			view.BufferLocation = upload->Get()->GetGPUVirtualAddress();
+			view.SizeInBytes    = bytes;
+			view.StrideInBytes  = sizeof(RHI::DebugLineVertex);
+			auto cmdList = _frameCommandList->GetCmdList();
+			cmdList->SetPipelineState(pso);
+			cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+			cmdList->IASetVertexBuffers(0, 1, &view);
+			cmdList->DrawInstanced(static_cast<UINT>(_debugLines.size()), 1, 0, 0);
+			cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);   // 次のフレームの初めにも設定し直される
 		}
 
 		void CommandContext::setRenderTargets(const RHI::RenderCommand& command)
@@ -1960,6 +2004,7 @@ namespace RHI
 			}
 			_visibility.reset();
 			_drawIdBuffer.reset();
+			for (auto& lines : _debugLineBuffer) lines.reset();
 			_renderTargets.clear();
 			_freeRenderTargets.clear();
 			_targetRtvHeap.reset();

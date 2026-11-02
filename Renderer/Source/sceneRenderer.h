@@ -137,6 +137,7 @@ namespace Renderer
 		void SetLights(const RHI::LightData* lights, uint32_t count);
 		void SetLightingSettings(const RHI::LightingSettings& settings);
 		void SetShadowSettings(const RHI::ShadowSettings& settings);
+		void SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
 		void SetProfilerInfo(const char* name, const char* text);
 
 		// GPU の処理が全て終わるまで待つ (計測用)

@@ -1,0 +1,93 @@
+﻿====================================================================
+ 衝突判定 C1 : Physics.dll / コライダー / ブロードフェーズ (BVH・総当たり・グリッド) / 重なりのイベント / 確認用の線
+ 日付   : 2026-11-02
+ ブランチ : feature/collision-c1 (develop 8caeaaa から)
+ ロードマップ : Engine_Roadmap_Shadow_Collision_Physics_2026-11-02.txt
+====================================================================
+
+■ 概要
+  - C++ の新しい DLL (Physics.dll。Physics/Physics.vcxproj、x64) を作った。Audio.dll と同じ C ABI の形
+  - C# : Collider コンポーネント (球 / 箱 / カプセル)、CollisionSystem (エンジン組み込み)、engine.Physics (設定とイベント)
+  - 重なり始め (Enter) / 離れた (Exit) を engine.Physics.Events で受け取れる (Layer / CollideWith で調べる組を絞れる)
+  - 確認用の線 (DebugDraw) を RHI に足した。コライダーを線で表示 (重なると赤 / 動く物は緑 / 動かない物は灰色)
+  - 見本 : 見本のシーンの地面・箱・岩・キャラクターにコライダー、周りを球 / 箱 / カプセルが回る
+           C でコライダーの表示、B で探し方 (BVH → 総当たり → グリッド)。重なりのイベントはコンソールにも出る
+           --collision-bench N (--bench-moving P / --broadphase bvh|brute|grid) で計測
+  - C1 は「重なっているか」まで。接触点・法線・めり込み量 (物理に要る) は C2
+
+■ Physics.dll (Physics/Source)
+  common.h        : C# とやり取りする構造体 (BodyDesc 96 / BodyTransform 48 / CollisionEvent 16 / PhysicsStats 32 byte)
+  mathTypes.h     : Float3 / 回転 / AABB (inline)
+  dynamicTree.*   : 動的 AABB ツリー (Box2D の b2DynamicTree を 3 次元にした考え方)
+                    葉の箱は少し太らせる (一番長い辺の 10%) → 少し動いただけなら木を直さない
+                    入れる場所は表面積の増え方で選び、高さの差が 2 以上なら回転して直す
+                    問い合わせ (箱) / 木の中の組を全部 (QueryAllPairs) / 2 本の木の間の組を全部 (QueryPairs)
+  shapes.*        : 形の重なりの判定
+                    球 / カプセル どうし : 芯 (点 / 線分) の距離と半径の和 / 球と箱 : 箱の中の一番近い点
+                    箱どうし・箱とカプセル : GJK (2 つの形の差が原点を含むか)
+  physicsWorld.*  : 体の表 (ハンドル = 番号 16bit + 世代 16bit)、ブロードフェーズ、イベント
+                    BVH : 動かない物の木と動く物の木の 2 本。
+                          動いた物が少ない時は、動いた物だけを両方の木に問い合わせる (動いていない組は前の結果のまま)
+                          動いた物が動く物の 1/4 以上の時は、木の節の組を 1 回たどって全部の組を探す
+                    総当たり / グリッド : 比べる用 (毎回全部)
+                    イベント : 前の Step の「重なっている組」と比べて Enter / Exit。体を消した時は相手との Exit を出す
+  physicsDll.cpp  : Physics_Initialize / Shutdown / CreateBody / DestroyBody / SetTransforms (まとめて) / SetBroadphase /
+                    Step / GetEvents (まとめて) / GetStats
+  ソリューション (GameEngine.sln) に追加。GameEngine_console.csproj が Physics.dll を出力フォルダへ写す (無ければ衝突判定だけ無効)
+
+■ C# (GameEngine.Runtime)
+  Components/Collider.cs  : Collider.Sphere(r) / Box(halfExtents) / Capsule(r, halfHeight)。Center / Layer / CollideWith
+                            位置・回転・大きさは Transform から取る。Static も付けると動かない物
+  Systems/CollisionSystem : 体を作る / 形を変えたら作り直す / 動いた物だけ位置を 1 回の P/Invoke で送る / Step / イベント
+                            TransformSystem の後、RenderSyncSystem (Transform.Changed を下ろす) の前に動く
+  Physics.cs              : PhysicsSettings (engine.Physics : ShowColliders / Broadphase / Events / 計測の値)、CollisionEvent
+  DebugDraw.cs            : Line / WireBox / WireSphere / WireCapsule / Circle。フレームの最後に 1 回の P/Invoke で送る
+  プロファイラー (F1) : Physics step / broadphase / narrowphase (ms)、bodies、moved、candidates、overlaps
+
+■ RHI (確認用の線)
+  - Renderer_SetDebugLines (毎フレーム。0 本で消える)。debug.shader (VSDebugLine / PSDebugLine)
+  - 描画の最後 (トーンマップ / FXAA の後のバックバッファ、ImGui の下) に、深度なしで線のリストとして描く
+  - 頂点はフレームごとの UPLOAD バッファ (最大 26 万頂点 = 13 万本)
+
+■ 計測 (Release / RTX 2070 の PC の CPU / 1 フレームの Step の時間 ms。2 回計測)
+  条件 : 球と箱 (大きさ 0.3〜0.8) を N 個、立方体の中でまっすぐ動かして壁で跳ね返す。床 (動かない物) 1 つ。描画なし
+                          BVH              グリッド          総当たり
+    1,000 個 (全部動く)   0.303 / 0.457    0.258 / 0.263     3.220 / 3.213
+    5,000 個              2.321 / 2.167    1.528 / 1.601     -
+    10,000 個             5.326 / 5.077    3.132 / 3.167     -
+    20,000 個             11.85 / 12.48    7.258 / 6.699     -
+    10,000 個・25% 動く   5.639 / 5.075    3.155 / 3.056
+    10,000 個・ 5% 動く   0.869 / 0.828    3.191 / 3.237
+  見つけた候補の数・重なっている組の数は、3 つの方法でほぼ同じ (例 1 万個 : 候補 2,900 前後 / 重なり 2,240 前後)
+
+  分かったこと
+    - 全部が毎フレーム動く場面は、グリッドが一番速い (BVH の 6 割)
+    - 動く物が少ない場面 (止まっている物が多い = 普通のゲームの場面) は、BVH がグリッドの約 4 倍速い
+      (グリッドは毎回全部を入れ直す。BVH は動いた物だけ)
+    - 既定は BVH にした (ゲームの場面に近い / C2 のレイキャストも木を使う)。
+      全部が動く場面だけグリッドに切り替える (自動で選ぶ) のは C3 の候補
+    - 目標 (1 万個で 1 ms 未満) は、5% が動く場面では達成 (0.83 ms)、全部が動く場面は未達 (グリッドで 3.1 ms)。C3 で詰める
+  直したこと (計測して見つけた)
+    - 最初の実装は、BVH で全部の動いた物を 1 個ずつ木に問い合わせていた : 1 万個で 23 ms (グリッドの 7 倍)
+      木の高さは 16 (理想 14) で偏ってはいなかった。1 回の問い合わせで約 100 節をたどり、1 節 約 12 ns (メモリの読み込み待ち)
+      → 動いた物が多い時は、木の節の組を 1 回たどって全部の組を探すようにした : 23 → 5.1 ms
+  ※ BVH の木を直す時間 (SetTransforms の中) は Step の時間に入っていない (3 つの方法で同じだけ掛かる)
+
+■ 確認
+  - Physics.dll のテスト (DLL を直接呼ぶ。Release / Debug とも 39 項目すべて OK)
+      形 : 球-球 / 球-箱 (面・角・45° 回した箱) / 箱-箱 (重なる・離れる・回した角・辺と辺・
+           「箱は重なるが形は重ならない」斜めの棒) / カプセル-球 (横・上) / カプセル-カプセル / カプセル-箱
+      動かない物どうしは調べない / レイヤーのマスク
+      イベント (BVH / 総当たり / グリッドのそれぞれ) : 最初は無し / 近づくと Enter / 重なったままは無し / 離れると Exit /
+      2 つと同時に重なると Enter 2 つ / 体を消すと相手との Exit
+      古いハンドル (番号を使い回した後) は無視される
+  - Debug (D3D12 デバッグレイヤー有効) で D3D12 のエラー / 警告 0
+      見本のシーン (線あり)、Deferred + MSAA 4x、計測 2,000 個 + 線 (約 10 万本)、計測 5,000 個 (グリッド)、リサイズ、C / B のキー
+  - 見た目 : 回る物が原点の箱・岩・キャラクターに触れると赤くなり、離れると緑に戻る (コンソールに Enter / Exit)
+
+■ 制限 / 次
+  - 接触点・法線・めり込み量は無い (C2 : 物理で押し戻すのに要る)
+  - レイキャスト / 重なりの問い合わせ / メッシュコライダー は C2
+  - 体は 65,535 個まで (ハンドルの番号が 16bit)
+  - Events は前のフレームの Step の結果 (System は次のフレームで読む)
+  - 確認用の線は深度を使わない (物に隠れない)

@@ -412,6 +412,11 @@ namespace Renderer
 		if (IsInitialized()) _rhi->DestroyRenderTarget(handle);
 	}
 
+	void SceneRenderer::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
+	{
+		if (IsInitialized()) _rhi->SetDebugLines(vertices, count);
+	}
+
 	void SceneRenderer::SetShadowSettings(const RHI::ShadowSettings& settings)
 	{
 		if (IsInitialized()) _rhi->SetShadowSettings(settings);
