@@ -562,6 +562,8 @@ namespace RHI
 			}
 			auto cmdList = _frameCommandList->GetCmdList();
 			_msaaDepthDirty = false;   // MSAA の深度は、このフレームで描いた時だけ解決する
+			_sceneDepthReadLastFrame = _sceneDepthReadThisFrame;
+			_sceneDepthReadThisFrame = false;
 
 			for (uint32_t i = 0; i < count; ++i)
 			{
@@ -811,8 +813,10 @@ namespace RHI
 					const bool resetVisibility = !_scene.Reused || !_visibilityValid;
 					recordCulling(frame, buffer, _scene.ObjectData, 1, resetVisibility);
 					drawOpaque(drawCulled);
-					// MSAA : Hi-Z は 1 サンプルの深度から作るので、前段の深度を先に解決する
-					if (_boundDepthMsaa) resolveSceneDepth(buffer);
+					// MSAA : Hi-Z は MSAA の深度から直接作る (作れない環境では先に 1 サンプルの深度へ解決する)
+					// 以前は毎回解決していた (SSAO もあると 1 フレームに 2 回)
+					// (8x は先に解決する方が速い : HIZ_FROM_MSAA_MAX_SAMPLES)
+					if (_boundDepthMsaa && !hiZFromMsaa()) resolveSceneDepth(buffer);
 					buildHiZ(buffer);
 					recordCulling(frame, buffer, _scene.ObjectData, 2, resetVisibility);
 					_scene.OcclusionDone = true;
@@ -860,6 +864,7 @@ namespace RHI
 					}
 					// MSAA の深度に描いていたら、1 サンプルの深度へ解決してから読む (このフレームで 1 回だけ)
 					if (_msaaDepthDirty) resolveSceneDepth(buffer);
+					_sceneDepthReadThisFrame = true;
 					transitionDepth(readState);
 					constants[i] = _depthSrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
 				}
@@ -1003,23 +1008,7 @@ namespace RHI
 			// ==============================================================
 			if (!_msaaDepth || !_msaaDepthDirty) return;
 			ID3D12PipelineState* pso = _currentPipeline->GetDepthResolvePso();
-			if (!pso) return;
-			auto heapManager = buffer->GetDescHeapManager();
-			if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX)
-			{
-				_msaaDepthSrvIndex = heapManager->AllocateSrv();
-				if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX) return;   // 満杯
-				_msaaDepthSrvDirty = true;
-			}
-			if (_msaaDepthSrvDirty)
-			{
-				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-				srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;
-				srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2DMS;
-				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				_device->GetDevice()->GetDevice()->CreateShaderResourceView(_msaaDepth.Get(), &srvDesc, heapManager->GetSrvCpuHandle(_msaaDepthSrvIndex));
-				_msaaDepthSrvDirty = false;
-			}
+			if (!pso || !ensureMsaaDepthSrv(buffer)) return;
 
 			auto cmdList = _frameCommandList->GetCmdList();
 			transitionMsaaDepth(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -1051,6 +1040,38 @@ namespace RHI
 				cmdList->RSSetViewports(1, &boundViewport);
 				cmdList->RSSetScissorRects(1, &boundRect);
 			}
+		}
+
+		bool CommandContext::hiZFromMsaa() const
+		{
+			// 後で全画面のシェーダーが深度を読む (SSAO など) なら、どうせ解決するので先に解決して、その深度から作る方が速い
+			// (MSAA の深度をコンピュートで読むと圧縮の展開が別に要るため。4x + SSAO : 直接 0.443 / 解決 0.426 ms)
+			// 今のフレームの後のことは分からないので、前のフレームで読んだかで決める (切り替えた次のフレームから合う)
+			if (_sceneDepthReadLastFrame) return false;
+			return _currentPipeline->GetHiZPipelineMs() && _msaaDepthSamples <= HIZ_FROM_MSAA_MAX_SAMPLES;
+		}
+
+		bool CommandContext::ensureMsaaDepthSrv(Buffer* buffer)
+		{
+			// MSAA の深度の SRV (ヒープに 1 個だけ確保し、MSAA の深度を作り直した時に書き直す)
+			if (!_msaaDepth) return false;
+			auto heapManager = buffer->GetDescHeapManager();
+			if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX)
+			{
+				_msaaDepthSrvIndex = heapManager->AllocateSrv();
+				if (_msaaDepthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX) return false;   // 満杯
+				_msaaDepthSrvDirty = true;
+			}
+			if (_msaaDepthSrvDirty)
+			{
+				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+				srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;
+				srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				_device->GetDevice()->GetDevice()->CreateShaderResourceView(_msaaDepth.Get(), &srvDesc, heapManager->GetSrvCpuHandle(_msaaDepthSrvIndex));
+				_msaaDepthSrvDirty = false;
+			}
+			return true;
 		}
 
 		void CommandContext::resolveTarget(RenderTarget& target)
@@ -1544,14 +1565,17 @@ namespace RHI
 			if (!ensureDepthSrv(buffer)) return;   // ヒープが満杯 (Hi-Z を作らない)
 			auto heapManager = buffer->GetDescHeapManager();
 
+			// MSAA の深度に描いている (まだ解決していない) なら、MSAA の深度から直接作る
+			const bool fromMsaa = _boundDepthMsaa && _msaaDepthDirty && hiZFromMsaa() && ensureMsaaDepthSrv(buffer);
+
 			// 1. 深度バッファを読む状態へ
-			transitionDepth(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			if (fromMsaa) transitionMsaaDepth(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			else          transitionDepth(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 			transitionHiZ(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 			// 2. 段ごとに縮小する
 			cmdList->SetComputeRootSignature(_currentPipeline->GetHiZRootSignature());
-			cmdList->SetPipelineState(_currentPipeline->GetHiZPipeline());
-			cmdList->SetComputeRootDescriptorTable(Pipeline::HIZ_PARAM_DEPTH, heapManager->GetSrvGpuHandle(_depthSrvIndex));
+			cmdList->SetComputeRootDescriptorTable(Pipeline::HIZ_PARAM_DEPTH, heapManager->GetSrvGpuHandle(fromMsaa ? _msaaDepthSrvIndex : _depthSrvIndex));
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::HIZ_PARAM_HIZ,  _hiZ->GetGPUVirtualAddress());
 
 			D3D12_RESOURCE_BARRIER uavBarrier = {};
@@ -1585,6 +1609,9 @@ namespace RHI
 					constants[4] = 0;
 				}
 				constants[5] = count;
+				constants[6] = fromMsaa ? _msaaDepthSamples : 1;                 // MSAA の深度のサンプル数
+				// 段 0 を作る Dispatch だけ MSAA の深度から読む (以降は Hi-Z の前の段から読むので同じシェーダーでよい)
+				cmdList->SetPipelineState(fromMsaa && first == 0 ? _currentPipeline->GetHiZPipelineMs() : _currentPipeline->GetHiZPipeline());
 				for (uint32_t i = 0; i < count; ++i)                             // 作る段 (uint4 ずつ)
 				{
 					constants[8 + i * 4 + 0] = _hiZMipWidth[first + i];
@@ -1598,7 +1625,8 @@ namespace RHI
 			}
 
 			// 3. 深度バッファを描画用に戻す
-			transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			if (fromMsaa) transitionMsaaDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			else          transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
 			// 描画用の PSO に戻す (この後、後段のカリングと描画が続く)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());

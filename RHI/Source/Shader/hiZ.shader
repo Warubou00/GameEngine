@@ -10,6 +10,9 @@
 //   Hi-Z をテクスチャではなくバッファにしたのは、ルート UAV だけで扱えてディスクリプタの管理が要らないため。
 //   深度バッファはテクスチャのまま SRV で直接読む (以前は CopyTextureRegion でバッファに写してから読んでいた)。
 //
+//   MSAA の深度からも直接作れる (CSDownsampleMS。段 0 で 2x2 × サンプルの一番奥を取る)。
+//   以前は MSAA の時、先に 1 サンプルの深度へ解決 (全画面のパス) してから作っていた。
+//
 //   1 回の Dispatch で最大 5 段を作る (16x16 スレッドのグループが、自分の範囲を groupshared で 16→8→4→2→1 と縮める)。
 //   以前は 1 段ごとに Dispatch + UAV バリアで、小さい段ほど GPU の待ちばかりになっていた
 //   (1280x720 で 11 回 → 3 回)
@@ -28,26 +31,34 @@ cbuffer HiZConstants : register(b0)
     uint  g_SrcPitch;     // 読む段の 1 行の要素数 (Hi-Z の段は幅と同じ。深度バッファから読む時は使わない)
     uint  g_FromDepth;    // 1 : 深度バッファから読む (段 0 を作る) / 0 : Hi-Z の前の段から読む
     uint  g_LevelCount;   // この Dispatch で作る段の数 (1〜5)
-    uint2 g_Padding;
+    uint  g_DepthSamples; // MSAA の深度のサンプル数 (CSDownsampleMS だけが使う)
+    uint  g_Padding;
     uint4 g_Dst[MAX_LEVELS_PER_PASS];   // 作る段 : x = 幅, y = 高さ, z = 先頭 (要素数)
 };
 
-Texture2D<float>          g_Depth : register(t0);   // 深度バッファ (R32_FLOAT の SRV)
+Texture2D<float>          g_Depth   : register(t0);   // 深度バッファ (R32_FLOAT の SRV)
+Texture2DMS<float>        g_DepthMS : register(t1);   // 同じディスクリプタを MSAA の深度として読む (CSDownsampleMS)
 RWStructuredBuffer<float> g_HiZ   : register(u0);   // Hi-Z (全段)
 
 groupshared float gs_Depth[16][16];
 
 // 範囲外は 0 (一番手前) として読む。「一番奥」を取るので、0 は結果に影響しない
 // (段の大きさは前の段の半分の切り上げなので、範囲内の texel が見落とされることは無い)
-float loadSource(uint x, uint y)
+// msaa はリテラル (CSDownsample / CSDownsampleMS) なので、使わない方の読み方とテクスチャはコンパイルで消える
+float loadSource(uint x, uint y, bool msaa)
 {
     if (x >= g_SrcWidth || y >= g_SrcHeight) return 0.0f;
-    if (g_FromDepth != 0) return g_Depth.Load(int3(x, y, 0));
+    if (g_FromDepth != 0)
+    {
+        if (!msaa) return g_Depth.Load(int3(x, y, 0));
+        float depth = 0.0f;
+        for (uint i = 0; i < g_DepthSamples; ++i) depth = max(depth, g_DepthMS.Load(int2(x, y), i));
+        return depth;
+    }
     return g_HiZ[g_SrcOffset + y * g_SrcPitch + x];
 }
 
-[numthreads(16, 16, 1)]
-void CSDownsample(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
+void downsample(uint3 groupId, uint3 threadId, bool msaa)
 {
     const uint2 t = threadId.xy;
 
@@ -57,8 +68,8 @@ void CSDownsample(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
     float depth = 0.0f;
     if (p.x < g_Dst[0].x && p.y < g_Dst[0].y)
     {
-        depth = max(max(loadSource(sp.x, sp.y),     loadSource(sp.x + 1, sp.y)),
-                    max(loadSource(sp.x, sp.y + 1), loadSource(sp.x + 1, sp.y + 1)));
+        depth = max(max(loadSource(sp.x, sp.y, msaa),     loadSource(sp.x + 1, sp.y, msaa)),
+                    max(loadSource(sp.x, sp.y + 1, msaa), loadSource(sp.x + 1, sp.y + 1, msaa)));
         g_HiZ[g_Dst[0].z + p.y * g_Dst[0].x + p.x] = depth;
     }
     gs_Depth[t.y][t.x] = depth;
@@ -88,4 +99,17 @@ void CSDownsample(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
             }
         }
     }
+}
+
+[numthreads(16, 16, 1)]
+void CSDownsample(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
+{
+    downsample(groupId, threadId, false);
+}
+
+// MSAA の深度から作る (段 0 だけが違う。2 Dispatch 目以降は CSDownsample と同じ)
+[numthreads(16, 16, 1)]
+void CSDownsampleMS(uint3 groupId : SV_GroupID, uint3 threadId : SV_GroupThreadID)
+{
+    downsample(groupId, threadId, true);
 }
