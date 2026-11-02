@@ -541,15 +541,24 @@ namespace RHI
         {
             // ==============================================================
             // Hi-Z (深度の縮小ピラミッド) を作るコンピュートのルートシグネチャと PSO
-            //   深度の写しもHi-Z もバッファなので、ルート SRV / UAV だけで組む (ディスクリプタヒープ不要)
+            //   深度バッファはテクスチャなので、ディスクリプタテーブル (1 個) で読む。Hi-Z はバッファなので Root UAV
+            //   (以前は深度バッファをバッファに写してから Root SRV で読んでいた。写すのに 約 0.012 ms かかっていた)
             // ==============================================================
+            D3D12_DESCRIPTOR_RANGE1 depthRange = {};
+            depthRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            depthRange.NumDescriptors                    = 1;
+            depthRange.BaseShaderRegister                = 0;   // t0
+            depthRange.RegisterSpace                     = 0;
+            depthRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            depthRange.OffsetInDescriptorsFromTableStart = 0;
+
             D3D12_ROOT_PARAMETER1 params[HIZ_PARAM_COUNT] = {};
             params[HIZ_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
             params[HIZ_PARAM_CONSTANTS].Constants.ShaderRegister = 0;
             params[HIZ_PARAM_CONSTANTS].Constants.Num32BitValues = HIZ_CONSTANT_COUNT;
-            params[HIZ_PARAM_DEPTH].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
-            params[HIZ_PARAM_DEPTH].Descriptor.ShaderRegister = 0;
-            params[HIZ_PARAM_DEPTH].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            params[HIZ_PARAM_DEPTH].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            params[HIZ_PARAM_DEPTH].DescriptorTable.NumDescriptorRanges = 1;
+            params[HIZ_PARAM_DEPTH].DescriptorTable.pDescriptorRanges   = &depthRange;
             params[HIZ_PARAM_HIZ].ParameterType               = D3D12_ROOT_PARAMETER_TYPE_UAV;
             params[HIZ_PARAM_HIZ].Descriptor.ShaderRegister   = 0;
             params[HIZ_PARAM_HIZ].Descriptor.Flags            = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;

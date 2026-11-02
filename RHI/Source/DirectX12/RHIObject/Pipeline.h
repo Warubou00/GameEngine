@@ -131,7 +131,8 @@ namespace RHI
             enum HiZRootParameterIndex : unsigned int
             {
                 HIZ_PARAM_CONSTANTS = 0,  // b0 : 読む段 / 書く段の大きさと位置 (ルート定数)
-                HIZ_PARAM_DEPTH     = 1,  // t0 : 深度バッファの写し (Root SRV)
+                HIZ_PARAM_DEPTH     = 1,  // t0 : 深度バッファ (Texture2D。ディスクリプタテーブル)
+                                          //      以前は深度バッファの写し (バッファ。Root SRV) だった
                 HIZ_PARAM_HIZ       = 2,  // u0 : Hi-Z (Root UAV)
                 HIZ_PARAM_COUNT
             };

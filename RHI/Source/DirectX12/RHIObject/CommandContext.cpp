@@ -239,6 +239,8 @@ namespace RHI
 			{
 				Core::Logger::Log("[CommandContext] Failed create visibility buffer. Occlusion culling disabled.");
 				_visibility.reset();
+			_depthSrvIndex = 0xFFFFFFFFu;   // ヒープは Buffer が持っているので、番号だけ忘れる (Buffer と一緒に作り直される)
+			_depthSrvDirty = true;
 			}
 			_visibilityValid = false;
 
@@ -531,7 +533,7 @@ namespace RHI
 				const bool resetVisibility = !reused || !_visibilityValid;
 				recordCulling(frame, buffer, objectData, 1, resetVisibility);
 				drawCulled();
-				buildHiZ();
+				buildHiZ(buffer);
 				recordCulling(frame, buffer, objectData, 2, resetVisibility);
 				drawCulled();
 				_visibilityValid = true;
@@ -852,22 +854,15 @@ namespace RHI
 		bool CommandContext::createHiZ(uint32_t width, uint32_t height)
 		{
 			_hiZLevels = 0;
-			_depthCopy.reset();
 			_hiZ.reset();
 			if (!_depthBuffer || width == 0 || height == 0) return false;
 
 			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
 
-			// 深度の写し : CopyTextureRegion で写せる並び (1 行は 256byte 境界) をデバイスに聞く
-			const D3D12_RESOURCE_DESC depthDesc = _depthBuffer->Get()->GetDesc();
-			UINT64 copySize = 0;
-			dx12Device->GetCopyableFootprints(&depthDesc, 0, 1, 0, &_depthFootprint, nullptr, nullptr, &copySize);
-			_depthCopy = std::make_unique<DirectX12::ResourceBuffer>();
-			if (FAILED(_depthCopy->Create(dx12Device, copySize, D3D12_HEAP_TYPE_DEFAULT)))
-			{
-				_depthCopy.reset();
-				return false;
-			}
+			// 深度バッファを作り直したので、次に Hi-Z を作る時に SRV を書き直す
+			_depthWidth    = width;
+			_depthHeight   = height;
+			_depthSrvDirty = true;
 
 			// Hi-Z の段 : 段 0 = 画面の半分 (切り上げ)、1x1 になるまで半分にしていく
 			uint32_t w = (width + 1) / 2, h = (height + 1) / 2, offset = 0;
@@ -888,7 +883,6 @@ namespace RHI
 				D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)))
 			{
 				_hiZ.reset();
-				_depthCopy.reset();
 				_hiZLevels = 0;
 				return false;
 			}
@@ -903,43 +897,48 @@ namespace RHI
 			_hiZState = after;
 		}
 
-		void CommandContext::buildHiZ()
+		void CommandContext::buildHiZ(Buffer* buffer)
 		{
 			// ==============================================================
 			// Hi-Z を作る (オクルージョンカリングの前段を描いた直後。後段はこの Hi-Z で判定する)
-			//   1. 深度バッファをバッファに写す (DEPTH_WRITE → COPY_SOURCE → 写す → DEPTH_WRITE に戻す)
-			//   2. 段 0 : 深度の写しの 2x2 の一番奥 / 段 1〜 : 前の段の 2x2 の一番奥
+			//   1. 深度バッファをシェーダーが読む状態にする (DEPTH_WRITE → NON_PIXEL_SHADER_RESOURCE)
+			//   2. 段 0 : 深度バッファの 2x2 の一番奥 / 段 1〜 : 前の段の 2x2 の一番奥
+			//   3. 深度バッファを描画用に戻す (後段の描画が続く)
+			//   (以前は深度バッファを CopyTextureRegion でバッファに写してから読んでいた)
 			// (以前はシーンを描き終えた後に作って、次のフレームで使っていた。カメラが動くと 1 フレーム遅れていた)
 			// ==============================================================
 			auto cmdList = _frameCommandList->GetCmdList();
 			ID3D12Resource* depth = _depthBuffer->Get();
 
-			// 1. 深度を写す
-			const auto toCopy = makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-			cmdList->ResourceBarrier(1, &toCopy);
+			// 深度バッファの SRV (ヒープに 1 個だけ確保し、深度バッファを作り直した時に書き直す)
+			// リサイズの時は GPU の完了を待ってから深度バッファを作り直すので、使用中のディスクリプタを書き換えることは無い
+			auto heapManager = buffer->GetDescHeapManager();
+			if (_depthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX)
+			{
+				_depthSrvIndex = heapManager->AllocateSrv();
+				if (_depthSrvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX) return;   // 満杯 (Hi-Z を作らない)
+				_depthSrvDirty = true;
+			}
+			if (_depthSrvDirty)
+			{
+				D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+				srvDesc.Format                  = DXGI_FORMAT_R32_FLOAT;   // 深度バッファ (R32_TYPELESS) を float として読む
+				srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+				srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				srvDesc.Texture2D.MipLevels     = 1;
+				_device->GetDevice()->GetDevice()->CreateShaderResourceView(depth, &srvDesc, heapManager->GetSrvCpuHandle(_depthSrvIndex));
+				_depthSrvDirty = false;
+			}
 
-			D3D12_TEXTURE_COPY_LOCATION dst = {};
-			dst.pResource       = _depthCopy->Get();
-			dst.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-			dst.PlacedFootprint = _depthFootprint;
-			D3D12_TEXTURE_COPY_LOCATION src = {};
-			src.pResource        = depth;
-			src.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-			src.SubresourceIndex = 0;
-			cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-
-			// 深度は描画用に戻す / 写しはシェーダーが読む状態へ (コピーで COMMON → COPY_DEST に暗黙で昇格している)
-			D3D12_RESOURCE_BARRIER barriers[2] = {
-				makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE),
-				makeTransitionBarrier(_depthCopy->Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			};
-			cmdList->ResourceBarrier(2, barriers);
+			// 1. 深度バッファを読む状態へ
+			const auto toRead = makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			cmdList->ResourceBarrier(1, &toRead);
 			transitionHiZ(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
 			// 2. 段ごとに縮小する
 			cmdList->SetComputeRootSignature(_currentPipeline->GetHiZRootSignature());
 			cmdList->SetPipelineState(_currentPipeline->GetHiZPipeline());
-			cmdList->SetComputeRootShaderResourceView(Pipeline::HIZ_PARAM_DEPTH, _depthCopy->GetGPUVirtualAddress());
+			cmdList->SetComputeRootDescriptorTable(Pipeline::HIZ_PARAM_DEPTH, heapManager->GetSrvGpuHandle(_depthSrvIndex));
 			cmdList->SetComputeRootUnorderedAccessView(Pipeline::HIZ_PARAM_HIZ,  _hiZ->GetGPUVirtualAddress());
 
 			D3D12_RESOURCE_BARRIER uavBarrier = {};
@@ -958,11 +957,11 @@ namespace RHI
 				uint32_t constants[Pipeline::HIZ_CONSTANT_COUNT] = {};
 				if (first == 0)
 				{
-					constants[0] = _depthFootprint.Footprint.Width;              // 読む段 = 深度の写し
-					constants[1] = _depthFootprint.Footprint.Height;
+					constants[0] = _depthWidth;                                  // 読む段 = 深度バッファ
+					constants[1] = _depthHeight;
 					constants[2] = 0;
-					constants[3] = _depthFootprint.Footprint.RowPitch / sizeof(float);
-					constants[4] = 1;                                            // 深度の写しから読む
+					constants[3] = 0;
+					constants[4] = 1;                                            // 深度バッファから読む
 				}
 				else
 				{
@@ -984,6 +983,10 @@ namespace RHI
 				cmdList->Dispatch((_hiZMipWidth[first] + group - 1) / group, (_hiZMipHeight[first] + group - 1) / group, 1);
 				cmdList->ResourceBarrier(1, &uavBarrier);   // 次の Dispatch はこの Dispatch の最後の段を読む
 			}
+
+			// 3. 深度バッファを描画用に戻す
+			const auto toDepth = makeTransitionBarrier(depth, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			cmdList->ResourceBarrier(1, &toDepth);
 
 			// 描画用の PSO に戻す (この後、後段のカリングと描画が続く)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
@@ -1181,7 +1184,8 @@ namespace RHI
 			ID3D12Device* dx12Device = _device->GetDevice()->GetDevice();
 
 			_depthBuffer = std::make_unique<DirectX12::ResourceBuffer>();
-			HRESULT hr = _depthBuffer->CreateDepthStencil(dx12Device, width, height, DEPTH_FORMAT, DEPTH_CLEAR_VALUE);
+			// オクルージョンカリングの Hi-Z を作るのにシェーダーから読むので、読める深度バッファにする
+			HRESULT hr = _depthBuffer->CreateDepthStencil(dx12Device, width, height, DEPTH_FORMAT, DEPTH_CLEAR_VALUE, true);
 			if (FAILED(hr)) { logFailed("CreateDepthStencil", hr); return false; }
 
 			D3D12_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};

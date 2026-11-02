@@ -1,0 +1,52 @@
+====================================================================
+ 深度バッファを直接読む (Hi-Z を作る時の深度の写しを無くす)
+ 日付   : 2026-11-02
+ ブランチ : feature/depth-srv
+====================================================================
+
+■ 背景
+  オクルージョンカリングの Hi-Z を作る時、深度バッファを CopyTextureRegion でバッファに写してから読んでいた。
+  深度バッファは DENY_SHADER_RESOURCE (シェーダーから読まない) で作っていて、シェーダーから直接読めなかったため。
+
+■ 変更
+  1. 深度バッファ (ResourceBuffer::CreateDepthStencil に shaderReadable を追加)
+     - R32_TYPELESS で作る (DSV は D32_FLOAT、SRV は R32_FLOAT として作れる)
+     - DENY_SHADER_RESOURCE を外す
+  2. 深度の SRV
+     - Buffer のディスクリプタヒープに 1 個だけ確保する (最初に Hi-Z を作る時)
+     - 深度バッファを作り直した時 (リサイズ) だけ書き直す。リサイズは GPU の完了を待ってから行うので、
+       使用中のディスクリプタを書き換えることは無い
+  3. Hi-Z を作る処理 (CommandContext::buildHiZ / hiZ.shader)
+     - 深度バッファを DEPTH_WRITE → NON_PIXEL_SHADER_RESOURCE にして、Texture2D<float> として直接読む
+       (ルートシグネチャの深度は Root SRV → ディスクリプタテーブル 1 個)
+     - 読み終わったら DEPTH_WRITE に戻す (後段の描画が続く)
+     - 深度の写し (_depthCopy) と、写す並びの情報 (_depthFootprint) は削除
+
+■ 計測結果 (RTX 2070 / Release / 1280x720 / ExecuteIndirect + インスタンシング + GPU カリング、各 2 回)
+                                 オクルージョンなし        オクルージョンあり
+                                 (前回 → 今回)             深度の写し (前回)  → 直接読む (今回)
+    地面すれすれ (1010 / 14850)    0.178 → 0.175 ms          0.135 ms           → 0.114 ms
+    全体が映る (隠れる物なし)      0.203 → 0.201 ms          0.261 ms           → 0.242 ms
+    通常起動 (箱 1 個)             0.038 → 0.039 ms          0.086 ms           → 0.067 ms
+
+  - オクルージョンカリングありで、どの場面も 約 0.02 ms 速くなった (写しにかかると見積もった 0.012 ms より大きい。
+    写す時に圧縮された深度を展開する処理や、コピーの完了待ちも無くなったためと考えられる)。
+  - オクルージョンカリングなしの時間は変わらない。DENY_SHADER_RESOURCE を外したことによる深度テストの遅れは、このGPUでは出ていない。
+  - オクルージョンカリングの固定の負担 (隠れる物が無い時) は 約 0.04〜0.05 ms → 約 0.03〜0.04 ms。
+    隠れる物が多い場面では、オクルージョンなしより 35% 速い (2 段階にする前の 1 段階と同じくらいまで戻った)。
+
+■ 確認したこと
+  - D3D12 デバッグレイヤーのエラー・警告 0 : 通常起動 / 地面すれすれ / 格子の中から / オクルージョン OFF / GPU カリング OFF
+  - ウィンドウのサイズを 3 回変えても (1000x600 → 1400x820 → 700x500) エラー 0、カリングも続けて効いている
+    (深度バッファを作り直した時に SRV を書き直せている)
+  - 地面すれすれ・格子の中からの 2 つのカメラで、オクルージョン ON / OFF の画面がシーンの範囲 142000 ピクセルで一致
+
+■ 注意
+  - DENY_SHADER_RESOURCE を外すと、GPU によっては深度の圧縮の最適化が弱くなることがある。
+    このテスト (RTX 2070) では差が出なかったが、別の GPU では確かめていない。
+
+■ 変更ファイル
+  RHI/Source/DirectX12/Object/dx12_resourceBuffer.h/.cpp   (CreateDepthStencil に shaderReadable)
+  RHI/Source/DirectX12/RHIObject/CommandContext.h/.cpp     (深度の SRV、buildHiZ、深度の写しを削除)
+  RHI/Source/DirectX12/RHIObject/Pipeline.h/.cpp           (Hi-Z のルートシグネチャ : 深度をディスクリプタテーブルに)
+  RHI/Source/Shader/hiZ.shader                             (Texture2D<float> で深度を読む)
