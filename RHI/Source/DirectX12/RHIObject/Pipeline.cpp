@@ -46,6 +46,7 @@
 // ========================================
 
 #include <wrl.h>
+#include <algorithm>
 
 /******************************************************************
 * Macro Definitions
@@ -73,6 +74,7 @@ namespace RHI
 			constexpr const wchar_t* DEFAULT_SHADER_PATH = L"../Shader/hlslTemplate.shader";
 			constexpr const wchar_t* CULLING_SHADER_PATH = L"../Shader/gpuCulling.shader";
 			constexpr const wchar_t* HIZ_SHADER_PATH     = L"../Shader/hiZ.shader";
+			constexpr const wchar_t* ANTI_ALIASING_SHADER_PATH = L"../Shader/antiAliasing.shader";   // MSAA の深度の解決
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -250,6 +252,16 @@ namespace RHI
                                                             D3D12_DESCRIPTOR_RANGE_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             srvRangeTex.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
+            // 同じテクスチャ配列を MSAA のテクスチャ (Texture2DMS) としても読めるようにする (t0, space2)
+            //   範囲は重ねてよい (OffsetInDescriptorsFromTableStart = 0 で同じ場所を指す)。
+            //   MSAA の深度を 1 サンプルの深度へ解決するシェーダー (PSResolveDepth) が使う
+            //   (Texture2D の配列から MSAA のテクスチャは読めない。種類の違う SRV を同じ添え字で読むため)
+            D3D12_DESCRIPTOR_RANGE1 texRanges[2]           = { srvRangeTex, srvRangeTex };
+            texRanges[0].OffsetInDescriptorsFromTableStart = 0;
+            texRanges[1].NumDescriptors                    = MSAA_TEXTURE_COUNT;
+            texRanges[1].RegisterSpace                     = 2;
+            texRanges[1].OffsetInDescriptorsFromTableStart = 0;
+
             // パラメータの設定 (番号は Pipeline.h の RootParameterIndex を参照)
             D3D12_ROOT_PARAMETER1 rootParams[ROOT_PARAM_COUNT] = {};
 
@@ -292,8 +304,8 @@ namespace RHI
             // [4]: テクスチャ配列のSRV (t1) - Descriptor Table
             auto& texTable = rootParams[ROOT_PARAM_TEXTURE_TABLE];
             texTable.ParameterType                         = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-            texTable.DescriptorTable.NumDescriptorRanges   = 1;
-            texTable.DescriptorTable.pDescriptorRanges     = &srvRangeTex;
+            texTable.DescriptorTable.NumDescriptorRanges   = _countof(texRanges);   // 以前は 1 (Texture2D の配列だけ)
+            texTable.DescriptorTable.pDescriptorRanges     = texRanges;
             texTable.ShaderVisibility                      = D3D12_SHADER_VISIBILITY_PIXEL; // テクスチャはピクセルシェーダーで読む
 
             // [5]: マテリアル (t3) - Root SRV (StructuredBuffer<MaterialData>)
@@ -389,7 +401,7 @@ namespace RHI
 
             // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
             const DXGI_FORMAT hdr = HDR_FORMAT;
-            ID3D12PipelineState* pso = GetScenePso(static_cast<uint32_t>(RHI::ScenePass::Forward), PIPELINE_OPAQUE, &hdr, 1, CommandContext::DEPTH_FORMAT);
+            ID3D12PipelineState* pso = GetScenePso(static_cast<uint32_t>(RHI::ScenePass::Forward), PIPELINE_OPAQUE, &hdr, 1, CommandContext::DEPTH_FORMAT, 1);
             if (!pso)
             {
                 Core::Logger::Log("[Pipeline] Failed create pipeline state.");
@@ -489,12 +501,13 @@ namespace RHI
             return pso.Get();
         }
 
-        ID3D12PipelineState* Pipeline::GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat)
+        ID3D12PipelineState* Pipeline::GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount)
         {
             if (!_sceneShaders || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
 
             uint64_t key = fnv1a(&scenePass, sizeof(scenePass), 0x5CE7E0ull);
             key = fnv1a(&group, sizeof(group), key);
+            key = fnv1a(&sampleCount, sizeof(sampleCount), key);
             key = hashFormats(key, rtvFormats, rtvCount, dsvFormat);
             auto found = _psoMap.find(key);
             if (found != _psoMap.end()) return found->second.Get();
@@ -527,16 +540,19 @@ namespace RHI
             for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
             desc.DSVFormat = dsvFormat;
             if (dsvFormat == DXGI_FORMAT_UNKNOWN) desc.DepthStencilState.DepthEnable = FALSE;
+            // MSAA : 描画先 (色と深度) と同じサンプル数。ピクセルシェーダーは 1 ピクセル 1 回のまま (縁のサンプルだけ増える)
+            desc.SampleDesc.Count = (std::max)(1u, sampleCount);
 
             return createPso(key, gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
         }
 
-        ID3D12PipelineState* Pipeline::GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount)
+        ID3D12PipelineState* Pipeline::GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount)
         {
             if (shader >= _fullscreenShaders.size() || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
 
             uint64_t key = fnv1a(&shader, sizeof(shader), 0xF0115C2Eull);
             key = fnv1a(&blend, sizeof(blend), key);
+            key = fnv1a(&sampleCount, sizeof(sampleCount), key);
             key = hashFormats(key, rtvFormats, rtvCount, DXGI_FORMAT_UNKNOWN);
             auto found = _psoMap.find(key);
             if (found != _psoMap.end()) return found->second.Get();
@@ -564,7 +580,36 @@ namespace RHI
             desc.NumRenderTargets = rtvCount;
             for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
             desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+            desc.SampleDesc.Count = (std::max)(1u, sampleCount);   // MSAA の描画先に足す時 (Forward + SSAO の環境光)
             return createPso(key, L"Fullscreen", desc);
+        }
+
+        ID3D12PipelineState* Pipeline::GetDepthResolvePso()
+        {
+            // ==============================================================
+            // MSAA の深度 → 1 サンプルの深度 (全画面で SV_Depth に書く。色の描画先は無し)
+            //   深度はハードウェアの Resolve (ResolveSubresource) では解決できない (平均すると物の縁で
+            //   どちらの物でもない深度になる) ので、シェーダーでサンプルの「一番奥」を選ぶ
+            //   一番奥 : Hi-Z (オクルージョン) が、縁で見えている物を隠れたと判定しないように (控えめな側に倒す)
+            // ==============================================================
+            if (_depthResolveShader == 0xFFFFFFFFu)
+            {
+                _depthResolveShader = LoadFullscreenShader(ANTI_ALIASING_SHADER_PATH, "PSResolveDepth");
+                if (_depthResolveShader == 0xFFFFFFFFu) return nullptr;
+            }
+            const uint64_t key = fnv1a(&_depthResolveShader, sizeof(_depthResolveShader), 0xDE97E5ull);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            const auto& fullscreen = *_fullscreenShaders[_depthResolveShader];
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = fullscreen.Vs.View();
+            desc.PS = fullscreen.Ps.View();
+            desc.InputLayout = { nullptr, 0 };
+            desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;   // 前の値に関係なく書く
+            desc.NumRenderTargets = 0;
+            desc.DSVFormat        = CommandContext::DEPTH_FORMAT;
+            return createPso(key, L"DepthResolve", desc);
         }
 
         uint32_t Pipeline::LoadFullscreenShader(const std::wstring& filePath, const std::string& entry)

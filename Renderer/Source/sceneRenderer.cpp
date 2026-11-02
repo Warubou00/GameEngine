@@ -411,6 +411,11 @@ namespace Renderer
 		if (IsInitialized()) _rhi->DestroyRenderTarget(handle);
 	}
 
+	uint32_t SceneRenderer::GetMaxSampleCount() const
+	{
+		return IsInitialized() ? _rhi->GetMaxSampleCount() : 1;
+	}
+
 	RHI::FullscreenShaderHandle SceneRenderer::LoadFullscreenShader(const wchar_t* filePath, const char* entry)
 	{
 		return IsInitialized() ? _rhi->LoadFullscreenShader(filePath, entry) : RHI::FullscreenShaderHandle();

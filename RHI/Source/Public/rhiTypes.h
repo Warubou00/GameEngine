@@ -173,6 +173,10 @@ namespace RHI
 		uint32_t Width  = 0;
 		uint32_t Height = 0;
 		float    ClearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };   // 最適化クリア値 (同じ色で消すと速い)
+		// MSAA のサンプル数 (1 / 2 / 4 / 8)。2 以上なら、描画先にした後に全画面のシェーダーで読む時、
+		// RHI が 1 サンプルの写しへ自動で解決 (Resolve) する。シーンの深度 (SCENE_DEPTH) も描画先と同じサンプル数になる
+		// 対応していない数は、対応している一番近い数に下げる (GetMaxSampleCount)
+		uint32_t SampleCount = 1;
 	};
 
 	struct RenderTargetHandle

@@ -248,6 +248,11 @@ namespace RHI
         if (_isInitialized) _commandContext->DestroyRenderTarget(handle);
     }
 
+    uint32_t RenderHardwareInterface::GetMaxSampleCount() const
+    {
+        return _isInitialized ? _commandContext->GetMaxSampleCount() : 1;
+    }
+
     FullscreenShaderHandle RenderHardwareInterface::LoadFullscreenShader(const wchar_t* filePath, const char* entry)
     {
         FullscreenShaderHandle handle;

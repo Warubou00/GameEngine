@@ -107,6 +107,8 @@ namespace RHI
 		// レンダーターゲットを作る (画面に合わせる物はリサイズで自動で作り直す)
 		virtual RenderTargetHandle CreateRenderTarget(const RenderTargetDesc& desc) = 0;
 		virtual void               DestroyRenderTarget(RenderTargetHandle handle) = 0;
+		// MSAA で使えるサンプル数の上限 (HDR / 環境光 / 深度の形式がどれも対応している数。最大 8)
+		virtual uint32_t           GetMaxSampleCount() const = 0;
 
 		// 全画面のシェーダーを読み込む (ファイルの VSFullscreen と entry のピクセルシェーダー)。失敗時は無効なハンドル
 		virtual FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry) = 0;

@@ -115,6 +115,12 @@ extern "C"
 		if (g_renderer) g_renderer->DestroyRenderTarget(target);
 	}
 
+	// MSAA で使えるサンプル数の上限 (1 なら MSAA は使えない)
+	RENDERER_API uint32_t Renderer_GetMaxSampleCount()
+	{
+		return g_renderer ? g_renderer->GetMaxSampleCount() : 1;
+	}
+
 	// 全画面のシェーダー (filePath の VSFullscreen と entry)。戻り値はハンドル (失敗時 INVALID_HANDLE)
 	RENDERER_API uint32_t Renderer_LoadFullscreenShader(const wchar_t* filePath, const char* entry)
 	{

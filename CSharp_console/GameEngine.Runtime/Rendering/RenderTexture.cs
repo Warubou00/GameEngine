@@ -23,6 +23,8 @@ public enum RenderTextureFormat : uint
 // レンダーターゲット (描画パスの描き先 / 後のパスで読むテクスチャ)
 //   Create(format, scale) : 画面の大きさ × scale。ウィンドウのサイズが変わると C++ が自動で作り直す
 //   BackBuffer / SceneDepth : 画面と、シーンの深度 (GPU カリングのオクルージョンもこれを使う)。消せない
+//   sampleCount > 1 (MSAA) : 描画先にした後、全画面のシェーダーで読む時に C++ が 1 サンプルへ自動で解決する。
+//                            SceneDepth と一緒に描画先にすると、深度も同じサンプル数になる (C++ が別に持つ)
 //   以前は描画先がバックバッファ 1 枚に決まっていて、C# からは作れなかった
 // ==========================================================================
 public sealed class RenderTexture : IDisposable
@@ -36,40 +38,44 @@ public sealed class RenderTexture : IDisposable
     public RenderTextureFormat Format { get; }
     public float Scale { get; }   // 0 なら大きさ固定
     public Vector4 ClearColor { get; }
+    public int SampleCount { get; }   // MSAA のサンプル数 (頼んだ数。GPU が対応していなければ C++ が下げる)
     public bool IsValid => Handle != NativeMethods.InvalidHandle;
 
-    private RenderTexture(uint handle, bool owned, RenderTextureFormat format, float scale, Vector4 clearColor = default)
+    private RenderTexture(uint handle, bool owned, RenderTextureFormat format, float scale, Vector4 clearColor = default, int sampleCount = 1)
     {
-        Handle     = handle;
-        _owned     = owned;
-        Format     = format;
-        Scale      = scale;
-        ClearColor = clearColor;
+        Handle      = handle;
+        _owned      = owned;
+        Format      = format;
+        Scale       = scale;
+        ClearColor  = clearColor;
+        SampleCount = sampleCount;
     }
 
     /// <summary>画面の大きさに合わせたレンダーターゲットを作る</summary>
     /// <param name="clearColor">最適化クリア値 (RenderCommandBuffer.ClearColor で同じ色を使うと速い)</param>
-    public static RenderTexture Create(RenderTextureFormat format, float scale = 1.0f, Vector4 clearColor = default)
+    /// <param name="sampleCount">MSAA のサンプル数 (1 なら MSAA なし)</param>
+    public static RenderTexture Create(RenderTextureFormat format, float scale = 1.0f, Vector4 clearColor = default, int sampleCount = 1)
     {
-        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = scale, ClearColor = clearColor };
-        return CreateNative(ref desc, format, scale, clearColor);
+        var samples = Math.Max(1, sampleCount);
+        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = scale, ClearColor = clearColor, SampleCount = (uint)samples };
+        return CreateNative(ref desc, format, scale, clearColor, samples);
     }
 
     /// <summary>大きさ固定のレンダーターゲットを作る (リサイズしても変わらない)</summary>
     public static RenderTexture CreateFixed(RenderTextureFormat format, uint width, uint height, Vector4 clearColor = default)
     {
-        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = 0.0f, Width = width, Height = height, ClearColor = clearColor };
+        var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = 0.0f, Width = width, Height = height, ClearColor = clearColor, SampleCount = 1 };
         return CreateNative(ref desc, format, 0.0f, clearColor);
     }
 
-    private static RenderTexture CreateNative(ref NativeMethods.RenderTargetDesc desc, RenderTextureFormat format, float scale, Vector4 clearColor)
+    private static RenderTexture CreateNative(ref NativeMethods.RenderTargetDesc desc, RenderTextureFormat format, float scale, Vector4 clearColor, int sampleCount = 1)
     {
         var handle = NativeMethods.Renderer_CreateRenderTarget(ref desc);
         if (handle == NativeMethods.InvalidHandle)
         {
             throw new InvalidOperationException($"Failed to create render texture ({format}). See the log above.");
         }
-        return new RenderTexture(handle, owned: true, format, scale, clearColor);
+        return new RenderTexture(handle, owned: true, format, scale, clearColor, sampleCount);
     }
 
     // 消すと GPU の完了を待つ (描画パイプラインを切り替える時だけ使う想定)

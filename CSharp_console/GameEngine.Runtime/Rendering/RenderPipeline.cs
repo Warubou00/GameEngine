@@ -15,6 +15,8 @@ namespace GameEngine.Rendering;
 public abstract class RenderPipeline : IDisposable
 {
     private FullscreenShader? _tonemap;
+    private FullscreenShader? _fxaa;
+    private RenderTexture?    _ldr;   // FXAA の時だけ : トーンマップの結果 (画面の色)
 
     // SSAO (Forward / Deferred 共通の部品)
     protected SsaoPass Ssao { get; } = new();
@@ -27,7 +29,32 @@ public abstract class RenderPipeline : IDisposable
     public virtual void Dispose()
     {
         Ssao.Dispose();
+        _ldr?.Dispose();
+        _ldr = null;
     }
+
+    // ---------- アンチエイリアス ----------
+
+    // このパイプラインが使う MSAA のサンプル数 (1 なら MSAA なし)。既定は MSAA を使わない (Deferred)
+    protected virtual int MsaaSamples(GraphicsSettings settings) => 1;
+
+    // FXAA を掛けるか。既定は FXAA の時と、MSAA を頼まれたが使えない時 (代わりに FXAA)
+    protected virtual bool UseFxaa(GraphicsSettings settings) =>
+        settings.AntiAliasing == AntiAliasing.Fxaa ||
+        (settings.AntiAliasing.SampleCount() > 1 && MsaaSamples(settings) <= 1);
+
+    // 表示用 : 実際に使っているアンチエイリアス (毎フレーム呼ばれるので、文字列は作らず定数を返す)
+    public string AntiAliasingName(GraphicsSettings settings)
+    {
+        var samples = MsaaSamples(settings);
+        if (samples > 1) return samples switch { 2 => "MSAA 2x", 4 => "MSAA 4x", _ => "MSAA 8x" };
+        if (UseFxaa(settings)) return settings.AntiAliasing == AntiAliasing.Fxaa ? "FXAA" : "FXAA (MSAA not available)";
+        return "No AA";
+    }
+
+    // 頼まれた MSAA のサンプル数を、GPU が対応している数に合わせる (MSAA を使うパイプライン用)
+    protected static int ClampMsaaSamples(GraphicsSettings settings) =>
+        Math.Min(settings.AntiAliasing.SampleCount(), settings.MaxMsaaSamples);
 
     // SSAO を使うか (Unlit は環境光が無いので使わない)
     protected static bool UseSsao(GraphicsSettings settings) =>
@@ -46,8 +73,21 @@ public abstract class RenderPipeline : IDisposable
         // ライト無し (Unlit) は以前と同じ見た目になるよう、トーンマップを掛けない (色をそのまま出す)
         var unlit  = settings.LightingModel == LightingModel.Unlit;
         var method = unlit ? Tonemapper.None : settings.Tonemapper;
+
+        // FXAA : トーンマップの結果 (ガンマを掛けた画面の色) を一度 RGBA8 に描き、FXAA でバックバッファへ
+        //   トーンマップの後に掛ける : 明るさが画面の見た目と同じになり、縁の見つけ方が人の目に近い
+        //   (HDR のまま掛けると、明るい所の小さな差を縁と見なしてしまう)
+        var fxaa = UseFxaa(settings);
+        if (fxaa) _ldr ??= RenderTexture.Create(RenderTextureFormat.RGBA8);
+        cmd.SetRenderTarget(fxaa ? _ldr! : RenderTexture.BackBuffer);
+        // FXAA の時はアルファに明るさを書いてもらう (FXAA が 4 ピクセル分をまとめて読む)
+        cmd.DrawFullscreen(_tonemap, [hdr], [unlit ? 1.0f : settings.Exposure, (float)method, settings.Gamma, fxaa ? 1.0f : 0.0f]);
+        if (!fxaa) return;
+
+        _fxaa ??= FullscreenShader.Load(ShaderPaths.AntiAliasing, "PSFxaa");
+        var f = settings.Fxaa;
         cmd.SetRenderTarget(RenderTexture.BackBuffer);
-        cmd.DrawFullscreen(_tonemap, [hdr], [unlit ? 1.0f : settings.Exposure, (float)method, settings.Gamma]);
+        cmd.DrawFullscreen(_fxaa, [_ldr!], [Math.Clamp(f.Subpixel, 0.0f, 1.0f), f.EdgeThreshold, f.EdgeThresholdMin]);
     }
 
     // sRGB の色 → 線形 (シェーダーの toLinear と同じ近似)
@@ -59,6 +99,7 @@ internal static class ShaderPaths
 {
     public const string Scene       = "../Shader/hlslTemplate.shader";
     public const string PostProcess = "../Shader/postProcess.shader";
+    public const string AntiAliasing = "../Shader/antiAliasing.shader";
 }
 
 // ==========================================================================
@@ -66,14 +107,19 @@ internal static class ShaderPaths
 //   ライトが少ない / 半透明が多い場面向き。G-Buffer が要らないのでメモリと帯域が少ない
 //   SSAO あり : ライトの光 (HDR) と環境光 (R11G11B10F) を分けて描き、深度から遮蔽を求めて
 //               「環境光 × 遮蔽」を HDR に足す (遮蔽が環境光にだけ掛かる。深度のプリパスも要らない)
+//   MSAA あり : HDR (と環境光) を MSAA にする。深度も C++ が同じサンプル数にする。
+//               遮蔽 / トーンマップは C++ が 1 サンプルへ解決した物を読む
 // ==========================================================================
 public sealed class ForwardRenderPipeline : RenderPipeline
 {
     private RenderTexture? _hdr;
     private RenderTexture? _ambient;   // SSAO の時だけ作る
     private Vector3 _background;
+    private int _samples;
 
     public override string Name => "Forward";
+
+    protected override int MsaaSamples(GraphicsSettings settings) => ClampMsaaSamples(settings);
 
     protected internal override void Initialize(GraphicsSettings settings)
     {
@@ -83,21 +129,25 @@ public sealed class ForwardRenderPipeline : RenderPipeline
     private void CreateTargets(GraphicsSettings settings)
     {
         _hdr?.Dispose();
+        _ambient?.Dispose();
+        _ambient    = null;
         _background = settings.BackgroundColor;
+        _samples    = MsaaSamples(settings);
         // 背景の色を最適化クリア値にしておく (毎フレームその色で消すので速い)
-        _hdr = RenderTexture.Create(RenderTextureFormat.RGBA16F, 1.0f, ToLinear(_background));
+        _hdr = RenderTexture.Create(RenderTextureFormat.RGBA16F, 1.0f, ToLinear(_background), _samples);
     }
 
     protected internal override void Render(RenderCommandBuffer cmd, GraphicsSettings settings)
     {
-        if (settings.BackgroundColor != _background) CreateTargets(settings);
+        if (settings.BackgroundColor != _background || MsaaSamples(settings) != _samples) CreateTargets(settings);
         var hdr = _hdr!;
         RenderTexture? ao = null;
 
         if (UseSsao(settings))
         {
             // 背景は環境光 0 (黒) で消す。足すのは環境光の分だけなので背景の色は変わらない
-            _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F);
+            // (同時に描くので、HDR と同じサンプル数にする)
+            _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F, 1.0f, default, _samples);
             cmd.SetRenderTarget(_ambient);
             cmd.ClearColor(Vector4.Zero);
             cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
@@ -140,6 +190,8 @@ public sealed class ForwardRenderPipeline : RenderPipeline
 //   半透明は G-Buffer に書けないので、ライティングの後にフォワードで重ねる
 //   G-Buffer : RT0 RGBA8_SRGB アルベド / RT1 RGBA16F 法線 / RT2 RGBA8 金属・粗さ (1280x720 で約 14MB)
 //   SSAO あり : G-Buffer の法線と深度から遮蔽を求め、ライティングが環境光に掛ける
+//   MSAA は使わず、代わりに FXAA を掛ける (G-Buffer を MSAA にすると 4x で約 56MB・帯域 4 倍で、
+//   ライティングも縁のサンプルごとに行う必要がある。RenderPipeline.UseFxaa)
 // ==========================================================================
 public sealed class DeferredRenderPipeline : RenderPipeline
 {

@@ -58,6 +58,7 @@ float3 acesFilm(float3 x)
 // トーンマップ
 //   g_Inputs[0].x : HDR の色
 //   g_Params[0]   : x = 露出 (倍率) / y = 方法 (0 なし / 1 Reinhard / 2 ACES) / z = ガンマ (2.2)
+//                   w = 1 ならアルファに明るさ (luma) を書く (FXAA が GatherAlpha で 4 ピクセル分をまとめて読む)
 // ==============================================================
 float4 PSTonemap(FullscreenOutput input) : SV_TARGET
 {
@@ -69,5 +70,6 @@ float4 PSTonemap(FullscreenOutput input) : SV_TARGET
 
     // 線形 → 画面 (バックバッファは UNORM なので自分でガンマをかける)
     color = pow(saturate(color), 1.0f / max(g_Params[0].z, 0.01f));
-    return float4(color, 1.0f);
+    const float luma = dot(color, float3(0.299f, 0.587f, 0.114f));   // ガンマを掛けた後 (人の目の感じ方に近い)
+    return float4(color, g_Params[0].w > 0.5f ? luma : 1.0f);
 }
