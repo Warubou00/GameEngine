@@ -139,7 +139,7 @@ namespace RHI
             return S_OK;
         }
 
-        HRESULT ResourceBuffer::CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth)
+        HRESULT ResourceBuffer::CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth, bool shaderReadable)
         {
             if (!device || _resourceBuffer || width == 0 || height == 0)
             {
@@ -160,12 +160,15 @@ namespace RHI
             desc.Height                     = height;
             desc.DepthOrArraySize           = 1;
             desc.MipLevels                  = 1;
-            desc.Format                     = format;
+            // シェーダーから読む時は型なしで作る (D32_FLOAT のままだと R32_FLOAT の SRV が作れない)
+            desc.Format                     = shaderReadable && format == DXGI_FORMAT_D32_FLOAT ? DXGI_FORMAT_R32_TYPELESS : format;
             desc.SampleDesc.Count           = 1;
             desc.SampleDesc.Quality         = 0;
             desc.Layout                     = D3D12_TEXTURE_LAYOUT_UNKNOWN;
             // DENY_SHADER_RESOURCE : シェーダーから読まないことを伝えると、ドライバーが深度圧縮を最適化できる
-            desc.Flags                      = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL | D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
+            //                        (シェーダーから読む時は付けられない)
+            desc.Flags                      = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+            if (!shaderReadable) desc.Flags |= D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE;
 
             // 最適化クリア値 : ClearDepthStencilView で同じ値を使うと高速クリアになる
             D3D12_CLEAR_VALUE clearValue = {};

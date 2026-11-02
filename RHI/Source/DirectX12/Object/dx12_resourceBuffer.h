@@ -91,7 +91,9 @@ namespace RHI
 			 * @param[in] float clearDepth クリアする深度値
 			 * @return HRESULT 成功の有無
 			 ************************************************************************************/
-			HRESULT CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth);
+			// shaderReadable : シェーダーから SRV で読むか (オクルージョンカリングの Hi-Z を作るのに使う)
+			//                  true なら型なしフォーマットで作る (DSV は format、SRV は対応する R 系のフォーマットで作れる)
+			HRESULT CreateDepthStencil(ID3D12Device* device, UINT64 width, UINT height, DXGI_FORMAT format, float clearDepth, bool shaderReadable = false);
 
 			/***********************************************************************************
 			 * @brief バッファーの登録

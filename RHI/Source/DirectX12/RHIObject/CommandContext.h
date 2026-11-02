@@ -357,13 +357,16 @@ namespace RHI
             bool                                                 _useOcclusion    = true;
 
             // ---------- オクルージョンカリング (Hi-Z) ----------
-            //   _depthCopy : 深度バッファの写し (バッファにするとルート SRV で読める)
-            //   _hiZ       : 深度の縮小ピラミッド。段 0 = 画面の半分 (切り上げ)、最後の段 = 1x1 を 1 本に詰めて並べる
-            //   どちらも 1 個だけ持つ (同じキューで順番に実行されるので、前のフレームのカリングが読み終わってから作り直される)
+            //   _hiZ : 深度の縮小ピラミッド。段 0 = 画面の半分 (切り上げ)、最後の段 = 1x1 を 1 本に詰めて並べる
+            //          1 個だけ持つ (同じキューで順番に実行されるので、前のフレームのカリングが読み終わってから作り直される)
+            //   深度バッファは SRV で直接読む (以前はバッファに写していた : _depthCopy)
+            //   SRV のディスクリプタは Buffer のヒープに 1 個だけ確保し、深度バッファを作り直した時に書き直す
             static constexpr uint32_t MAX_HIZ_LEVELS = 16;
-            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _depthCopy;
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _hiZ;
-            D3D12_PLACED_SUBRESOURCE_FOOTPRINT                   _depthFootprint = {};
+            uint32_t                                             _depthWidth   = 0;
+            uint32_t                                             _depthHeight  = 0;
+            uint32_t                                             _depthSrvIndex = 0xFFFFFFFFu;   // ヒープの番号 (未確保なら 0xFFFFFFFF)
+            bool                                                 _depthSrvDirty = true;          // 深度バッファを作り直した (SRV を書き直す)
             uint32_t                                             _hiZLevels = 0;
             uint32_t                                             _hiZMipWidth[MAX_HIZ_LEVELS]  = {};
             uint32_t                                             _hiZMipHeight[MAX_HIZ_LEVELS] = {};
@@ -421,7 +424,7 @@ namespace RHI
 
             // オクルージョンカリング : 深度の写しと Hi-Z を作る (リサイズ時) / 前段の深度から Hi-Z を作る (毎フレーム)
             bool createHiZ(uint32_t width, uint32_t height);
-            void buildHiZ();
+            void buildHiZ(Buffer* buffer);
             void transitionHiZ(D3D12_RESOURCE_STATES after);
             void     warnTooManyDraws();
 
