@@ -159,6 +159,23 @@
     <ClInclude Include="Source\Math\Vector\vector2.h" />
     <ClInclude Include="Source\Math\Vector\vector3.h" />
     <ClInclude Include="Source\Math\Vector\vector4.h" />
+    <ClInclude Include="Source\Controller\diectInput\di.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePad.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButton.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonA.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonB.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonConfigData.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonEND.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonL.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonLTrigger.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonR.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonRTrigger.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonSelect.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonStart.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonX.h" />
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonY.h" />
+    <ClInclude Include="Source\Controller\gamePad.h" />
+    <ClInclude Include="Source\Controller\xInput\xInput.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\File\file.cpp" />
@@ -174,6 +191,23 @@
     <ClCompile Include="Source\Math\Vector\vector2.cpp" />
     <ClCompile Include="Source\Math\Vector\vector3.cpp" />
     <ClCompile Include="Source\Math\Vector\vector4.cpp" />
+    <ClCompile Include="Source\Controller\controllerDll.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\di.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePad.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonA.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonB.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonEND.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonL.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonLTrigger.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonR.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonRTrigger.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonSelect.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonStart.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonX.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonY.cpp" />
+    <ClCompile Include="Source\Controller\diectInput\diGamePadKeyConfigData.cpp" />
+    <ClCompile Include="Source\Controller\gamePad.cpp" />
+    <ClCompile Include="Source\Controller\xInput\xInput.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

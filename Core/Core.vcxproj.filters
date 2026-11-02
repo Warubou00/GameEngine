@@ -49,6 +49,24 @@
     <Filter Include="ソース ファイル\Vector\Math">
       <UniqueIdentifier>{81cb7b86-bbf6-4b78-832b-140db5053aeb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\Controller">
+      <UniqueIdentifier>{f8d56870-7f94-4914-a08e-64ccab17dcbf}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\Controller\diectInput">
+      <UniqueIdentifier>{55528595-ddbe-4165-9bae-368ca8446b7c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ヘッダー ファイル\Controller\xInput">
+      <UniqueIdentifier>{779c8360-77c4-46e5-855d-eb652b026268}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Controller">
+      <UniqueIdentifier>{e23afbb0-f31c-4f05-95d0-e9a476a35a35}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Controller\diectInput">
+      <UniqueIdentifier>{decf1e37-a236-43c9-845a-382b24678b10}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Controller\xInput">
+      <UniqueIdentifier>{ebf34a9a-c895-407f-8efc-ef1a0e553342}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Log\scopedTimer.h" />
@@ -143,6 +161,112 @@
     </ClCompile>
     <ClCompile Include="Source\Math\Vector\Myvector.cpp">
       <Filter>ソース ファイル\Vector</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Controller\diectInput\di.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePad.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButton.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonA.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonB.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonConfigData.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonEND.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonL.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonLTrigger.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonR.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonRTrigger.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonSelect.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonStart.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonX.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\diectInput\diGamePadButtonY.h">
+      <Filter>ヘッダー ファイル\Controller\diectInput</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\gamePad.h">
+      <Filter>ヘッダー ファイル\Controller</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Controller\xInput\xInput.h">
+      <Filter>ヘッダー ファイル\Controller\xInput</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Controller\controllerDll.cpp">
+      <Filter>ソース ファイル\Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\di.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePad.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonA.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonB.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonEND.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonL.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonLTrigger.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonR.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonRTrigger.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonSelect.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonStart.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonX.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadButtonY.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\diectInput\diGamePadKeyConfigData.cpp">
+      <Filter>ソース ファイル\Controller\diectInput</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\gamePad.cpp">
+      <Filter>ソース ファイル\Controller</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Controller\xInput\xInput.cpp">
+      <Filter>ソース ファイル\Controller\xInput</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

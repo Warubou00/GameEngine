@@ -1,0 +1,115 @@
+﻿====================================================================
+ コントローラー (DirectInput / XInput) のソースのレビュー
+ 日付   : 2026-11-02
+ 対象   : Core/Source/Controller/diectInput/* (di / diGamePad / キーコンフィグの Strategy 12 クラス / ConfigData)
+          Core/Source/Controller/xInput/xInput.h / xInput.cpp
+ 結果   : 下の指摘はすべて直した (A-1 〜 E-3)。直した後の確認は最後の「■ 確認」
+          変更の内容 (DLL の C ABI と C# の Gamepad) は Controller_DllAndGamepad_2026-11-02.txt
+====================================================================
+
+重さの目安 : [重大] 落ちる・止まる・入力が取れない / [中] 条件によって間違う / [軽] 品質・保守性
+
+■ 0. ビルドに入れるための修正
+  0-1 文字コード : 全 31 ファイルが Shift-JIS (CP932) だった。UTF-8 (BOM 付き) + CRLF に変換した。
+  0-2 xInput.h の 327 行目の #endif の後ろに、古い版のクラス定義 (静的でない XInput) がもう 1 つ続けて書かれていた。
+      同じインクルードガードなので読まれないが、紛らわしいので消した。
+  0-3 xInput.h が ../vector/vector2.h を読んでいたが、Core にあるのは Math/Vector/vector2.h。
+      スティックの値は float 2 つで持つようにして、Vector2 を使わなくした。
+  0-4 diGamePad.cpp の extern const TCHAR* windowClassName (main.cpp で定義) は DLL では定義する所が無い。
+      使っていた SetCooperativeLevel はコメントアウト済みだったので宣言ごと消した。
+      (SetCooperativeLevel を呼ばない時の DirectInput は 非排他 + バックグラウンド で読める)
+
+■ A. デバイスの取得と消失 (DirectInput)
+  A-1 [重大] _gamePadDevice[4] を初期化していない
+      パッドが 4 個未満だと Release() が残りの不定のポインタに Unacquire / Release を呼んで落ちる。
+      パッドが 0 個の PC (今回の PC) では、終了時に必ず 4 回とも不定のポインタを触っていた。
+      → 配列を {} で初期化し、Release 後に nullptr に戻す。
+  A-2 [重大] 列挙のコールバックで数を調べていない
+      パッドが 5 個以上あると _gamePadDevice[4] 以降 (配列の外) に書く。→ 4 個で DIENUM_STOP。
+      また、GetPadDevice (不定の値) を temp に入れてから CreateDevice に渡していた (上書きされるので害は無いが紛らわしい)。
+  A-3 [重大] 抜いたパッドで止まることがある
+      Poll / GetDeviceState が失敗すると while (result == DIERR_INPUTLOST) Acquire() を繰り返していた。
+      抜いたままだと Acquire が DIERR_INPUTLOST を返し続ける環境では抜けられない (フレームが止まる)。
+      → 1 フレーム 1 回だけ Acquire を試し、だめならそのパッドは「未接続」(状態は 0) として次へ進む。
+  A-4 [中] GetDeviceState に失敗しても、前の (または 0 にした) _currDijs からボタンを作っていた
+      → 失敗した時は状態を 0 にして、押した瞬間も 0 にする。
+  A-5 [中] XInput のパッド (Xbox コントローラー) も DirectInput で数えていた
+      XInput と両方を使うと 1 台が 2 台に見える (DirectInput 側では LT / RT が 1 本の軸に合成されていて値も違う)。
+      → RawInput のデバイス名に "IG_" が入っている物の VID / PID を集め、guidProduct が一致するデバイスは作らない
+        (Microsoft の "XInput and DirectInput" の手順。WMI を使う版より軽い)。
+  A-6 [中] 列挙が DI8DEVTYPE_JOYSTICK だけで、ゲームパッドとして登録されたデバイスが漏れる → DI8DEVCLASS_GAMECTRL。
+  A-7 [中] SetDataFormat に失敗すると return して、後ろのパッドを Acquire しないまま残していた → そのパッドだけ飛ばす。
+  A-8 [軽] パッドの抜き差しは起動時の 1 回しか反映されない (DirectInput は自動では増えない)
+      → Init をもう一度呼ぶと、今のパッドを解放して列挙し直すようにした (C# の Gamepad.RescanDevices / サンプルの F9)。
+
+■ B. 入力の値 (DirectInput)
+  B-1 [重大] 入力の状態 (_currDijs) が全パッドで 1 つだけ
+      GetAnalogPadX / Y は index を使わず、最後に読んだパッドの値を返していた (2 台目以降のスティックが取れない)。
+      → パッドごとに DIJOYSTATE を持つ。
+  B-2 [重大] キーコンフィグをしないと、全てのボタンが rgbButtons[0] に割り当たる
+      DirectInputGamePadButtonConfigData の _index[] の既定が全部 0 だった。A も B も START も「1 つ目のボタン」になる。
+      → 既定を多くの HID パッド (DualShock 4 など) の並びにした : □(X)=0 ✕(A)=1 ○(B)=2 △(Y)=3 L1=4 R1=5 L2=6 R2=7
+        Share(Back)=8 Options(Start)=9 L3=10 R3=11。ResetToDefault() で戻せる。
+  B-3 [中] GetDeviceState には sizeof(DIJOYSTATE) を渡し、受け取る変数は DIJOYSTATE2 だった
+      c_dfDIJoystick (DIJOYSTATE の形) を使っているので動いてはいたが、型を DIJOYSTATE にそろえた。
+  B-4 [中] 右スティック・アナログトリガー・十字キー・L3 / R3 が取れなかった
+      → Z / Rz を右スティック、Rx / Ry をトリガー (L2 / R2)、POV[0] を十字キー (8 方向) として読む。
+        無い軸は GetDeviceState で 0 が返り、範囲を -1000 〜 1000 にしているとトリガーが 0.5 に見えるので、
+        GetObjectInfo で軸があるかを調べ、無いパッドは右スティック 0 / トリガーは L2 / R2 ボタンの 0 か 1 にする。
+  B-5 [軽] DIPROP_RANGE と DIPROP_DEADZONE を X / Y にしか設定していなかった → Z / Rz にも付ける (トリガーにはデッドゾーンを付けない)。
+
+■ C. キーコンフィグ (Strategy パターンのクラス)
+  C-1 [重大] DirectInputGamePadButton (基底) のデストラクタが virtual でない
+      SetNewGamePadButtonState が基底のポインタで delete するので未定義動作。→ virtual にした。
+  C-2 [中] UpdateSetKeyConfig が全パッドを回し、_prevDijs (1 つ) と比べていた
+      2 台目の今の値と 1 台目の前の値を比べ、触っていないのに「押した」と判定されることがある。
+      → キーコンフィグをするパッドを引数で決め、そのパッドだけ読む。始めた直後のフレームは前の値をそろえるだけにする
+        (押しっぱなしのボタンを最初のボタンとして取らない)。
+  C-3 [中] _isInitGamePad の既定が true (= 起動直後からキーコンフィグ中)、_pDigpb は Init で new するだけ
+      → BeginKeyConfig() で始める形にした。終わったら (END に来たら) _pDigpb を解放する。Release でも解放する。
+  C-4 [軽] どのボタンを待っているかが外から分からない → SetNewGamePadButtonState で番号 (_configStep) を数える。
+  C-5 [軽] Strategy の 12 クラス (A / B / X / Y / L / L2 / R / R2 / Start / Select / END) はそのまま使っている。
+      割り当ては全パッドで 1 つ (ConfigData はシングルトン) のまま。
+
+■ D. XInput
+  D-1 [重大] (性能) 未接続のスロットにも毎フレーム XInputGetState と XInputSetState を呼んでいた
+      未接続のスロットの XInputGetState は重いことが知られている。この PC (パッドなし) で測った 1 回の時間 :
+        XInputGetState (未接続) 20.4 〜 23.8 us、XInputSetState (未接続) 20.5 〜 22.0 us (2000 回の平均、2 回測った)
+      以前は 1 フレームに 4 スロット × 2 回 = 約 170 us (パッドが無いだけで毎フレーム 0.17 ms)。
+      → 未接続のスロットは 1 秒に 1 回だけ調べる (スロットごとに 250 ms ずつずらし、同じフレームに重ねない)。
+        パッドが無い時の平均は 4 回 / 秒 × 21 us ≒ 0.08 ms / 秒 (1 フレームあたりではほぼ 0)。
+        挿してから認識されるまで最大 1 秒かかる。
+  D-2 [中] 振動を毎フレーム全スロットに XInputSetState していた (D-1 の半分) → 値が変わった時だけ、接続中のパッドへ送る。
+  D-3 [重大] 振動の強さ 0 が 0 にならない
+      ((speed + 1) * 256) - 1 なので speed = 0 で 255 (弱く震え続ける)。speed % 256 で負の値も変な値になる。
+      → 0 以下は 0、255 以上は 65535、その間は speed * 257 (0 〜 65535 に均等)。
+  D-4 [中] 右スティックの Y の符号を左スティック (sThumbLY) で見ていた
+      右スティックを下に倒しても左が上なら 32767 で割る (わずかにずれるだけだが間違い)。
+  D-5 [中] デッドゾーンの外の値をそのまま割っていて、デッドゾーンの境目で 0 → 0.067 に飛ぶ
+      → 円形のデッドゾーンの外側 (deadZone 〜 32767) を 0 〜 1 に広げ直す (向きはそのまま)。
+        デッドゾーンは 2200 から XInput の推奨値 (左 7849 / 右 8689) にした。2200 は古いパッドで触っていなくても動く値。
+  D-6 [中] 抜いた時に前の状態が残り、ボタンが押しっぱなしのままになる (XInputGetState は失敗時に書き換えない)
+      → 失敗したらそのスロットの状態を消す。繋がった瞬間は前のボタンを今と同じにする (挿した時に「押した」としない)。
+  D-7 [軽] XInputEnable(TRUE / FALSE) を呼んでいた
+      XInputEnable はウィンドウが裏に回った時に振動を止めるための関数で、終了時の FALSE は他のアプリの振動も止めかねない。
+      → 呼ばない。終了時は振動していたパッドだけ XInputSetState で止める。
+  D-8 [軽] padNo の範囲を調べていなかった → 範囲外は 0 / false。
+  D-9 [軽] クラスは静的なのに、コンストラクタが public で userDefinition という使われないメンバがあった → 消した。
+
+■ E. 解放とシングルトン
+  E-1 [中] DirectInput::Release の後も _iDevice が残り、2 回目の Release で解放済みの COM を触る → nullptr に戻す。
+  E-2 [中] _iDevice を初期化しておらず、Init の前に GetDevice / Release を呼ぶと不定のポインタ → nullptr で初期化。
+  E-3 [軽] シングルトン 3 つ (DirectInput / DirectInputGamePad / ConfigData) を new したまま解放していなかった
+      → 関数の中の static にした。COM の解放は明示的な Release で行う (DLL を外す時 = DllMain の中で COM を触らないため)。
+
+■ F. 性能 (新しく見つけた所)
+  F-1 DirectInput の列挙が、パッドが 0 台でも重い
+      測った値 (この PC、パッドなし) : DirectInput8Create 11.0 / 11.7 ms、EnumDevices 128.6 〜 228.6 ms (6 回)。
+      最初はメインスレッドで行っていたので、起動時と列挙し直し (F9) の時に 130 〜 230 ms フレームが止まっていた。
+      → 別のスレッドで行う。列挙中はメインスレッドは DirectInput に触らず、終わったら join してから使う。
+        列挙中 (100 〜 200 ms) は DirectInput のパッドが「未接続」に見える。XInput のパッドは影響なし。
+
+■ 確認
+  ・Core (Debug / Release x64) : 警告 0 / エラー 0。Core.dll が Controller_* の 7 関数を export、DINPUT8.dll と XINPUT1_4.dll を読む。
+  ・この PC にはパッドが無いので、実機のボタン / スティック / 振動は確かめていない (利用者の確認待ち)。
+    確かめたのは「パッドが無い時に落ちない・止まらない」こと (Release / Debug とも、起動 → F9 を 2 回 → F10 → 終了まで正常)。
