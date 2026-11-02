@@ -17,6 +17,7 @@ public enum RenderTextureFormat : uint
     R8         = 6,   // 1 成分 (遮蔽など)
     RGB10A2    = 7,
     R11G11B10F = 8,   // HDR の色 (アルファ無し。RGBA16F の半分の大きさ)
+    Depth32    = 9,   // 深度だけ (シャドーマップ)。SetRenderTargets の depth に指定し、後で読む (MSAA は不可)
 }
 
 // ==========================================================================

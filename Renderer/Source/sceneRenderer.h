@@ -136,6 +136,7 @@ namespace Renderer
 		RHI::FullscreenShaderHandle LoadFullscreenShader(const wchar_t* filePath, const char* entry);
 		void SetLights(const RHI::LightData* lights, uint32_t count);
 		void SetLightingSettings(const RHI::LightingSettings& settings);
+		void SetShadowSettings(const RHI::ShadowSettings& settings);
 		void SetProfilerInfo(const char* name, const char* text);
 
 		// GPU の処理が全て終わるまで待つ (計測用)

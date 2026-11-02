@@ -16,6 +16,7 @@
 //   PSForwardAlpha     : 同じ (半透明。完全に透明な所は捨てる)
 //   PSForwardSplit     : ライトの光と環境光を分けて書く (Forward + SSAO)
 //   PSForwardAlphaSplit: 半透明 (Forward + SSAO)。環境光の RT を、自分が覆った分だけ減らす
+//   PSShadowAlpha      : シャドーマップ (半透明をアルファテストで描く。不透明はピクセルシェーダー無し)
 //   PSGBuffer          : ディファード用の G-Buffer (アルベド / 法線 / 金属・粗さ)
 //   VSFullscreen       : 全画面の三角形
 //   PSDeferredLighting : G-Buffer と深度からライティングする
@@ -119,11 +120,14 @@ StructuredBuffer<LightData> g_Lights : register(t4);
 // レンダーターゲット (G-Buffer など) と深度バッファもここに入っている (番号は g_Inputs で受け取る)
 // 上限の無い範囲なので、他の SRV と番号が重ならないよう space1 に置く (以前は t1)
 Texture2D g_Textures[4096] : register(t0, space1);
+// 同じ配列を 1 成分の深度として読む (シャドーマップを比較サンプラーで読むため。Pipeline.cpp で範囲を重ねている)
+Texture2D<float> g_DepthTextures[4096] : register(t0, space3);
 
 // (Root Signature の StaticSampler)
 SamplerState g_Sampler      : register(s0);   // 線形・繰り返し (モデルのテクスチャ)
 SamplerState g_PointClamp   : register(s1);   // 点・端で止める
 SamplerState g_LinearClamp  : register(s2);   // 線形・端で止める
+SamplerComparisonState g_ShadowSampler : register(s3);   // 比較 (自分の深度 <= シャドーマップ)・線形・外は白 (影の PCF)
 
 // [ROOT_PARAM_GLOBAL_CBV]: フレームの定数 (Root CBV) - Buffer::FrameConstants と同じ並び
 // C++ 側で XMMatrixTranspose 済みの行列が入っているので、mul(ベクトル, 行列) の順で掛ける
@@ -138,6 +142,19 @@ cbuffer FrameData : register(b0)
     uint   g_LightingModel;        // 0 : Unlit / 1 : Lambert / 2 : PBR
     float2 g_ScreenSize;
     float2 g_InvScreenSize;
+
+    // ---------- 影 (カメラの視点だけが使う。影の視点では g_ShadowCascadeCount = 0) ----------
+    matrix g_ShadowViewProj[4];    // ワールド → シャドーマップ (カスケードごと)
+    float4 g_ShadowSplits;         // カスケードの奥の端 (カメラからの奥行き)
+    float4 g_ShadowNormalOffset;   // 法線方向へずらす長さ (ワールド。カスケードごと)
+    uint   g_ShadowLightIndex;     // 影を付けるライト (無ければ 0xFFFFFFFF)
+    uint   g_ShadowMapTexture;     // g_DepthTextures の番号
+    uint   g_ShadowCascadeCount;   // 0 なら影なし
+    float  g_ShadowTexelSize;      // 1 / 解像度
+    float  g_ShadowFadeStart;      // ここから g_ShadowDistance まで影を薄くする
+    float  g_ShadowDistance;
+    float  g_ShadowSoftness;       // PCF で読む間隔 (texel)
+    float  g_ShadowPadding;
 };
 
 // [ROOT_PARAM_PASS_CONSTANTS]: 全画面のパスの値 (ルート定数 16 個)
@@ -201,6 +218,52 @@ float3 shadeAmbient(float3 albedo, float3 N, float3 V, float metallic, float rou
 
 // ライトの直接の光 (Unlit はテクスチャの色そのまま)
 // N : 法線 (正規化済み) / V : 視線 (物 → カメラ、正規化済み) / P : ワールド座標
+// ==============================================================
+// 影 (シャドーマップ。平行光源 1 つ)
+//   1. カメラからの奥行きでカスケードを選ぶ
+//   2. 位置を法線の向きに少しずらしてからシャドーマップへ投影する (自分の影が縞になる「シャドーアクネ」を抑える。
+//      ずらす量は 1 texel の大きさに比例するので、遠いカスケードほど大きい)
+//   3. PCF : 3x3 の 9 か所を比較サンプラーで読む (1 か所ごとに 2x2 を補間するので、実質 4x4 の範囲がなめらかになる)
+//   4. 影を描く距離の最後の 10% は、だんだん薄くする (影の端がくっきり切れないように)
+//   戻り値 : 1 = 光が当たる / 0 = 影
+// ==============================================================
+float shadowFactor(float3 P, float3 N)
+{
+    if (g_ShadowCascadeCount == 0) return 1.0f;
+
+    const float depth = mul(float4(P, 1.0f), g_ViewMatrix).z;   // カメラからの奥行き
+    if (depth >= g_ShadowDistance) return 1.0f;
+    uint cascade = 0;
+    [unroll]
+    for (uint c = 0; c < 3; ++c)
+    {
+        if (c + 1 < g_ShadowCascadeCount && depth > g_ShadowSplits[c]) cascade = c + 1;
+    }
+
+    const float3 offsetP = P + N * g_ShadowNormalOffset[cascade];
+    const float4 shadowPos = mul(float4(offsetP, 1.0f), g_ShadowViewProj[cascade]);
+    const float2 uv = shadowPos.xy * float2(0.5f, -0.5f) + 0.5f;
+    const float  z  = shadowPos.z;
+    if (z >= 1.0f) return 1.0f;   // ライトの奥の端より奥 (影を落とす物は無い)
+
+    Texture2D<float> shadowMap = g_DepthTextures[g_ShadowMapTexture];
+    const float step = g_ShadowTexelSize * g_ShadowSoftness;
+    float lit = 0.0f;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            lit += shadowMap.SampleCmpLevelZero(g_ShadowSampler, uv + float2(x, y) * step, z);
+        }
+    }
+    lit /= 9.0f;
+
+    const float fade = saturate((depth - g_ShadowFadeStart) / max(g_ShadowDistance - g_ShadowFadeStart, 1e-4f));
+    return lerp(lit, 1.0f, fade);
+}
+
 float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness)
 {
     if (g_LightingModel == LIGHTING_UNLIT) return albedo;
@@ -235,6 +298,12 @@ float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, 
 
         const float NoL = saturate(dot(N, L));
         if (NoL <= 0.0f) continue;
+        // 影 : 影を付けるライトだけ (光が当たっていない面は上で飛ばすので、シャドーマップを読むのは当たる面だけ)
+        if (i == g_ShadowLightIndex)
+        {
+            attenuation *= shadowFactor(P, N);
+            if (attenuation <= 0.0f) continue;
+        }
         const float3 radiance = light.Color * (light.Intensity * attenuation * NoL);
 
         if (!pbr)
@@ -347,6 +416,17 @@ Surface getSurface(VSOutput input)
     if (dot(N, surface.View) < 0.0f) N = -N;
     surface.Normal = N;
     return surface;
+}
+
+// ==============================================================
+// シャドーマップ (半透明) : 深度だけを書く。透明な所 (α < 0.5) は影を落とさない
+//   getSurface は使わない (カメラの行列で位置を戻すので、ライトの視点では合わない。色も要らない)
+// ==============================================================
+void PSShadowAlpha(VSOutput input)
+{
+    const MaterialData material = g_Materials[input.MaterialIndex];
+    const float alpha = input.Color.a * material.Color.a * g_Textures[material.TextureID].Sample(g_Sampler, input.UV).a;
+    clip(alpha - 0.5f);
 }
 
 float4 PSForward(VSOutput input) : SV_TARGET

@@ -167,6 +167,7 @@ namespace RHI
 		R8         = 6,   // 1 成分 (遮蔽など)
 		RGB10A2    = 7,
 		R11G11B10F = 8,   // HDR の色 (アルファ無し。RGBA16F の半分の大きさ。環境光など)
+		Depth32    = 9,   // 深度だけ (シャドーマップ)。描画先の Depth に指定し、後で SRV として読む (MSAA は不可)
 	};
 
 	struct RenderTargetDesc
@@ -203,6 +204,7 @@ namespace RHI
 		Forward = 0,   // ライティングまで 1 回で描く (HDR の色)
 		GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ を書く (半透明は描けないので Forward で)
 		ForwardSplitAmbient = 2,   // Forward + SSAO 用 : RT0 にライトの光、RT1 に環境光を分けて書く (後で 環境光 × 遮蔽 を足す)
+		Shadow  = 3,   // シャドーマップ : 深度だけ (ライトの視点。DrawScene の Inputs[0] で視点を選ぶ。半透明はアルファテスト)
 	};
 
 	// シーンのどの物を描くか
@@ -217,7 +219,7 @@ namespace RHI
 		SetRenderTargets = 0,   // Colors[0..ColorCount) と Depth を描画先にする
 		ClearColor       = 1,   // 描画先の色を ClearColor で消す
 		ClearDepth       = 2,   // 描画先の深度を ClearDepth で消す
-		DrawScene        = 3,   // Arg0 = ScenePass / Arg1 = RenderQueue
+		DrawScene        = 3,   // Arg0 = ScenePass / Arg1 = RenderQueue / Inputs[0] = 視点 (0 カメラ / 1〜 影のカスケード)
 		DrawFullscreen   = 4,   // Arg0 = シェーダー / Arg1 = ブレンド (0 なし / 1 加算 / 2 アルファ) / Inputs / Params
 	};
 
@@ -274,6 +276,26 @@ namespace RHI
 		LightingModel Model      = LightingModel::PBR;
 		float         Ambient[3] = { 0.25f, 0.27f, 0.30f };   // 環境光 (空の明るさ)
 	};
+
+	// ==========================================================================
+	// 影 (平行光源 1 つのシャドーマップ)
+	//   ライトの視点の行列は RHI がカメラに合わせて毎フレーム作る (C# は設定とシャドーマップを渡すだけ)
+	//   視点の番号 : 1 〜 CascadeCount (DrawScene の Inputs[0])。0 はカメラ
+	// ==========================================================================
+	static constexpr uint32_t MAX_SHADOW_CASCADES = 4;
+
+	struct ShadowSettings
+	{
+		uint32_t Enabled      = 0;
+		uint32_t LightIndex   = 0;                          // SetLights で渡したライトの番号 (平行光源であること)
+		uint32_t ShadowMap    = RenderTargetHandle::INVALID;   // Depth32 のレンダーターゲット
+		uint32_t CascadeCount = 1;                          // 1 〜 MAX_SHADOW_CASCADES
+		float    Distance     = 30.0f;                      // 影を描く距離 (カメラからの奥行き)
+		float    NormalBias   = 1.0f;                       // 法線方向へずらす量 (シャドーマップの 1 texel の何倍か)
+		float    Softness     = 1.0f;                       // PCF で読む間隔 (texel)
+		float    SplitLambda  = 0.75f;                      // カスケードの分け方 (0 = 均等 / 1 = 対数)
+	};
+	static_assert(sizeof(ShadowSettings) == 32, "ShadowSettings must be 32 bytes (same as C#)");
 
 	// ==========================================================================
 	// 初期化

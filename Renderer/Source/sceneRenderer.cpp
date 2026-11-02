@@ -412,6 +412,11 @@ namespace Renderer
 		if (IsInitialized()) _rhi->DestroyRenderTarget(handle);
 	}
 
+	void SceneRenderer::SetShadowSettings(const RHI::ShadowSettings& settings)
+	{
+		if (IsInitialized()) _rhi->SetShadowSettings(settings);
+	}
+
 	uint32_t SceneRenderer::GetMaxSampleCount() const
 	{
 		return IsInitialized() ? _rhi->GetMaxSampleCount() : 1;

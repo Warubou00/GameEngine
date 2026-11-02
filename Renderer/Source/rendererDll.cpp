@@ -115,6 +115,12 @@ extern "C"
 		if (g_renderer) g_renderer->DestroyRenderTarget(target);
 	}
 
+	// 影 (平行光源 1 つのシャドーマップ)。変わった時だけ呼べばよい
+	RENDERER_API void Renderer_SetShadowSettings(const RHI::ShadowSettings* settings)
+	{
+		if (g_renderer && settings) g_renderer->SetShadowSettings(*settings);
+	}
+
 	// MSAA で使えるサンプル数の上限 (1 なら MSAA は使えない)
 	RENDERER_API uint32_t Renderer_GetMaxSampleCount()
 	{

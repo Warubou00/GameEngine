@@ -13,11 +13,13 @@ public struct DirectionalLight
 {
     public Vector3 Color;
     public float   Intensity;
+    public bool    CastShadows;   // 影を落とす (最初の 1 つだけ。Graphics.Shadows で設定)
 
     public DirectionalLight()
     {
-        Color     = Vector3.One;
-        Intensity = 1.0f;
+        Color       = Vector3.One;
+        Intensity   = 1.0f;
+        CastShadows = true;
     }
 }
 

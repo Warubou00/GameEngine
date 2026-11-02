@@ -113,7 +113,9 @@ namespace RHI
             static constexpr uint32_t MAX_MATERIALS = 4096;
             static constexpr uint32_t MAX_LIGHTS    = 256;
 
-            // ---------- フレームの定数 (シェーダーの cbuffer FrameData と同じ並び : 240byte。1 フレーム 256byte の枠に入る) ----------
+            // ---------- フレームの定数 (シェーダーの cbuffer FrameData と同じ並び : 560byte) ----------
+            //   視点 (カメラ + 影のカスケード) ごとに 1 つずつ書く (FRAME_SLOT_SIZE ごと)。影の項目はカメラの視点だけが使う
+            //   以前は 240byte (カメラ 1 つ、256byte の枠)
             struct FrameConstants
             {
                 ::DirectX::XMFLOAT4X4 View;            // シェーダー用に転置済み
@@ -125,8 +127,22 @@ namespace RHI
                 uint32_t              LightingModel;   // RHI::LightingModel
                 float                 ScreenSize[2];
                 float                 InvScreenSize[2];
+                // ---------- 影 (カメラの視点で使う) ----------
+                ::DirectX::XMFLOAT4X4 ShadowViewProj[RHI::MAX_SHADOW_CASCADES];   // ワールド → シャドーマップ (転置済み)
+                float                 ShadowSplits[RHI::MAX_SHADOW_CASCADES];     // カスケードの奥の端 (カメラからの奥行き)
+                float                 ShadowNormalOffset[RHI::MAX_SHADOW_CASCADES];   // 法線方向へずらす長さ (ワールド)
+                uint32_t              ShadowLightIndex;     // 影を付けるライト (無ければ 0xFFFFFFFF)
+                uint32_t              ShadowMapTexture;     // g_Textures の番号
+                uint32_t              ShadowCascadeCount;   // 0 なら影なし
+                float                 ShadowTexelSize;      // 1 / 解像度
+                float                 ShadowFadeStart;      // ここから Distance まで影を薄くする
+                float                 ShadowDistance;
+                float                 ShadowSoftness;       // PCF の間隔 (texel)
+                float                 ShadowPadding;
             };
-            static_assert(sizeof(FrameConstants) <= CONSTANT_BUFFER_ALIGNMENT, "FrameConstants must fit in 256 bytes");
+            static constexpr uint64_t FRAME_SLOT_SIZE = 768;   // 1 視点の枠 (Root CBV は 256byte の倍数)
+            static_assert(sizeof(FrameConstants) <= FRAME_SLOT_SIZE, "FrameConstants must fit in FRAME_SLOT_SIZE");
+            static constexpr uint32_t VIEW_COUNT = 1 + RHI::MAX_SHADOW_CASCADES;   // カメラ + 影のカスケード
 
             // Scene定数バッファの容量 (フレームの数で等分して使う)
             static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
@@ -238,6 +254,8 @@ namespace RHI
              * @details 左 / 右 / 下 / 上 / 手前 / 奥 の順。カメラが変わった時だけ計算し直す
              ************************************************************************************/
             const ::DirectX::XMFLOAT4* GetFrustumPlanes();
+            // 視点ごとの視錐台 (0 = カメラ / 1〜 = 影のカスケード。影はライトの直方体)
+            const ::DirectX::XMFLOAT4* GetFrustumPlanes(uint32_t view);
 
             // 登録されている描画オブジェクトの数 (プロファイラー用)
             uint32_t GetObjectCount()const { return static_cast<uint32_t>(_objects.size() - _freeObjects.size()); }
@@ -255,6 +273,12 @@ namespace RHI
              * @return D3D12_GPU_VIRTUAL_ADDRESS Root CBV に渡すアドレス
              ************************************************************************************/
             D3D12_GPU_VIRTUAL_ADDRESS WriteFrameConstants(uint32_t frameIndex);
+            // 視点の定数のアドレス (WriteFrameConstants の後。0 はカメラ = WriteFrameConstants の戻り値と同じ)
+            D3D12_GPU_VIRTUAL_ADDRESS GetViewConstants(uint32_t frameIndex, uint32_t view)const;
+
+            // 影 (shadowMapTexture : シャドーマップの g_Textures の番号 / resolution : その大きさ)
+            void SetShadowSettings(const RHI::ShadowSettings& settings, uint32_t shadowMapTexture, uint32_t resolution);
+            uint32_t GetShadowViewCount()const { return _shadowViewCount; }   // 今のフレームで描く影の視点の数 (0 なら影なし)
 
             // 画面の大きさ (フレームの定数に入れる。全画面のシェーダーが使う)
             void SetScreenSize(uint32_t width, uint32_t height);
@@ -308,7 +332,8 @@ namespace RHI
             const uint64_t _GLOBAL_CB_SIZE = 4ull  * 1024ull * 1024ull;
             const uint64_t _SCENE_CB_SIZE  = SCENE_CB_SIZE;
             // フレームごとの定数 (View / Projection) : 1 フレーム 256byte × フレーム数
-            const uint64_t _COMMON_CB_SIZE = CONSTANT_BUFFER_ALIGNMENT * CommandContext::FRAME_COUNT;
+            // 以前は 1 フレーム 256byte (カメラだけ)。今は 視点の数 × FRAME_SLOT_SIZE
+            const uint64_t _COMMON_CB_SIZE = FRAME_SLOT_SIZE * VIEW_COUNT * CommandContext::FRAME_COUNT;
             const uint64_t _GLOBAL_IB_SIZE = 16ull * 1024ull * 1024ull;
             const uint64_t _SCENE_IB_SIZE  = 64ull * 1024ull * 1024ull;
 
@@ -336,6 +361,18 @@ namespace RHI
             float                                           _cameraPosition[3] = {};
             uint32_t                                        _screenWidth  = 1;
             uint32_t                                        _screenHeight = 1;
+
+            // ---------- 影 ----------
+            RHI::ShadowSettings                             _shadowSettings;
+            uint32_t                                        _shadowMapTexture = 0;
+            uint32_t                                        _shadowResolution = 1;
+            uint32_t                                        _shadowViewCount  = 0;   // 作ったカスケードの数 (計算した結果)
+            ::DirectX::XMFLOAT4X4                           _shadowView[RHI::MAX_SHADOW_CASCADES] = {};       // そのまま (転置していない)
+            ::DirectX::XMFLOAT4X4                           _shadowProj[RHI::MAX_SHADOW_CASCADES] = {};
+            float                                           _shadowSplits[RHI::MAX_SHADOW_CASCADES] = {};
+            float                                           _shadowNormalOffset[RHI::MAX_SHADOW_CASCADES] = {};
+            ::DirectX::XMFLOAT4                             _shadowPlanes[RHI::MAX_SHADOW_CASCADES][6] = {};
+            void computeShadowViews();   // カメラとライトから、カスケードごとのライトの行列を作る (WriteFrameConstants の中)
 
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
             std::vector<MaterialData>                       _materials;

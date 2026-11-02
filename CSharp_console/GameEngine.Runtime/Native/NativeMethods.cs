@@ -113,6 +113,25 @@ internal static unsafe class NativeMethods
         public Vector3 Ambient;
     }
 
+    // C++ の RHI::ShadowSettings と同じ並び (32byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ShadowSettings
+    {
+        public uint  Enabled;
+        public uint  LightIndex;     // SetLights で送ったライトの番号
+        public uint  ShadowMap;      // Depth32 のレンダーターゲット
+        public uint  CascadeCount;
+        public float Distance;
+        public float NormalBias;
+        public float Softness;
+        public float SplitLambda;
+
+        // 値の比較 (Equals は object を受け取るので箱詰めが起きる。毎フレーム比べるので自分で比べる)
+        public readonly bool SameAs(in ShadowSettings o) =>
+            Enabled == o.Enabled && LightIndex == o.LightIndex && ShadowMap == o.ShadowMap && CascadeCount == o.CascadeCount &&
+            Distance == o.Distance && NormalBias == o.NormalBias && Softness == o.Softness && SplitLambda == o.SplitLambda;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void LogCallback([MarshalAs(UnmanagedType.LPStr)] string message);
 
@@ -200,4 +219,7 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetLightingSettings(ref LightingSettings settings);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetShadowSettings(ref ShadowSettings settings);
 }
