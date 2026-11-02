@@ -68,7 +68,8 @@ public struct BenchMover
 internal static class CollisionBench
 {
     /// <param name="movingPercent">毎フレーム動く物の割合 (%)。残りは止まっている (止まった物は C++ へ送らない)</param>
-    public static float Spawn(World world, int count, int movingPercent = 100)
+    /// <param name="layers">レイヤーの数 (1 なら全部 0)。2 以上なら番号順にレイヤーを振る (違うレイヤーどうしを調べない設定は Program が行う)</param>
+    public static float Spawn(World world, int count, int movingPercent = 100, int layers = 1)
     {
         // 密度 : 1 辺 2.5 の立方体に 1 個 (大きさ 0.3〜0.8 なので、いつも少し重なっている物がある)
         var half = MathF.Cbrt(count) * 2.5f * 0.5f;
@@ -79,7 +80,9 @@ internal static class CollisionBench
             var position = new Vector3(rand(-half, half), rand(0.5f, 2.0f * half), rand(-half, half));
             world.Add(entity, new Transform(position));
             var size = rand(0.3f, 0.8f);
-            world.Add(entity, (i & 1) == 0 ? Collider.Sphere(size) : Collider.Box(new Vector3(size, size * 0.7f, size * 0.9f)));
+            var collider = (i & 1) == 0 ? Collider.Sphere(size) : Collider.Box(new Vector3(size, size * 0.7f, size * 0.9f));
+            collider.Layer = layers > 1 ? i % layers : 0;
+            world.Add(entity, collider);
             var direction = Vector3.Normalize(new Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)) + new Vector3(1e-3f));
             world.Add(entity, new BenchMover { Velocity = direction * rand(1.0f, 3.0f), Moving = (i % 100) < movingPercent });
         }
@@ -99,7 +102,7 @@ public sealed class BenchMoverSystem : ISystem
 {
     private readonly float _half;
     private readonly PhysicsSettings _physics;
-    private double _step, _broad, _narrow, _candidates, _overlaps;
+    private double _step, _broad, _narrow, _candidates, _overlaps, _sync, _events, _system, _tree;
     private int _frames;
 
     public BenchMoverSystem(float half, PhysicsSettings physics)
@@ -115,11 +118,12 @@ public sealed class BenchMoverSystem : ISystem
         {
             _step += _physics.StepMs; _broad += _physics.BroadphaseMs; _narrow += _physics.NarrowphaseMs;
             _candidates += _physics.Candidates; _overlaps += _physics.Overlaps; _frames++;
+            _sync += _physics.SyncMs; _events += _physics.EventsMs; _system += _physics.SystemMs; _tree += _physics.TreeMs;
             if (_frames == 120)
             {
-                Console.WriteLine($"[Bench] {_physics.Broadphase} bodies {_physics.Bodies} : step {_step / _frames:F3} ms (broad {_broad / _frames:F3} / narrow {_narrow / _frames:F3}), " +
-                                  $"candidates {_candidates / _frames:F0}, overlaps {_overlaps / _frames:F0}");
-                _step = _broad = _narrow = _candidates = _overlaps = 0;
+                Console.WriteLine($"[Bench] {_physics.Broadphase} bodies {_physics.Bodies} : step {_step / _frames:F3} ms (broad {_broad / _frames:F3} [tree {_tree / _frames:F3}] / narrow {_narrow / _frames:F3} / events {_events / _frames:F3}), " +
+                                  $"sync {_sync / _frames:F3}, C# system {_system / _frames:F3}, workers {_physics.Workers}, candidates {_candidates / _frames:F0}, overlaps {_overlaps / _frames:F0}");
+                _step = _broad = _narrow = _candidates = _overlaps = _sync = _events = _system = _tree = 0;
                 _frames = 0;
             }
         }

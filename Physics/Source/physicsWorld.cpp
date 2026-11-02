@@ -35,6 +35,14 @@ namespace Physics
 	// 体
 	// ==============================================================
 
+	PhysicsWorld::PhysicsWorld()
+	{
+		for (uint32_t& row : _layerMatrix) row = 0xFFFFFFFFu;   // 既定は全部のレイヤーどうしを調べる
+		// 並列のスレッド : 論理コアの数 - 1 (呼んだスレッドも働く)。描画や C# の分を残すため 3 本まで
+		const uint32_t cores = std::thread::hardware_concurrency();
+		_jobs.SetWorkers(cores > 1 ? (std::min)(cores - 1, 3u) : 0u);
+	}
+
 	PhysicsWorld::Body* PhysicsWorld::find(uint32_t handle)
 	{
 		const uint32_t index = handle & 0xFFFFu;
@@ -65,7 +73,8 @@ namespace Physics
 		body.Version     = version;
 		body.IsStatic    = desc.IsStatic != 0;
 		body.Layer       = desc.Layer & 31u;
-		body.Mask        = desc.CollideMask;
+		body.RequestedMask = desc.CollideMask;
+		body.Mask        = desc.CollideMask & _layerMatrix[body.Layer];
 		body.Shape       = static_cast<ShapeType>(desc.Shape <= 3 ? desc.Shape : 0);
 		body.LocalCenter = Float3(desc.Center[0], desc.Center[1], desc.Center[2]);
 		if (body.Shape == ShapeType::Mesh)
@@ -87,6 +96,7 @@ namespace Physics
 		body.Size        = Float3(desc.Size[0], desc.Size[1], desc.Size[2]);
 		updateShape(body, desc.Position, desc.Rotation, desc.Scale);
 		insertProxy(index);
+		noteEnlarged(index);           // 次の Step で、この体の組を探す
 
 		body.MovedStep = _stepIndex;   // 次の Step で重なりを調べる
 		_moved.push_back(index);
@@ -101,20 +111,23 @@ namespace Physics
 		if (!body) return;
 		const uint32_t index = handle & 0xFFFFu;
 
-		// 重なっていた相手には「離れた」を送る (次の Step のイベントに入る)
-		for (auto it = _overlaps.begin(); it != _overlaps.end();)
+		// この体の組を表から消す。重なっていた相手には「離れた」を送る (次の Step のイベントに入る)
+		for (size_t i = 0; i < _pairs.size();)
 		{
-			const uint32_t a = static_cast<uint32_t>(*it >> 32), b = static_cast<uint32_t>(*it & 0xFFFFFFFFu);
-			if (a == index || b == index)
+			Pair& pair = _pairs[i];
+			if (pair.A != index && pair.B != index) { ++i; continue; }
+			if (pair.Touching)
 			{
-				_pendingEvents.push_back({ handleOf(a), handleOf(b), 1u, 0u });
-				_manifolds.erase(*it);
-				it = _overlaps.erase(it);
+				_pendingEvents.push_back({ handleOf(pair.A), handleOf(pair.B), 1u, 0u });
+				_touchingCount--;
 			}
-			else
+			_pairMap.Erase(pair.Key);
+			if (i + 1 != _pairs.size())
 			{
-				++it;
+				pair = _pairs.back();   // 最後の組を空いた所へ
+				*_pairMap.Find(pair.Key) = static_cast<uint32_t>(i);
 			}
+			_pairs.pop_back();
 		}
 		removeProxy(index);
 		if (!body->IsStatic) _dynamicCount--;
@@ -168,7 +181,7 @@ namespace Physics
 	{
 		Body& body = _bodies[index];
 		DynamicTree& tree = body.IsStatic ? _staticTree : _dynamicTree;
-		body.Proxy = tree.CreateProxy(body.Box, marginOf(body), index);
+		body.Proxy = tree.CreateProxy(body.Box, marginOf(body), index, 1u << body.Layer, body.Mask);
 	}
 
 	void PhysicsWorld::removeProxy(uint32_t index)
@@ -182,18 +195,53 @@ namespace Physics
 
 	void PhysicsWorld::SetTransforms(const BodyTransform* items, uint32_t count)
 	{
+		const Clock::time_point start = Clock::now();
+		struct SyncTimer
+		{
+			Clock::time_point Start; float& Total;
+			~SyncTimer() { Total += elapsedMs(Start, Clock::now()); }
+		} timer{ start, _syncMs };
+		// 1. 形と箱を作り直す (体ごとに別の所へ書くので並列。同じ体を 1 回の呼び出しで 2 回渡さないこと)
+		if (_previousBoxes.size() < count) _previousBoxes.resize(count);
+		_jobs.ParallelFor(count, 512, [&](uint32_t begin, uint32_t end)
+		{
+			for (uint32_t i = begin; i < end; ++i)
+			{
+				const BodyTransform& t = items[i];
+				Body* body = find(t.Handle);
+				if (!body) continue;
+				_previousBoxes[i] = body->Box;
+				updateShape(*body, t.Position, t.Rotation, t.Scale);
+			}
+		});
+
+		// 2. 木の葉 (1 本の木を直すので順番に)
 		for (uint32_t i = 0; i < count; ++i)
 		{
 			const BodyTransform& t = items[i];
 			Body* body = find(t.Handle);
 			if (!body) continue;
-			updateShape(*body, t.Position, t.Rotation, t.Scale);
+			const Aabb& previous = _previousBoxes[i];
+			const uint32_t index = t.Handle & 0xFFFFu;
 
 			// 木の葉 : 太らせた箱からはみ出した時だけ直す
-			DynamicTree& tree = body->IsStatic ? _staticTree : _dynamicTree;
-			tree.MoveProxy(body->Proxy, body->Box, marginOf(*body));
-
-			const uint32_t index = t.Handle & 0xFFFFu;
+			// 動く物は箱を広げるだけにして、木の形は Step の始めにまとめて直す (fixDynamicTree)
+			// 以前は 1 つずつ抜いて入れ直していた (全部動くと、これだけで 1 万個で 1.3 ms)
+			// 動く物は、動いた向きにも広げる (前の箱の中心からのずれ × _predictScale。瞬間移動で大きくならないよう、箱の大きさまで)
+			bool changed;
+			if (body->IsStatic)
+			{
+				changed = _staticTree.MoveProxy(body->Proxy, body->Box, marginOf(*body));
+			}
+			else
+			{
+				const Float3 size  = body->Box.max - body->Box.min;
+				const float  limit = (std::max)((std::max)(size.x, size.y), size.z);
+				const Float3 shift = (body->Box.min + body->Box.max - previous.min - previous.max) * (0.5f * _predictScale);
+				auto clampAxis = [limit](float v) { return (std::max)(-limit, (std::min)(limit, v)); };
+				changed = _dynamicTree.EnlargeProxy(body->Proxy, body->Box, marginOf(*body), Float3(clampAxis(shift.x), clampAxis(shift.y), clampAxis(shift.z)));
+			}
+			if (changed) noteEnlarged(index);
 			if (body->MovedStep != _stepIndex)
 			{
 				body->MovedStep = _stepIndex;
@@ -205,7 +253,66 @@ namespace Physics
 	void PhysicsWorld::SetBroadphase(Broadphase mode)
 	{
 		_mode = mode;
-		// 方法を変えたら、次の Step は全部を調べ直す (BVH は動いた物しか調べないので)
+		markAllMoved();   // 方法を変えたら、次の Step は全部を調べ直す (BVH は動いた物しか調べないので)
+	}
+
+	void PhysicsWorld::SetLayerCollision(uint32_t a, uint32_t b, bool collide)
+	{
+		if (a >= 32 || b >= 32) return;
+		if (collide) { _layerMatrix[a] |= 1u << b; _layerMatrix[b] |= 1u << a; }
+		else         { _layerMatrix[a] &= ~(1u << b); _layerMatrix[b] &= ~(1u << a); }
+		// 体の「当たる相手」と木の節のビットを作り直し、次の Step で全部を調べ直す (外れた組は Exit になる)
+		for (Body& body : _bodies)
+		{
+			if (!body.Alive) continue;
+			body.Mask = body.RequestedMask & _layerMatrix[body.Layer];
+			(body.IsStatic ? _staticTree : _dynamicTree).SetProxyFilter(body.Proxy, 1u << body.Layer, body.Mask);
+		}
+		markAllMoved();
+	}
+
+	void PhysicsWorld::SetOption(uint32_t option, uint32_t value)
+	{
+		if (option == 1) _layerPruning = value != 0;
+		if (option == 2) _jobs.SetWorkers((std::min)(value, 63u));   // 並列に使う追加のスレッドの数 (0 = 1 本だけ)
+		if (option == 3) _treeRebuild  = value != 0;
+		if (option == 4) _fullPassDivisor = value;   // 0 : いつも全部を探し直す
+		if (option == 6) _rebuildDivisor  = (std::max)(1u, value);
+		if (option == 7) _mortonBuild     = value != 0;   // 0 : 節ごとに軸の真ん中で分ける
+		if (option == 5) _predictScale    = static_cast<float>(value);   // 動いた向きに広げる倍率 (0 で切る)
+	}
+
+	void PhysicsWorld::noteEnlarged(uint32_t index)
+	{
+		Body& body = _bodies[index];
+		if (body.EnlargedStep == _stepIndex) return;
+		body.EnlargedStep = _stepIndex;
+		_enlarged.push_back(index);
+	}
+
+	void PhysicsWorld::fixDynamicTree()
+	{
+		if (_enlarged.empty()) return;
+		// 動く物の 1/16 以上がはみ出したら、中の節を全部作り直す (1 つずつ入れ直すと、入れる場所を探して回転もするので重い)
+		// 1 万個 : 作り直し 約 0.6 ms (並列) / 入れ直し 1 つ 約 0.4 µs。境目は計測で決めた (ClaudLog の C3)
+		const bool rebuild = _treeRebuild && _enlarged.size() > 64 && _enlarged.size() * _rebuildDivisor >= _dynamicCount;
+		if (rebuild)
+		{
+			_dynamicTree.Rebuild(&_jobs, _mortonBuild);
+			return;
+		}
+		for (const uint32_t index : _enlarged)
+		{
+			const Body& body = _bodies[index];
+			// 消された体 / 動かない物 (動かない物の木は MoveProxy で直してある) は飛ばす
+			if (!body.Alive || body.IsStatic || body.EnlargedStep != _stepIndex) continue;
+			_dynamicTree.ReinsertProxy(body.Proxy);
+		}
+	}
+
+	void PhysicsWorld::markAllMoved()
+	{
+		_forceFull = true;   // 組も全部探し直す
 		for (uint32_t i = 0; i < _bodies.size(); ++i)
 		{
 			if (_bodies[i].Alive && _bodies[i].MovedStep != _stepIndex)
@@ -227,55 +334,62 @@ namespace Physics
 		const Body& A = _bodies[a];
 		const Body& B = _bodies[b];
 		if (!canCollide(A, B) || !A.Box.Overlaps(B.Box)) return;
-		_candidates.push_back(pairKey(a, b));
+		addPair(a, b);
+	}
+
+	void PhysicsWorld::addPair(uint32_t a, uint32_t b)
+	{
+		const uint64_t key = pairKey(a, b);
+		bool inserted;
+		uint32_t* slot = _pairMap.FindOrInsert(key, inserted);
+		if (inserted)
+		{
+			*slot = static_cast<uint32_t>(_pairs.size());
+			Pair pair;
+			pair.Key = key;
+			pair.A   = static_cast<uint32_t>(key >> 32);
+			pair.B   = static_cast<uint32_t>(key & 0xFFFFFFFFu);
+			_pairs.push_back(pair);
+		}
+		_pairs[*slot].SeenStep = _stepIndex;
 	}
 
 	// ==============================================================
 	// ブロードフェーズ
 	// ==============================================================
 
-	void PhysicsWorld::findPairsBvh()
+	bool PhysicsWorld::findPairsBvh()
 	{
 		// ==============================================================
-		// 多く動いた時 : 木の節の組を 1 回たどって、全部の組を探す (動く物の木の中 + 動く物の木 × 動かない物の木)
-		//   1 個ずつ問い合わせると、木の上の方の節を動いた物の数だけたどり直す (1 万個で 1 回 約 100 節)
-		//   以前 (最初の実装) は常に 1 個ずつ問い合わせていた : 1 万個が全部動くと 23 ms (ClaudLog の C1)
+		// 新しい組ができうるのは、太らせた箱が変わった体 (_enlarged) の所だけ (組の表は Step をまたいで持つ)
+		//   以前 (C1 / C2) は「動いた体」を全部問い合わせていた。太らせた箱の中で動いている間は、探さなくてよい
+		// 多く変わった時 : 木の節の組を 1 回たどって、太らせた箱が重なる組を全部探し直す
+		//   (動く物の木の中 + 動く物の木 × 動かない物の木)。見つからなかった組は表から消える
 		// ==============================================================
-		_fullPass = _dynamicCount > 64 && _moved.size() * 4 >= _dynamicCount;
-		if (_fullPass)
+		const bool full = _forceFull || _fullPassDivisor == 0 ||
+		                  (_dynamicCount > 64 && _enlarged.size() * _fullPassDivisor >= _dynamicCount);
+		auto add = [&](uint32_t a, uint32_t b) { if (canCollide(_bodies[a], _bodies[b])) addPair(a, b); };
+		if (full)
 		{
-			_dynamicTree.QueryAllPairs([&](uint32_t a, uint32_t b) { testPair(a, b); });
-			_dynamicTree.QueryPairs(_staticTree, [&](uint32_t a, uint32_t b) { testPair(a, b); });
-			return;
+			_dynamicTree.QueryAllPairs(add, _layerPruning);
+			_dynamicTree.QueryPairs(_staticTree, add, _layerPruning);
+			return true;
 		}
 
-		// 少し動いた時 : 動いた体だけを問い合わせる。両方動いた組は、番号の大きい方からだけ数える (二重に数えない)
-		for (const uint32_t index : _moved)
+		// 少し変わった時 : 変わった体の太らせた箱で問い合わせる (両方変わった組は 2 回見つかるが、表で 1 つになる)
+		for (const uint32_t index : _enlarged)
 		{
 			const Body& body = _bodies[index];
-			if (!body.Alive) continue;
-			if (!body.IsStatic)
-			{
-				_dynamicTree.Query(body.Box, [&](uint32_t other)
-				{
-					if (other == index) return;
-					if (_bodies[other].MovedStep == _stepIndex && other < index) return;
-					testPair(index, other);
-				});
-				_staticTree.Query(body.Box, [&](uint32_t other)
-				{
-					testPair(index, other);   // 動いた動かない物は、動く物の木だけに問い合わせる (下) ので二重にならない
-				});
-			}
-			else
-			{
-				_dynamicTree.Query(body.Box, [&](uint32_t other)
-				{
-					if (_bodies[other].MovedStep == _stepIndex) return;   // 動いた動く物の方が数える
-					testPair(index, other);
-				});
-			}
+			if (!body.Alive || body.EnlargedStep != _stepIndex) continue;
+			// レイヤーで当たりえない枝は飛ばす (比べる用に切った時は全部たどる)
+			const uint32_t layers = _layerPruning ? 1u << body.Layer : ~0u;
+			const uint32_t mask   = _layerPruning ? body.Mask : ~0u;
+			const Aabb fat = fatBoxOf(body);
+			auto visit = [&](uint32_t other) { if (other != index) add(index, other); };
+			_dynamicTree.Query(fat, visit, layers, mask);
+			if (!body.IsStatic) _staticTree.Query(fat, visit, layers, mask);
 		}
+		return false;
 	}
 
 	void PhysicsWorld::findPairsBrute()
@@ -370,86 +484,117 @@ namespace Physics
 		const Clock::time_point start = Clock::now();
 		_events.swap(_pendingEvents);   // 体を消した時の「離れた」から始める
 		_pendingEvents.clear();
-		_candidates.clear();
-		_found.clear();
 		_stats.MovedBodies = static_cast<uint32_t>(_moved.size());
 
-		// 1. ブロードフェーズ (BVH は動いた物だけ。比べる用の方法は毎回全部)
-		_fullPass = false;
+		// 0. 動く物の木を直す (はみ出した葉)
+		fixDynamicTree();
+		_stats.TreeMs = elapsedMs(start, Clock::now());
+
+		// 1. ブロードフェーズ : 組の表に新しい組を入れる (Brute / Grid は比べる用で、毎回全部を探し直す)
+		bool full = true;
 		switch (_mode)
 		{
-		case Broadphase::Bvh:   findPairsBvh();   break;
-		case Broadphase::Brute: findPairsBrute(); break;
-		case Broadphase::Grid:  findPairsGrid();  break;
+		case Broadphase::Bvh:   full = findPairsBvh(); break;
+		case Broadphase::Brute: findPairsBrute();      break;
+		case Broadphase::Grid:  findPairsGrid();       break;
 		}
-		const bool incremental = _mode == Broadphase::Bvh && !_fullPass;   // 全部を調べ直した時は、前の結果と全部比べる
 		const Clock::time_point broad = Clock::now();
 
-		// 2. ナローフェーズ : 候補の形の接触を求める (重なっていれば接触を残す)
-		//    以前 (C1) は重なっているかだけ (Overlap) を調べていた
-		for (const uint64_t key : _candidates)
-		{
-			const uint32_t a = static_cast<uint32_t>(key >> 32), b = static_cast<uint32_t>(key & 0xFFFFFFFFu);
-			Manifold manifold;
-			if (Collide(_bodies[a].World, _bodies[b].World, manifold))
-			{
-				_found.push_back(key);
-				_manifolds[key] = manifold;
-			}
-		}
-		const Clock::time_point narrow = Clock::now();
-
-		// 3. イベント
-		emitEvents(incremental);
+		// 2. ナローフェーズとイベント
+		float narrowMs = 0.0f, eventsMs = 0.0f;
+		updatePairs(full, narrowMs, eventsMs);
 
 		_moved.clear();
+		_enlarged.clear();
+		_forceFull = false;
 		_stepIndex++;
 		if (_stepIndex == 0) _stepIndex = 1;   // 0 は「動いていない」の印にしないので飛ばす
 
-		_stats.Candidates    = static_cast<uint32_t>(_candidates.size());
-		_stats.Overlaps      = static_cast<uint32_t>(_overlaps.size());
+		_stats.Overlaps      = _touchingCount;
 		_stats.BroadphaseMs  = elapsedMs(start, broad);
-		_stats.NarrowphaseMs = elapsedMs(broad, narrow);
+		_stats.NarrowphaseMs = narrowMs;
 		_stats.StepMs        = elapsedMs(start, Clock::now());
 		_stats.Broadphase    = static_cast<uint32_t>(_mode);
+		_stats.EventsMs      = eventsMs;
+		_stats.Workers       = _jobs.Workers();
+		_stats.SyncMs        = _syncMs;
+		_syncMs = 0.0f;
 		return static_cast<uint32_t>(_events.size());
 	}
 
-	void PhysicsWorld::emitEvents(bool incremental)
+	void PhysicsWorld::updatePairs(bool fullPass, float& narrowMs, float& eventsMs)
 	{
-		std::sort(_found.begin(), _found.end());
-		_found.erase(std::unique(_found.begin(), _found.end()), _found.end());
-		auto isFound = [&](uint64_t key) { return std::binary_search(_found.begin(), _found.end(), key); };
+		const Clock::time_point start = Clock::now();
 
-		// 離れた : 前に重なっていた組のうち、今回の結果に無い物
-		//   BVH は動いた体を含む組だけ調べ直したので、両方とも動いていない組は重なったまま
-		_exits.clear();
-		for (const uint64_t key : _overlaps)
+		// ==============================================================
+		// 1 回目 : 組ごとに「消す / 形を調べる / そのまま」を決める (組ごとに別の所へ書くので、並列にもできる)
+		//   消す : 全部を探し直した時は、見つからなかった組。そうでなければ、太らせた箱が変わって離れた組
+		//   形を調べる : 表に入ったばかりか、どちらかが動いた組 (以前 (C2) は箱が重なった組を毎回調べていた)
+		// ==============================================================
+		_jobs.ParallelFor(static_cast<uint32_t>(_pairs.size()), 256, [&](uint32_t begin, uint32_t end)
 		{
-			const uint32_t a = static_cast<uint32_t>(key >> 32), b = static_cast<uint32_t>(key & 0xFFFFFFFFu);
-			if (incremental && _bodies[a].MovedStep != _stepIndex && _bodies[b].MovedStep != _stepIndex) continue;
-			if (!isFound(key)) _exits.push_back(key);
-		}
-		for (const uint64_t key : _exits)
-		{
-			_overlaps.erase(key);
-			_manifolds.erase(key);
-			_events.push_back({ handleOf(static_cast<uint32_t>(key >> 32)), handleOf(static_cast<uint32_t>(key & 0xFFFFFFFFu)), 1u, 0u });
-		}
-
-		// 重なり始めた : 今回の結果のうち、前に無かった物
-		for (const uint64_t key : _found)
-		{
-			if (_overlaps.insert(key).second)
+			for (uint32_t i = begin; i < end; ++i)
 			{
-				_events.push_back({ handleOf(static_cast<uint32_t>(key >> 32)), handleOf(static_cast<uint32_t>(key & 0xFFFFFFFFu)), 0u, 0u });
+				Pair& pair = _pairs[i];
+				const Body& a = _bodies[pair.A];
+				const Body& b = _bodies[pair.B];
+				const bool remove = fullPass ? pair.SeenStep != _stepIndex
+				                             : (a.EnlargedStep == _stepIndex || b.EnlargedStep == _stepIndex) && !fatBoxOf(a).Overlaps(fatBoxOf(b));
+				if (remove) { pair.Action = 1; continue; }
+				if (pair.IsNew || a.MovedStep == _stepIndex || b.MovedStep == _stepIndex)
+				{
+					pair.Contact.Count = 0;
+					pair.Hit    = a.Box.Overlaps(b.Box) && Collide(a.World, b.World, pair.Contact) ? 1 : 0;
+					pair.Action = 2;
+				}
+				else
+				{
+					pair.Action = 0;
+				}
 			}
-		}
-	}
+		});
+		const Clock::time_point narrow = Clock::now();
 
-	// ==============================================================
-	// メッシュ
-	// ==============================================================
+		// ==============================================================
+		// 2 回目 : イベントと表の片付け (離れた → 重なり始めた の順に返す。以前と同じ)
+		// ==============================================================
+		_enterEvents.clear();
+		uint32_t tested = 0;
+		for (size_t i = 0; i < _pairs.size();)
+		{
+			Pair& pair = _pairs[i];
+			if (pair.Action == 1)
+			{
+				if (pair.Touching)
+				{
+					_events.push_back({ handleOf(pair.A), handleOf(pair.B), 1u, 0u });
+					_touchingCount--;
+				}
+				_pairMap.Erase(pair.Key);
+				if (i + 1 != _pairs.size())
+				{
+					pair = _pairs.back();   // 最後の組を空いた所へ (その組の Action も済んでいるので、この場所でもう一度見る)
+					*_pairMap.Find(pair.Key) = static_cast<uint32_t>(i);
+				}
+				_pairs.pop_back();
+				continue;
+			}
+			if (pair.Action == 2) tested++;
+			if (pair.Action == 2 && pair.Hit != pair.Touching)
+			{
+				if (pair.Hit) { _enterEvents.push_back({ handleOf(pair.A), handleOf(pair.B), 0u, 0u }); _touchingCount++; }
+				else          { _events.push_back({ handleOf(pair.A), handleOf(pair.B), 1u, 0u });      _touchingCount--; }
+				pair.Touching = pair.Hit;
+			}
+			pair.IsNew = 0;
+			++i;
+		}
+		_events.insert(_events.end(), _enterEvents.begin(), _enterEvents.end());
+
+		_stats.Candidates = tested;
+		narrowMs = elapsedMs(start, narrow);
+		eventsMs = elapsedMs(narrow, Clock::now());
+	}
 
 	uint32_t PhysicsWorld::CreateMesh(const float* positions, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount)
 	{
@@ -512,8 +657,8 @@ namespace Physics
 				best = t; limit = t; bestBody = index; bestNormal = n;
 			}
 		};
-		_staticTree.RayCast(origin, invDir, best, visit);
-		_dynamicTree.RayCast(origin, invDir, best, visit);
+		_staticTree.RayCast(origin, invDir, best, visit, ray.LayerMask);
+		_dynamicTree.RayCast(origin, invDir, best, visit, ray.LayerMask);
 		if (bestBody == INVALID_HANDLE) return false;
 
 		const Float3 point = origin + dir * best;
@@ -537,16 +682,19 @@ namespace Physics
 			if (out && count < capacity) out[count] = handleOf(index);
 			count++;
 		};
-		_staticTree.Query(box, visit);
-		_dynamicTree.Query(box, visit);
+		_staticTree.Query(box, visit, ~0u, layerMask);
+		_dynamicTree.Query(box, visit, ~0u, layerMask);
 		return count;   // 全部の数 (capacity より多いこともある)
 	}
 
 	uint32_t PhysicsWorld::GetContacts(ContactOut* out, uint32_t capacity) const
 	{
 		uint32_t count = 0;
-		for (const auto& [key, manifold] : _manifolds)
+		for (const Pair& pair : _pairs)
 		{
+			if (!pair.Touching) continue;
+			const uint64_t key = pair.Key;
+			const Manifold& manifold = pair.Contact;
 			const uint32_t a = handleOf(static_cast<uint32_t>(key >> 32)), b = handleOf(static_cast<uint32_t>(key & 0xFFFFFFFFu));
 			for (int i = 0; i < manifold.Count; ++i)
 			{

@@ -57,6 +57,7 @@ internal sealed unsafe class CollisionSystem
     {
         _settings.EventList.Clear();
         if (!_enabled) return;
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
 
         foreach (var body in _pendingDestroy) PhysicsNativeMethods.Physics_DestroyBody(body);
         _pendingDestroy.Clear();
@@ -170,6 +171,11 @@ internal sealed unsafe class CollisionSystem
         _settings.BroadphaseMs  = stats.BroadphaseMs;
         _settings.NarrowphaseMs = stats.NarrowphaseMs;
         _settings.StepMs        = stats.StepMs;
+        _settings.SyncMs        = stats.SyncMs;
+        _settings.TreeMs        = stats.TreeMs;
+        _settings.EventsMs      = stats.EventsMs;
+        _settings.Workers       = (int)stats.Workers;
+        _settings.SystemMs      = (float)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;   // 表示の線を描く前まで
 
         if (_settings.ShowColliders) drawColliders(world);
         if (_settings.ShowContacts)  drawContacts();

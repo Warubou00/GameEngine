@@ -64,6 +64,29 @@ extern "C"
 		if (g_world && mode <= 2) g_world->SetBroadphase(static_cast<Physics::Broadphase>(mode));
 	}
 
+	// レイヤーの衝突の表 (Unity の Layer Collision Matrix と同じ)。a / b は 0〜31
+	PHYSICS_API void Physics_SetLayerCollision(uint32_t a, uint32_t b, bool collide)
+	{
+		if (g_world) g_world->SetLayerCollision(a, b, collide);
+	}
+
+	// レイヤーが当たる相手のレイヤー (ビット)
+	PHYSICS_API uint32_t Physics_GetLayerCollisionMask(uint32_t layer)
+	{
+		return g_world ? g_world->GetLayerCollisionMask(layer) : 0u;
+	}
+
+	// 比べる用の切り替え (1 : 木の節のレイヤーのビットで枝を飛ばす (既定 1) / 2 : 並列に使うスレッドの数 /
+	//                     3 : 多く動いた時に動く物の木を作り直す (既定 1。0 なら 1 つずつ入れ直す) /
+	//                     4 : 木の葉が変わった体が動く物の 1/N 以上なら、全部の組を探し直す (既定 4。0 ならいつも) /
+	//                     5 : 太らせた箱を動いた向きに広げる倍率 (既定 4。0 で切る) /
+	//                     6 : はみ出した葉が動く物の 1/N 以上なら木を作り直す (既定 16) /
+	//                     7 : 木の作り直しを Morton 符号の順で行う (既定 1。0 なら節ごとに軸の真ん中で分ける))
+	PHYSICS_API void Physics_SetOption(uint32_t option, uint32_t value)
+	{
+		if (g_world) g_world->SetOption(option, value);
+	}
+
 	// 重なりを調べ直す。戻り値はイベントの数 (Physics_GetEvents で受け取る)
 	PHYSICS_API uint32_t Physics_Step()
 	{

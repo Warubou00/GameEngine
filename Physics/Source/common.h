@@ -141,8 +141,12 @@ namespace Physics
 		float    NarrowphaseMs;  // 形の判定の時間
 		float    StepMs;         // Step 全体
 		uint32_t Broadphase;     // Broadphase
+		float    SyncMs;         // 前の Step から、動いた体の位置を受け取った時間 (SetTransforms。木を直す分)
+		float    EventsMs;       // 重なりの記録とイベントの時間
+		uint32_t Workers;        // 並列に使ったスレッドの数 (0 = 1 本)
+		float    TreeMs;         // 動く物の木を直した時間 (Step の始め。入れ直し / 作り直し。BroadphaseMs に含む)
 	};
-	static_assert(sizeof(PhysicsStats) == 32, "PhysicsStats must be 32 bytes (same as C#)");
+	static_assert(sizeof(PhysicsStats) == 48, "PhysicsStats must be 48 bytes (same as C#)");
 }
 
 #endif // PHYSICS_COMMON_H_

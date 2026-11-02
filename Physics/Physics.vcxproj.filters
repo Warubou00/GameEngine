@@ -30,6 +30,9 @@
     <ClInclude Include="Source\raycast.h">
       <Filter>Source</Filter>
     </ClInclude>
+    <ClInclude Include="Source\jobSystem.h">
+      <Filter>Source</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\dynamicTree.cpp">
@@ -51,6 +54,9 @@
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="Source\raycast.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\jobSystem.cpp">
       <Filter>Source</Filter>
     </ClCompile>
   </ItemGroup>
