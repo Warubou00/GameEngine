@@ -45,6 +45,16 @@ public struct Transform
 
     // Static を付けた物を動かした時に呼ぶ (次のフレームで行列を作り直して送る)
     public void MarkDirty() => HasMatrix = false;
+
+    // 行列をすぐ作り直す (TransformSystem の後に位置を変える物 (剛体) 用。変わったら描画へ送る印を立てる)
+    internal void UpdateMatrix()
+    {
+        var matrix = Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Position);
+        if (HasMatrix && matrix == LocalToWorld) return;
+        LocalToWorld = matrix;
+        HasMatrix    = true;
+        Changed      = true;
+    }
 }
 
 // 動かない物の印 (中身は無い)。TransformSystem は最初の 1 回だけ行列を計算する

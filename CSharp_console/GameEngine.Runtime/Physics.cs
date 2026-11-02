@@ -196,4 +196,54 @@ public sealed class PhysicsSettings
     public float EventsMs      { get; internal set; }   // 重なりの記録とイベント
     public int   Workers       { get; internal set; }   // 並列に使ったスレッドの数
     public float SystemMs      { get; internal set; }   // C# の CollisionSystem 全体 (P/Invoke と C++ の時間を含む)
+
+    // ---------- 剛体 (P1) ----------
+    public float SolverMs           { get; internal set; }   // 最後の刻みで接触とジョイントを解いた時間
+    public int   RigidBodies        { get; internal set; }
+    public int   ContactConstraints { get; internal set; }   // 解いた接触の組
+    public int   Joints             { get; internal set; }   // 働いているジョイント
+    public int   FixedSteps         { get; internal set; }   // このフレームで進めた固定の刻み
+
+    /// <summary>剛体の解き方の設定 (変えると次の刻みから効く)</summary>
+    public PhysicsSolverSettings Solver { get; } = new();
+}
+
+// ==========================================================================
+// 剛体の解き方 (engine.Physics.Solver)。既定は Box2D v3 に近い値
+// ==========================================================================
+public sealed class PhysicsSolverSettings
+{
+    private Vector3 _gravity = new(0.0f, -9.81f, 0.0f);
+    private int   _subSteps = 4, _iterations = 1, _relaxIterations = 1;
+    private float _contactHertz = 30.0f, _contactDampingRatio = 10.0f, _contactPushMaxVelocity = 3.0f;
+    private float _restitutionThreshold = 1.0f, _speculativeDistance = 0.02f;
+    private float _jointHertz = 60.0f, _jointDampingRatio = 2.0f, _maxLinearSpeed = 400.0f;
+
+    internal bool Dirty { get; set; } = true;
+
+    public Vector3 Gravity { get => _gravity; set { _gravity = value; Dirty = true; } }
+    /// <summary>1 刻みを何回に分けて解くか (多いほど積み重ねや鎖が安定。重くなる)</summary>
+    public int   SubSteps               { get => _subSteps;               set { _subSteps = Math.Clamp(value, 1, 64); Dirty = true; } }
+    public int   Iterations             { get => _iterations;             set { _iterations = Math.Clamp(value, 1, 64); Dirty = true; } }
+    public int   RelaxIterations        { get => _relaxIterations;        set { _relaxIterations = Math.Clamp(value, 0, 64); Dirty = true; } }
+    /// <summary>めり込みを戻す速さ (振動数)。大きいほど硬いが、刻みの 1/4 までしか効かない</summary>
+    public float ContactHertz           { get => _contactHertz;           set { _contactHertz = MathF.Max(0.0f, value); Dirty = true; } }
+    public float ContactDampingRatio    { get => _contactDampingRatio;    set { _contactDampingRatio = MathF.Max(0.0f, value); Dirty = true; } }
+    /// <summary>めり込みを戻す速度の上限 (m/s。大きいと重なった物が勢いよく飛ぶ)</summary>
+    public float ContactPushMaxVelocity { get => _contactPushMaxVelocity; set { _contactPushMaxVelocity = MathF.Max(0.0f, value); Dirty = true; } }
+    /// <summary>この速さ (m/s) より遅くぶつかった時は跳ねない (止まっている物が震えないように)</summary>
+    public float RestitutionThreshold   { get => _restitutionThreshold;   set { _restitutionThreshold = MathF.Max(0.0f, value); Dirty = true; } }
+    /// <summary>離れていても、この距離までは接触として扱う (m。すり抜けと着地の震えを減らす)</summary>
+    public float SpeculativeDistance    { get => _speculativeDistance;    set { _speculativeDistance = MathF.Max(0.0f, value); Dirty = true; } }
+    public float JointHertz             { get => _jointHertz;             set { _jointHertz = MathF.Max(0.0f, value); Dirty = true; } }
+    public float JointDampingRatio      { get => _jointDampingRatio;      set { _jointDampingRatio = MathF.Max(0.0f, value); Dirty = true; } }
+    public float MaxLinearSpeed         { get => _maxLinearSpeed;         set { _maxLinearSpeed = MathF.Max(0.1f, value); Dirty = true; } }
+
+    internal PhysicsNativeMethods.SolverSettings ToNative() => new()
+    {
+        Gravity = _gravity, SubSteps = (uint)_subSteps, ContactHertz = _contactHertz, ContactDampingRatio = _contactDampingRatio,
+        ContactPushMaxVelocity = _contactPushMaxVelocity, RestitutionThreshold = _restitutionThreshold, SpeculativeDistance = _speculativeDistance,
+        JointHertz = _jointHertz, JointDampingRatio = _jointDampingRatio, MaxLinearSpeed = _maxLinearSpeed,
+        Iterations = (uint)_iterations, RelaxIterations = (uint)_relaxIterations,
+    };
 }

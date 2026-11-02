@@ -41,6 +41,20 @@ namespace Physics
 		// 並列のスレッド : 論理コアの数 - 1 (呼んだスレッドも働く)。描画や C# の分を残すため 3 本まで
 		const uint32_t cores = std::thread::hardware_concurrency();
 		_jobs.SetWorkers(cores > 1 ? (std::min)(cores - 1, 3u) : 0u);
+
+		// 剛体の解き方の既定 (Box2D v3 に近い値)
+		_solver.Gravity[0] = 0.0f; _solver.Gravity[1] = -9.81f; _solver.Gravity[2] = 0.0f;
+		_solver.SubSteps               = 4;
+		_solver.ContactHertz           = 30.0f;
+		_solver.ContactDampingRatio    = 10.0f;
+		_solver.ContactPushMaxVelocity = 3.0f;
+		_solver.RestitutionThreshold   = 1.0f;
+		_solver.SpeculativeDistance    = 0.02f;
+		_solver.JointHertz             = 60.0f;
+		_solver.JointDampingRatio      = 2.0f;
+		_solver.MaxLinearSpeed         = 400.0f;
+		_solver.Iterations             = 1;
+		_solver.RelaxIterations        = 1;
 	}
 
 	PhysicsWorld::Body* PhysicsWorld::find(uint32_t handle)
@@ -94,6 +108,9 @@ namespace Physics
 			}
 		}
 		body.Size        = Float3(desc.Size[0], desc.Size[1], desc.Size[2]);
+		body.Friction    = desc.Friction;
+		body.Restitution = desc.Restitution;
+		body.IsTrigger   = (desc.Flags & BODY_TRIGGER) != 0;
 		updateShape(body, desc.Position, desc.Rotation, desc.Scale);
 		insertProxy(index);
 		noteEnlarged(index);           // 次の Step で、この体の組を探す
@@ -125,12 +142,22 @@ namespace Physics
 			if (i + 1 != _pairs.size())
 			{
 				pair = _pairs.back();   // 最後の組を空いた所へ
+				_pairImpulses[i] = _pairImpulses.back();
 				*_pairMap.Find(pair.Key) = static_cast<uint32_t>(i);
 			}
 			_pairs.pop_back();
+			_pairImpulses.pop_back();
 		}
 		removeProxy(index);
 		if (!body->IsStatic) _dynamicCount--;
+		setMotion(index, MotionType::None);
+		// この体に繋いだジョイントは壊れた扱い (C# が後で消す)
+		for (const std::unique_ptr<Joint>& joint : _joints)
+		{
+			if (!joint || joint->Broken || (joint->A.Handle != handle && joint->B.Handle != handle)) continue;
+			joint->Broken = true;
+			releaseJointPair(*joint);
+		}
 		body->MeshInst.reset();
 		body->MeshData.reset();
 		body->Alive = false;
@@ -142,6 +169,9 @@ namespace Physics
 	{
 		// 大きさを形に掛ける (球は一番大きい軸 / カプセルの太さは X と Z の大きい方 / 高さは Y)
 		const Float3 s(std::fabs(scale[0]), std::fabs(scale[1]), std::fabs(scale[2]));
+		body.Position = Float3(position[0], position[1], position[2]);
+		body.Rotation = normalize(Quat(rotation[0], rotation[1], rotation[2], rotation[3]));
+		body.Scale    = Float3(scale[0], scale[1], scale[2]);
 		WorldShape& w = body.World;
 		w.Type     = body.Shape;
 		w.Rotation = Rotation3::FromQuaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
@@ -168,6 +198,7 @@ namespace Physics
 			break;
 		}
 		body.Box = w.ComputeAabb();
+		if (body.Motion == MotionType::Dynamic) updateMass(body);   // 大きさが変わると慣性も変わる
 	}
 
 	float PhysicsWorld::marginOf(const Body& body) const
@@ -350,6 +381,7 @@ namespace Physics
 			pair.A   = static_cast<uint32_t>(key >> 32);
 			pair.B   = static_cast<uint32_t>(key & 0xFFFFFFFFu);
 			_pairs.push_back(pair);
+			_pairImpulses.emplace_back();
 		}
 		_pairs[*slot].SeenStep = _stepIndex;
 	}
@@ -522,6 +554,69 @@ namespace Physics
 		return static_cast<uint32_t>(_events.size());
 	}
 
+	void PhysicsWorld::collidePhysical(Pair& pair, PairImpulse& impulse, const Body& a, const Body& b) const
+	{
+		// ==============================================================
+		// 剛体の組 (P1) : 形を SpeculativeDistance だけ太らせて求め、深さから引く
+		//   少し離れた点 (深さが負) も入るので、ぶつかる直前から止め始められる (すり抜け / 着地の震えが減る)
+		//   重なっているか (イベント) は本当の深さ (0 以上の点があるか) で決める
+		//   前の点に近い点は、前の力積を引き継ぐ (積み重ねた物が少ない反復でも止まる)
+		// ==============================================================
+		const int oldCount = pair.Physical ? pair.Contact.Count : 0;
+		Float3 oldPosition[Manifold::MAX_POINTS], oldFriction[Manifold::MAX_POINTS];
+		float  oldNormal[Manifold::MAX_POINTS];
+		for (int i = 0; i < oldCount; ++i)
+		{
+			oldPosition[i] = pair.Contact.Points[i].Position;
+			oldNormal[i]   = impulse.Normal[i];
+			oldFriction[i] = impulse.Friction[i];
+		}
+
+		const float margin = (std::max)(0.0f, _solver.SpeculativeDistance);
+		WorldShape sa = a.World, sb = b.World;
+		WorldShape& grow = sb.Type != ShapeType::Mesh ? sb : sa;   // メッシュは太らせられないので相手を
+		if (grow.Type == ShapeType::Box) grow.HalfExtents = grow.HalfExtents + Float3(margin, margin, margin);
+		else                             grow.Radius += margin;
+		const Float3 m(margin, margin, margin);
+		const Aabb boxA { a.Box.min - m, a.Box.max + m };
+
+		pair.Contact.Count = 0;
+		const bool collided = boxA.Overlaps(b.Box) && Collide(sa, sb, pair.Contact) && pair.Contact.Count > 0;
+		float deepest = -FLT_MAX;
+		if (collided)
+		{
+			for (int i = 0; i < pair.Contact.Count; ++i)
+			{
+				pair.Contact.Points[i].Depth -= margin;
+				deepest = (std::max)(deepest, pair.Contact.Points[i].Depth);
+			}
+		}
+		else
+		{
+			pair.Contact.Count = 0;
+		}
+		pair.Physical = collided ? 1 : 0;
+		pair.Hit      = collided && deepest >= 0.0f ? 1 : 0;
+
+		const float tolerance = 0.05f * 0.05f;   // 5 cm 以内なら同じ点
+		for (int i = 0; i < pair.Contact.Count; ++i)
+		{
+			impulse.Normal[i]   = 0.0f;
+			impulse.Friction[i] = Float3();
+			float best = tolerance;
+			for (int j = 0; j < oldCount; ++j)
+			{
+				const float d = lengthSq(pair.Contact.Points[i].Position - oldPosition[j]);
+				if (d < best)
+				{
+					best = d;
+					impulse.Normal[i]   = oldNormal[j];
+					impulse.Friction[i] = oldFriction[j];
+				}
+			}
+		}
+	}
+
 	void PhysicsWorld::updatePairs(bool fullPass, float& narrowMs, float& eventsMs)
 	{
 		const Clock::time_point start = Clock::now();
@@ -543,8 +638,13 @@ namespace Physics
 				if (remove) { pair.Action = 1; continue; }
 				if (pair.IsNew || a.MovedStep == _stepIndex || b.MovedStep == _stepIndex)
 				{
-					pair.Contact.Count = 0;
-					pair.Hit    = a.Box.Overlaps(b.Box) && Collide(a.World, b.World, pair.Contact) ? 1 : 0;
+					if (isPhysicalPair(a, b)) collidePhysical(pair, _pairImpulses[i], a, b);
+					else
+					{
+						pair.Physical = 0;
+						pair.Contact.Count = 0;
+						pair.Hit = a.Box.Overlaps(b.Box) && Collide(a.World, b.World, pair.Contact) ? 1 : 0;
+					}
 					pair.Action = 2;
 				}
 				else
@@ -574,9 +674,11 @@ namespace Physics
 				if (i + 1 != _pairs.size())
 				{
 					pair = _pairs.back();   // 最後の組を空いた所へ (その組の Action も済んでいるので、この場所でもう一度見る)
+					_pairImpulses[i] = _pairImpulses.back();
 					*_pairMap.Find(pair.Key) = static_cast<uint32_t>(i);
 				}
 				_pairs.pop_back();
+				_pairImpulses.pop_back();
 				continue;
 			}
 			if (pair.Action == 2) tested++;
@@ -698,6 +800,7 @@ namespace Physics
 			const uint32_t a = handleOf(static_cast<uint32_t>(key >> 32)), b = handleOf(static_cast<uint32_t>(key & 0xFFFFFFFFu));
 			for (int i = 0; i < manifold.Count; ++i)
 			{
+				if (manifold.Points[i].Depth < 0.0f) continue;   // 剛体の少し先の点 (まだ触れていない)
 				if (out && count < capacity)
 				{
 					const ContactPoint& p = manifold.Points[i];

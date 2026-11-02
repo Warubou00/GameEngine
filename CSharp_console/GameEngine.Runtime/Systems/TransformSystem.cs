@@ -11,7 +11,8 @@ namespace GameEngine;
 internal sealed class TransformSystem : ISystem
 {
     // このフレームで行列が変わった数 (0 なら RenderSyncSystem は送る物を探さない)
-    public int ChangedCount { get; private set; }
+    // 剛体の位置を書いた CollisionSystem も足す (以前は TransformSystem だけが数えていたので、物理だけが動かした物が描画へ送られなかった)
+    public int ChangedCount { get; internal set; }
 
     public void Update(World world)
     {

@@ -40,6 +40,9 @@
 #include "meshShape.h"
 #include "dynamicTree.h"
 #include "jobSystem.h"
+#include "dynamics.h"
+#include "joints.h"
+#include <unordered_map>
 
 namespace Physics
 {
@@ -74,6 +77,23 @@ namespace Physics
 		// 今重なっている組の接触点 (out が nullptr なら数だけ)
 		uint32_t GetContacts(ContactOut* out, uint32_t capacity) const;
 
+		// ---------- 剛体 (P1。solver.cpp) ----------
+		// 体を剛体にする / 値を変える (Motion = None で剛体でなくなる)。動かない物 (IsStatic) は剛体にできない
+		void     SetBodyDynamics(uint32_t handle, const BodyDynamics& dynamics);
+		// 力 / 力積 / 速度 / キネマティックの目標 (まとめて)
+		void     ApplyCommands(const BodyCommand* commands, uint32_t count);
+		// dt 秒進める : 重なりを調べ (Step と同じ。イベントも作る)、接触とジョイントを解いて剛体を動かす
+		uint32_t Simulate(float dt);
+		// 剛体の今の状態 (out が nullptr なら数だけ)
+		uint32_t GetBodyStates(BodyState* out, uint32_t capacity) const;
+		void     SetSolverSettings(const SolverSettings& settings) { _solver = settings; }
+		const SolverSettings& GetSolverSettings() const { return _solver; }
+
+		// ジョイント (ハンドル = 番号 16bit + 世代 16bit)
+		uint32_t CreateJoint(const JointDesc& desc);
+		void     DestroyJoint(uint32_t handle);
+		bool     GetJointInfo(uint32_t handle, JointInfo& info) const;
+
 	private:
 		struct Body
 		{
@@ -91,8 +111,39 @@ namespace Physics
 			int        Proxy     = DynamicTree::NULL_NODE;
 			uint32_t   MovedStep = 0;   // この Step で動いたか (= _stepIndex)
 			uint32_t   EnlargedStep = 0;    // 木の葉 (太らせた箱) が変わった Step (= _stepIndex なら、新しい組を探す)
+			// 形の判定で毎回見る剛体の値は前の方に置く (後ろの剛体の値と別のキャッシュの行にならないように)
+			MotionType Motion    = MotionType::None;   // P1
+			bool       IsTrigger = false;   // 重なりのイベントだけ (押し戻さない。P1)
 			std::shared_ptr<const TriangleMesh> MeshData;   // メッシュの形 (共有)
 			std::unique_ptr<MeshInstance>       MeshInst;   // この体のワールドの三角形と BVH
+
+			// ---------- 剛体 (P1) ----------
+			// 剛体だけが使う値は _rigidData (RigidSlot の場所) に分けた (体の表を小さく保ち、衝突判定だけの時に遅くしない)
+			float      Friction    = 0.5f;
+			float      Restitution = 0.0f;
+			Float3     Position;              // Transform の位置 / 回転 / 大きさ (最後に受け取った / 動かした値)
+			Quat       Rotation;
+			Float3     Scale = Float3(1.0f, 1.0f, 1.0f);
+			int        Solver    = -1;        // _solverBodies の場所 (剛体でなければ -1)
+			int        RigidSlot = -1;        // _rigidBodies / _rigidData の場所
+		};
+
+		// 剛体の値 (Dynamic / Kinematic の体だけ。_rigidBodies と同じ並び)
+		struct RigidData
+		{
+			BodyDynamics Dynamics {};
+			float      InvMass = 0.0f;
+			Float3     InvInertiaLocal;       // ローカルの対角の慣性の逆数
+			Float3     Velocity;              // 重心の速度
+			Float3     AngularVelocity;       // ワールド
+			Float3     Force;                 // 次の Simulate でかける力 (終わったら 0)
+			Float3     Torque;
+			bool       HasTarget = false;     // キネマティックの目標
+			bool       ClearVelocityAfterStep = false;   // 目標へ動いた後は止まる
+			Float3     TargetPosition;
+			Quat       TargetRotation;
+			Float3     LinearMask  = Float3(1.0f, 1.0f, 1.0f);   // 固定した軸は 0
+			Float3     AngularMask = Float3(1.0f, 1.0f, 1.0f);
 		};
 
 		std::vector<Body>     _bodies;
@@ -130,7 +181,14 @@ namespace Physics
 			uint8_t  IsNew    = 1;       // 表に入ったばかり (必ず形を調べる)
 			uint8_t  Action   = 0;       // 作業用 : 0 そのまま / 1 表から消す / 2 形を調べた
 			uint8_t  Hit      = 0;       // 作業用 : 形を調べた結果
-			Manifold Contact;
+			uint8_t  Physical = 0;       // 剛体の接触として解く (少し離れていても点がある。P1)
+			Manifold Contact;            // 剛体の組は、少し離れた点 (深さが負) も入る
+		};
+		// 前の Simulate の力積 (次の始めにかけ直す。_pairs と同じ並び。組の表を小さく保つため分けた)
+		struct PairImpulse
+		{
+			float  Normal[Manifold::MAX_POINTS] = {};
+			Float3 Friction[Manifold::MAX_POINTS];
 		};
 
 		// 組の番号 → _pairs の場所 (開番地法のハッシュ表。消す時は後ろを詰める (墓石を残さない))
@@ -198,6 +256,7 @@ namespace Physics
 		};
 
 		std::vector<Pair>            _pairs;
+		std::vector<PairImpulse>     _pairImpulses;
 		PairMap                      _pairMap;
 		uint32_t                     _touchingCount = 0;
 
@@ -207,6 +266,76 @@ namespace Physics
 		std::vector<CollisionEvent>  _events;
 		std::vector<CollisionEvent>  _pendingEvents;   // 体を消した時の「離れた」(次の Step で返す)
 		PhysicsStats                 _stats = {};
+
+		// ---------- 剛体 (P1) ----------
+		// 1 本の向き (法線 / 摩擦の 2 本) の拘束。回転の項は始めに 1 回だけ求めておく
+		//   (慣性の逆数と点の位置は Simulate の間変えないので、毎回の 3x3 の掛け算と外積が要らない)
+		struct ContactAxis
+		{
+			Float3 Dir;                  // 向き (A → B)
+			Float3 RA, RB;               // r × Dir
+			Float3 IA, IB;               // 慣性の逆数 × (r × Dir)
+			float  Mass    = 0.0f;       // 有効な質量
+			float  Impulse = 0.0f;       // 積み重ねた力積
+		};
+		struct ContactPointConstraint
+		{
+			Float3 RA, RB;               // 重心から点 (Simulate の始め。ワールドの向き)
+			ContactAxis N, T1, T2;
+			float  AdjustedSeparation = 0.0f;   // 今の離れ具合 = dot(d, n) + これ
+			float  MaxNormalImpulse = 0.0f;
+			float  RelativeVelocity = 0.0f;     // 始めの法線の向きの速さ (反発に使う)
+		};
+		struct ContactConstraint
+		{
+			SolverBody* A = nullptr;
+			SolverBody* B = nullptr;
+			uint32_t    Pair = 0;
+			int         Count = 0;
+			float       Friction = 0.0f, Restitution = 0.0f;
+			Softness    Soft;
+			ContactPointConstraint Points[Manifold::MAX_POINTS];
+		};
+		SolverSettings                     _solver {};
+		std::vector<uint32_t>              _rigidBodies;      // Dynamic / Kinematic の体 (番号)
+		std::vector<RigidData>             _rigidData;        // _rigidBodies と同じ並び
+		std::vector<SolverBody>            _solverBodies;
+		std::vector<ContactConstraint>     _contacts;
+		// 色分け : 同じ色の接触は、動く体を共有しない (並列に解いても同じ体に書かない。Box2D v3 の graph coloring)
+		static constexpr int               MAX_COLORS = 24;
+		std::vector<ContactConstraint>     _coloredContacts;  // 作業用
+		std::vector<uint64_t>              _colorBits;        // 色ごとの「使った体」(ビット)
+		std::vector<uint8_t>               _contactColor;
+		uint32_t                           _colorStart[MAX_COLORS + 2] = {};   // 色 k の接触 = [start[k], start[k + 1])。最後 (MAX_COLORS) はあふれた分
+		std::vector<BodyTransform>         _poseBuffer;       // 動かした体を SetTransforms と同じ道で木へ
+		SolverBody                         _staticBody;       // 動かない物 (質量が無限)
+		std::vector<std::unique_ptr<Joint>> _joints;          // 空きは nullptr
+		std::vector<uint16_t>              _jointVersions;
+		std::vector<uint32_t>              _freeJoints;
+		std::unordered_map<uint64_t, int>  _noCollidePairs;   // ジョイントで繋いで、押し戻さない組 (数)
+		uint32_t                           _activeJoints = 0;
+
+		bool  isPhysicalPair(const Body& a, const Body& b) const
+		{
+			return !a.IsTrigger && !b.IsTrigger && (a.Motion == MotionType::Dynamic || b.Motion == MotionType::Dynamic);
+		}
+		void  updateMass(Body& body);
+		void  collidePhysical(Pair& pair, PairImpulse& impulse, const Body& a, const Body& b) const;   // 剛体の組の形の判定 (少し先の点も)
+		RigidData&       rigidOf(const Body& body)       { return _rigidData[body.RigidSlot]; }
+		const RigidData& rigidOf(const Body& body) const { return _rigidData[body.RigidSlot]; }
+		void  setMotion(uint32_t index, MotionType motion);
+		void  solveRigid(float dt);
+		void  prepareContacts(const SolverStep& step);
+		void  colorContacts();
+		template<typename Fn> void forEachColor(Fn&& fn);   // 色ごとに並列 (最後のあふれた分は順番に)
+		void  warmStartContacts(uint32_t begin, uint32_t end);
+		void  solveContacts(const SolverStep& step, bool useBias, uint32_t begin, uint32_t end);
+		void  applyRestitution();
+		void  storeImpulses();
+		bool  prepareJoint(Joint& joint);
+		void  releaseJointPair(const Joint& joint);
+		Joint* findJoint(uint32_t handle) const;
+		SolverBody* solverOf(const Body& body) { return body.Solver >= 0 ? &_solverBodies[body.Solver] : &_staticBody; }
 		float                        _syncMs = 0.0f;   // SetTransforms の時間 (Step で _stats に移す)
 
 		// Grid の作業用

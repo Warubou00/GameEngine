@@ -1,0 +1,113 @@
+﻿====================================================================
+ 物理 P1 : 固定の時間刻み / 剛体 (Rigidbody) / 接触の解決 / ジョイント (Distance・Ball・Fixed)
+ 日付   : 2026-11-03
+ ブランチ : feature/physics-p1 (develop 4a32954 から)
+ ロードマップ : Engine_Roadmap_Shadow_Collision_Physics_2026-11-02.txt
+====================================================================
+
+■ 概要
+  - Rigidbody コンポーネントを Collider と一緒に付けると、Physics.dll が固定の時間刻みで動かす
+    以前 (C1〜C3) は衝突判定だけで、物を動かすのは C# (Transform) だけだった
+  - 汎用性のために入れた物
+      Dynamic / Kinematic、質量 / 慣性 (形と大きさから) / 減衰 / 重力の倍率 / 軸の固定 (Unity の Constraints)
+      力の API (AddForce / AddTorque / AddForceAtPosition。ForceMode 4 種) / Velocity / MovePosition / MoveRotation
+      摩擦 / 反発 / トリガー (Collider に持つ。動かない地面にも付けられる)
+      IFixedSystem (Unity の FixedUpdate。固定の刻みで呼ばれる System)
+      ジョイント : Joint コンポーネント (2 つの体 / 体とワールドの点。ジョイントだけのエンティティも可。壊れる力)
+                   C++ は Joint を継承して Prepare / WarmStart / Solve を書けば新しい種類を足せる (joints.h)
+      解き方の設定 : engine.Physics.Solver (重力 / 小さな刻みの数 / 接触の硬さ / 少し先の接触の距離 など)
+  - 描画は前後の刻みの間を補間する (Interpolate。描画のフレームが 60 Hz と違ってもカクつかない)
+  - 剛体もジョイントも IFixedSystem も無い間は、以前と同じく毎フレーム衝突判定だけ (C3 の動きのまま)
+
+■ 解き方 (solver.cpp。Box2D v3 の「柔らかい小さな刻み」(soft step) を 3 次元にしたもの)
+  1 回の Simulate(dt) :
+    1. キネマティックの目標 → 速度 (MovePosition。着いたら止まる)
+    2. 重なりを調べる (C3 の組の表のまま)。剛体の組は形を 2 cm 太らせて求め、少し離れた点も入れる
+       (ぶつかる直前から止め始めるので、すり抜けと着地の震えが減る)。前の点に近い点は前の力積を引き継ぐ
+    3. 接触の準備 : 点ごとに法線 / 摩擦 2 本の向き、有効な質量、回転の項 (慣性の逆数 × 外積) を 1 回だけ求める
+    4. dt を 4 つに分けて、それぞれで
+         速度を進める (重力 / 力 / 減衰) → 前の力積をかけ直す → 解く (めり込みを「ばね + ダンパー」で戻す) →
+         位置を進める → 解く (速度だけ。戻しすぎた勢いを取る)
+       接触の離れ具合は、小さな刻みごとに体の動きから見積もり直す (形の判定は 1 回だけ)
+    5. 反発 (始めにぶつかった速さから。1 m/s より遅い時は跳ねない) / 力積を組の表に残す
+    6. 動いた剛体の形と箱を作り直す (SetTransforms と同じ道。木の葉も)
+  並列 : 接触を「同じ動く体を触らない組」に色分けし (Box2D v3 の graph coloring。最大 24 色、あふれた分は順番に)、
+         色ごとに並列に解く。結果はスレッドの数に関係なく同じ (テストで確認)
+         ワーカーは仕事の後 100 µs 回して待つ (ParallelFor が 1 刻みに約 100 回来るので、毎回起こすと遅い)
+
+■ ジョイント (joints.cpp)
+  Distance : 2 点の距離。Min〜Max の限り (片側の拘束) + Hertz > 0 ならばね。Min == Max で Hertz 0 なら硬い棒
+             Joint.Distance / Joint.Rope (伸びる限りだけ) / Joint.Spring
+  Ball     : 2 点を合わせる (3x3 の有効な質量)
+  Fixed    : Ball + 向き (作った時の qB qA^-1 を保つ)
+  BreakForce を超えると壊れる (IsBroken。もう働かない)。繋いだ 2 つの体どうしは押し戻さない (CollideConnected で変更)
+  体を消す / 作り直すと C++ では壊れた扱い。C# の Joint は体ができ直した時に作り直す
+
+■ C#
+  Components/Rigidbody.cs  : Rigidbody / RigidbodyType / RigidbodyConstraints / ForceMode
+  Components/Joint.cs      : Joint / JointType
+  Collider                 : Friction (0.5) / Restitution (0) / IsTrigger
+  Time                     : FixedDeltaTime (1/60) / MaxFixedSteps (5) / FixedAlpha / FixedTime / InFixedStep
+  ISystem.cs               : IFixedSystem。engine.AddSystem (両方実装していれば両方) / engine.AddFixedSystem
+  Physics.cs               : engine.Physics.Solver (PhysicsSolverSettings)、SolverMs / RigidBodies / ContactConstraints / Joints / FixedSteps
+  CollisionSystem.Rigidbody.cs : 剛体の値を送る / 命令をまとめて送る / 固定の刻みのループ / 状態を受け取る / Transform に書く /
+                                 ジョイントを作る (C で表示 : 黄色の線、壊れたら赤)
+  Transform.UpdateMatrix   : 剛体の位置を書いた後に行列を作り直す (TransformSystem の後なので)
+  TransformSystem.ChangedCount : CollisionSystem が書いた数も足す (以前は TransformSystem だけが数えていたので、
+                                 物理だけが動かした物が描画へ送られなかった (確認中に見つけた))
+  見本 (GameEngine_console)
+    --scene physics   : ピラミッド (36 個) / 12 段の塔 / 25 度の坂 (摩擦 0.05・0.3・0.8 の箱、転がる球) / 反発 0・0.5・0.9 の球 /
+                        振り子の鎖 (Ball × 8) / ばね / 硬い棒の振り子 / Fixed のダンベル / 壊れるロープ (25 N) に重い箱 /
+                        動く床 (キネマティック。FixedUpdate で MovePosition) と上の箱 / トリガー (通った物をコンソールへ)
+                        スペース : カメラから球を撃つ / R : 積み木を作り直す / C : コライダーとジョイントの線
+    --physics-bench N : 箱を N 個、10 段くらいに並べて落とす ([PhysicsBench] を 120 フレームごと)
+
+■ C++ (Physics.dll)
+  新しいファイル : dynamics.h (クォータニオン / 3x3 行列 / 柔らかい拘束の係数 / 摩擦の軸) / joints.* / solver.cpp
+  common.h       : BodyDesc の詰め物を Friction / Restitution / Flags に (96byte のまま)、BodyDynamics / BodyCommand /
+                   BodyState / SolverSettings / JointDesc / JointInfo、PhysicsStats 48 → 64byte
+  physicsWorld   : 剛体だけの値は RigidData (別の配列)、前の力積は PairImpulse (組の表と同じ並びの別の配列)
+                   (体と組の表を小さく保つ。最初は体と組に直接入れていて、衝突判定だけの計測が 25〜40% 遅くなった)
+  C ABI 追加     : Physics_SetBodyDynamics / ApplyCommands / Simulate / GetBodyStates / Set・GetSolverSettings /
+                   CreateJoint / DestroyJoint / GetJointInfo
+
+■ 確認 (Physics.dll を直接呼ぶテスト。Release / Debug とも)
+  P1 : 27 項目すべて OK (physics_test_p1.ps1)
+    自由落下 (1 秒で 4.93 m。半陰的オイラーの分だけ 4.905 より少し多い) / 球・箱が床で止まる (y 0.4999) / 箱 8 段がずれない /
+    反発 0.8 : 跳ねた高さの比 0.624 (理論 e^2 = 0.64) / 20 度の坂 : 摩擦 0.6 は止まる、0.1 は 4.89 m/s (理論 4.87) /
+    球が転がる : 2.3968 m/s (理論 5/7 g sinθ t = 2.3966)、ω r と速さが一致 (滑っていない) / 力積 J/m / 質量 4 kg /
+    軸の固定 (位置 / 回転) / キネマティックの速度・上に乗った箱が一緒に動く・目標へ 1 回で着いて止まる /
+    振り子 : 長さの誤差 0.0001、周期 2.008 s (理論 2.006) / ばね : 伸び 0.2485 m (理論 m g / k = 0.2485) /
+    Ball の鎖 6 個 : 継ぎ目の誤差 1.2 cm 以下 / Fixed : 距離と向きが保たれる / 壊れる力 (49 N > 10 N で壊れる、4.9 N は保つ) /
+    トリガーは止めない / 繋いだ体どうしは押し戻さない / 剛体でなくす・体を消すとジョイントは壊れた扱い /
+    箱 1,000 個を 10 段に並べて落とす → 6 秒後に最大の速さ 0.002 m/s
+  C1 39 項目 / C2 33 項目 : すべて OK (剛体の無い組は今までと同じ判定)
+  BVH / 総当たり / グリッドで、毎 Step の重なりとイベントの数が全部同じ (2,000〜3,000 個、200 Step。Release / Debug)
+  Debug (D3D12 デバッグレイヤー有効) で D3D12 のエラー / 警告 0 : 見本のシーン、--scene physics、--physics-bench 300 + 線
+  見た目 (ゲームの窓だけを撮った) : 塔とピラミッドが立つ、坂で摩擦ごとに違う動き、動く床の上の箱が一緒に動く、
+                                     鎖・ばね・振り子が揺れる、重い箱でロープが切れる (赤い線)、撃った球で塔が倒れる
+
+■ 計測 (Release)
+  剛体 (箱を N 個積んだ山。1 刻み = 1/60 秒、小さな刻み 4)
+                                      接触の組   解く時間 / 刻み   重なり / 刻み
+    500 個  (--physics-bench)         1,819      3.0〜3.1 ms       0.45〜0.62 ms
+    1,000 個 (--physics-bench)        3,390      4.9〜5.4 ms       0.88〜0.95 ms
+    2,000 個 (--physics-bench)        7,977      11.4〜11.5 ms     1.7 ms   (1 フレームに刻みが 1 回以上 → 約 40 fps)
+    1,000 個 (DLL のテスト、別の並べ方) 1,941    2.4 ms
+  並列の効果 (DLL のテスト。1,000 個の山) : 1 本 5.2 ms → 追加 1 本 4.5 → 3 本 2.9 → 7 本 3.2 ms
+  接触の回転の項を始めに求めておく : 5.4 → 4.1 ms (1 本)。色分けして並列 : → 2.9 ms (3 本)
+  止まった山も毎刻み全部を解いている (眠りが無い)。P2 で眠り (止まった物は解かない) を入れれば、止まった山はほぼ 0 になる
+
+  衝突判定だけ (C3 の計測。剛体なし) : C3 の後 → P1 の後 (C# の合計 ms)
+    10,000 個 全部動く    1.43〜1.47 → 1.59〜1.65 (+0.15。C++ の Step 0.74 → 0.79〜0.83、Sync 0.45 → 0.49〜0.52)
+    10,000 個 5% 動く     0.41〜0.42 → 0.45〜0.48
+    1,000 個              0.15〜0.17 → 0.14〜0.17
+    残りの差 : 体ごとに位置 / 回転 / 大きさを持つようになった分 (ジョイントと剛体に要る) と、形の判定で剛体かを見る分
+
+■ 制限 / 次 (P2 の候補)
+  - 眠り (止まった物は解かない) と島 (触れ合っている物のまとまり) : 止まった山の時間をほぼ 0 にする (一番効く)
+  - ヒンジ (扉 / 車輪) / スライダー / モーター / 角度の限り (ラグドール) などのジョイント
+  - 速い物のすり抜け (CCD) : 今は少し先の接触 2 cm と、速度の上限だけ (細い物を速く撃つと抜けることがある)
+  - 重ねて作った物 (深く重なった物が多い) は押し戻しで飛び散ることがある (押し戻しの速さは 3 m/s まで)
+  - メッシュは動かない物だけ (動く剛体には球 / 箱 / カプセルを使う)。転がり抵抗は無い (球は AngularDamping で止める)
+  - Update でかけた力は、すぐ後の 1 刻みだけかかる (Unity と同じ。続けてかける力は FixedUpdate で)

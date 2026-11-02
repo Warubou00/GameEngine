@@ -9,3 +9,14 @@ public interface ISystem
 {
     void Update(World world);
 }
+
+// ==========================================================================
+// 固定の時間刻みで呼ばれる System (物理の前。Unity の FixedUpdate)
+//   engine.AddSystem で ISystem と一緒に実装すれば両方 / engine.AddFixedSystem なら FixedUpdate だけ
+//   1 フレームで 0 回〜Time.MaxFixedSteps 回呼ばれる。時間は Time.FixedDeltaTime を使う
+//   剛体に力をかける / 速度を変えるのはここ (かけた力は、すぐ後の 1 刻みにかかる)
+// ==========================================================================
+public interface IFixedSystem
+{
+    void FixedUpdate(World world);
+}

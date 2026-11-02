@@ -87,6 +87,59 @@ extern "C"
 		if (g_world) g_world->SetOption(option, value);
 	}
 
+	// ---------- 剛体 (P1) ----------
+
+	// 体を剛体にする / 値を変える (Motion = 0 で剛体でなくなる)
+	PHYSICS_API void Physics_SetBodyDynamics(uint32_t body, const Physics::BodyDynamics* dynamics)
+	{
+		if (g_world && dynamics) g_world->SetBodyDynamics(body, *dynamics);
+	}
+
+	// 力 / 力積 / 速度 / キネマティックの目標 (まとめて)
+	PHYSICS_API void Physics_ApplyCommands(const Physics::BodyCommand* commands, uint32_t count)
+	{
+		if (g_world && commands) g_world->ApplyCommands(commands, count);
+	}
+
+	// dt 秒進める (重なりを調べ、剛体を動かす)。戻り値はイベントの数 (Physics_GetEvents で受け取る)
+	PHYSICS_API uint32_t Physics_Simulate(float dt)
+	{
+		return g_world ? g_world->Simulate(dt) : 0u;
+	}
+
+	// 剛体の今の状態。戻り値は剛体の数 (out が nullptr なら数だけ)
+	PHYSICS_API uint32_t Physics_GetBodyStates(Physics::BodyState* out, uint32_t capacity)
+	{
+		return g_world ? g_world->GetBodyStates(out, capacity) : 0u;
+	}
+
+	PHYSICS_API void Physics_SetSolverSettings(const Physics::SolverSettings* settings)
+	{
+		if (g_world && settings) g_world->SetSolverSettings(*settings);
+	}
+
+	PHYSICS_API void Physics_GetSolverSettings(Physics::SolverSettings* settings)
+	{
+		if (g_world && settings) *settings = g_world->GetSolverSettings();
+	}
+
+	// ジョイント。戻り値はハンドル (体が無い時 INVALID_HANDLE)
+	PHYSICS_API uint32_t Physics_CreateJoint(const Physics::JointDesc* desc)
+	{
+		return (g_world && desc) ? g_world->CreateJoint(*desc) : Physics::INVALID_HANDLE;
+	}
+
+	PHYSICS_API void Physics_DestroyJoint(uint32_t joint)
+	{
+		if (g_world) g_world->DestroyJoint(joint);
+	}
+
+	// 戻り値 : ジョイントがあれば true
+	PHYSICS_API bool Physics_GetJointInfo(uint32_t joint, Physics::JointInfo* info)
+	{
+		return g_world && info && g_world->GetJointInfo(joint, *info);
+	}
+
 	// 重なりを調べ直す。戻り値はイベントの数 (Physics_GetEvents で受け取る)
 	PHYSICS_API uint32_t Physics_Step()
 	{

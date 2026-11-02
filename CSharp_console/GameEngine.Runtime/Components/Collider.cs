@@ -17,6 +17,8 @@ public enum ColliderShape : uint
 //   Static も付いた物は「動かない物」として扱う (動かない物どうしは調べない。動かす時は Transform.MarkDirty)
 //   重なり始め / 離れた は engine.Physics.Events で受け取る (次のフレームの System から読める)
 //   Layer (0〜31) と CollideWith (調べる相手のレイヤーのビット) で、調べる組を絞れる
+//   Rigidbody と一緒に付けると物理で動く。Friction / Restitution は 2 つの物の組で
+//   摩擦 = √(a × b) / 反発 = 大きい方 (P1)。IsTrigger なら重なりのイベントだけで押し戻さない
 // ==========================================================================
 public struct Collider
 {
@@ -26,6 +28,9 @@ public struct Collider
     public int           Layer       = 0;
     public uint          CollideWith = 0xFFFFFFFFu;  // 全部のレイヤー
     public CollisionMesh? Mesh;                      // Shape = Mesh の時 (engine.Assets.LoadCollisionMesh)
+    public float         Friction    = 0.5f;         // 摩擦 (0 で氷。1 前後でゴム)
+    public float         Restitution = 0.0f;         // 反発 (0 で跳ねない。1 でそのまま跳ね返る)
+    public bool          IsTrigger;                  // 重なりのイベントだけ (押し戻さない)
 
     public Collider()
     {
