@@ -38,6 +38,8 @@
       <NativeEngineFile Include="$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.dll;$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.pdb" />
       <NativeEngineFile Include="$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.dll;$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.pdb" />
       <NativeEngineFile Include="$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll;$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.pdb" />
+      <!-- 音 (XAudio2)。以前の Audio は静的ライブラリで、C# からは使えなかった -->
+      <NativeEngineFile Include="$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.dll;$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.pdb" />
       <!-- DXC : dxcompiler.dll (コンパイラ) と dxil.dll (シェーダーの署名)。無い時は RHI が FXC に戻す -->
       <NativeEngineFile Include="$(DxcRedistDir)dxcompiler.dll;$(DxcRedistDir)dxil.dll" />
       <!-- シェーダー : RHI は実行時に "../Shader/" から読むので、出力フォルダの 1 つ上に置く -->
@@ -47,6 +49,9 @@
     <!-- DLL が無い = C++ 側をビルドしていない。古い DLL のまま動いてしまわないよう警告を出す -->
     <Warning Condition="!Exists('$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll')"
              Text="RHI.dll ($(NativeConfiguration)) が見つかりません。先に C++ 側 (GameEngine.sln) をビルドしてください。" />
+    <!-- Audio.dll が無くても動く (音だけ鳴らない) が、気付けるように警告を出す -->
+    <Warning Condition="!Exists('$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.dll')"
+             Text="Audio.dll ($(NativeConfiguration)) が見つかりません。音を鳴らすには Audio プロジェクト (x64) をビルドしてください。" />
 
     <Copy SourceFiles="@(NativeEngineFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
     <Copy SourceFiles="@(EngineShaderFile)" DestinationFolder="$(OutDir)..\Shader\" SkipUnchangedFiles="true" />

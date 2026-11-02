@@ -1,0 +1,88 @@
+﻿====================================================================
+ Audio の DLL 化 + C# の AudioSource / AudioSystem
+ 日付   : 2026-11-02
+ ブランチ : feature/audio-dll
+ レビュー : ClaudLog/Audio_Review_2026-11-02.txt
+====================================================================
+
+■ 概要
+  - Audio プロジェクトを静的ライブラリ (Audio.lib) から DLL (Audio.dll) にし、rendererDll.cpp と同じ形の C ABI を公開
+  - C# (GameEngine.Runtime) に P/Invoke・Sound アセット・AudioSource コンポーネント・AudioSystem を追加
+  - サンプル (GameEngine_console) で wav を 1 つ鳴らす。F7 で鳴らす / 止める、F8 で音量
+      wav の場所 : 既定は ../Sound/bgm.wav (モデルの ../Model/ と同じ並び)。--sound <path> で指定もできる
+      無ければ "[Sample] No sound file (...)" と出して、音無しで続ける
+      ※リポジトリにも bin にも wav が無かったので、確認は C:\Windows\Media の wav を --sound で指定して行った
+        (bin 以下には何も置いていない)
+
+■ C++ (Audio)
+  Audio.vcxproj
+    - ConfigurationType : StaticLibrary → DynamicLibrary (全構成)
+    - AUDIO_EXPORTS を定義 / C++20 / CRT は DLL 版 (/MDd /MD。以前は /MTd /MT) / x64 も Unicode (以前は MultiByte)
+    - Core を ProjectReference (Logger を使うため。Renderer と同じ)
+    - プリコンパイル済みヘッダーは使わない (Win32 は Use だった。新しいファイルが pch.h を含まないため NotUsing に揃えた)
+    - 出力 : Audio\x64\Debug\Audio.dll / Audio\x64\Release\Audio.dll
+  Source/common.h (新規)      : AUDIO_API (extern "C" + dllexport) / INVALID_HANDLE
+  Source/audioDll.cpp (新規)  : C ABI
+      Audio_Initialize() → bool (再生できるか)       Audio_Shutdown()
+      Audio_IsAvailable()                            Audio_SetMasterVolume(float)
+      Audio_LoadSound(const wchar_t*, float* len) → ハンドル   Audio_DestroySound(sound)
+      Audio_CreateVoice(sound) → ハンドル            Audio_DestroyVoice(voice)
+      Audio_Play(voice) → bool   Audio_Stop(voice)   Audio_SetVolume(voice, float)   Audio_SetLoop(voice, bool)
+      Audio_GetPlaying(const uint32_t* voices, count, uint8_t* out)  ← 毎フレームの「鳴り終わったか」をまとめて 1 回で
+  Source/XAudio.h / .cpp      : XAudio2 の管理 (サウンドとボイスの表。ハンドル = 番号 16bit + 世代 16bit)
+  Source/wavSoundLoader.*     : ファイル全体を 1 回で読み、メモリ上でチャンクを解析。PCM はコピーせずに指す
+  Source/soundLoaderBase.h    : SoundData (形式のバイト列 + ファイルのバイト列 + PCM の位置) と純粋仮想の Load
+  文字コード : 以前の .h / .cpp は Shift-JIS (CP932) だった。UTF-8 (BOM 付き) + CRLF にした
+
+■ C# (GameEngine.Runtime)
+  Native/AudioNativeMethods.cs (新規) : NativeMethods.cs と同じ書き方 (Cdecl、bool は I1、パスは LPWStr)
+  Assets/Sound.cs (新規)               : Sound (Handle / Length 秒 / Path)
+  Assets/Model.cs                      : AssetManager.LoadSound(path) (同じパスは 1 回だけ読む。LoadModel と同じ)
+  Components/AudioSource.cs (新規)     : Clip / Volume / Loop / PlayOnStart、Play() / Stop() / IsPlaying
+  Systems/AudioSystem.cs (新規)        : エンジン組み込み。LightSystem の後に動く
+      - ボイスの状態はエンティティの番号で引く表に持つ (World.Set で AudioSource を置き換えてもボイスを失わない。
+        MeshRenderer は Handle をコンポーネントに持つので Set で置き換えると描画オブジェクトが残る : 下の「気付いた事」)
+      - Clip を差し替えるとボイスを作り直す。Volume / Loop は変わった時だけ送る
+      - ループしない再生中の物だけを Audio_GetPlaying でまとめて調べる
+      - 何も鳴っていない・何も変わっていない時は P/Invoke 0 回
+      - 外された / 削除された AudioSource のボイスは次の更新で破棄
+  Engine.cs
+      - AudioSettings (Available / MasterVolume)。engine.Audio で使う
+      - 起動時に Audio_Initialize。Audio.dll が無い (DllNotFoundException) / 音の出る機器が無い時は音だけ無効で続ける
+      - 終了時 (Dispose) に Audio_Shutdown (Renderer より先)
+      - プロファイラー (F1) に "Sounds playing"
+  GameEngine_console.csproj : NativeEngineFile に Audio.dll / Audio.pdb を追加。Audio.dll が無い時は警告
+  Program.cs / Samples/SoundHotkeys.cs (新規) : wav を 1 つ鳴らす (既定はループ、音量 0.5)。--sound / --sound-loop
+
+  使い方
+      var bgm = engine.Assets.LoadSound("../Sound/bgm.wav");
+      var e   = world.CreateEntity();
+      world.Add(e, new AudioSource(bgm) { Loop = true, Volume = 0.5f });   // PlayOnStart (既定 true) で次の更新から鳴る
+      world.Get<AudioSource>(e).Stop();  / .Play();
+
+■ 確認
+  ビルド : Audio (Debug / Release x64) 警告 0 エラー 0。GameEngine_console (Debug / Release x64) OK
+           (MSB3290 の COM 参照の警告は以前から出ているもの)
+  C ABI のテスト (Release / Debug) : 26 項目すべて OK (内容はレビューのログの「■ 確認」)
+  サンプル (Release / Debug) : 起動 → "[Engine] Audio OK" → wav の読み込み → 鳴る
+      Windows Ding.wav (1.09 秒、ループ無し) での流れ (ゲームのウィンドウにだけ PostMessage でキーを送った) :
+        [Sound] Playing (0.08 s)        ← PlayOnStart
+        [Sound] F7 : Stop / Stopped     ← 鳴っている途中で止める
+        [Sound] Volume 0.2              ← F8
+        [Sound] F7 : Play / Playing
+        [Sound] F7 : Stop / Stopped
+      別の回 : Playing (0.09 s) → 何もしないと Stopped (1.08 s) (= 鳴り終わりを AudioSystem が見つける)
+      終了 (WM_CLOSE) → 終了コード 0
+  Audio.dll を一時的に外した起動 : "[Engine] Audio.dll was not found. Sound is disabled." で描画はそのまま動く
+  速さ : 1 フレームの C# 側の追加は、鳴っている音が無ければ P/Invoke 0 回。ループしない音が鳴っている間は 1 回
+         (Audio_GetPlaying。中身は GetState(NOSAMPLESPLAYED) をボイスの数だけ)。
+         C# update (ms) への影響は測れる差にならないので、数値は出していない
+
+■ 気付いた事 (今回は直していない)
+  - Engine/main.cpp (C++ の古いテスト) は Audio.lib の XAudio / WavLoader クラスを直接使っていた。
+    Audio.lib は Audio.dll のインポートライブラリになったので、Engine プロジェクトはリンクできない
+    (Engine / Platform は今回の作業の前からビルドに失敗している)。使うなら C ABI か C# 側へ移す
+  - World.Set で MeshRenderer を置き換えると、前の描画オブジェクト (Handle) が C++ 側に残る (RenderSyncSystem)。
+    AudioSystem はエンティティの番号の表で持つ形にして避けた
+  - AudioSource は 2D の音だけ (Transform の位置による音量・左右の変化 = X3DAudio は無い)
+  - ストリーミング再生 (長い BGM を少しずつ読む) は無い。今は wav 全体をメモリに置く (2 GB まで)

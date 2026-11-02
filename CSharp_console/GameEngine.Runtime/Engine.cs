@@ -170,6 +170,35 @@ public sealed class GraphicsSettings
 }
 
 // ==========================================================================
+// 音の設定 (C++ は Audio.dll)
+// ==========================================================================
+public sealed class AudioSettings
+{
+    private readonly bool _loaded;
+    private float _masterVolume = 1.0f;
+
+    internal AudioSettings(bool loaded, bool available)
+    {
+        _loaded   = loaded;
+        Available = available;
+    }
+
+    // 音を鳴らせるか (Audio.dll が無い / 音の出る機器が無い時は false。その時 AudioSource は何もしない)
+    public bool Available { get; }
+
+    // 全体の音量 (1 = そのまま)
+    public float MasterVolume
+    {
+        get => _masterVolume;
+        set
+        {
+            _masterVolume = Math.Max(0.0f, value);
+            if (_loaded) AudioNativeMethods.Audio_SetMasterVolume(_masterVolume);
+        }
+    }
+}
+
+// ==========================================================================
 // エンジン本体 : ウィンドウ・C++ の初期化・メインループ・ECS の World と System
 //
 //   using var engine = new Engine(new EngineSettings { Title = "Sample" });
@@ -182,7 +211,7 @@ public sealed class GraphicsSettings
 //
 //   毎フレームの順番 :
 //     ウィンドウのメッセージ → Time → 登録した System (登録順) → Transform の行列 → カメラ → 描画オブジェクトへ反映
-//     → ライト → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
+//     → ライト → 音 (AudioSource) → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
 //   以前 (GameEngine_console の RHI.cs) は、ウィンドウ・P/Invoke・テスト用の関数が 1 つのクラスに入っていた
 // ==========================================================================
 public sealed class Engine : IDisposable
@@ -193,6 +222,8 @@ public sealed class Engine : IDisposable
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
     private readonly LightSystem      _lightSystem     = new();
+    private readonly AudioSystem      _audioSystem;
+    private readonly bool             _audioLoaded;
     private readonly RenderCommandBuffer _commands     = new();
     private bool _closed;
     private bool _disposed;
@@ -206,6 +237,7 @@ public sealed class Engine : IDisposable
     public World            World    { get; } = new();
     public AssetManager     Assets   { get; } = new();
     public GraphicsSettings Graphics { get; } = new();
+    public AudioSettings    Audio    { get; }
 
     // エンジンが毎フレーム C# 側でかけた時間 (System の更新 + C++ への反映。描画は含まない)
     public double UpdateMilliseconds { get; private set; }
@@ -252,6 +284,22 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_Resize((uint)_window.ClientSize.Width, (uint)_window.ClientSize.Height);
         };
 
+        // 音 (Audio.dll)。無い / 音の出る機器が無い時も、描画はそのまま動かす (音だけ鳴らない)
+        var audioAvailable = false;
+        try
+        {
+            audioAvailable = AudioNativeMethods.Audio_Initialize();
+            _audioLoaded   = true;
+        }
+        catch (DllNotFoundException)
+        {
+            Console.WriteLine("[Engine] Audio.dll was not found. Sound is disabled.");
+        }
+        Console.WriteLine($"[Engine] Audio {(audioAvailable ? "OK" : "unavailable")}");
+        Audio = new AudioSettings(_audioLoaded, audioAvailable);
+        Assets.AudioLoaded = _audioLoaded;
+        _audioSystem = new AudioSystem(World, _audioLoaded);
+
         Input.Attach(_window);
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
 
@@ -286,6 +334,7 @@ public sealed class Engine : IDisposable
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
+            _audioSystem.Update(World);
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
             Graphics.BeginFrame();
@@ -295,6 +344,7 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_ReportProfilerValue("C# update (ms)", UpdateMilliseconds);
             NativeMethods.Renderer_ReportProfilerValue("C# transforms sent", _renderSyncSystem.TransformsSentLastFrame);
             NativeMethods.Renderer_ReportProfilerValue("Lights", _lightSystem.LightCount);
+            NativeMethods.Renderer_ReportProfilerValue("Sounds playing", _audioSystem.PlayingCount);
 
             Graphics.RenderFrame(_commands);
             NativeMethods.Renderer_ReportProfilerValue("Render commands", _commands.Count);
@@ -318,6 +368,7 @@ public sealed class Engine : IDisposable
         {
             Console.WriteLine($"[Engine] C# update average {_updateTotalMs / _updateFrames:F3} ms ({_updateFrames} frames, entities {World.EntityCount})");
         }
+        if (_audioLoaded) AudioNativeMethods.Audio_Shutdown();   // ボイス → XAudio2 → PCM の順に解放される
         Graphics.Shutdown();                // レンダーターゲットを先に返す
         NativeMethods.Renderer_CleanUp();   // GPU の完了を待ってから解放される
         if (!_window.IsDisposed) _window.Dispose();

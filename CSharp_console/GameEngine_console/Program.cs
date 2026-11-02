@@ -23,10 +23,13 @@ namespace GameEngine_console;
 //   --ssao on|off|show          : SSAO (既定は on。show は遮蔽だけを白黒で出す)
 //   --ssao-scale S / --ssao-samples N : SSAO の解像度の倍率 (既定 0.5) / 点の数 (既定 12)
 //   --aa none|fxaa|msaa2|msaa4|msaa8 : アンチエイリアス (既定は fxaa。Deferred の MSAA は FXAA になる)
+//   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
+//   --sound-loop on|off         : ループするか (既定は on)
 //
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
 //                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)
+//                     F7 で音を鳴らす / 止める、F8 で音量
 // ==========================================================================
 internal static class Program
 {
@@ -122,6 +125,29 @@ internal static class Program
             engine.Graphics.AntiAliasing = antiAliasing;
         }
         engine.AddSystem(new GraphicsHotkeySystem(engine.Graphics));
+
+        // ---------- 音 ----------
+        // wav は ../Sound/ に置く (モデルの ../Model/ と同じ並び)。無ければ鳴らさずに続ける
+        var soundPath = options.GetValueOrDefault("--sound", "../Sound/bgm.wav");
+        if (File.Exists(soundPath))
+        {
+            try
+            {
+                var bgm     = engine.Assets.LoadSound(soundPath);
+                var speaker = world.CreateEntity();
+                world.Add(speaker, new AudioSource(bgm) { Loop = options.GetValueOrDefault("--sound-loop", "on") != "off", Volume = 0.5f });
+                engine.AddSystem(new SoundHotkeySystem(speaker));
+                Console.WriteLine($"[Sample] {bgm} (F7 : play / stop, F8 : volume)");
+            }
+            catch (Exception e) when (e is FileNotFoundException or InvalidOperationException)
+            {
+                Console.WriteLine($"[Sample] {e.Message}");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"[Sample] No sound file ({Path.GetFullPath(soundPath)}). Put a wav there or use --sound <path>.");
+        }
 
         engine.Run();
     }

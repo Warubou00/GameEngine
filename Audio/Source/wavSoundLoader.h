@@ -1,25 +1,24 @@
-/***********************************************************************************
+ï»¿/***********************************************************************************
 * @file    wavSoundLaoder.h
-* @brief   WAVƒtƒ@ƒCƒ‹“Ç‚İ‚İ
-* @details
+* @brief   WAVãƒ•ã‚¡ã‚¤ãƒ«èª­ã¿è¾¼ã¿
+* @details å¯¾å¿œå½¢å¼ : ãƒªãƒ‹ã‚¢ PCM (8 / 16 / 24 / 32bit)ã€IEEE float (32bit)ã€WAVE_FORMAT_EXTENSIBLE (ä¸­èº«ãŒ PCM / float)
+*          ä»¥å‰ã¯ 16bit ã‚’å‰æã« std::vector<short> ã¸èª­ã¿è¾¼ã¿ã€WAVE_FORMAT_EXTENSIBLE (24bit ã‚„ãƒãƒ«ãƒãƒãƒ£ãƒ³ãƒãƒ«ã®
+*          wav ã§ä½¿ã‚ã‚Œã‚‹) ã¯èª­ã‚ãªã‹ã£ãŸ
 *
 * @author  Keigo Onari
 * @date    2025/09/05
-* @version v_1.0.0
+* @version v_1.1.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    ‚»‚Ì‘¼
+* @note    ãã®ä»–
 ************************************************************************************/
 #pragma once
 #ifndef _WAV_SOUND_LOADER_H_
-#define _WAV_SOUND_LAODER_H_
+// ä»¥å‰ã¯ #define _WAV_SOUND_LAODER_H_ ã¨ç¶´ã‚ŠãŒé•ã„ã€ã‚¤ãƒ³ã‚¯ãƒ«ãƒ¼ãƒ‰ã‚¬ãƒ¼ãƒ‰ãŒåŠ¹ã„ã¦ã„ãªã‹ã£ãŸ (#pragma once ã§åŠ©ã‹ã£ã¦ã„ãŸ)
+#define _WAV_SOUND_LOADER_H_
 
-#define NOMINMAX
-#include <windows.h>
-#include <string>
-#include <vector>
 #include "soundLoaderBase.h"
 
 namespace Library
@@ -29,124 +28,25 @@ namespace Library
         namespace Loader
         {
             /// <summary>
-            /// wavƒtƒ@ƒCƒ‹‚Ìƒ[ƒ_[
+            /// wavãƒ•ã‚¡ã‚¤ãƒ«ã®ãƒ­ãƒ¼ãƒ€ãƒ¼
+            ///   ãƒ•ã‚¡ã‚¤ãƒ«å…¨ä½“ã‚’ 1 å›ã® ReadFile ã§èª­ã¿ã€ãƒ¡ãƒ¢ãƒªä¸Šã§ãƒãƒ£ãƒ³ã‚¯ã‚’è§£æã™ã‚‹
+            ///   (ä»¥å‰ã¯ std::ifstream ã§ãƒãƒ£ãƒ³ã‚¯ã”ã¨ã« read / seekg ã—ã¦ã„ãŸ)
             /// </summary>
-            class WavLoader : SoundLoaderBase
+            class WavLoader : public SoundLoaderBase
             {
             public:
                 /// <summary>
-                /// Wavƒtƒ@ƒCƒ‹‚Ì“Ç‚İ‚İ
+                /// Wavãƒ•ã‚¡ã‚¤ãƒ«ã®èª­ã¿è¾¼ã¿
                 /// </summary>
-                /// <param name="filePath"></param>
-                /// <returns></returns>
-                bool Load(const std::string& filePath)override;
+                /// <param name="filePath">ãƒ‘ã‚¹ (UTF-16ã€‚æ—¥æœ¬èªã®ãƒ‘ã‚¹ã‚‚èª­ã‚ã‚‹)</param>
+                /// <param name="outData">çµæœ</param>
+                /// <returns>æˆåŠŸã—ãŸã‹</returns>
+                bool Load(const std::wstring& filePath, SoundData* outData) override;
 
                 /// <summary>
-                /// Wavƒtƒ@ƒCƒ‹‚Ì“Ç‚İ‚İ(Wav‚Ì‚İ)
+                /// ãƒ¡ãƒ¢ãƒªä¸Šã® wav ã‚’è§£æã™ã‚‹ (data->bytes ã«ãƒ•ã‚¡ã‚¤ãƒ«ã®ä¸­èº«ãŒå…¥ã£ã¦ã„ã‚‹å‰æ)
                 /// </summary>
-                /// <param name="filePath"></param>
-                /// <param name="wavFormat"></param>
-                /// <returns></returns>
-                std::vector<short> Load(const std::string& filePath, WAVEFORMATEX* wavFormat);
-
-                ///// <summary>
-                ///// ƒtƒH[ƒ}ƒbƒg‚Ìæ“¾
-                ///// </summary>
-                ///// <returns></returns>
-                //const WAVEFORMATEX& GetFormat()const;
-
-                ///// <summary>
-                ///// PCMƒf[ƒ^‚Ìæ“¾
-                ///// </summary>
-                ///// <returns></returns>
-                //const std::vector<short>& GetAudioData() const;
-
-                ///// <summary>
-                ///// ƒTƒ“ƒvƒ‹ƒŒ[ƒg‚Ìæ“¾
-                ///// </summary>
-                ///// <returns></returns>
-                //unsigned int GetSampleRate() const;
-
-                ///// <summary>
-                ///// ƒ`ƒƒƒ“ƒlƒ‹”‚Ìæ“¾
-                ///// </summary>
-                ///// <returns></returns>
-                //unsigned short GetNumChannels() const;
-
-                ///// <summary>
-                ///// ƒTƒ“ƒvƒ‹’PˆÊ‚Ìƒrƒbƒg”
-                ///// </summary>
-                ///// <returns></returns>
-                //unsigned short GetBitsPerSample() const;
-
-            private:
-
-                struct RIFFHeader
-                {
-                    char chunkID[4];
-                    unsigned int chunkSize;
-                    char format[4];
-                };
-
-                //struct FormatChunk
-                //{
-                //    //char subchunk1ID[4];
-                //    unsigned int fmtChunkSize;
-                //    unsigned short audioFormat;
-                //    unsigned short numChannels;
-                //    unsigned int sampleRate;
-                //    unsigned int byteRate;
-                //    unsigned short blockAlign;
-                //    unsigned short bitsPerSample;
-                //};
-
-                //struct DataChunk
-                //{
-                //    //char subchunk2ID[4];
-                //    unsigned int dataChunkSize;
-                //};
-
-#pragma pack(push, 1)
-                struct ChunkHeader {
-                    char id[4];
-                    unsigned int size;
-                };
-#pragma pack(pop)
-
-                ///// <summary>
-                ///// RIFFƒwƒbƒ_[
-                ///// </summary>
-                //RIFFHeader _riffHeader{};
-
-                ///// <summary>
-                ///// fmtƒ`ƒƒƒ“ƒN
-                ///// </summary>
-                //FormatChunk _formatChunk{};
-
-                ///// <summary>
-                ///// formatƒ`ƒƒƒ“ƒN
-                ///// </summary>
-                //WAVEFORMATEX _format{};
-
-                ///// <summary>
-                ///// dataƒ`ƒƒƒ“ƒN
-                ///// </summary>
-                //DataChunk _dataChunk{};
-                //std::vector<short> _audioData;
-
-                //const int _CHUNK_ID_SIZE = 4;
-                //const unsigned int _LINEAR_PCM_FMT_CHUNK_SIZE = 16U;
-                //const std::string _CHUNK_JUNK = "JUNK";
-                //const std::string _CHUNK_FMT = "fmt ";
-                //const std::string _CHUNK_DATA = "data";
-
-                ///// <summary>
-                ///// ƒ`ƒƒƒ“ƒN‚Ìƒ`ƒFƒbƒN
-                ///// </summary>
-                ///// <param name="chunk"></param>
-                ///// <param name="checkChunk"></param>
-                ///// <returns></returns>
-                //bool checkChunk(const char* chunk, const char* checkChunk);
+                static bool Parse(SoundData* data);
             };
         }
     }

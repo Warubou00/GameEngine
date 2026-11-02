@@ -25,14 +25,38 @@ public readonly struct Model
 
 // ==========================================================================
 // アセットの読み込み (以前の Test_LoadModel に当たる)
-//   同じパスは 1 回だけ読み込み、2 回目からは同じ Model を返す
+//   同じパスは 1 回だけ読み込み、2 回目からは同じ Model / Sound を返す
 // ==========================================================================
 public sealed class AssetManager
 {
     private readonly Dictionary<string, Model> _models = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Sound> _sounds = new(StringComparer.OrdinalIgnoreCase);
+
+    // Audio.dll を読み込めたか (Engine が設定する。無い時は LoadSound が例外を出す)
+    internal bool AudioLoaded { get; set; }
 
     internal AssetManager()
     {
+    }
+
+    /// <summary>
+    /// サウンド (wav) を読み込む。パスは実行ファイルのフォルダからの相対パスか絶対パス
+    /// 音の出る機器が無い環境でも読み込みはできる (鳴らないだけ)
+    /// </summary>
+    public Sound LoadSound(string path)
+    {
+        if (_sounds.TryGetValue(path, out var cached)) return cached;
+        if (!AudioLoaded) throw new InvalidOperationException("Audio.dll is not loaded. Build the Audio project (x64) first.");
+
+        var handle = AudioNativeMethods.Audio_LoadSound(path, out var length);
+        if (handle == AudioNativeMethods.InvalidHandle)
+        {
+            throw new FileNotFoundException($"Failed to load sound: {path}", path);
+        }
+
+        var sound = new Sound(handle, length, path);
+        _sounds.Add(path, sound);
+        return sound;
     }
 
     /// <summary>

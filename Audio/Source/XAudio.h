@@ -1,17 +1,21 @@
-
-/***********************************************************************************
+ï»¿/***********************************************************************************
 * @file    XAudio.h
-* @brief   
-* @details 
+* @brief   XAudio2 ã®ç®¡ç† (ã‚µã‚¦ãƒ³ãƒ‰ã®èª­ã¿è¾¼ã¿ / ãƒœã‚¤ã‚¹ã®ä½œæˆãƒ»å†ç”Ÿãƒ»ç ´æ£„)
+* @details Audio.dll ã®ä¸­èº«ã€‚C# ã‹ã‚‰ã¯ audioDll.cpp ã® C ABI çµŒç”±ã§ä½¿ã†
+*          - ã‚µã‚¦ãƒ³ãƒ‰ (èª­ã¿è¾¼ã‚“ã  PCM) ã¨ãƒœã‚¤ã‚¹ (å†ç”Ÿã™ã‚‹ç‰©ã€‚AudioSource 1 ã¤ã« 1 å€‹) ã¯ãƒãƒ³ãƒ‰ãƒ« (uint32) ã§æ‰±ã†
+*          - ãƒãƒ³ãƒ‰ãƒ«ã¯ã€Œç•ªå· (ä¸‹ä½ 16bit) + ä¸–ä»£ (ä¸Šä½ 16bit)ã€ã€‚ç ´æ£„ã—ãŸå¾Œã®å¤ã„ãƒãƒ³ãƒ‰ãƒ«ã¯ç„¡è¦–ã•ã‚Œã‚‹
+*          - å‘¼ã³å‡ºã—ã¯ 1 ã¤ã®ã‚¹ãƒ¬ãƒƒãƒ‰ (C# ã®ãƒ¡ã‚¤ãƒ³ã‚¹ãƒ¬ãƒƒãƒ‰) ã‹ã‚‰è¡Œã†ã€‚XAudio2 ã®ã‚³ãƒ¼ãƒ«ãƒãƒƒã‚¯ã¯ä½¿ã‚ãªã„
+*          ä»¥å‰ã¯ Initialize / CreateSourceVoiceWAV / CreateAudioBuffers ã ã‘ã§ã€ãƒœã‚¤ã‚¹ã‚„ãƒãƒƒãƒ•ã‚¡ã®å¯¿å‘½ã¯
+*          ä½¿ã†å´ (Engine/main.cpp) ãŒç®¡ç†ã—ã€IXAudio2 / ãƒã‚¹ã‚¿ãƒ¼ãƒœã‚¤ã‚¹ã¯è§£æ”¾ã•ã‚Œã¦ã„ãªã‹ã£ãŸ
 *
 * @author  Keigo Onari
 * @date    2026/01/29
-* @version v_1.0.0
+* @version v_1.1.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
 *
-* @note    
+* @note
 ************************************************************************************/
 
 #pragma once
@@ -21,205 +25,113 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <xaudio2.h>
-#include <iostream>
 #include <vector>
+#include "common.h"
+#include "soundLoaderBase.h"
+// ä»¥å‰ã¯ winmm.lib ã‚‚ãƒªãƒ³ã‚¯ã—ã¦ã„ãŸãŒã€ä½¿ã£ã¦ã„ãªã„ã®ã§å¤–ã—ãŸ
 #pragma comment(lib, "xaudio2.lib")
-#pragma comment(lib, "winmm.lib")
-
-/******************************************************************
-* Macro Definitions
-******************************************************************/
-
-
-/******************************************************************
-* Enumeration Definitions
-******************************************************************/
-
-
-/******************************************************************
-* Structure Declarations
-******************************************************************/
-
-
 
 namespace Audio
 {
-
     class XAudio
     {
+    public:          /*---ã‚³ãƒ³ã‚¹ãƒˆãƒ©ã‚¯ã‚¿ãƒ»ãƒ‡ã‚¹ãƒˆãƒ©ã‚¯ã‚¿---*/
+        XAudio() = default;
+        ~XAudio() { Shutdown(); }   // ä»¥å‰ã¯ç©ºã§ã€ä½•ã‚‚è§£æ”¾ã—ã¦ã„ãªã‹ã£ãŸ
+        XAudio(const XAudio&) = delete;
+        XAudio& operator=(const XAudio&) = delete;
 
-        /******************************************************************
-        * Internal Enumeration Declarations
-        ******************************************************************/
-
-
-        /******************************************************************
-        * Internal Structure Declarations
-        ******************************************************************/
-    public:
-        struct CallbackMethodsBase : public IXAudio2VoiceCallback 
-        {
-        public:
-
-            /// <summary>
-            /// ƒI[ƒfƒBƒIƒpƒX‚ÌÅ‰‚ÉŒÄ‚Î‚ê‚é <br/>
-            /// 1ƒtƒŒ[ƒ€•ª‚Ìƒ~ƒLƒVƒ“ƒO‚ªn‚Ü‚é’¼‘O
-            /// </summary>
-            /// <param name="">SourceVoice ‚Ìê‡‚Ì‚İˆÓ–¡‚ğ‚Â
-            ///u‚±‚Ìˆ—ƒpƒX‚Å•K—v‚È PCM ƒf[ƒ^—ÊiƒoƒCƒgjv
-            /// ƒXƒgƒŠ[ƒ~ƒ“ƒO‰¹º‚Å
-            /// uŸ‚É‚Ç‚ê‚­‚ç‚¢ƒf[ƒ^‚ğ‹Ÿ‹‹‚·‚×‚«‚©v ‚Ì–ÚˆÀ</param>
-            /// yå‚È—p“rz
-            /// ƒXƒgƒŠ[ƒ~ƒ“ƒOÄ¶iBGM / ‰¹ºƒf[ƒ^‚Ì’€Ÿ‹Ÿ‹‹j<br/>
-            ///  ‘«‚è‚È‚­‚È‚è‚»‚¤‚È‚çŸ‚Ìƒoƒbƒtƒ@‚ğ—pˆÓ‚·‚év
-            void OnVoiceProcessingPassStart(UINT32) override {
-                //std::cout << "Pass Start\n";
-            }
-
-            /// <summary>
-            /// 1‰ñ‚ÌƒI[ƒfƒBƒIÄ¶‚ªI‚í‚Á‚½ƒ^ƒCƒ~ƒ“ƒO‚ÅŒÄ‚Î‚ê‚é
-            /// </summary>
-            void OnVoiceProcessingPassEnd() override {
-                //std::cout << "Pass End\n";
-            }
-
-            /// <summary>
-            /// ‘S‚Ä‚Ìƒoƒbƒtƒ@‚ÌÄ¶‚ªI‚í‚Á‚½ƒ^ƒCƒ~ƒ“ƒO
-            /// </summary>
-            /// yå‚È—p“rz
-            /// Ä¶Š®—¹’Ê’m
-            /// BGM ‚Ìƒ‹[ƒvÄ¶ŠJn
-            /// SE Ä¶I—¹ƒtƒ‰ƒO
-            void OnStreamEnd() override {
-                std::cout << "Stream End\n";
-            }
-
-            /// <summary>
-            /// SubmitSourceBuffer‚ğ‚µ‚½ƒoƒbƒtƒ@‚ÌÄ¶ŠJn
-            /// </summary>
-            /// <param name="pBufferContext">XAUDIO2_BUFFER::pContext ‚É“n‚µ‚½ƒ|ƒCƒ“ƒ^
-            /// ƒ†[ƒU[’è‹`‚Ì¯•Êq</param>
-            /// yå‚È—p“rz
-            /// u‚Ç‚Ìƒoƒbƒtƒ@‚ª¡Ä¶‚³‚ê‚Ä‚¢‚é‚©v‚ğ’m‚é
-            /// ƒfƒoƒbƒO / ƒƒO / ó‘ÔŠÇ—
-            /// ‚±‚±‚ªƒXƒgƒŠ[ƒ~ƒ“ƒOì‹Æ‚ÌƒƒCƒ“‚Æ‚È‚é
-            void OnBufferStart(void* pBufferContext) override {
-                std::cout << "Buffer Start\n";
-            }
-
-            /// <summary>
-            /// 1‚Â‚Ìƒoƒbƒtƒ@Ä¶‚ªI‚Á‚½
-            /// </summary>
-            /// <param name="pBufferContext">ŠJn‚Æ“¯‚¶‚à‚Ì‚ª“n‚³‚ê‚é</param>
-            /// yå‚È—p“rz
-            /// ƒoƒbƒtƒ@‚Ì‰ğ•ú
-            /// Ÿ‚ÌƒXƒgƒŠ[ƒ~ƒ“ƒOƒoƒbƒtƒ@“Š“ü
-            /// Ä¶ƒLƒ…[ŠÇ—
-            void OnBufferEnd(void* pBufferContext) override {
-                // ƒoƒbƒtƒ@Ä¶I—¹ ¨ Ÿ‚Ìƒoƒbƒtƒ@‚ğ‹Ÿ‹‹‚·‚é
-                std::cout << "Buffer finished\n";
-            }
-
-            /// <summary>
-            /// ƒ‹[ƒvw’è‚³‚ê‚½ƒoƒbƒtƒ@‚Ìƒ‹[ƒvÄ¶‚ªI‚í‚Á‚½‚Æ‚« <br/>
-            /// XAUDIO2_BUFFER::LoopCount ‚ğw’è‚µ‚Ä‚¢‚éê‡‚Ì‚İ
-            /// </summary>
-            /// <param name="pBufferContext">ƒ‹[ƒvw’è‚³‚ê‚½ƒoƒbƒtƒ@‚Ìƒ‹[ƒvÄ¶‚ªI‚í‚Á‚½‚Æ‚«
-            /// XAUDIO2_BUFFER::LoopCount ‚ğw’è‚µ‚Ä‚¢‚éê‡‚Ì‚İ</param>
-            /// yå‚È—p“rz
-            /// ƒ‹[ƒv‰ñ”ŠÇ—
-            /// ƒ‹[ƒvI—¹Œã‚Ìˆ—Ø‚è‘Ö‚¦
-            /// ‚ ‚­‚Ü‚Åƒtƒ‰ƒO‚ğ—§‚Ä‚é‚¾‚¯ -> —áŠOˆ—“™‚ÍƒƒCƒ“ƒXƒŒƒbƒh‚Å
-            void OnLoopEnd(void* pBufferContext) override {
-                std::cout << "Loop End\n";
-            }
-
-            /// <summary>
-            /// ‰¹ºÄ¶’†‚ÉƒGƒ‰[‚ª”­¶‚µ‚½‚Æ‚«
-            /// </summary>
-            /// <param name="pBufferContext">ƒGƒ‰[‚ª‹N‚«‚½ƒoƒbƒtƒ@</param>
-            /// <param name="Error">HRESULTiXAUDIO2_E_* Œnj</param>
-            /// yå‚È—p“rz
-            /// ƒGƒ‰[ƒƒO
-            /// Ä¶’â~ˆ—
-            /// ƒtƒH[ƒ‹ƒoƒbƒNˆ—
-            void OnVoiceError(void* pBufferContext, HRESULT Error) override {
-                std::cerr << "Voice error: " << Error << std::endl;
-            }
-        };
-
-        struct WaveAudioData
-        {
-        public:
-            WAVEFORMATEX waveFormat{};
-            std::vector<short> pcmData{};
-            BYTE* buffer = nullptr;
-            DWORD bufferSize = 0;
-        };
-
-    public:          /*---ƒRƒ“ƒXƒgƒ‰ƒNƒ^EƒfƒXƒgƒ‰ƒNƒ^---*/
-        XAudio() {}
-        ~XAudio() {}
-
-
-    public:          /*---ƒNƒ‰ƒXƒƒ\ƒbƒh---*/
-
+    public:          /*---ã‚¯ãƒ©ã‚¹ãƒ¡ã‚½ãƒƒãƒ‰---*/
 
         /***********************************************************************************
-         * @brief ‰Šú‰»
-         * @details 
-         *
-         * @return bool ¬Œ÷‚Ì—L–³
+         * @brief åˆæœŸåŒ– (XAudio2 ã¨ãƒã‚¹ã‚¿ãƒ¼ãƒœã‚¤ã‚¹)
+         * @details å¤±æ•—ã—ã¦ã‚‚ (éŸ³ã®å‡ºã‚‹æ©Ÿå™¨ãŒç„¡ã„ç­‰) ã‚µã‚¦ãƒ³ãƒ‰ã®èª­ã¿è¾¼ã¿ã¯ã§ãã‚‹ã€‚å†ç”Ÿã ã‘ãŒã§ããªã„
+         * @return bool å†ç”Ÿã§ãã‚‹çŠ¶æ…‹ã«ãªã£ãŸã‹
          ************************************************************************************/
         bool Initialize();
 
+        /***********************************************************************************
+         * @brief çµ‚äº† (å…¨ã¦ã®ãƒœã‚¤ã‚¹ â†’ ãƒã‚¹ã‚¿ãƒ¼ãƒœã‚¤ã‚¹ â†’ XAudio2 ã®é †ã«è§£æ”¾)
+         ************************************************************************************/
+        void Shutdown();
+
+        bool IsAvailable() const { return _pXAudio2 != nullptr && _pMasterVoice != nullptr; }
+        void SetMasterVolume(float volume);
 
         /***********************************************************************************
-         * @brief ƒ\[ƒXƒ{ƒCƒX‚Ì¶¬
-         * @details 
-         *
-         * @param[in] const WAVEFORMATEX& waveFormat Waveƒtƒ@ƒCƒ‹ƒtƒH[ƒ}ƒbƒg
-         * @param[in] XAudio::CallbackMethodsBase* callback
-         * @return IXAudio2SouceVoice* ƒ\[ƒXƒ{ƒCƒXƒIƒuƒWƒFƒNƒg‚Ìƒ|ƒCƒ“ƒ^
+         * @brief ã‚µã‚¦ãƒ³ãƒ‰ (wav) ã®èª­ã¿è¾¼ã¿
+         * @return ã‚µã‚¦ãƒ³ãƒ‰ã®ãƒãƒ³ãƒ‰ãƒ« (å¤±æ•—æ™‚ INVALID_HANDLE)
          ************************************************************************************/
-        IXAudio2SourceVoice* CreateSourceVoiceWAV(const WAVEFORMATEX& waveFormat, XAudio::CallbackMethodsBase* callback);
-        
+        uint32_t LoadSound(const wchar_t* filePath);
 
         /***********************************************************************************
-         * @brief AudioBuffer‚Ìì¬
-         * @details
-         *
-         * @param[in] BYTE* ¶ƒf[ƒ^
-         * @param[in] DWORD ƒg[ƒ^ƒ‹‚Ìƒf[ƒ^ƒTƒCƒY
-         * @param[in] int channels@ƒ`ƒƒƒ“ƒlƒ‹”
-         * @param[in] WORD nBlockAlign
-         * @return std::vector<XAUDIO2_BUFFER> ƒoƒbƒtƒ@[
+         * @brief ã‚µã‚¦ãƒ³ãƒ‰ã®ç ´æ£„ (ã“ã®ã‚µã‚¦ãƒ³ãƒ‰ã‚’ä½¿ã£ã¦ã„ã‚‹ãƒœã‚¤ã‚¹ã‚‚ç ´æ£„ã™ã‚‹)
          ************************************************************************************/
-        std::vector<XAUDIO2_BUFFER> CreateAudioBuffers(BYTE* pAudioData, DWORD totalDataSizeBytes, int channels, WORD nBlockAlign);
+        void DestroySound(uint32_t sound);
 
+        // ã‚µã‚¦ãƒ³ãƒ‰ã®é•·ã• (ç§’ã€‚ç„¡åŠ¹ãªãƒãƒ³ãƒ‰ãƒ«ãªã‚‰ 0)
+        float GetSoundLength(uint32_t sound) const;
 
         /***********************************************************************************
-         * @brief vector<short>‚©‚çBYTE**‚Ö•ÏX
-         * @details
-         *
-         * @param[in] std::vector<short>& data vector”z—ñPCMƒf[ƒ^
-         * @param[in] BYTE** outFrontPointer BYTE*‚Ìæ“ªƒ|ƒCƒ“ƒ^
-         * @param[in] DWORD* outBufferSize DWORD‚Ìæ“ªƒ|ƒCƒ“ƒ^
-         * @return std::vector<XAUDIO2_BUFFER> ƒoƒbƒtƒ@[
+         * @brief ãƒœã‚¤ã‚¹ã®ä½œæˆ (ã‚µã‚¦ãƒ³ãƒ‰ã®å½¢å¼ã§ã‚½ãƒ¼ã‚¹ãƒœã‚¤ã‚¹ã‚’ä½œã‚‹ã€‚å†ç”Ÿã¯ã—ãªã„)
+         * @return ãƒœã‚¤ã‚¹ã®ãƒãƒ³ãƒ‰ãƒ« (å¤±æ•—æ™‚ / å†ç”Ÿã§ããªã„ç’°å¢ƒã§ã¯ INVALID_HANDLE)
          ************************************************************************************/
-        void ProcessWaveBuffer(std::vector<short>& data, BYTE** outFrontPointer, DWORD* outBufferSize);
+        uint32_t CreateVoice(uint32_t sound);
+        void DestroyVoice(uint32_t voice);
 
-    public:          /*---ƒAƒNƒZƒbƒT[ŠÖ”ŒQ---*/
+        // æœ€åˆã‹ã‚‰å†ç”Ÿã™ã‚‹ (å†ç”Ÿä¸­ã§ã‚‚æœ€åˆã«æˆ»ã‚‹)
+        bool Play(uint32_t voice);
+        void Stop(uint32_t voice);
+        void SetVolume(uint32_t voice, float volume);
+        // å†ç”Ÿä¸­ã«ãƒ«ãƒ¼ãƒ—ã‚’åˆ‡ã‚‹ã¨ã€ä»Šã®å‘¨ã®çµ‚ã‚ã‚Šã§æ­¢ã¾ã‚‹ã€‚å†ç”Ÿä¸­ã«ãƒ«ãƒ¼ãƒ—ã‚’ä»˜ã‘ãŸæ™‚ã¯æ¬¡ã® Play ã‹ã‚‰
+        void SetLoop(uint32_t voice, bool loop);
+        // å†ç”Ÿä¸­ã‹ (æœ€å¾Œã¾ã§é³´ã‚Šçµ‚ã‚ã£ãŸã‚‰ false)ã€‚ã¾ã¨ã‚ã¦èª¿ã¹ã‚‹ (outPlaying ã¯ 0 / 1)
+        void GetPlaying(const uint32_t* voices, uint32_t count, uint8_t* outPlaying);
 
+    private:         /*---å†…éƒ¨å‡¦ç†---*/
+        struct SoundSlot
+        {
+            Library::Sound::Loader::SoundData data;
+            uint16_t generation = 1;
+            bool     alive      = false;
+        };
 
-    private:         /*---ƒƒ“ƒo•Ï”---*/
+        struct VoiceSlot
+        {
+            IXAudio2SourceVoice* source = nullptr;
+            uint32_t sound      = INVALID_HANDLE;
+            uint16_t generation = 1;
+            bool     alive      = false;
+            bool     loop       = false;
+            bool     started    = false;   // Play ã—ã¦ã‹ã‚‰ Stop / é³´ã‚Šçµ‚ã‚ã‚Šã¾ã§
+        };
+
+        static uint32_t makeHandle(uint32_t index, uint16_t generation) { return (static_cast<uint32_t>(generation) << 16) | index; }
+        static uint16_t nextGeneration(uint16_t generation) { return generation >= 0x7FFF ? 1 : static_cast<uint16_t>(generation + 1); }
+
+        SoundSlot*       findSound(uint32_t handle);
+        const SoundSlot* findSound(uint32_t handle) const;
+        VoiceSlot*       findVoice(uint32_t handle);
+        void destroyVoiceSlot(uint32_t index);
+        bool submit(VoiceSlot& voice);
+        bool isQueued(const VoiceSlot& voice) const;
+
+    private:         /*---ãƒ¡ãƒ³ãƒå¤‰æ•°---*/
         IXAudio2* _pXAudio2 = nullptr;
         IXAudio2MasteringVoice* _pMasterVoice = nullptr;
+        bool _comInitialized = false;   // CoInitializeEx ãŒæˆåŠŸã—ãŸæ™‚ã ã‘ CoUninitialize ã™ã‚‹
+
+        // ç©ºã„ãŸç•ªå·ã¯ä½¿ã„å›ã™ã€‚std::vector ãŒä¼¸ã³ã¦ã‚‚ã€SoundData ã®ä¸­ã®é…åˆ— (PCM) ã®å ´æ‰€ã¯å¤‰ã‚ã‚‰ãªã„
+        std::vector<SoundSlot> _sounds;
+        std::vector<VoiceSlot> _voices;
+        std::vector<uint32_t>  _freeSounds;
+        std::vector<uint32_t>  _freeVoices;
     };
-
 }
-
 
 #endif // XAUDIO_H_
 
