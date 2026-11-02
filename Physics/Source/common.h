@@ -41,6 +41,7 @@ namespace Physics
 		Sphere  = 0,   // Size.x = 半径
 		Box     = 1,   // Size = 半分の大きさ (中心から面まで)
 		Capsule = 2,   // Size.x = 半径 / Size.y = 円柱の半分の高さ (ローカルの Y 方向)
+		Mesh    = 3,   // 三角形のメッシュ (BodyDesc.Mesh。動かない物だけ)
 	};
 
 	// 重なりを探す方法 (比べるため。既定は BVH)
@@ -59,7 +60,7 @@ namespace Physics
 		uint32_t CollideMask;    // 重なりを調べる相手のレイヤー (ビット)
 		uint32_t IsStatic;       // 1 : 動かない物 (動かない物どうしは調べない)
 		float    Center[3];      // 形の中心 (ローカル。Transform の位置からのずれ。大きさも掛かる)
-		float    Padding0;
+		uint32_t Mesh;           // Physics_CreateMesh のハンドル (Shape = Mesh の時。以前は詰め物)
 		float    Size[3];        // ShapeType を参照
 		float    Padding1;
 		float    Position[3];
@@ -90,6 +91,44 @@ namespace Physics
 		uint32_t Padding;
 	};
 	static_assert(sizeof(CollisionEvent) == 16, "CollisionEvent must be 16 bytes (same as C#)");
+
+	// レイ (C# の PhysicsNativeMethods.Ray と同じ並び : 32byte)
+	struct Ray
+	{
+		float    Origin[3];
+		float    MaxDistance;
+		float    Direction[3];   // 長さ 1 でなくてよい (中で直す)
+		uint32_t LayerMask;      // 当てるレイヤー (ビット)
+	};
+	static_assert(sizeof(Ray) == 32, "Ray must be 32 bytes (same as C#)");
+
+	// レイの当たり (C# の PhysicsNativeMethods.RaycastHit と同じ並び : 48byte)
+	struct RaycastHit
+	{
+		uint32_t Body;           // 当たらなければ INVALID_HANDLE
+		uint32_t Hit;            // 1 : 当たった
+		float    Distance;
+		float    Padding0;
+		float    Point[3];
+		float    Padding1;
+		float    Normal[3];
+		float    Padding2;
+	};
+	static_assert(sizeof(RaycastHit) == 48, "RaycastHit must be 48 bytes (same as C#)");
+
+	// 接触点 (C# の PhysicsNativeMethods.ContactPoint と同じ並び : 48byte)。法線は BodyA → BodyB
+	struct ContactOut
+	{
+		uint32_t BodyA;
+		uint32_t BodyB;
+		float    Depth;
+		float    Padding0;
+		float    Position[3];
+		float    Padding1;
+		float    Normal[3];
+		float    Padding2;
+	};
+	static_assert(sizeof(ContactOut) == 48, "ContactOut must be 48 bytes (same as C#)");
 
 	// 1 回の Step の計測 (C# の PhysicsNativeMethods.PhysicsStats と同じ並び : 32byte)
 	struct PhysicsStats

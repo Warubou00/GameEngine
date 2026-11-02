@@ -168,6 +168,15 @@ extern "C"
 		return g_renderer->LoadModel(filePath, outSubMeshCount);
 	}
 
+	// モデルの形 (位置 xyz とインデックス) を写す (衝突判定のメッシュ用)。positions / indices が nullptr なら数だけ
+	RENDERER_API bool Renderer_GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
+	                                            uint32_t* outVertexCount, uint32_t* outIndexCount)
+	{
+		if (outVertexCount) *outVertexCount = 0;
+		if (outIndexCount)  *outIndexCount  = 0;
+		return g_renderer ? g_renderer->GetModelGeometry(model, positions, maxVertices, indices, maxIndices, outVertexCount, outIndexCount) : false;
+	}
+
 	// モデルを置く描画オブジェクトを count 個まとめて作る (原点に置かれる)
 	RENDERER_API void Renderer_CreateRenderObjects(uint32_t model, uint32_t count, uint32_t* outHandles)
 	{

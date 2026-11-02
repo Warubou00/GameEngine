@@ -35,7 +35,7 @@ namespace GameEngine_console;
 // 操作 (orbit 以外) : 右ボタンを押しながらマウスで向き、WASD で移動、E / Q で上下、Shift で速く、F1 でプロファイラー
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
 //                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)、F11 で影、F12 で影の段の色分け
-//                     C でコライダーの表示、B で衝突判定の探し方 (BVH → 総当たり → グリッド)
+//                     C でコライダーの表示、X で接触点の表示、B で衝突判定の探し方 (BVH → 総当たり → グリッド)
 //                     F7 で音を鳴らす / 止める、F8 で音量
 //                     F9 で DirectInput のパッドを探し直す、F10 で DirectInput のパッドのボタンの割り当て
 // ゲームパッド      : 右スティックで向き、左スティックで移動、RT / LT で上下、RB で速く、A で振動 (状態はプロファイラーとコンソール)
@@ -81,7 +81,9 @@ internal static class Program
             Showcase.Spawn(engine);
             CollisionDemo.Spawn(world);
             engine.AddSystem(new OrbitMoverSystem());
+            engine.AddSystem(new LaserDemoSystem(engine.Physics));
             engine.Physics.ShowColliders = true;
+            engine.Physics.ShowContacts  = true;
         }
         if (benchCount > 0)
         {

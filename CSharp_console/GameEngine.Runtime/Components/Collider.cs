@@ -8,6 +8,7 @@ public enum ColliderShape : uint
     Sphere  = 0,   // Size.X = 半径
     Box     = 1,   // Size = 半分の大きさ (中心から面まで)
     Capsule = 2,   // Size.X = 半径 / Size.Y = 円柱の半分の高さ (ローカルの Y 方向。両端の半球は含まない)
+    Mesh    = 3,   // 三角形のメッシュ (Collider.Mesh。動かない物だけ)
 }
 
 // ==========================================================================
@@ -24,6 +25,7 @@ public struct Collider
     public Vector3       Center;                     // 形の中心 (Transform の位置からのずれ。ローカル)
     public int           Layer       = 0;
     public uint          CollideWith = 0xFFFFFFFFu;  // 全部のレイヤー
+    public CollisionMesh? Mesh;                      // Shape = Mesh の時 (engine.Assets.LoadCollisionMesh)
 
     public Collider()
     {
@@ -36,6 +38,10 @@ public struct Collider
 
     public static Collider Box(Vector3 halfExtents, Vector3 center = default) =>
         new() { Shape = ColliderShape.Box, Size = halfExtents, Center = center };
+
+    /// <summary>メッシュの形どおりに当てる (動かない物だけ。Transform の位置 / 回転 / 大きさがそのまま掛かる)</summary>
+    public static Collider FromMesh(CollisionMesh mesh) =>
+        new() { Shape = ColliderShape.Mesh, Mesh = mesh, Size = Vector3.One };
 
     /// <param name="halfHeight">円柱の部分の半分の高さ (全体の高さ = 2 × (halfHeight + radius))</param>
     public static Collider Capsule(float radius, float halfHeight, Vector3 center = default) =>

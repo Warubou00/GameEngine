@@ -239,4 +239,9 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetDebugLines(DebugLineVertex* vertices, uint count);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_GetModelGeometry(uint model, float* positions, uint maxVertices, uint* indices, uint maxIndices,
+                                                        out uint vertexCount, out uint indexCount);
 }

@@ -234,6 +234,17 @@ namespace Renderer
 		}
 
 		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
+
+		// 衝突判定のメッシュ用に、位置とインデックスだけ CPU 側に残す (頂点 12byte + インデックス 4byte。色や UV は捨てる)
+		model.Positions.reserve(mesh->Vertices.size() * 3);
+		for (const auto& v : mesh->Vertices)
+		{
+			model.Positions.push_back(v.Position._x);
+			model.Positions.push_back(v.Position._y);
+			model.Positions.push_back(v.Position._z);
+		}
+		for (const auto& indices : mesh->Indecies) model.Indices.insert(model.Indices.end(), indices.begin(), indices.end());
+
 		_models.push_back(std::move(model));
 
 				// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
@@ -400,6 +411,20 @@ namespace Renderer
 		// RHI は描画リストが前回と同じなら、GPU 用の描画データも書き直さない
 		if (_drawListDirty) rebuildDrawList();
 		return _rhi->Render(_drawItems.data(), static_cast<uint32_t>(_drawItems.size()), commands, commandCount);
+	}
+
+	bool SceneRenderer::GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
+	                                     uint32_t* outVertexCount, uint32_t* outIndexCount) const
+	{
+		if (model >= _models.size()) return false;
+		const ModelResource& m = _models[model];
+		const uint32_t vertexCount = static_cast<uint32_t>(m.Positions.size() / 3);
+		const uint32_t indexCount  = static_cast<uint32_t>(m.Indices.size());
+		if (outVertexCount) *outVertexCount = vertexCount;
+		if (outIndexCount)  *outIndexCount  = indexCount;
+		if (positions) std::memcpy(positions, m.Positions.data(), sizeof(float) * 3 * (std::min)(vertexCount, maxVertices));
+		if (indices)   std::memcpy(indices, m.Indices.data(), sizeof(uint32_t) * (std::min)(indexCount, maxIndices));
+		return true;
 	}
 
 	RHI::RenderTargetHandle SceneRenderer::CreateRenderTarget(const RHI::RenderTargetDesc& desc)

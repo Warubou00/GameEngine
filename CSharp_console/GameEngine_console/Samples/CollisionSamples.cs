@@ -19,7 +19,7 @@ internal static class CollisionDemo
         (Collider.Box(new Vector3(0.4f)),           2.6f, 0.6f, -30.0f),
         (Collider.Capsule(0.3f, 0.5f),              4.0f, 1.0f,  25.0f),   // 岩とキャラクターに当たる
         (Collider.Sphere(0.6f),                     4.0f, 0.7f, -35.0f),   // カプセルとすれ違う
-        (Collider.Box(new Vector3(0.6f, 0.3f, 0.5f)), 5.3f, 0.4f, 18.0f),
+        (Collider.Box(new Vector3(0.6f, 0.3f, 0.5f)), 5.3f, 0.9f, 18.0f),   // 回転しても地面に潜らない高さ
     };
 
     public static void Spawn(World world)
@@ -140,7 +140,7 @@ public sealed class BenchMoverSystem : ISystem
     }
 }
 
-// C : コライダーの表示 / B : 探し方 (BVH → 総当たり → グリッド)
+// C : コライダーの表示 / X : 接触点の表示 / B : 探し方 (BVH → 総当たり → グリッド)
 public sealed class PhysicsHotkeySystem : ISystem
 {
     private readonly PhysicsSettings _physics;
@@ -149,6 +149,7 @@ public sealed class PhysicsHotkeySystem : ISystem
     public void Update(World world)
     {
         if (Input.GetKeyDown(Keys.C)) _physics.ShowColliders = !_physics.ShowColliders;
+        if (Input.GetKeyDown(Keys.X)) _physics.ShowContacts  = !_physics.ShowContacts;
         if (Input.GetKeyDown(Keys.B))
         {
             _physics.Broadphase = (Broadphase)(((int)_physics.Broadphase + 1) % 3);
@@ -169,4 +170,34 @@ public sealed class PhysicsHotkeySystem : ISystem
         "grid"  => Broadphase.Grid,
         _       => null,
     };
+}
+
+// ==========================================================================
+// レイキャストの見本 : 原点の上から斜め下へレーザーを回す。当たった所に印と法線を描く
+//   (地面 / 箱 / 岩のメッシュ / キャラクターのカプセル / 回る物に当たる)
+// ==========================================================================
+public sealed class LaserDemoSystem : ISystem
+{
+    private readonly PhysicsSettings _physics;
+    private float _angle;
+
+    public LaserDemoSystem(PhysicsSettings physics) => _physics = physics;
+
+    public void Update(World world)
+    {
+        _angle += 30.0f * MathEx.Deg2Rad * Time.DeltaTime;
+        var origin    = new Vector3(0, 4.0f, 0);
+        var direction = Vector3.Normalize(new Vector3(MathF.Cos(_angle), -0.45f, MathF.Sin(_angle)));
+        var laser     = DebugDraw.Color(1.0f, 0.2f, 0.9f);
+        if (_physics.Raycast(origin, direction, out var hit, 30.0f))
+        {
+            DebugDraw.Line(origin, hit.Point, laser);
+            DebugDraw.WireSphere(hit.Point, 0.08f, laser);
+            DebugDraw.Line(hit.Point, hit.Point + hit.Normal * 0.6f, DebugDraw.Color(0.2f, 0.9f, 1.0f));
+        }
+        else
+        {
+            DebugDraw.Line(origin, origin + direction * 30.0f, DebugDraw.Color(1.0f, 0.2f, 0.9f, 0.4f));
+        }
+    }
 }
