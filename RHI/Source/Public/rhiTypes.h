@@ -163,6 +163,7 @@ namespace RHI
 		R32F       = 5,
 		R8         = 6,   // 1 成分 (遮蔽など)
 		RGB10A2    = 7,
+		R11G11B10F = 8,   // HDR の色 (アルファ無し。RGBA16F の半分の大きさ。環境光など)
 	};
 
 	struct RenderTargetDesc
@@ -194,6 +195,7 @@ namespace RHI
 	{
 		Forward = 0,   // ライティングまで 1 回で描く (HDR の色)
 		GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ を書く (半透明は描けないので Forward で)
+		ForwardSplitAmbient = 2,   // Forward + SSAO 用 : RT0 にライトの光、RT1 に環境光を分けて書く (後で 環境光 × 遮蔽 を足す)
 	};
 
 	// シーンのどの物を描くか

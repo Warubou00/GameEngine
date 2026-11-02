@@ -16,6 +16,9 @@ public abstract class RenderPipeline : IDisposable
 {
     private FullscreenShader? _tonemap;
 
+    // SSAO (Forward / Deferred 共通の部品)
+    protected SsaoPass Ssao { get; } = new();
+
     public abstract string Name { get; }
 
     protected internal abstract void Initialize(GraphicsSettings settings);
@@ -23,11 +26,22 @@ public abstract class RenderPipeline : IDisposable
 
     public virtual void Dispose()
     {
+        Ssao.Dispose();
     }
 
+    // SSAO を使うか (Unlit は環境光が無いので使わない)
+    protected static bool UseSsao(GraphicsSettings settings) =>
+        settings.Ssao.Enabled && settings.LightingModel != LightingModel.Unlit;
+
     // HDR (線形) → 画面 (露出 / トーンマップ / ガンマ)。最後にバックバッファへ描く
-    protected void Tonemap(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings)
+    //   ao があり Ssao.ShowOnly なら、代わりに遮蔽を白黒で出す (確認用)
+    protected void Tonemap(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings, RenderTexture? ao = null)
     {
+        if (ao != null && settings.Ssao.ShowOnly)
+        {
+            Ssao.Show(cmd, ao);
+            return;
+        }
         _tonemap ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSTonemap");
         // ライト無し (Unlit) は以前と同じ見た目になるよう、トーンマップを掛けない (色をそのまま出す)
         var unlit  = settings.LightingModel == LightingModel.Unlit;
@@ -50,10 +64,13 @@ internal static class ShaderPaths
 // ==========================================================================
 // フォワード : 物を描く時にライティングまで済ませる (HDR に描いてトーンマップ)
 //   ライトが少ない / 半透明が多い場面向き。G-Buffer が要らないのでメモリと帯域が少ない
+//   SSAO あり : ライトの光 (HDR) と環境光 (R11G11B10F) を分けて描き、深度から遮蔽を求めて
+//               「環境光 × 遮蔽」を HDR に足す (遮蔽が環境光にだけ掛かる。深度のプリパスも要らない)
 // ==========================================================================
 public sealed class ForwardRenderPipeline : RenderPipeline
 {
     private RenderTexture? _hdr;
+    private RenderTexture? _ambient;   // SSAO の時だけ作る
     private Vector3 _background;
 
     public override string Name => "Forward";
@@ -75,20 +92,44 @@ public sealed class ForwardRenderPipeline : RenderPipeline
     {
         if (settings.BackgroundColor != _background) CreateTargets(settings);
         var hdr = _hdr!;
+        RenderTexture? ao = null;
 
+        if (UseSsao(settings))
+        {
+            // 背景は環境光 0 (黒) で消す。足すのは環境光の分だけなので背景の色は変わらない
+            _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F);
+            cmd.SetRenderTarget(_ambient);
+            cmd.ClearColor(Vector4.Zero);
+            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+            cmd.ClearColor(hdr.ClearColor);
+            cmd.ClearDepth();
+            cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
+            cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
+
+            ao = Ssao.Render(cmd, settings.Ssao, normal: null);   // 法線は深度から作る
+            Ssao.ApplyAmbient(cmd, hdr, _ambient, ao);
+        }
+        else
+        {
+            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+            cmd.ClearColor(hdr.ClearColor);
+            cmd.ClearDepth();
+            cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+        }
+
+        // 半透明 (遮蔽は掛けない)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
-        cmd.ClearColor(hdr.ClearColor);
-        cmd.ClearDepth();
-        cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
 
-        Tonemap(cmd, hdr, settings);
+        Tonemap(cmd, hdr, settings, ao);
     }
 
     public override void Dispose()
     {
         _hdr?.Dispose();
-        _hdr = null;
+        _ambient?.Dispose();
+        _hdr = _ambient = null;
+        base.Dispose();
     }
 }
 
@@ -98,6 +139,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
 //   ライトが多い / 重なりが多い場面ほど得 (隠れた面のライティングをしない)。
 //   半透明は G-Buffer に書けないので、ライティングの後にフォワードで重ねる
 //   G-Buffer : RT0 RGBA8_SRGB アルベド / RT1 RGBA16F 法線 / RT2 RGBA8 金属・粗さ (1280x720 で約 14MB)
+//   SSAO あり : G-Buffer の法線と深度から遮蔽を求め、ライティングが環境光に掛ける
 // ==========================================================================
 public sealed class DeferredRenderPipeline : RenderPipeline
 {
@@ -127,16 +169,26 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.GBuffer, RenderQueue.Opaque);
 
-        // 2. ライティング (全画面。背景もここで塗る)
+        // 2. SSAO (G-Buffer の法線を使う)。使わない時は入力を渡さない (シェーダーは白 = 遮蔽なし を読む)
+        var ao = UseSsao(settings) ? Ssao.Render(cmd, settings.Ssao, _normal) : null;
+
+        // 3. ライティング (全画面。背景もここで塗る)
         var background = ToLinear(settings.BackgroundColor);
         cmd.SetRenderTarget(hdr);
-        cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth], [background.X, background.Y, background.Z]);
+        if (ao != null)
+        {
+            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth, ao], [background.X, background.Y, background.Z]);
+        }
+        else
+        {
+            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth], [background.X, background.Y, background.Z]);
+        }
 
-        // 3. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)
+        // 4. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
 
-        Tonemap(cmd, hdr, settings);
+        Tonemap(cmd, hdr, settings, ao);
     }
 
     public override void Dispose()
@@ -146,5 +198,6 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         _material?.Dispose();
         _hdr?.Dispose();
         _albedo = _normal = _material = _hdr = null;
+        base.Dispose();
     }
 }

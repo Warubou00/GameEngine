@@ -7,6 +7,8 @@ namespace GameEngine_console;
 // 描画の切り替え (キー)
 //   F2 : 描画パイプライン Forward ⇔ Deferred
 //   F3 : ライティング Unlit → Lambert → PBR
+//   F4 : SSAO の ON / OFF
+//   F5 : 遮蔽だけを白黒で表示 (SSAO の確認用)
 //   今の設定はプロファイラー (F1) の "Render pipeline" に出る
 // ==========================================================================
 public sealed class GraphicsHotkeySystem : ISystem
@@ -35,6 +37,8 @@ public sealed class GraphicsHotkeySystem : ISystem
                 _                     => LightingModel.Unlit,
             };
         }
+        if (Input.GetKeyDown(Keys.F4)) _graphics.Ssao.Enabled  = !_graphics.Ssao.Enabled;
+        if (Input.GetKeyDown(Keys.F5)) _graphics.Ssao.ShowOnly = !_graphics.Ssao.ShowOnly;
     }
 
     // コマンドライン引数の名前 → 設定

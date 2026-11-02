@@ -14,6 +14,7 @@
 //   VSMain             : シーンの頂点
 //   PSForward          : ライティングまで 1 回で描く (不透明)
 //   PSForwardAlpha     : 同じ (半透明。完全に透明な所は捨てる)
+//   PSForwardSplit     : ライトの光と環境光を分けて書く (Forward + SSAO)
 //   PSGBuffer          : ディファード用の G-Buffer (アルベド / 法線 / 金属・粗さ)
 //   VSFullscreen       : 全画面の三角形
 //   PSDeferredLighting : G-Buffer と深度からライティングする
@@ -184,8 +185,22 @@ float3 envBrdfApprox(float3 f0, float roughness, float NoV)
     return f0 * ab.x + ab.y;
 }
 
+// 環境光 (空の明るさ)。PBR は鏡面反射の分も入れる
+//   SSAO (遮蔽) はこの分にだけ掛ける (ライトの直接の光には掛けない)。Unlit は 0
+// N : 法線 (正規化済み) / V : 視線 (物 → カメラ、正規化済み)
+float3 shadeAmbient(float3 albedo, float3 N, float3 V, float metallic, float roughness)
+{
+    if (g_LightingModel == LIGHTING_UNLIT) return 0.0f.xxx;
+    if (g_LightingModel != LIGHTING_PBR)   return albedo * g_Ambient;
+
+    const float  NoV = saturate(dot(N, V)) + 1e-4f;
+    const float3 f0  = lerp(0.04f.xxx, albedo, metallic);
+    return (albedo * (1.0f - metallic) + envBrdfApprox(f0, clamp(roughness, 0.045f, 1.0f), NoV)) * g_Ambient;
+}
+
+// ライトの直接の光 (Unlit はテクスチャの色そのまま)
 // N : 法線 (正規化済み) / V : 視線 (物 → カメラ、正規化済み) / P : ワールド座標
-float3 shade(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness)
+float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness)
 {
     if (g_LightingModel == LIGHTING_UNLIT) return albedo;
 
@@ -198,10 +213,7 @@ float3 shade(float3 albedo, float3 N, float3 V, float3 P, float metallic, float 
     const float3 f0  = lerp(0.04f.xxx, albedo, metallic);                // 非金属は 4% 反射、金属は自分の色で反射
     const float3 diffuseColor = pbr ? albedo * (1.0f - metallic) : albedo;
 
-    // 環境光 (空の明るさ)。PBR は鏡面反射の分も入れる
-    float3 color = diffuseColor * g_Ambient;
-    if (pbr) color += envBrdfApprox(f0, roughness, NoV) * g_Ambient;
-
+    float3 color = 0.0f.xxx;
     for (uint i = 0; i < g_LightCount; ++i)
     {
         const LightData light = g_Lights[i];
@@ -245,6 +257,12 @@ float3 shade(float3 albedo, float3 N, float3 V, float3 P, float metallic, float 
     return color;
 }
 
+// 環境光 × 遮蔽 (ao : 1 = 遮られていない) + ライト
+float3 shade(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness, float ao)
+{
+    return shadeAmbient(albedo, N, V, metallic, roughness) * ao + shadeLights(albedo, N, V, P, metallic, roughness);
+}
+
 // ==============================================================
 // Vertex Shader
 // ==============================================================
@@ -264,9 +282,14 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint drawID : DRAWID)
     float4 viewPos  = mul(worldPos, g_ViewMatrix);
     output.Position = mul(viewPos, g_ProjectionMatrix);
 
-    // 法線は平行移動を含めないので w = 0 で変換する (正規化はピクセルシェーダーで補間後に行う)
-    // (不均一スケールを使うようになったら逆転置行列に変えること)
-    output.Normal = mul(float4(v.Normal, 0.0f), object.World).xyz;
+    // 法線はワールド行列の余因子行列で変換する (= 逆転置行列 × 行列式。向きは同じで、逆行列を求めなくてよい)
+    //   以前はワールド行列でそのまま変換していて、不均一なスケール (地面のように平たく伸ばした箱) で
+    //   法線が傾き、ライティングと SSAO (ディファード) が崩れていた
+    // 正規化はピクセルシェーダーで補間後に行う。鏡像 (行列式が負) で裏返っても、ピクセルシェーダーがカメラ側に向け直す
+    const float3 r0 = object.World[0].xyz;
+    const float3 r1 = object.World[1].xyz;
+    const float3 r2 = object.World[2].xyz;
+    output.Normal = v.Normal.x * cross(r1, r2) + v.Normal.y * cross(r2, r0) + v.Normal.z * cross(r0, r1);
 
     output.Color = v.Color;
     output.UV    = v.UV;
@@ -328,7 +351,7 @@ Surface getSurface(VSOutput input)
 float4 PSForward(VSOutput input) : SV_TARGET
 {
     const Surface surface = getSurface(input);
-    const float3 color = shade(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness);
+    const float3 color = shade(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness, 1.0f);
     return float4(color, surface.Alpha);
 }
 
@@ -341,8 +364,29 @@ float4 PSForwardAlpha(VSOutput input) : SV_TARGET
 {
     const Surface surface = getSurface(input);
     clip(surface.Alpha - 1.0f / 255.0f);
-    const float3 color = shade(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness);
+    const float3 color = shade(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness, 1.0f);
     return float4(color, surface.Alpha);
+}
+
+// ==============================================================
+// Forward (SSAO あり) : ライトの光と環境光を別々に書く
+//   RT0 : ライトの光 (HDR) / RT1 : 環境光 (R11G11B10F)
+//   SSAO を作った後に「環境光 × 遮蔽」を RT0 に足す (ssao.shader の PSApplyAmbient)
+//   こうすると Forward でも遮蔽が環境光にだけ掛かり、深度だけを先に描く (プリパス) も要らない
+// ==============================================================
+struct ForwardSplitOutput
+{
+    float4 Lights  : SV_TARGET0;
+    float4 Ambient : SV_TARGET1;
+};
+
+ForwardSplitOutput PSForwardSplit(VSOutput input)
+{
+    const Surface surface = getSurface(input);
+    ForwardSplitOutput output;
+    output.Lights  = float4(shadeLights(surface.Albedo, surface.Normal, surface.View, surface.Position, surface.Metallic, surface.Roughness), 1.0f);
+    output.Ambient = float4(shadeAmbient(surface.Albedo, surface.Normal, surface.View, surface.Metallic, surface.Roughness), 1.0f);
+    return output;
 }
 
 // ==============================================================
@@ -389,6 +433,7 @@ FullscreenOutput VSFullscreen(uint vertexID : SV_VertexID)
 // ==============================================================
 // ディファードのライティング
 //   g_Inputs[0] : x = アルベド / y = 法線 / z = 金属・粗さ / w = 深度
+//   g_Inputs[1] : x = SSAO (無ければ既定テクスチャの白 = 遮蔽なし。縮小したバッファでもよい)
 //   g_Params[0] : 背景の色 (何も描かれていない所。線形)
 // ==============================================================
 float4 PSDeferredLighting(FullscreenOutput input) : SV_TARGET
@@ -407,5 +452,6 @@ float4 PSDeferredLighting(FullscreenOutput input) : SV_TARGET
     const float3 P     = world.xyz / world.w;
     const float3 V     = normalize(g_CameraPosition - P);
 
-    return float4(shade(albedo, normal, V, P, material.x, material.y), 1.0f);
+    const float  ao    = g_Textures[g_Inputs[1].x].SampleLevel(g_LinearClamp, input.UV, 0).r;
+    return float4(shade(albedo, normal, V, P, material.x, material.y, ao), 1.0f);
 }

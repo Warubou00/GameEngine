@@ -79,6 +79,10 @@ public sealed class GraphicsSettings
     public float      Gamma           { get; set; } = 2.2f;
     public Vector3    BackgroundColor { get; set; } = new(0.1f, 0.2f, 0.4f);   // 何も無い所の色 (sRGB。以前のクリア色)
 
+    // SSAO (環境光の遮蔽。Forward / Deferred の両方で使える。Unlit では使わない)
+    public SsaoSettings Ssao { get; } = new();
+    private int _shownSsaoState = -1;
+
     // フレームの始め : パイプラインの切り替えとライティングの設定を C++ へ (変わった時だけ)
     internal void BeginFrame()
     {
@@ -97,10 +101,14 @@ public sealed class GraphicsSettings
             _lightingDirty = false;
             _infoDirty     = true;
         }
-        if (_infoDirty)
+        // SSAO の ON / OFF も表示する (変わった時だけ文字列を作る)
+        var ssaoState = !Ssao.Enabled ? 0 : Ssao.ShowOnly ? 2 : 1;
+        if (_infoDirty || ssaoState != _shownSsaoState)
         {
-            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}");
-            _infoDirty = false;
+            var ssao = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
+            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}");
+            _infoDirty      = false;
+            _shownSsaoState = ssaoState;
         }
     }
 

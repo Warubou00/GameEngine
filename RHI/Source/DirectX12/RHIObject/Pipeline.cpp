@@ -93,6 +93,7 @@ namespace RHI
             Shader::CompiledShader PsForward;        // PSForward      : ライティングまで (不透明)
             Shader::CompiledShader PsForwardAlpha;   // PSForwardAlpha : ライティングまで (半透明。透明な所を捨てる)
             Shader::CompiledShader PsGBuffer;        // PSGBuffer      : ディファード用の G-Buffer
+            Shader::CompiledShader PsForwardSplit;   // PSForwardSplit : ライトの光と環境光を分けて書く (Forward + SSAO)
         };
 
         // 全画面のシェーダー (ファイルの VSFullscreen + entry)
@@ -384,6 +385,7 @@ namespace RHI
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForward",      Shader::Stage::Pixel,  shaders.PsForward))      return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlpha", Shader::Stage::Pixel,  shaders.PsForwardAlpha)) return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",      Shader::Stage::Pixel,  shaders.PsGBuffer))      return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit", Shader::Stage::Pixel,  shaders.PsForwardSplit)) return RHI_FAILED_COMPILED_SHADER;
 
             // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
             const DXGI_FORMAT hdr = HDR_FORMAT;
@@ -501,7 +503,12 @@ namespace RHI
             D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
             desc.VS = shaders.Vs.View();
             const bool gbuffer = scenePass == static_cast<uint32_t>(RHI::ScenePass::GBuffer);
-            desc.PS = gbuffer ? shaders.PsGBuffer.View() : (group == PIPELINE_ALPHA_BLEND ? shaders.PsForwardAlpha.View() : shaders.PsForward.View());
+            const bool split   = scenePass == static_cast<uint32_t>(RHI::ScenePass::ForwardSplitAmbient);
+            // 半透明は環境光を分けない (SSAO を掛けない。RT1 には書かない)
+            if (group == PIPELINE_ALPHA_BLEND) desc.PS = shaders.PsForwardAlpha.View();
+            else if (gbuffer)                  desc.PS = shaders.PsGBuffer.View();
+            else if (split)                    desc.PS = shaders.PsForwardSplit.View();
+            else                               desc.PS = shaders.PsForward.View();
 
             // 頂点はシェーダーがメガ頂点バッファから読む (Programmable Vertex Fetch) ので、頂点の入力は無い。
             // 入力アセンブラに読ませるのは、描画番号 (DRAWID) のインスタンス単位の入力 1 つだけ。
