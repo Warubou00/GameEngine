@@ -30,6 +30,8 @@ namespace GameEngine_console;
 //                     F2 で Forward / Deferred、F3 で Unlit / Lambert / PBR、F4 で SSAO、F5 で遮蔽だけを表示
 //                     F6 でアンチエイリアス (なし → FXAA → MSAA 2x → 4x → 8x)
 //                     F7 で音を鳴らす / 止める、F8 で音量
+//                     F9 で DirectInput のパッドを探し直す、F10 で DirectInput のパッドのボタンの割り当て
+// ゲームパッド      : 右スティックで向き、左スティックで移動、RT / LT で上下、RB で速く、A で振動 (状態はプロファイラーとコンソール)
 // ==========================================================================
 internal static class Program
 {
@@ -125,6 +127,7 @@ internal static class Program
             engine.Graphics.AntiAliasing = antiAliasing;
         }
         engine.AddSystem(new GraphicsHotkeySystem(engine.Graphics));
+        engine.AddSystem(new GamepadMonitorSystem(engine));
 
         // ---------- 音 ----------
         // wav は ../Sound/ に置く (モデルの ../Model/ と同じ並び)。無ければ鳴らさずに続ける

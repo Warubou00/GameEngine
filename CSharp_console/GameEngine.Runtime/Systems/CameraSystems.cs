@@ -45,7 +45,7 @@ internal sealed class CameraSystem : ISystem
 }
 
 // ==========================================================================
-// FreeCamera を動かす (右ボタン + マウスで向き、WASD / E Q で移動、Shift で速く)
+// FreeCamera を動かす (右ボタン + マウスで向き、WASD / E Q で移動、Shift で速く。ゲームパッドでも動かせる)
 // ==========================================================================
 public sealed class FreeCameraSystem : ISystem
 {
@@ -69,9 +69,18 @@ public sealed class FreeCameraSystem : ISystem
                 camera.Yaw  += delta.X;
                 camera.Pitch = Math.Clamp(camera.Pitch + delta.Y, -89.0f, 89.0f);
             }
+            // ゲームパッド (1 台目) : 右スティックで向き、左スティックで移動、RT / LT で上下、RB (R1) で速く
+            var look = Gamepad.GetRightStick();
+            if (look != Vector2.Zero)
+            {
+                var degrees = camera.GamepadLookSpeed * Time.DeltaTime;
+                camera.Yaw  += look.X * degrees;
+                camera.Pitch = Math.Clamp(camera.Pitch - look.Y * degrees, -89.0f, 89.0f);
+            }
             transform.Rotation = Quaternion.CreateFromYawPitchRoll(camera.Yaw * MathEx.Deg2Rad, camera.Pitch * MathEx.Deg2Rad, 0.0f);
 
-            var move = Vector3.Zero;
+            var stick = Gamepad.GetLeftStick();
+            var move  = new Vector3(stick.X, Gamepad.GetAxis(GamepadAxis.RightTrigger) - Gamepad.GetAxis(GamepadAxis.LeftTrigger), stick.Y);
             if (Input.GetKey(Keys.W)) move.Z += 1;
             if (Input.GetKey(Keys.S)) move.Z -= 1;
             if (Input.GetKey(Keys.D)) move.X += 1;
@@ -80,7 +89,11 @@ public sealed class FreeCameraSystem : ISystem
             if (Input.GetKey(Keys.Q)) move.Y -= 1;
             if (move != Vector3.Zero)
             {
-                var speed = camera.MoveSpeed * (Input.GetKey(Keys.ShiftKey) ? camera.FastMultiplier : 1.0f) * Time.DeltaTime;
+                // キーとスティックを両方使った時に速くなりすぎないよう、長さは 1 まで
+                // (以前はキーだけで、W + D の斜めは 1.41 倍の速さだった)
+                if (move.LengthSquared() > 1.0f) move = Vector3.Normalize(move);
+                var fast  = Input.GetKey(Keys.ShiftKey) || Gamepad.GetButton(GamepadButton.RightShoulder);
+                var speed = camera.MoveSpeed * (fast ? camera.FastMultiplier : 1.0f) * Time.DeltaTime;
                 transform.Position += (transform.Right * move.X + Vector3.UnitY * move.Y + transform.Forward * move.Z) * speed;
             }
         });

@@ -19,12 +19,14 @@ public struct Camera
 // ==========================================================================
 // 自由に飛び回るカメラ (FreeCameraSystem が動かす)
 //   右ボタンを押しながらマウス : 向き / WASD : 前後左右 / E Q : 上下 / Shift : 速く
+//   ゲームパッド (1 台目) : 右スティック : 向き / 左スティック : 前後左右 / RT LT : 上下 / RB : 速く
 // ==========================================================================
 public struct FreeCamera
 {
     public float MoveSpeed       = 10.0f;    // 1 秒に進む距離
     public float FastMultiplier  = 5.0f;     // Shift を押している間の倍率
     public float LookSensitivity = 0.2f;     // マウス 1 ピクセルあたりの回転 (度)
+    public float GamepadLookSpeed = 120.0f;  // ゲームパッドの右スティックを倒し切った時の回転 (度 / 秒)
 
     internal float Yaw;
     internal float Pitch;

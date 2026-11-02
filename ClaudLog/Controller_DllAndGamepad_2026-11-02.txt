@@ -1,0 +1,84 @@
+﻿====================================================================
+ コントローラー : Core.dll への追加 (C ABI) / C# の Gamepad / サンプル
+ 日付     : 2026-11-02
+ ブランチ : feature/gamepad (develop 4c9533d から)
+ レビュー : Controller_Review_2026-11-02.txt (古いソースの指摘と修正)
+====================================================================
+
+■ 層の形
+  C# GameEngine.Runtime (Gamepad) → Core.dll (controllerDll.cpp の extern "C") → ko::GamePad → ko::XInput / ko::DirectInputGamePad
+  Audio.dll と同じ形 (C ABI、ハンドル / 番号でやり取り、ポインタは C# に渡さない、毎フレームの値は配列でまとめて 1 回)。
+  Core.dll は以前から GameEngine_console.csproj の NativeEngineFile で出力フォルダにコピーされているので、csproj の変更は無し。
+
+■ C++ (Core)
+  1. Core.vcxproj / .filters に Source/Controller 以下の 17 .h + 17 .cpp を追加 (フィルター : Controller / diectInput / xInput)。
+     リンクは各ヘッダーの #pragma comment (dinput8.lib / dxguid.lib / xinput.lib) のまま。
+  2. 新規 Source/Controller/gamePad.h / .cpp : XInput と DirectInput のパッドを 4 台までの 1 つの並びにまとめる
+     - 番号 : XInput のユーザー番号 (0 〜 3) が繋がっていればその番号。空いている番号に DirectInput のパッドを列挙順に入れる
+       (XInput のパッドが後から繋がると、DirectInput のパッドの番号が後ろへずれることがある)
+     - ボタンは XInput の並び (XINPUT_GAMEPAD_*)。L2 / R2 をボタンとして 0x0400 / 0x0800 (XInput では空き) に入れる
+       (XInput は XINPUT_GAMEPAD_TRIGGER_THRESHOLD = 30 / 255 を超えたら押した扱い)
+     - スティック -1 〜 1 (上 / 右が +)、トリガー 0 〜 1
+     - 振動は XInput のパッドだけ (DirectInput のフォースフィードバックは扱わない)。値が変わった時だけ送る
+     - DirectInput は別のスレッドで作成 + 列挙 (レビュー F-1)。終わった後の Update から出てくる
+     - DirectInput のパッドのキーコンフィグ中は、そのパッドの入力を 0 で返す (割り当てのために押したボタンがゲームの操作にならない)
+  3. 新規 Source/Controller/controllerDll.cpp (export。C# 側は GamepadNativeMethods.cs)
+       bool     Controller_Initialize()                                  常に true (XInput はすぐ読める)
+       void     Controller_Shutdown()                                    振動を止め、列挙中なら待ってから解放
+       uint32_t Controller_Update(ControllerPadState* out, uint32 count) 全パッドを読んで配列に入れる。戻り値は接続数
+       void     Controller_SetVibration(uint32 pad, float left, float right)  0 〜 1
+       bool     Controller_RescanDevices()                               DirectInput を別スレッドで列挙し直す
+       bool     Controller_BeginButtonConfig(uint32 pad)                 DirectInput のパッドのキーコンフィグを始める
+       int32_t  Controller_GetButtonConfigStep()                         -1 / 0 〜 9 (A B X Y L L2 R R2 Start Select)
+     ControllerPadState (36 バイト) : connected / type (0 無し 1 XInput 2 DirectInput) / buttons / leftX leftY rightX rightY / leftTrigger rightTrigger
+     「パッドの数・接続状態・ボタン・スティック・トリガー」は Controller_Update の 1 回で全部受け取るので、個別の関数は作っていない。
+
+■ C# (GameEngine.Runtime)
+  1. 新規 Native/GamepadNativeMethods.cs : 上の 7 関数と PadState (StructLayout.Sequential、C++ と同じ並び)
+  2. 新規 Gamepad.cs : Input (GetKey / GetKeyDown) に合わせた静的クラス。pad を省略すると 0 (1 台目)
+       Gamepad.GetButton / GetButtonDown / GetButtonUp (GamepadButton, pad)
+       Gamepad.GetAxis (GamepadAxis.LeftX ... RightTrigger, pad) / GetLeftStick / GetRightStick (Vector2)
+       Gamepad.SetVibration (left, right, pad) / StopVibration
+       Gamepad.IsConnected / GetPadType / GetButtons / ConnectedCount / MaxCount (= 4)
+       Gamepad.RescanDevices / BeginButtonConfig / ButtonConfigWaitingFor
+     押した瞬間 / 離した瞬間は C# で前のフレームのボタンと比べて作る (C++ には今の値だけを聞く)。
+     Core.dll が古くて関数が無い時 (EntryPointNotFoundException) は、何も繋がっていない扱いで動く。
+  3. Engine.cs : コンストラクタで Gamepad.Initialize()、Run のフレームの頭 (Time.Tick の直後、System より前) で Gamepad.Update()
+     (1 回の P/Invoke で 4 台分)、Dispose で Gamepad.Shutdown() (Audio より先)。
+  4. FreeCameraSystem / FreeCamera : 1 台目のパッドでも動かせるようにした
+     右スティック = 向き (FreeCamera.GamepadLookSpeed 度 / 秒、既定 120)、左スティック = 前後左右、RT / LT = 上下、RB = 速く。
+     キーとスティックを合わせた移動の長さを 1 までにした (以前はキーだけで、W + D の斜めは 1.41 倍の速さだった)。
+
+■ サンプル (GameEngine_console)
+  新規 Samples/GamepadMonitor.cs (GamepadMonitorSystem。Program.cs で登録)
+    - プロファイラー (F1) : "Gamepads" と、1 台目の "Pad0 type / buttons / left X / left Y / right X / right Y / LT / RT"
+      (CPU の欄の下の方。スクロールすると見える)
+    - コンソール : パッドの抜き差し ("[Gamepad] Pad 0 connected (XInput)") と、押したボタンの名前
+    - A を押している間 振動 (左 = LT、右 = RT の引き具合。引いていない時は 0.3)
+    - F9 : DirectInput のパッドを列挙し直す / F10 : 1 台目が DirectInput のパッドならボタンの割り当て (コンソールに次のボタンが出る)
+
+■ 文字コード
+  C++ : 全て UTF-8 (BOM 付き) + CRLF (古いソースは Shift-JIS から変換)。
+  C#  : 新しいファイルは BOM なし + CRLF (Runtime / Samples の他のファイルに合わせた)。Program.cs は BOM 付きのまま。
+
+■ ビルド (MSBuild、プロジェクトごと、x64)
+  Core.vcxproj         Debug / Release : 警告 0 / エラー 0
+  GameEngine_console   Debug / Release : エラー 0 (警告は MSB3290 の COM 参照の 1 件だけ。今回の変更の前からある)
+
+■ 動作の確認 (この PC にはパッドが無い)
+  ゲームのウィンドウだけを PrintWindow で撮り、キーは PostMessage でゲームのウィンドウにだけ送った。
+  Release : 起動 → 描画は以前どおり → F9 → F9 → F10 → 終了。落ちない・止まらない。
+    [Controller] DirectInput init : 0 pad(s) (create 11.00 ms + enumerate 154.73 ms, worker thread)
+    [Controller] DirectInput rescan : 0 pad(s) (create 0.00 ms + enumerate 149.88 ms, worker thread)
+    [Controller] DirectInput rescan : 0 pad(s) (create 0.00 ms + enumerate 228.55 ms, worker thread)
+    [Gamepad] F10 : pad 0 is not a DirectInput pad (XInput pads need no config)
+    [Engine] C# update average 0.009 ms (3851 frames)   ← Gamepad.Update を含む C# 側の 1 フレームの時間
+  Debug   : 同じ手順で正常 (create 11.66 ms + enumerate 159.69 ms、C# update average 0.021 ms)。
+  列挙を別のスレッドに移す前は、同じ列挙がメインスレッドで 148.7 / 179.5 ms (起動時)、128.6 / 138.9 ms (F9) かかっていた。
+  変更前の C# update の値はこのセッションでは測っていないので、増えた量は比べていない
+  (パッドが無い時の Controller_Update は XInput を 250 ms に 1 スロット調べるだけで、残りは配列のコピー)。
+
+■ 確かめていないこと / 利用者にお願いしたいこと
+  ・実機のパッド (XInput / DirectInput) でのボタン・スティック・トリガー・振動・抜き差し。
+  ・DirectInput のパッドのボタンの既定の並び (DualShock 4 の並びにした) が手元のパッドと合うか。合わなければ F10 で割り当てる。
+  ・プロファイラーの "Gamepads" 以下の表示 (PostMessage のホイールは ImGui に届かず、スクロールして撮れなかった)。

@@ -210,7 +210,7 @@ public sealed class AudioSettings
 //   engine.Run();
 //
 //   毎フレームの順番 :
-//     ウィンドウのメッセージ → Time → 登録した System (登録順) → Transform の行列 → カメラ → 描画オブジェクトへ反映
+//     ウィンドウのメッセージ → Time → ゲームパッド → 登録した System (登録順) → Transform の行列 → カメラ → 描画オブジェクトへ反映
 //     → ライト → 音 (AudioSource) → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
 //   以前 (GameEngine_console の RHI.cs) は、ウィンドウ・P/Invoke・テスト用の関数が 1 つのクラスに入っていた
 // ==========================================================================
@@ -301,6 +301,8 @@ public sealed class Engine : IDisposable
         _audioSystem = new AudioSystem(World, _audioLoaded);
 
         Input.Attach(_window);
+        // ゲームパッド (Core.dll。XInput + DirectInput)。パッドが無くてもそのまま動く (何も繋がっていない扱い)
+        Gamepad.Initialize();
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
 
         // カメラを動かす System は既定で入れておく (コンポーネントを付けた物だけが動く)
@@ -328,6 +330,9 @@ public sealed class Engine : IDisposable
 
             Time.Tick();
             var start = Stopwatch.GetTimestamp();
+
+            // ゲームパッドはフレームの頭で 1 回、全パッド分をまとめて読む (System の中ではこの値を見る)
+            Gamepad.Update();
 
             foreach (var system in _systems) system.Update(World);
             _transformSystem.Update(World);
@@ -368,6 +373,7 @@ public sealed class Engine : IDisposable
         {
             Console.WriteLine($"[Engine] C# update average {_updateTotalMs / _updateFrames:F3} ms ({_updateFrames} frames, entities {World.EntityCount})");
         }
+        Gamepad.Shutdown();                 // 振動を止めてから解放される
         if (_audioLoaded) AudioNativeMethods.Audio_Shutdown();   // ボイス → XAudio2 → PCM の順に解放される
         Graphics.Shutdown();                // レンダーターゲットを先に返す
         NativeMethods.Renderer_CleanUp();   // GPU の完了を待ってから解放される
