@@ -110,6 +110,9 @@ namespace RHI
 		BlendMode     Blend    = BlendMode::Opaque;
 		float         Metallic  = 0.0f;   // PBR : 金属らしさ (0 = 非金属)
 		float         Roughness = 0.6f;   // PBR : 表面の粗さ (0 = つるつる / 1 = ざらざら)
+		// 裏面も描く (葉や布など厚みの無い物)。false なら不透明な物は裏面を描かない (裏面カリング)
+		// 半透明は描く順番を崩せないので、この値に関係なく両面を描く
+		bool          DoubleSided = false;
 	};
 
 	struct MaterialHandle

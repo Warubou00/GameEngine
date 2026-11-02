@@ -309,10 +309,10 @@ namespace RHI
             };
             static_assert(sizeof(DrawData) == 16, "DrawData must be 16 bytes (same as HLSL)");
 
-            // 描き方 (PSO) のまとまりの数 (Pipeline::PIPELINE_GROUP_COUNT と同じ)。不透明 → 半透明 の順に描く
-            static constexpr uint32_t GROUP_COUNT = 2;
-            // 半透明の描画の先頭を、この数の倍数にそろえる (カリングの詰め直しは 64 個ずつまとめて処理するため、
-            // 64 個のまとまりの中に不透明と半透明が混ざらないようにする。間は空の描画で埋める)
+            // 描き方 (PSO) のまとまりの数 (Pipeline::PIPELINE_GROUP_COUNT と同じ)。不透明 → 両面の不透明 → 半透明 の順に描く
+            static constexpr uint32_t GROUP_COUNT = 3;
+            // 2 つ目以降のまとまりの先頭を、この数の倍数にそろえる (カリングの詰め直しは 64 個ずつまとめて処理するため、
+            // 64 個のまとまりの中に別の描き方が混ざらないようにする。間は空の描画で埋める)
             static constexpr uint32_t GROUP_ALIGNMENT = 64;
             // DrawFrame のバッファ内で、ExecuteIndirect の引数が始まる位置 (DrawData × MAX_DRAWS の後ろ)
             static constexpr UINT64 DRAW_ARGS_OFFSET = static_cast<UINT64>(MAX_DRAWS) * sizeof(DrawData);
@@ -347,6 +347,7 @@ namespace RHI
                 uint32_t Phase;              // 0 : 視錐台だけ / 1 : 前段 / 2 : 後段
                 uint32_t ResetVisibility;    // 1 : 可視の記録が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
                 uint32_t AlphaDrawStart;     // 半透明の描画の先頭 (無ければ 0xFFFFFFFF)
+                uint32_t DoubleSidedDrawStart;   // 両面の不透明の描画の先頭 (無ければ 0xFFFFFFFF)
             };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
