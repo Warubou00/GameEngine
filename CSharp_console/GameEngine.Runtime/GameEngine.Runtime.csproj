@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    C# のゲームエンジン本体 (クラスライブラリ)
+      - ECS (World / Entity / Component / System)、時間、入力、カメラ、アセット (モデル) の読み込み
+      - C++ (Renderer.dll) との P/Invoke は Native/NativeMethods.cs にまとめる
+      - ゲーム / サンプルはこのライブラリを参照する別のプロジェクト (GameEngine_console) に書く
+    以前は GameEngine_console の RHI.cs に、ウィンドウ・メインループ・P/Invoke・テスト用の関数が全部入っていた
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- 配列をコピーせずに C++ へ渡すため (fixed / ポインタ) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>AnyCPU;x64</Platforms>
+    <RootNamespace>GameEngine</RootNamespace>
+    <AssemblyName>GameEngine.Runtime</AssemblyName>
+  </PropertyGroup>
+
+</Project>

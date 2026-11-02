@@ -1,0 +1,112 @@
+====================================================================
+ エンジン化 E1 : C# エンジンの土台 (ECS / 入力 / 時間 / カメラ / モデル読み込み)
+ 日付   : 2026-11-02
+ ブランチ : feature/engine-e1
+ 設計   : ClaudLog/Engine_DesignReview_2026-11-02.txt (ECS、描画パスは C# で組む、で決定)
+====================================================================
+
+■ 概要
+  C# 側をエンジンのライブラリ (GameEngine.Runtime) とサンプル (GameEngine_console) に分け、
+  ECS でシーンを組み立てられるようにした。テスト専用の関数 (Test_XXX / Renderer_TestXXX) は全て廃止し、
+  モデルの読み込み・配置・カメラは C# のコードで書く形になった。カメラを動かすテストモード (orbit / free) も追加。
+
+■ C# : GameEngine.Runtime (新規クラスライブラリ、名前空間 GameEngine)
+  Engine           : ウィンドウ・C++ の初期化・メインループ・World・System の登録 (以前の RHI.cs の役割を整理)
+                     毎フレーム : メッセージ → Time → 登録した System → Transform → カメラ → 描画へ反映 → 描画 → 入力の後始末
+  EngineSettings   : タイトル / 大きさ / VSync
+  GraphicsSettings : IndirectDraw / Instancing / GpuCulling / OcclusionCulling (以前の SetIndirectDraw など)
+  Time             : DeltaTime (0.1 秒で上限) / TotalTime / FrameCount
+  Input            : GetKey / GetKeyDown / GetKeyUp / GetMouseButton / MouseDelta / ScrollDelta
+  AssetManager     : LoadModel(path) → Model (同じパスは 1 回だけ読み込む)。以前の Test_LoadModel
+  ECS
+    Entity         : 番号 + 世代 (削除された番号を使い回しても、古い Entity は IsAlive = false)
+    World          : CreateEntity / DestroyEntity / Add / Set / Get (ref) / Has / Remove / ForEach (1〜3 型) / GetPool
+    ComponentPool  : 型ごとの詰めた配列 (スパースセット)。追加・削除・検索が O(1)、全部を回すのが速い。外された時のイベント
+    ISystem        : Update(World)。engine.AddSystem で登録 (Unity のスクリプトに当たる処理はここに書く)
+  コンポーネント
+    Transform      : Position / Rotation / Scale (左手系)。Forward / Right / Up / LookAt / LookingAt
+    Static         : 動かない物の印 (行列を最初の 1 回だけ計算して送る)
+    Camera         : FieldOfView (度) / NearClip / FarClip / Orthographic
+    MeshRenderer   : Model を描く
+    FreeCamera     : 右ボタン + マウスで向き、WASD で移動、E / Q で上下、Shift で速く
+    OrbitCamera    : 注視点の周りを回り続ける (カメラを動かし続けるテスト用)
+  組み込みの System (登録した System の後に動く)
+    TransformSystem  : 行列を作り、前のフレームから変わった物だけ印を付ける (Static は 1 回だけ)
+    CameraSystem     : 最初のカメラを C++ へ (変わった時だけ)
+    RenderSyncSystem : MeshRenderer を C++ の描画オブジェクトへ反映
+                       - 新しい物はモデルごとにまとめて作る (1 モデル 1 回の呼び出し)
+                       - 行列が変わった物は配列に集めて 1 回の呼び出しで送る
+                       - 外された / 削除された物はまとめて削除
+                       - 何も増えず何も動いていないフレームは、何も見て回らず C++ も呼ばない
+    FreeCameraSystem / OrbitCameraSystem (既定で登録済み。コンポーネントを付けた物だけ動く)
+  Native/NativeMethods.cs : P/Invoke の宣言 (エンジンの中だけで使う)
+
+■ C# : GameEngine_console (サンプル)
+  - RHI.cs を削除し、Program.cs をエンジンを使う形に書き直した
+  - Samples/StressTest.cs : 負荷テストの格子とカメラの位置 (以前は C++ の SpawnTestGrid / SetTestGroundView / SetTestInsideView)
+  - Samples/Spin.cs       : 自分で書くコンポーネントと System の例 (回し続ける)
+  - 引数 : --stress N / --view inside|ground|orbit / --draw / --instancing / --culling / --occlusion / --animate on
+  - ソリューション (GameEngine_console.sln) に GameEngine.Runtime を追加。参照は ProjectReference
+
+■ C++ : Renderer.dll (ハンドル方式の API に作り替え)
+  以前 : 「最後に読み込んだモデル 1 個 + カメラ 1 個」を抱え、格子やテスト用カメラを直書き
+  今   : モデル・描画オブジェクトを何個でも作れ、配置とカメラは C# が決める
+    Renderer_LoadModel(path, out subMeshCount)            → モデルのハンドル
+    Renderer_CreateRenderObjects(model, count, out handles) → 描画オブジェクトをまとめて作る
+    Renderer_DestroyRenderObjects(handles, count)
+    Renderer_SetRenderObjectTransforms(handles, matrices, count) → 動いた物の行列をまとめて
+    Renderer_SetCamera(CameraDesc)  : 位置 / 向き / 上 / 視野角 / Near / Far。行列は C++ で作る (リサイズに自動で追従)
+    Renderer_WaitForGpu / Renderer_ReportProfilerValue
+    削除 : Renderer_TestLoadModel / Renderer_TestSpawnGrid / Renderer_TestGroundView / Renderer_TestInsideView
+  SceneRenderer : 描画リストは描画オブジェクトが増減した時だけ作り直す (位置が変わっただけなら同じリスト)
+                  → RHI の「描画リストが同じなら GPU 用のデータを書き直さない」がそのまま効く
+
+■ C++ : RHI.dll
+  - DestroyObject を追加 (削除した番号は次の CreateObject で使い回す)
+  - rhi.h のオクルージョンカリングの説明を 2 段階の内容に直した
+
+■ 計測結果 (RTX 2070 / Release / 1280x720、各 2 回)
+  描画 (以前の C++ のテストシーンと同じ配置)
+                               映った数 / 描画数     GPU                   以前
+    --stress 10000              20002 / 1252        0.242〜0.245 ms      0.242 ms
+    --stress 10000 --view ground 1010 / 252         0.111〜0.114 ms      0.114 ms
+    通常起動 (箱 1 個)               2 / 2           0.067〜0.068 ms      0.067 ms
+    → 映った数・描画数が以前と完全に一致し、GPU 時間も同じ (配置が C++ と同じになっている)
+
+  C# 側の 1 フレームの時間 (System の更新 + C++ への反映。描画は含まない)
+    箱 1 個                                   0.003 ms
+    10002 エンティティ (動かない)              0.05 ms   (最初は 0.10 ms。何も動いていない時は描画への反映を省くようにした)
+    10002 エンティティ (カメラが回り続ける)     0.05 ms
+    10000 個が毎フレーム回る (--animate on)    0.75 ms   (C++ の記録 0.32 ms / GPU 0.40 ms。約 600 FPS)
+      → 毎フレーム 1 万個の行列 (640 KB) を 1 回の呼び出しで送っている。今後の改善の目安
+
+■ 確認したこと
+  - D3D12 デバッグレイヤーのエラー・警告 0、例外 0 : 通常起動 / --stress 10000 / ground / orbit (格子あり・なし)
+  - 通常起動の画面が以前と同じ (原点の箱を (0, 5, -10) から見る)
+  - orbit : 時間をずらした 2 枚の画面でカメラの位置が変わり、映った数も変わる (カリングが動くカメラに追従)
+  - 入力 : ゲームのウィンドウに W キーを送ると、カメラが前に進む (箱を通り過ぎて映った数が 0 になる)
+
+■ 使い方 (C#)
+    using var engine = new Engine(new EngineSettings { Title = "Sample" });
+    var box = engine.Assets.LoadModel("../Model/box.obj");
+    var world = engine.World;
+    var e = world.CreateEntity();
+    world.Add(e, new Transform(new Vector3(0, 0, 0)));
+    world.Add(e, new MeshRenderer(box));
+    var camera = world.CreateEntity();
+    world.Add(camera, Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
+    world.Add(camera, new Camera());
+    world.Add(camera, new FreeCamera());
+    engine.AddSystem(new SpinSystem());   // 自分の System
+    engine.Run();
+
+■ 注意 / 残していること
+  - ForEach の中でエンティティ / コンポーネントを追加・削除しないこと (詰めた配列の順番が変わるため)。
+  - 親子関係 (Transform の階層) はまだ無い。
+  - Renderer の camera.h / WVP/*.h は使われなくなったが、プロジェクトには残している (次の段階で整理)。
+  - 実行ファイルのプロジェクト名は GameEngine_console のまま (Visual Studio の設定を変えないため)。
+
+■ 次 (E2)
+  - C# から GPU 資源を作る : GraphicsBuffer (Structured / Constant)、Texture、Shader (リフレクション)、Material
+  - マテリアル (PSO) ごとに GPU 駆動の描画を分ける
+  - その後 E3 : C# で描画パスを組む (レンダーターゲット / パス / Forward・Deferred を C# で)

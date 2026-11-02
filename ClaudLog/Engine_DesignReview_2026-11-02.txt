@@ -1,0 +1,193 @@
+====================================================================
+ ゲームエンジン化 : C# 側の設計と進め方 (設計レビュー)
+ 日付   : 2026-11-02
+ 対象   : CSharp_console (C# ホスト) / Renderer.dll / RHI.dll
+====================================================================
+
+■ 目標
+  Unity / Unreal Engine のように、C# 側でシーン・オブジェクト・カメラ・ライト・マテリアル・GPU バッファ・
+  描画パイプライン (フォワード / ディファード) を自由に扱えるエンジンにする。
+  C++ 側 (RHI.dll / Renderer.dll) は「速い描画の土台」、C# 側は「ゲームを作る場所」という分担にする。
+
+====================================================================
+■ 1. 現状 (固定化されている所)
+====================================================================
+  C# (RHI.cs / Program.cs)
+    - API は Test_LoadModel / Test_SpawnGrid / Test_InsideView / Test_GroundView と ON/OFF の切り替えだけ。
+    - モデル・オブジェクト・カメラ・マテリアルを C# から作ったり動かしたりできない。
+    - クラス名が RHI だが、実際は Renderer.dll の入口 + ウィンドウ + メインループ。
+    - 毎フレームの更新 (Update) の仕組みが無い。時間 (deltaTime)・入力 (キーボード / マウス) も無い。
+
+  Renderer.dll (SceneRenderer / rendererDll.cpp)
+    - g_renderer 1 個の中に、最後に読み込んだモデル・カメラ 1 個・描画リストを抱えている。
+    - モデルは "../Model/box.obj" 固定。負荷テストの格子やテスト用カメラも C++ に直書き。
+    - 公開関数は C# の都合に合わせた個別の関数 (Renderer_TestXXX) で、汎用の操作が無い。
+
+  RHI.dll
+    - シェーダー 1 本 (hlslTemplate.shader)・PSO 1 個・ルートシグネチャ 1 個に固定。
+    - 描画先はバックバッファ + 深度のみ。追加のレンダーターゲット (G-Buffer) が作れない → ディファード不可。
+    - 任意のバッファ (StructuredBuffer / 定数バッファ) を外から作る口が無い。マテリアルの概念も無い。
+    - ライトが無い (ピクセルシェーダーはテクスチャ × 頂点カラーのみ)。
+    - 良い所 : GPU 駆動の描画 (ExecuteIndirect / インスタンシング / GPU カリング / 2 段階オクルージョン) は
+              DrawItem の列を渡すだけで動くので、上の層を作り替えてもそのまま活かせる。
+
+====================================================================
+■ 2. 目指す形 (層の分担)
+====================================================================
+
+    ┌──────────────── C# (GameEngine.dll + ゲーム / サンプル) ────────────────┐
+    │ Engine / Time / Input / Scene / GameObject / Component (Transform, Camera, │
+    │ MeshRenderer, Light, スクリプト) / Assets (Model, Mesh, Material, Texture,  │
+    │ Shader, GraphicsBuffer) / RenderPipeline (Forward / Deferred の選択と設定)  │
+    └───────────────────────────────┬────────────────────────────────────────────┘
+                                    │ C ABI (ハンドル + まとめて渡す関数)
+    ┌───────────────────────────────┴──── Renderer.dll (C++) ───────────────────┐
+    │ ネイティブ側の資源表 (ハンドル → メッシュ / マテリアル / オブジェクト / ライト)    │
+    │ 描画パイプライン (Forward / Deferred のパス構成)、モデル読み込み (OBJ ...)       │
+    └───────────────────────────────┬────────────────────────────────────────────┘
+                                    │ RHI::IRenderHardwareInterface
+    ┌───────────────────────────────┴──── RHI.dll (C++ / DirectX12) ──────────────┐
+    │ バッファ / テクスチャ / レンダーターゲット / シェーダー / PSO / パス実行 / GPU 駆動描画 │
+    └────────────────────────────────────────────────────────────────────────────┘
+
+  方針
+    - C# と C++ の間はハンドル (uint32) だけでやり取りする。ポインタは渡さない。
+    - 1 フレームに何千回も呼ぶ操作は「まとめて 1 回」にする (P/Invoke の回数を増やさない)。
+        例 : 動いたオブジェクトの行列を配列でまとめて Renderer_UpdateTransforms(handles, matrices, count)
+    - 構造体は blittable (int / float / 固定長のみ) にして、コピー無しで渡す。
+    - 速さの土台 (GPU 駆動描画) は RHI に残し、C# からは「何を描くか」だけを渡す。
+
+====================================================================
+■ 3. C# 側の API の例 (完成時のイメージ)
+====================================================================
+
+  using GameEngine;
+
+  var engine = new Engine(new EngineSettings
+  {
+      Title = "Sample", Width = 1280, Height = 720, VSync = false,
+      RenderPipeline = RenderPipelineType.Deferred,       // Forward / Deferred
+  });
+
+  var scene = engine.CreateScene("Main");
+
+  // モデルの読み込み (以前の Test_LoadModel)
+  Model box = engine.Assets.LoadModel("Model/box.obj");
+
+  // カメラ (動かすスクリプト付き = カメラを動かすテストモード)
+  var camera = scene.CreateGameObject("Main Camera");
+  camera.Transform.Position = new Vector3(0, 5, -10);
+  camera.AddComponent<Camera>().FieldOfView = 60;
+  camera.AddComponent<FreeCameraController>();            // WASD + マウス / または OrbitCamera
+
+  // ライト
+  scene.CreateGameObject("Sun").AddComponent<DirectionalLight>().Intensity = 3.0f;
+
+  // オブジェクト (以前の Test_SpawnGrid は、サンプルのスクリプトに移す)
+  for (int i = 0; i < 10000; i++)
+      scene.Instantiate(box, new Vector3(i % 100 * 3, 0, i / 100 * 3));
+
+  // 任意の GPU バッファ
+  var particles = new GraphicsBuffer<Particle>(GraphicsBufferType.Structured, 4096);
+  particles.SetData(initialParticles);
+  var material = new Material(Shader.Load("Shader/particle.shader"));
+  material.SetBuffer("g_Particles", particles);
+  material.SetColor("g_Tint", Color.Orange);
+
+  engine.Run();   // 毎フレーム : Input → Update (スクリプト) → LateUpdate → 行列をまとめて送る → 描画
+
+  // スクリプト (Unity の MonoBehaviour に相当)
+  class Spinner : Behaviour
+  {
+      public float Speed = 90;
+      public override void Update() => Transform.Rotate(0, Speed * Time.DeltaTime, 0);
+  }
+
+  命名の整理
+    Test_LoadModel   → Assets.LoadModel / scene.Instantiate
+    Test_SpawnGrid   → サンプル (Samples/StressTestScene.cs) の中のスクリプト
+    Test_InsideView / Test_GroundView → サンプルのカメラの位置 (C# に移す)
+    RHI クラス       → Engine (ウィンドウ / ループ) と Native (P/Invoke の宣言だけ) に分ける
+    Renderer_SetIndirectDraw など → engine.Graphics.IndirectDraw などの設定 (プロファイラーからも変えられる)
+
+====================================================================
+■ 4. 進め方 (フェーズ)
+====================================================================
+  1 回で全部を作り替えると壊れた時に原因が追えないので、毎回「動く状態」を保って段階的に進める。
+  各フェーズの終わりに、これまでと同じく目視確認 → マージ。
+
+  ── E1 : C# エンジンの土台 (ここから始める) ──────────────────────────────
+    C#
+      - プロジェクトを分ける : GameEngine (クラスライブラリ = エンジン) / Sandbox (実行ファイル = サンプル)
+      - Engine (ウィンドウ・メインループ)、Time (DeltaTime / FPS)、Input (キー / マウス)
+      - Scene / GameObject / Component / Transform (親子あり) / Behaviour (Update / LateUpdate)
+      - Camera (視野角 / Near / Far)、MeshRenderer、Assets.LoadModel → Model (メッシュ + マテリアル)
+      - FreeCameraController / OrbitCameraController (= カメラを動かすテストモード)
+      - 負荷テストは Sandbox のサンプルシーンへ (--stress / --view / --occlusion などの引数もそちらへ)
+    Renderer.dll
+      - ハンドルの資源表 : Mesh / Material(今はテクスチャ 1 枚) / RenderObject / Camera
+      - C ABI : Renderer_LoadModel(path, out info) / Renderer_CreateRenderObject / Renderer_UpdateTransforms(まとめて) /
+                Renderer_SetCamera / Renderer_DestroyRenderObject など。Test 系の関数は削除
+    RHI.dll
+      - オブジェクトの削除 (今は作るだけ) と、描画リストの差分更新
+    確認 : 箱が今まで通り表示され、カメラを WASD / マウス / 自動旋回で動かせる。負荷テストの数値が今と同等。
+
+  ── E2 : C# から GPU 資源を作る ─────────────────────────────────────────
+    - GraphicsBuffer (Structured / Constant / Raw、SetData / 部分更新)、Texture2D (作成 / ファイル)
+    - Shader (ファイルから。DXC のリフレクションで変数名とレジスタを取得)
+    - Material (シェーダー + プロパティ : SetFloat / SetVector / SetColor / SetTexture / SetBuffer)
+    - RHI : マテリアルごとの PSO / ルートシグネチャ (PSO キャッシュの名前にシェーダーとステートを含める。仕組みは既にある)
+    - GPU 駆動描画は「マテリアル (PSO) ごと」に分けて ExecuteIndirect する
+    確認 : C# で作ったバッファの値でオブジェクトの色や位置が変わる
+
+  ── E3 : 描画パイプライン (フォワード / ディファード) ─────────────────────────
+    - RHI : レンダーターゲット (任意のフォーマット・複数同時 = MRT)、パス (描画先 + クリア + 読むテクスチャ) の実行
+    - ライト : Directional / Point / Spot (C# のコンポーネント → まとめて StructuredBuffer へ)
+    - Forward  : 1 パスでライトを計算 (ライトが少ない場面向け)
+    - Deferred : G-Buffer (アルベド / 法線 / 粗さ等 + 深度) → ライティングパス (全画面) → 合成
+                 (ライトが多い場面向け。後でタイル / クラスター化してライト数を増やせる)
+    - C# から選ぶ : engine.Graphics.RenderPipeline = Forward / Deferred (実行中に切り替え可)
+    - 既存の GPU カリング / オクルージョンは両方のパイプラインの「不透明物の描画」でそのまま使う
+    確認 : 同じシーンが両方のパイプラインで同じ見た目になる。ライトを増やした時の負担を比べる
+
+  ── E4 : C# から描画パスを組む (Unity の SRP / Unreal の RDG に相当) ──────────
+    - CommandBuffer / RenderGraph 風の API : C# で「この RT に、この描画を、このマテリアルで」を並べる
+    - ポストエフェクト (トーンマップ / ブルーム など) を C# のパスとして追加できる
+    - Forward / Deferred もこの仕組みの上の「組み込みのパイプライン」になる
+
+  ── E5 : エディター的な機能 (任意) ──────────────────────────────────────
+    - ImGui でヒエラルキー / インスペクター (Transform・コンポーネントの値をその場で変える)
+    - シェーダーのホットリロード、シーンの保存 / 読み込み (JSON など)
+
+====================================================================
+■ 5. 決めたこと (2026-11-02 に確認)
+====================================================================
+  1. C# のオブジェクトの作り方 : ECS
+     - Entity (番号 + 世代) / Component (struct。型ごとに詰めた配列で持つ) / System (毎フレームまとめて処理)
+     - 上の §3 の GameObject 風の例は、ECS では次のようになる
+         var world  = engine.World;
+         var camera = world.CreateEntity();
+         world.Add(camera, new Transform { Position = new Vector3(0, 5, -10) });
+         world.Add(camera, new Camera { FieldOfView = 60 });
+         world.Add(camera, new FreeCamera { MoveSpeed = 10 });
+         engine.AddSystem(new SpinSystem());      // スクリプトの代わりに System を書く
+     - コンポーネントが配列に詰まっているので、1 万個の Transform をまとめて計算して、まとめて C++ に送るのに向いている
+
+  2. 描画パイプライン : 最初から C# でパスを組む (Unity の SRP / Unreal の RDG 風)
+     - E3 と E4 を 1 つにする : RHI は「レンダーターゲット・パス・描画のまとまり・全画面の描画」の部品を出し、
+       Forward / Deferred は C# 側で組む (エンジンに付属するパイプラインとして C# で書く)
+     - 既存の GPU 駆動描画 (カリング / オクルージョン / ExecuteIndirect) は「不透明物を描く」部品として C# から呼ぶ
+
+  3. ウィンドウ / ホスト : 今の WinForms のコンソールアプリを続ける (エディターを作る時に見直す)
+     - 既存の CSharp/GameEngine (WPF) はそのまま残し、触らない
+
+  4. 進め方 : E1 (C# エンジンの土台) から
+
+====================================================================
+■ 6. 性能の注意 (これまでの最適化を壊さないために)
+====================================================================
+  - P/Invoke は 1 回 数十 ns。オブジェクトごとに毎フレーム呼ぶと 1 万個で 1 ms 近くになるので、必ずまとめて渡す。
+  - 動いたオブジェクトだけを送る (Transform に「変わった」印を持つ)。止まっているシーンでは毎フレームほぼ何も送らない。
+  - 描画リストは「変わった時だけ」RHI に渡す (今の updateDraws の使い回しがそのまま効く)。
+  - C# の毎フレームの割り当て (new) を避ける (GC の停止でフレームが飛ぶ)。配列は使い回す。
+  - 各フェーズで今の負荷テスト (--stress 10000 / --view ground など) の数値を測り、悪くなっていないか確かめる。

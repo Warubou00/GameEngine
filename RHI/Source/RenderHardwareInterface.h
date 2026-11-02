@@ -67,6 +67,7 @@ namespace RHI
         IndexRange   UploadIndices(const uint32_t* indices, uint32_t count)override;
         void         LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles)override;
         ObjectHandle CreateObject()override;
+        void         DestroyObject(ObjectHandle object)override;
         void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;
         void         SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)override;
 

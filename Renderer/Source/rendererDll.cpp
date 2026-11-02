@@ -1,13 +1,17 @@
 ﻿
 /***********************************************************************************
 * @file    rendererDll.cpp
-* @brief   Renderer.dll が C# ホストへ export する関数
-* @details C# から呼ぶ入口はこの DLL だけ (Phase 3 で RHI.dll から移した)。
-*          構造体の並びは C# 側 (RHI.cs の RHIInfo / RHIInitializedInfo) と一致させること
+* @brief   Renderer.dll が C# のエンジン (GameEngine.Runtime) へ export する関数
+* @details C# から呼ぶ入口はこの DLL だけ。C# 側の宣言は GameEngine.Runtime/Native/NativeMethods.cs
+*          - モデル・描画オブジェクトはハンドル (uint32) でやり取りする。ポインタは C# に渡さない
+*          - 1 フレームに何度も使う操作は「まとめて」渡す (P/Invoke の回数を増やさない)
+*          - 構造体の並びは C# 側と一致させること
+*          以前は Renderer_TestLoadModel / Renderer_TestSpawnGrid / Renderer_TestGroundView などの
+*          テスト専用の関数で、配置やカメラを C++ に直書きしていた (エンジン化 E1 で削除)
 *
 * @author  Keigo Onari
 * @date    2026/11/01
-* @version v_1.0.0
+* @version v_1.1.0
 *
 * @copyright
 * Copyright (c) 2024 Keigo Onari. All rights reserved.
@@ -19,14 +23,12 @@
 ******************************************************************/
 #include "common.h"
 #include "sceneRenderer.h"
-#include "camera.h"
 
 #include "../../Core/Source/Log/logger.h"
-#include "../../Core/Source/Log/scopedTimer.h"
 
 namespace
 {
-	// C# の RHIInfo と同じ並び (IntPtr / int / int / int)
+	// C# の Native.WindowDesc と同じ並び (IntPtr / uint / uint / uint)
 	struct WindowInfo
 	{
 		void*    HWnd;
@@ -35,14 +37,19 @@ namespace
 		uint32_t EnableVSync;
 	};
 
-	// C# の RHIInitializedInfo と同じ並び (int × 5)。RHI::InitializeResult もこの並び
-	static_assert(sizeof(RHI::InitializeResult) == sizeof(int) * 5, "InitializeResult must match C# RHIInitializedInfo");
+	// C# の Native.InitializeResult と同じ並び (int × 5)。RHI::InitializeResult もこの並び
+	static_assert(sizeof(RHI::InitializeResult) == sizeof(int) * 5, "InitializeResult must match C# Native.InitializeResult");
+	static_assert(sizeof(Renderer::CameraDesc) == sizeof(float) * 12 + sizeof(uint32_t), "CameraDesc must match C# Native.CameraDesc");
 
 	Renderer::SceneRenderer* g_renderer = nullptr;
 }
 
 extern "C"
 {
+	// ==============================================================
+	// 初期化 / 終了 / 画面
+	// ==============================================================
+
 	RENDERER_API void Renderer_SetLogCallback(LogCallback callback, WLogCallback wcallback)
 	{
 		// Logger は Core.dll にあるので、RHI.dll と Renderer.dll の両方のログがここに流れる
@@ -67,111 +74,6 @@ extern "C"
 		if (outResult) *outResult = result;
 	}
 
-	RENDERER_API void Renderer_Render()
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->Render();
-	}
-
-	// ウィンドウのクライアント領域のサイズが変わった時に呼ぶ (最小化中の 0 は無視される)
-	RENDERER_API bool Renderer_Resize(uint32_t width, uint32_t height)
-	{
-		if (g_renderer == nullptr)
-			return false;
-
-		return g_renderer->Resize(width, height);
-	}
-
-	// テスト用 : box.obj を読み込み、指定位置から原点を見るカメラを置く
-	RENDERER_API void Renderer_TestLoadModel(float cameraPosX, float cameraPosY, float cameraPosZ)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		double loadMs = 0.0;
-		{
-			// 高速化の効果確認用 : 読み込み開始 → GPU へのアップロード完了までの時間
-			// (計測のために GPU の完了を待っている。通常の読み込みでは待たない)
-			Core::ScopedTimer timer("LoadModel (until GPU upload complete)");
-			g_renderer->LoadModel(L"../Model/box.obj");
-			g_renderer->WaitForGpu();
-			loadMs = timer.ElapsedMs();
-		}
-		// ログだけでなくプロファイラーにも出す
-		g_renderer->ReportProfilerValue("LoadModel (ms)", loadMs);
-
-		Renderer::Camera camera;
-		camera.Position = Core::Vector3(cameraPosX, cameraPosY, cameraPosZ);
-		camera.Target   = Core::Vector3(0.0f, 0.0f, 0.0f);
-		camera.Up       = Core::Vector3(0.0f, 1.0f, 0.0f);
-		g_renderer->SetCamera(camera);
-	}
-
-	// テスト用 : 読み込んだモデルを格子状に count 個並べる (描画数を増やして CPU / GPU の負荷を見る)
-	RENDERER_API void Renderer_TestSpawnGrid(uint32_t count)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SpawnTestGrid(count);
-	}
-
-	// ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)
-	RENDERER_API void Renderer_SetIndirectDraw(bool enabled)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetIndirectDrawEnabled(enabled);
-	}
-
-	// インスタンシングするか (同じメッシュを 1 回の描画にまとめる)
-	RENDERER_API void Renderer_SetInstancing(bool enabled)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetInstancingEnabled(enabled);
-	}
-
-	// GPU カリングするか (ExecuteIndirect の時だけ効く)
-	RENDERER_API void Renderer_SetGpuCulling(bool enabled)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetGpuCullingEnabled(enabled);
-	}
-
-	// オクルージョンカリングするか (GPU カリングの時だけ効く)
-	RENDERER_API void Renderer_SetOcclusionCulling(bool enabled)
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetOcclusionCullingEnabled(enabled);
-	}
-
-	// 負荷テスト用 : 地面すれすれから格子を見るカメラ (オクルージョンカリングの効果を測る)
-	RENDERER_API void Renderer_TestGroundView()
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetTestGroundView();
-	}
-
-	// 負荷テスト用 : 格子の中から前を見るカメラ (カリングの効果を測る)
-	RENDERER_API void Renderer_TestInsideView()
-	{
-		if (g_renderer == nullptr)
-			return;
-
-		g_renderer->SetTestInsideView();
-	}
-
 	RENDERER_API void Renderer_CleanUp()
 	{
 		if (g_renderer == nullptr)
@@ -180,6 +82,93 @@ extern "C"
 		g_renderer->Shutdown();
 		delete g_renderer;
 		g_renderer = nullptr;
+	}
+
+	// ウィンドウのクライアント領域のサイズが変わった時に呼ぶ (最小化中の 0 は無視される)
+	RENDERER_API bool Renderer_Resize(uint32_t width, uint32_t height)
+	{
+		return g_renderer ? g_renderer->Resize(width, height) : false;
+	}
+
+	// 1 フレーム描画する (描画オブジェクトの位置やカメラは、先に設定しておく)
+	RENDERER_API void Renderer_Render()
+	{
+		if (g_renderer) g_renderer->Render();
+	}
+
+	// GPU の処理 (描画 + 転送) が全て終わるまで待つ (読み込み時間の計測など)
+	RENDERER_API void Renderer_WaitForGpu()
+	{
+		if (g_renderer) g_renderer->WaitForGpu();
+	}
+
+	// ==============================================================
+	// モデル / 描画オブジェクト
+	// ==============================================================
+
+	// OBJ モデルを読み込む。戻り値 = モデルのハンドル (失敗時 0xFFFFFFFF)
+	RENDERER_API uint32_t Renderer_LoadModel(const wchar_t* filePath, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (g_renderer == nullptr || filePath == nullptr) return Renderer::INVALID_HANDLE;
+		return g_renderer->LoadModel(filePath, outSubMeshCount);
+	}
+
+	// モデルを置く描画オブジェクトを count 個まとめて作る (原点に置かれる)
+	RENDERER_API void Renderer_CreateRenderObjects(uint32_t model, uint32_t count, uint32_t* outHandles)
+	{
+		if (g_renderer) g_renderer->CreateRenderObjects(model, count, outHandles);
+	}
+
+	// 描画オブジェクトをまとめて削除する
+	RENDERER_API void Renderer_DestroyRenderObjects(const uint32_t* handles, uint32_t count)
+	{
+		if (g_renderer) g_renderer->DestroyRenderObjects(handles, count);
+	}
+
+	// 描画オブジェクトのワールド行列をまとめて設定する (動いたものだけ。matrices = 16 float × count)
+	RENDERER_API void Renderer_SetRenderObjectTransforms(const uint32_t* handles, const float* matrices, uint32_t count)
+	{
+		if (g_renderer) g_renderer->SetRenderObjectTransforms(handles, matrices, count);
+	}
+
+	// ==============================================================
+	// カメラ / 設定 / プロファイラー
+	// ==============================================================
+
+	RENDERER_API void Renderer_SetCamera(const Renderer::CameraDesc* camera)
+	{
+		if (g_renderer && camera) g_renderer->SetCamera(*camera);
+	}
+
+	// ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)
+	RENDERER_API void Renderer_SetIndirectDraw(bool enabled)
+	{
+		if (g_renderer) g_renderer->SetIndirectDrawEnabled(enabled);
+	}
+
+	// インスタンシングするか (同じメッシュを 1 回の描画にまとめる)
+	RENDERER_API void Renderer_SetInstancing(bool enabled)
+	{
+		if (g_renderer) g_renderer->SetInstancingEnabled(enabled);
+	}
+
+	// GPU カリングするか (ExecuteIndirect の時だけ効く)
+	RENDERER_API void Renderer_SetGpuCulling(bool enabled)
+	{
+		if (g_renderer) g_renderer->SetGpuCullingEnabled(enabled);
+	}
+
+	// オクルージョンカリングするか (GPU カリングの時だけ効く)
+	RENDERER_API void Renderer_SetOcclusionCulling(bool enabled)
+	{
+		if (g_renderer) g_renderer->SetOcclusionCullingEnabled(enabled);
+	}
+
+	// プロファイラー (F1) に任意の値を表示する。C# の処理時間などに使う
+	RENDERER_API void Renderer_ReportProfilerValue(const char* name, double value)
+	{
+		if (g_renderer && name) g_renderer->ReportProfilerValue(name, value);
 	}
 }
 
