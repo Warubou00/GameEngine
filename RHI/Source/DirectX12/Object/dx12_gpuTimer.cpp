@@ -84,12 +84,13 @@ namespace RHI
 			_resolvedCount[frameIndex] = count;
 		}
 
-		bool GpuTimer::ReadIntervals(UINT frameIndex, UINT count, double* outMs)
+		bool GpuTimer::ReadIntervalsFrom(UINT frameIndex, UINT firstIndex, UINT count, double* outMs)
 		{
+			// 以前は先頭 (0 番) からの区間だけを読む ReadIntervals だった (GPU パーティクルの区間を足した)
 			if (!_readback || !outMs || frameIndex >= _frameCount || _frequency == 0) return false;
 
 			const UINT resolved = _resolvedCount[frameIndex];
-			if (resolved < 2 || count + 1 > resolved) return false;
+			if (resolved < 2 || firstIndex + count + 1 > resolved) return false;
 
 			// 読む範囲だけを指定して Map する (CPU が読む範囲をドライバーに伝える)
 			const UINT first = frameIndex * TIMESTAMPS_PER_FRAME;
@@ -97,7 +98,7 @@ namespace RHI
 			void* mapped = nullptr;
 			if (FAILED(_readback->Map(0, &readRange, &mapped)) || !mapped) return false;
 
-			const UINT64* ticks = static_cast<const UINT64*>(mapped) + first;
+			const UINT64* ticks = static_cast<const UINT64*>(mapped) + first + firstIndex;
 			for (UINT i = 0; i < count; ++i)
 			{
 				const UINT64 begin = ticks[i];

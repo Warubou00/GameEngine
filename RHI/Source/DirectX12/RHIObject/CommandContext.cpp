@@ -375,6 +375,8 @@ namespace RHI
 			// バッファは前のフレームの ExecuteCommandLists の完了で COMMON に戻っている
 			_hiZState        = D3D12_RESOURCE_STATE_COMMON;
 			_visibilityState = D3D12_RESOURCE_STATE_COMMON;
+			// GPU パーティクル : FRAME_COUNT フレーム前の生存数 / GPU 時間を読む。バッファも COMMON に戻っている
+			readParticleResults();
 
 			// 3. アロケーター → コマンドリストの順にリセット (GPU が使い終わったので安全)
 			hr = frame.Allocator->Reset();
@@ -470,7 +472,10 @@ namespace RHI
 			if (_gpuTimer)
 			{
 				_gpuTimer->Timestamp(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_FRAME_END);
-				_gpuTimer->Resolve(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_COUNT);
+				// GPU パーティクルのタイムスタンプ (3〜7) を書いたフレームはそこまで読み戻す (欠けた区切りは埋めてある)
+				finishParticleTimestamps();
+				_gpuTimer->Resolve(_frameCommandList->GetCmdList(), _frameIndex,
+					_particleTimed[_frameIndex] ? TIMESTAMP_PARTICLE_BEGIN + TIMESTAMP_PARTICLE_COUNT : TIMESTAMP_COUNT);
 			}
 
 			// 8. リソースバリア (RenderTarget -> Present)
@@ -598,6 +603,14 @@ namespace RHI
 
 				case RHI::RenderCommandType::DrawFullscreen:
 					drawFullscreen(buffer, command);
+					break;
+
+				case RHI::RenderCommandType::UpdateParticles:
+					updateParticles(buffer);
+					break;
+
+				case RHI::RenderCommandType::DrawParticles:
+					drawParticles(buffer);
 					break;
 				}
 			}
@@ -2004,6 +2017,7 @@ namespace RHI
 			}
 			_visibility.reset();
 			_drawIdBuffer.reset();
+			releaseParticleBuffers();
 			for (auto& lines : _debugLineBuffer) lines.reset();
 			_renderTargets.clear();
 			_freeRenderTargets.clear();

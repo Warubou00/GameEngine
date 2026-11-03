@@ -34,7 +34,8 @@ namespace RHI
 		{
 		public:
 			// 1 フレームで書けるタイムスタンプの数 (開始 / 区切り / 終了)
-			static constexpr UINT TIMESTAMPS_PER_FRAME = 4;
+			// (以前は 4。GPU パーティクルの 更新 / ソート / 描画 の区切りを足した : CommandContext の TIMESTAMP_PARTICLE_*)
+			static constexpr UINT TIMESTAMPS_PER_FRAME = 8;
 
 			GpuTimer();
 			~GpuTimer();
@@ -60,7 +61,9 @@ namespace RHI
 			 * @param[out] double* outMs 各区間の時間 (ミリ秒)。outMs[i] = タイムスタンプ i → i+1
 			 * @return bool 有効な結果があったか (まだ一度も計測していないフレームなら false)
 			 ************************************************************************************/
-			bool ReadIntervals(UINT frameIndex, UINT count, double* outMs);
+			bool ReadIntervals(UINT frameIndex, UINT count, double* outMs) { return ReadIntervalsFrom(frameIndex, 0, count, outMs); }
+			// first 番目のタイムスタンプからの区間 (outMs[i] = タイムスタンプ first+i → first+i+1)。GPU パーティクルの区間に使う
+			bool ReadIntervalsFrom(UINT frameIndex, UINT first, UINT count, double* outMs);
 
 			void Release();
 

@@ -231,6 +231,7 @@
     <ClCompile Include="Source\DirectX12\Object\dx12_swapChain.cpp" />
     <ClCompile Include="Source\DirectX12\RHIObject\Buffer.cpp" />
     <ClCompile Include="Source\DirectX12\RHIObject\CommandContext.cpp" />
+    <ClCompile Include="Source\DirectX12\RHIObject\CommandContext_Particles.cpp" />
     <ClCompile Include="Source\DirectX12\RHIObject\Device.cpp" />
     <ClCompile Include="Source\DirectX12\RHIObject\Pipeline.cpp" />
     <ClCompile Include="Source\DirectX12\RHIObject\Texture.cpp" />

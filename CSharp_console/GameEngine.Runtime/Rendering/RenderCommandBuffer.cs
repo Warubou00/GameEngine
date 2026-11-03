@@ -25,6 +25,7 @@ public enum FullscreenBlend : uint
     None     = 0,   // 上書き
     Additive = 1,   // 足す
     Alpha    = 2,   // アルファブレンド
+    Premultiplied = 3,   // 乗算済みアルファ (色 + 描いてある色 × (1 - α))
 }
 
 // ==========================================================================
@@ -113,6 +114,14 @@ public sealed unsafe class RenderCommandBuffer
         for (int i = 0; i < NativeMethods.MaxPassInputs; i++) command.Inputs[i] = i < inputs.Length ? inputs[i].Handle : NativeMethods.InvalidHandle;
         for (int i = 0; i < parameters.Length; i++) command.Params[i] = parameters[i];
     }
+
+    // ---------- GPU パーティクル ----------
+
+    /// <summary>GPU パーティクルの発生 / 更新 (/ ソート)。不透明を描いた後に置く (衝突でシーンの深度を読む)。1 フレームに 1 回</summary>
+    public void UpdateParticles() => Add(5);
+
+    /// <summary>GPU パーティクルを今の描画先へ描く (色の描画先だけを付けておく。深度はシェーダーがシーンの深度を読む)</summary>
+    public void DrawParticles() => Add(6);
 
     // 1 フレーム分を C++ へ渡して描く
     internal void Submit()

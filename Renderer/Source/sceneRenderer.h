@@ -141,6 +141,10 @@ namespace Renderer
 		void SetLightingSettings(const RHI::LightingSettings& settings);
 		void SetShadowSettings(const RHI::ShadowSettings& settings);
 		void SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
+		// GPU パーティクル (RHI に渡すだけ)
+		void SetParticleCapacity(uint32_t capacity);
+		void SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings& settings);
+		RHI::ParticleStats GetParticleStats() const;
 		void SetProfilerInfo(const char* name, const char* text);
 
 		// GPU の処理が全て終わるまで待つ (計測用)

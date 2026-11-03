@@ -258,6 +258,21 @@ namespace RHI
         if (_isInitialized) _commandContext->SetShadowSettings(_buffer.get(), settings);
     }
 
+    void RenderHardwareInterface::SetParticleCapacity(uint32_t capacity)
+    {
+        if (_isInitialized) _commandContext->SetParticleCapacity(capacity);
+    }
+
+    void RenderHardwareInterface::SetParticleEmitters(const ParticleEmitterData* emitters, uint32_t count, const ParticleFrameSettings& settings)
+    {
+        if (_isInitialized) _commandContext->SetParticleEmitters(emitters, count, settings);
+    }
+
+    ParticleStats RenderHardwareInterface::GetParticleStats() const
+    {
+        return _isInitialized ? _commandContext->GetParticleStats() : ParticleStats();
+    }
+
     uint32_t RenderHardwareInterface::GetMaxSampleCount() const
     {
         return _isInitialized ? _commandContext->GetMaxSampleCount() : 1;
@@ -333,6 +348,18 @@ namespace RHI
         stats.UiMs          = uiMs;
         stats.Objects       = _buffer->GetObjectCount();
         if (frameMs > 0.0) _profiler.AddFrame(stats);
+
+        // GPU パーティクル (使っている時だけ。GPU の値は FRAME_COUNT フレーム前)
+        const ParticleStats particles = _commandContext->GetParticleStats();
+        if (particles.Capacity > 0 && particles.Valid)
+        {
+            _profiler.SetValue("Particles alive", particles.Alive);
+            _profiler.SetValue("Particles visible", particles.Visible);
+            _profiler.SetValue("Particles emitters", particles.Emitters);
+            _profiler.SetValue("GPU particles update (ms)", particles.UpdateMs);
+            _profiler.SetValue("GPU particles sort (ms)", particles.SortMs);
+            _profiler.SetValue("GPU particles draw (ms)", particles.DrawMs);
+        }
 
         return _commandContext->RenderEnd();
     }

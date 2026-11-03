@@ -85,6 +85,8 @@ public sealed class GraphicsSettings
 
     // 影 (CastShadows の付いた最初の DirectionalLight。Forward / Deferred の両方。Unlit では使わない)
     public ShadowSettings Shadows { get; } = new();
+    // GPU パーティクル (ParticleEmitter。Forward / Deferred の両方。容量 / ソート / 衝突)
+    public ParticleSettings Particles { get; } = new();
     // 影を落とすライトの番号 (LightSystem が決める。-1 なら影を落とすライトが無い)
     public int ShadowLightIndex { get; internal set; } = -1;
     private int _shownShadowState = -1;
@@ -220,7 +222,7 @@ public sealed class AudioSettings
 //
 //   毎フレームの順番 :
 //     ウィンドウのメッセージ → Time → ゲームパッド → 登録した System (登録順) → Transform の行列 → カメラ → 描画オブジェクトへ反映
-//     → ライト → 音 (AudioSource) → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
+//     → ライト → GPU パーティクルのエミッター → 音 (AudioSource) → 描画パイプライン (Graphics.Pipeline) が命令を積む → C++ で描画 → 入力のフレーム終わりの処理
 //   以前 (GameEngine_console の RHI.cs) は、ウィンドウ・P/Invoke・テスト用の関数が 1 つのクラスに入っていた
 // ==========================================================================
 public sealed class Engine : IDisposable
@@ -232,6 +234,7 @@ public sealed class Engine : IDisposable
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
     private readonly LightSystem      _lightSystem     = new();
+    private readonly ParticleSystem   _particleSystem;
     private readonly AudioSystem      _audioSystem;
     private readonly bool             _audioLoaded;
     private readonly CollisionSystem  _collisionSystem;
@@ -330,6 +333,7 @@ public sealed class Engine : IDisposable
         // ゲームパッド (Core.dll。XInput + DirectInput)。パッドが無くてもそのまま動く (何も繋がっていない扱い)
         Gamepad.Initialize();
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
+        _particleSystem   = new ParticleSystem(World, Graphics.Particles);
 
         // カメラを動かす System は既定で入れておく (コンポーネントを付けた物だけが動く)
         AddSystem(new FreeCameraSystem());
@@ -377,6 +381,7 @@ public sealed class Engine : IDisposable
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
+            _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             _audioSystem.Update(World);
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
