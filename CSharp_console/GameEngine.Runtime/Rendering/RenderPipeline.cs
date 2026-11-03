@@ -17,6 +17,8 @@ public abstract class RenderPipeline : IDisposable
     private FullscreenShader? _tonemap;
     private FullscreenShader? _fxaa;
     private RenderTexture?    _ldr;   // FXAA の時だけ : トーンマップの結果 (画面の色)
+    private RenderTexture?    _particleTarget;      // GPU パーティクルを半分の解像度で描く時だけ
+    private FullscreenShader? _particleComposite;
 
     // SSAO (Forward / Deferred 共通の部品)
     protected SsaoPass Ssao { get; } = new();
@@ -34,6 +36,8 @@ public abstract class RenderPipeline : IDisposable
         Shadows.Dispose();
         _ldr?.Dispose();
         _ldr = null;
+        _particleTarget?.Dispose();
+        _particleTarget = null;
     }
 
     // ---------- アンチエイリアス ----------
@@ -101,6 +105,36 @@ public abstract class RenderPipeline : IDisposable
         var f = settings.Fxaa;
         cmd.SetRenderTarget(RenderTexture.BackBuffer);
         cmd.DrawFullscreen(_fxaa, [_ldr!], [Math.Clamp(f.Subpixel, 0.0f, 1.0f), f.EdgeThreshold, f.EdgeThresholdMin]);
+    }
+
+    // ---------- GPU パーティクル (Forward / Deferred 共通の部品) ----------
+    //   UpdateParticles : 不透明を描いた後 (シーンの深度で跳ね返るため)
+    //   DrawParticles   : 半透明の後、トーンマップの前の HDR へ (光る物は 1 を超えた色でよい)
+    //   描画先に深度は付けない (C++ のシェーダーがシーンの深度を読んで比べる。MSAA の時は解決した深度)
+    protected static void UpdateParticles(RenderCommandBuffer cmd, GraphicsSettings settings)
+    {
+        if (settings.Particles.Enabled) cmd.UpdateParticles();
+    }
+
+    //   半分の解像度 (Particles.HalfResolution) : 縮小バッファ (RGBA16F) を 0 で消して描き、HDR へ乗算済みアルファで重ねる
+    //     縮小バッファ : rgb = 乗算済みの色の合計 / a = 覆った割合。合成は 色 + HDR × (1 - a) で、HDR に直接描いた時と同じ式
+    //     (以前は HDR に直接描くだけだった。画面を覆う大きな煙で、塗りつぶしと重ね描きが重かった)
+    protected void DrawParticles(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings)
+    {
+        if (!settings.Particles.Enabled) return;
+        if (!settings.Particles.HalfResolution)
+        {
+            cmd.SetRenderTarget(hdr);
+            cmd.DrawParticles();
+            return;
+        }
+        _particleTarget    ??= RenderTexture.Create(RenderTextureFormat.RGBA16F, 0.5f);
+        _particleComposite ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSParticleComposite");
+        cmd.SetRenderTarget(_particleTarget);
+        cmd.ClearColor(Vector4.Zero);
+        cmd.DrawParticles();
+        cmd.SetRenderTarget(hdr);
+        cmd.DrawFullscreen(_particleComposite, [_particleTarget], [], FullscreenBlend.Premultiplied);
     }
 
     // sRGB の色 → 線形 (シェーダーの toLinear と同じ近似)
@@ -171,12 +205,14 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             cmd.ClearDepth();
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
+            UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (不透明の深度で跳ね返る)
 
             ao = Ssao.Render(cmd, settings.Ssao, normal: null);   // 法線は深度から作る
 
             // 半透明 (遮蔽は掛けない)。環境光の RT も一緒に描画先にして、覆った分だけ減らす
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
+            DrawParticles(cmd, hdr, settings);   // 光る物は遮蔽を掛けない (環境光の RT には書かない)
             Tonemap(cmd, hdr, settings, ao, _ambient);
             return;
         }
@@ -185,9 +221,11 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         cmd.ClearColor(hdr.ClearColor);
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+        UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (C++ が深度を付け直すので、続けて半透明を描ける)
 
         // 半透明
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+        DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings);
     }
@@ -239,6 +277,7 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         cmd.SetRenderTargets([_albedo!, _normal!, _material!], RenderTexture.SceneDepth);
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.GBuffer, RenderQueue.Opaque);
+        UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (G-Buffer の深度で跳ね返る)
 
         // 2. SSAO (G-Buffer の法線を使う)。使わない時は入力を渡さない (シェーダーは白 = 遮蔽なし を読む)
         var ao = UseSsao(settings) ? Ssao.Render(cmd, settings.Ssao, _normal) : null;
@@ -258,6 +297,7 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         // 4. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+        DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings, ao);
     }

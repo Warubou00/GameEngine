@@ -146,6 +146,79 @@ internal static unsafe class NativeMethods
         public uint    Color;   // R8G8B8A8
     }
 
+    // ---------- GPU パーティクル (C++ の RHI::ParticleEmitterData / ParticleFrameSettings / ParticleStats と同じ並び) ----------
+    public const int MaxParticleEmitters = 1024;      // C++ の RHI::MAX_PARTICLE_EMITTERS
+    public const int MaxParticleCapacity = 1 << 21;   // C++ の RHI::MAX_PARTICLE_CAPACITY
+
+    // 160byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParticleEmitterData
+    {
+        public Vector3 Position;
+        public uint    SpawnCount;      // このフレームに出す数
+        public Vector3 PrevPosition;    // 前のフレームの位置 (この間に散らして出す)
+        public uint    SpawnOffset;     // C++ が書く
+        public Vector3 Direction;       // 出す向き (正規化済み)
+        public float   ConeAngle;       // ラジアン (円錐の半角)
+        public float   SpeedMin;
+        public float   SpeedMax;
+        public float   LifeMin;
+        public float   LifeMax;
+        public Vector3 Gravity;
+        public float   Drag;
+        public Vector4 ColorStart;
+        public Vector4 ColorEnd;
+        public float   SizeStart;
+        public float   SizeEnd;
+        public uint    Shape;           // 下位 8bit : ParticleShape / 8〜15bit : ParticleSprite
+        public float   ShapeRadius;
+        public uint    Flags;           // 1 : 加算 / 2 : 衝突 / 4 : 速度で伸ばす
+        public float   Restitution;
+        public float   AngularSpeed;    // ラジアン / 秒
+        public uint    Seed;
+        public float   Turbulence;
+        public float   StretchScale;
+        public Vector2 Padding;
+    }
+
+    // 32byte
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParticleFrameSettings
+    {
+        public float DeltaTime;
+        public uint  Flags;               // 1 : 衝突 / 2 : ソート
+        public float CollisionThickness;
+        public float SoftDistance;
+        public float Time;
+        public uint  Padding0;
+        public uint  Padding1;
+        public uint  Padding2;
+    }
+
+    // 36byte (以前は 32byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParticleStats
+    {
+        public uint  Capacity;
+        public uint  Alive;
+        public uint  Free;
+        public uint  Emitters;
+        public float UpdateMs;
+        public float SortMs;
+        public float DrawMs;
+        public uint  Valid;
+        public uint  Visible;    // 画面に映った数 (描いた数)
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetParticleCapacity(uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetParticleEmitters(ParticleEmitterData* emitters, uint count, ref ParticleFrameSettings settings);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_GetParticleStats(out ParticleStats stats);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate void LogCallback([MarshalAs(UnmanagedType.LPStr)] string message);
 

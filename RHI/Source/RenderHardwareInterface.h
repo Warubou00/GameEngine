@@ -82,6 +82,9 @@ namespace RHI
         void                   SetLightingSettings(const LightingSettings& settings)override;
         void                   SetShadowSettings(const ShadowSettings& settings)override;
         void                   SetDebugLines(const DebugLineVertex* vertices, uint32_t count)override;
+        void                   SetParticleCapacity(uint32_t capacity)override;
+        void                   SetParticleEmitters(const ParticleEmitterData* emitters, uint32_t count, const ParticleFrameSettings& settings)override;
+        ParticleStats          GetParticleStats()const override;
         void WaitForGpu()override;
 
         void SetIndirectDrawEnabled(bool enabled)override;

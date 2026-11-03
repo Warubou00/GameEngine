@@ -76,6 +76,8 @@ namespace RHI
 			constexpr const wchar_t* HIZ_SHADER_PATH     = L"../Shader/hiZ.shader";
 			constexpr const wchar_t* ANTI_ALIASING_SHADER_PATH = L"../Shader/antiAliasing.shader";   // MSAA の深度の解決
 			constexpr const wchar_t* DEBUG_SHADER_PATH         = L"../Shader/debug.shader";          // 確認用の線
+			constexpr const wchar_t* PARTICLE_SIM_SHADER_PATH  = L"../Shader/particleSim.shader";    // GPU パーティクル (コンピュート)
+			constexpr const wchar_t* PARTICLE_DRAW_SHADER_PATH = L"../Shader/particleDraw.shader";   // GPU パーティクル (描画)
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -110,6 +112,13 @@ namespace RHI
             Shader::CompiledShader Ps;
         };
 
+        // GPU パーティクルを描くシェーダー (particleDraw.shader)
+        struct Pipeline::ParticleDrawShaders
+        {
+            Shader::CompiledShader Vs;   // VSParticle
+            Shader::CompiledShader Ps;   // PSParticle
+        };
+
         Pipeline::Pipeline() = default;
         Pipeline::~Pipeline() = default;
 
@@ -121,6 +130,11 @@ namespace RHI
 			_pipelineCache.reset();
 			_shaderCompiler.reset();
 			_indirectDrawSignature.reset();
+			for (auto& pso : _particlePipelines) pso.reset();
+			_particleRootSignature.reset();
+			_particleDrawSignature.reset();
+			_particleDispatchSignature.reset();
+			_particleDrawShaders.reset();
 			_hiZPipeline.reset();
 			_hiZPipelineMs.reset();
 			_hiZRootSignature.reset();
@@ -167,6 +181,8 @@ namespace RHI
             if (_indirectDrawSignature) makeCullingPipeline(device);
             // オクルージョンカリング用の Hi-Z (GPU カリングが前提)
             if (IsGpuCullingAvailable()) makeHiZPipeline(device);
+            // GPU パーティクル (作れなくても、パーティクルを描かずに続けられる)
+            makeParticlePipeline(device);
             return RHI_SUCCEEDED;
 		}
 
@@ -228,6 +244,36 @@ namespace RHI
         ID3D12PipelineState* Pipeline::GetHiZPipelineMs()const
         {
             return _hiZPipelineMs ? _hiZPipelineMs->Get() : nullptr;
+        }
+
+        bool Pipeline::IsParticleAvailable()const
+        {
+            if (!_particleRootSignature || !_particleDrawSignature || !_particleDispatchSignature) return false;
+            for (uint32_t i = 0; i <= PARTICLE_KERNEL_FINISH; ++i)
+            {
+                if (!_particlePipelines[i]) return false;
+            }
+            return true;
+        }
+
+        ID3D12RootSignature* Pipeline::GetParticleRootSignature()const
+        {
+            return _particleRootSignature ? _particleRootSignature->Get() : nullptr;
+        }
+
+        ID3D12PipelineState* Pipeline::GetParticlePipeline(ParticleKernel kernel)const
+        {
+            return (kernel < PARTICLE_KERNEL_COUNT && _particlePipelines[kernel]) ? _particlePipelines[kernel]->Get() : nullptr;
+        }
+
+        ID3D12CommandSignature* Pipeline::GetParticleDrawSignature()const
+        {
+            return _particleDrawSignature ? _particleDrawSignature->Get() : nullptr;
+        }
+
+        ID3D12CommandSignature* Pipeline::GetParticleDispatchSignature()const
+        {
+            return _particleDispatchSignature ? _particleDispatchSignature->Get() : nullptr;
         }
 
         RHI_RESULT Pipeline::makeRootSignature(Device* device)
@@ -628,6 +674,16 @@ namespace RHI
             {
                 setAlphaBlend(desc.BlendState.RenderTarget[0]);
             }
+            else if (blend == 3)
+            {
+                // 乗算済みアルファ (色 = 自分 + 描いてある色 × (1 - α))。縮小バッファに描いたパーティクルを重ねる
+                auto& target = desc.BlendState.RenderTarget[0];
+                target.BlendEnable    = TRUE;
+                target.SrcBlend       = D3D12_BLEND_ONE;
+                target.DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+                target.SrcBlendAlpha  = D3D12_BLEND_ONE;
+                target.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            }
             desc.NumRenderTargets = rtvCount;
             for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
             desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
@@ -912,6 +968,166 @@ namespace RHI
                     _hiZPipelineMs->Attach(psoMs);
                 }
             }
+        }
+
+        void Pipeline::makeParticlePipeline(Device* device)
+        {
+            // ==============================================================
+            // GPU パーティクルのコンピュートのルートシグネチャ / PSO と、ExecuteIndirect のコマンドシグネチャ
+            //   どれも 1 フレームに 1 回設定するだけなので、ルート定数と Root CBV / SRV / UAV で組む
+            //   (シーンの深度だけはテクスチャなので、ディスクリプタテーブル 1 個)
+            //   ルートの大きさ : 定数 16 + ルート CBV / SRV / UAV 10 個 × 2 + テーブル 1 = 37 DWORD (上限 64)
+            // ==============================================================
+            ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
+
+            D3D12_DESCRIPTOR_RANGE1 depthRange = {};
+            depthRange.RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            depthRange.NumDescriptors                    = 1;
+            depthRange.BaseShaderRegister                = 1;   // t1
+            // DATA_VOLATILE : 更新の後、深度は描画先 (DEPTH_WRITE) に戻って書き換わるが、このルートシグネチャは
+            // 次のコンピュートまで結ばれたまま残る。STATIC だと、その後の描画ごとにデバッグレイヤーのエラーになった
+            // (「DATA_STATIC_WHILE_SET_AT_EXECUTE で結ばれたリソースが書ける状態に変わった。結び直すこと」)
+            depthRange.Flags                             = D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE;
+            depthRange.OffsetInDescriptorsFromTableStart = 0;
+
+            D3D12_ROOT_PARAMETER1 params[PARTICLE_PARAM_COUNT] = {};
+            params[PARTICLE_PARAM_FRAME].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+            params[PARTICLE_PARAM_FRAME].Descriptor.ShaderRegister = 0;
+            params[PARTICLE_PARAM_FRAME].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            params[PARTICLE_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            params[PARTICLE_PARAM_CONSTANTS].Constants.ShaderRegister = 1;
+            params[PARTICLE_PARAM_CONSTANTS].Constants.Num32BitValues = PARTICLE_CONSTANT_COUNT;
+            params[PARTICLE_PARAM_EMITTERS].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[PARTICLE_PARAM_EMITTERS].Descriptor.ShaderRegister = 0;
+            params[PARTICLE_PARAM_EMITTERS].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            // 書き込むもの (u0〜u7)。Atomic で数えるものもあるので DATA_VOLATILE
+            const ParticleRootParameterIndex uavs[] = { PARTICLE_PARAM_PARTICLES_IN, PARTICLE_PARAM_PARTICLES_OUT, PARTICLE_PARAM_SORTED,
+                                                        PARTICLE_PARAM_KEYS, PARTICLE_PARAM_COUNTERS, PARTICLE_PARAM_ARGS,
+                                                        PARTICLE_PARAM_SORT_BINS, PARTICLE_PARAM_DRAW_DATA };
+            for (UINT i = 0; i < _countof(uavs); ++i)
+            {
+                auto& param = params[uavs[i]];
+                param.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+                param.Descriptor.ShaderRegister = i;
+                param.Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+            }
+            params[PARTICLE_PARAM_DEPTH].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            params[PARTICLE_PARAM_DEPTH].DescriptorTable.NumDescriptorRanges = 1;
+            params[PARTICLE_PARAM_DEPTH].DescriptorTable.pDescriptorRanges   = &depthRange;
+            for (auto& param : params) param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;   // コンピュートは ALL のみ
+
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC desc = {};
+            desc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            desc.Desc_1_1.NumParameters = PARTICLE_PARAM_COUNT;
+            desc.Desc_1_1.pParameters   = params;
+
+            auto rootSignature = std::make_unique<DirectX12::RootSignature>();
+            if (FAILED(rootSignature->Create(dx12Device, desc)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create particle root signature. GPU particles disabled.");
+                return;
+            }
+
+            // シェーダー (ShaderCache/ にあれば読むだけ) と PSO (pipeline.cache にあれば読むだけ)
+            // ソートの 3 つは無くても動く (ソートせずに描く)
+            static const char* const ENTRIES[PARTICLE_KERNEL_COUNT] = {
+                "CSParticleInit", "CSParticleBegin", "CSParticleEmit", "CSParticleSimulate", "CSParticleFinish",
+                "CSParticleSortLocal", "CSParticleSortStep", "CSParticleSortMerge",
+                "CSParticleBinClear", "CSParticleBinCount", "CSParticleBinScan", "CSParticleBinScatter" };
+            for (uint32_t i = 0; i < PARTICLE_KERNEL_COUNT; ++i)
+            {
+                Shader::CompiledShader cs;
+                if (!_shaderCompiler->Compile(PARTICLE_SIM_SHADER_PATH, ENTRIES[i], Shader::Stage::Compute, cs))
+                {
+                    Core::Logger::Log((std::string("[Pipeline] Failed compile particle shader : ") + ENTRIES[i]).c_str());
+                    continue;
+                }
+                D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+                psoDesc.pRootSignature = rootSignature->Get();
+                psoDesc.CS             = cs.View();
+                const uint64_t rootSignatureHash = rootSignature->GetHash();
+                uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+                hash = fnv1a(cs.Bytecode.data(), cs.Bytecode.size(), hash);
+                wchar_t psoName[64] = {};
+                swprintf_s(psoName, L"Particle%u_%016llx", i, hash);
+                Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+                if (FAILED(_pipelineCache->GetOrCreateComputePipeline(psoName, psoDesc, pso))) continue;
+                _particlePipelines[i] = std::make_unique<DirectX12::PipelineState>();
+                _particlePipelines[i]->Attach(pso);
+            }
+            _particleRootSignature = std::move(rootSignature);
+
+            // ExecuteIndirect : 描画は DrawIndexedInstanced 1 回 (インデックス 6 個 × 映る数)、更新は Dispatch 1 回
+            // (以前の描画は DrawInstanced (頂点 6 個 × 生きている数))
+            // どちらもルート引数を書き換えないので、ルートシグネチャは渡さない
+            D3D12_INDIRECT_ARGUMENT_DESC drawArg = {};
+            drawArg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+            D3D12_COMMAND_SIGNATURE_DESC drawDesc = {};
+            drawDesc.ByteStride       = sizeof(D3D12_DRAW_INDEXED_ARGUMENTS);
+            drawDesc.NumArgumentDescs = 1;
+            drawDesc.pArgumentDescs   = &drawArg;
+            _particleDrawSignature = std::make_unique<DirectX12::CommandSignature>();
+            if (FAILED(_particleDrawSignature->Create(dx12Device, nullptr, drawDesc))) _particleDrawSignature.reset();
+
+            D3D12_INDIRECT_ARGUMENT_DESC dispatchArg = {};
+            dispatchArg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+            D3D12_COMMAND_SIGNATURE_DESC dispatchDesc = {};
+            dispatchDesc.ByteStride       = sizeof(D3D12_DISPATCH_ARGUMENTS);
+            dispatchDesc.NumArgumentDescs = 1;
+            dispatchDesc.pArgumentDescs   = &dispatchArg;
+            _particleDispatchSignature = std::make_unique<DirectX12::CommandSignature>();
+            if (FAILED(_particleDispatchSignature->Create(dx12Device, nullptr, dispatchDesc))) _particleDispatchSignature.reset();
+
+            if (!IsParticleAvailable()) Core::Logger::Log("[Pipeline] GPU particles are not available.");
+        }
+
+        ID3D12PipelineState* Pipeline::GetParticleDrawPso(const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount)
+        {
+            // ==============================================================
+            // パーティクルを描く PSO
+            //   ブレンド : 乗算済みアルファ (色 = 自分 + 描いてある色 × (1 - α))。
+            //              半透明は (色 × α, α)、加算は (色 × α, 0) を出すので、1 つの PSO で両方を描ける
+            //              (資料の MH:W はエミッターごとに描画を分けている。ここでは全パーティクルを 1 回で描く)
+            //   深度 : 描画先に付けない。ピクセルシェーダーがシーンの深度を読んで比べる (ソフトパーティクル)
+            // ==============================================================
+            if (_particleDrawFailed || rtvCount == 0 || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
+            uint64_t key = fnv1a(&sampleCount, sizeof(sampleCount), 0x9A271C1Eull);
+            key = hashFormats(key, rtvFormats, rtvCount, DXGI_FORMAT_UNKNOWN);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            if (!_particleDrawShaders)
+            {
+                auto shaders = std::make_unique<ParticleDrawShaders>();
+                if (!_shaderCompiler->Compile(PARTICLE_DRAW_SHADER_PATH, "VSParticle", Shader::Stage::Vertex, shaders->Vs) ||
+                    !_shaderCompiler->Compile(PARTICLE_DRAW_SHADER_PATH, "PSParticle", Shader::Stage::Pixel, shaders->Ps))
+                {
+                    Core::Logger::Log("[Pipeline] Failed compile particle draw shader.");
+                    _particleDrawFailed = true;
+                    return nullptr;
+                }
+                _particleDrawShaders = std::move(shaders);
+            }
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = _particleDrawShaders->Vs.View();
+            desc.PS = _particleDrawShaders->Ps.View();
+            desc.InputLayout = { nullptr, 0 };   // 頂点はシェーダーが SV_VertexID / SV_InstanceID から作る
+            desc.DepthStencilState.DepthEnable    = FALSE;
+            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            auto& target = desc.BlendState.RenderTarget[0];
+            target.BlendEnable    = TRUE;
+            target.SrcBlend       = D3D12_BLEND_ONE;
+            target.DestBlend      = D3D12_BLEND_INV_SRC_ALPHA;
+            target.BlendOp        = D3D12_BLEND_OP_ADD;
+            target.SrcBlendAlpha  = D3D12_BLEND_ONE;
+            target.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+            target.BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            desc.NumRenderTargets = rtvCount;
+            for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
+            desc.DSVFormat        = DXGI_FORMAT_UNKNOWN;
+            desc.SampleDesc.Count = (std::max)(1u, sampleCount);
+            return createPso(key, L"Particle", desc);
         }
 
         RHI_RESULT Pipeline::MakeCustomPipeline(const std::wstring& vsPath, const std::string& vsEntry, const std::wstring& psPath, const std::string& psEntry)

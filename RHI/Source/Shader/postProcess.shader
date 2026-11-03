@@ -4,6 +4,7 @@
 // ポストエフェクト (全画面のシェーダー)。C# の描画パスが LoadFullscreenShader で読み込む
 //   VSFullscreen : 全画面の三角形
 //   PSTonemap    : HDR (線形) → 画面の色 (露出 / トーンマップ / ガンマ)
+//   PSParticleComposite : 縮小バッファに描いた GPU パーティクルを HDR へ重ねる (乗算済みアルファの合成で)
 //
 // ルートシグネチャはシーンと同じ (Pipeline.cpp)。読むテクスチャは g_Inputs の番号で受け取る
 // ※この文字コードは UTF-8 (BOMなし)。FXC は BOM を読めないため BOM を付けないこと
@@ -83,4 +84,15 @@ float4 PSTonemap(FullscreenOutput input) : SV_TARGET
     color = pow(saturate(color), 1.0f / max(g_Params[0].z, 0.01f));
     const float luma = dot(color, float3(0.299f, 0.587f, 0.114f));   // ガンマを掛けた後 (人の目の感じ方に近い)
     return float4(color, g_Params[0].w > 0.5f ? luma : 1.0f);
+}
+
+// ==============================================================
+// 縮小バッファに描いた GPU パーティクルを重ねる
+//   g_Inputs[0].x : パーティクルを描いた縮小バッファ (rgb = 乗算済みの色の合計 / a = 覆った割合 (1 - 透けて見える割合))
+//   線形補間で拡大して出す。合成は 色 + HDR × (1 - a) (C# の FullscreenBlend.Premultiplied)
+//   縮小バッファに描くと、画面を覆う大きな煙の塗りつぶしが 1/4 になる (細かい粒は少しぼやける)
+// ==============================================================
+float4 PSParticleComposite(FullscreenOutput input) : SV_TARGET
+{
+    return g_Textures[g_Inputs[0].x].SampleLevel(g_LinearClamp, input.UV, 0);
 }

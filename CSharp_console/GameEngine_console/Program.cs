@@ -33,6 +33,10 @@ namespace GameEngine_console;
 //                                 --physics-workers N : 衝突判定の追加のスレッドの数 (既定 論理コア - 1、3 本まで) / --tree-rebuild off
 //   --scene physics             : 物理 (剛体 / ジョイント) の見本のシーン。スペースで球を撃つ / R で積み木を作り直す
 //   --physics-bench N           : 箱を N 個落として積む (物理の計測。--physics-workers N / --sleep off も使える)
+//   --scene particles           : GPU パーティクルの見本 (噴水 / 花火 / たき火と煙 / 光の群れ)。P ソート / O 衝突 / K 花火 / U ON・OFF
+//                                 J 噴水のエミッターを外す・付け直す。--view fountain|smoke で近くから見る
+//   --particle-bench N          : GPU パーティクルを N 個保ち続ける (計測。[ParticleBench] を出す)
+//   --particle-sort on|off / --particle-collision on|off / --particle-capacity N / --particle-half on|off : GPU パーティクルの設定
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -73,7 +77,10 @@ internal static class Program
         var benchCount = options.TryGetValue("--collision-bench", out var bench) && int.TryParse(bench, out var b) ? b : 0;
         var physicsBench = options.TryGetValue("--physics-bench", out var pbench) && int.TryParse(pbench, out var pb) ? pb : 0;
         var physicsScene = options.GetValueOrDefault("--scene", "") == "physics";
-        var physicsOnly  = physicsScene || physicsBench > 0;
+        var particleScene = options.GetValueOrDefault("--scene", "") == "particles";
+        var particleBench = options.TryGetValue("--particle-bench", out var particleText) && int.TryParse(particleText, out var pn) ? pn : 0;
+        // 物理 / パーティクルの見本は、見本のシーン (Showcase) と原点の箱を置かない
+        var physicsOnly  = physicsScene || physicsBench > 0 || particleScene || particleBench > 0;
 
         // 原点に 1 個 (動かないので Static)
         if (!physicsOnly)
@@ -96,6 +103,18 @@ internal static class Program
             PhysicsBench.Spawn(engine, box, physicsBench);
             if (options.TryGetValue("--physics-workers", out var pworkerText) && int.TryParse(pworkerText, out var pworkers)) engine.Physics.SetWorkerCount(pworkers);
             if (options.GetValueOrDefault("--sleep", "on") == "off") engine.Physics.Solver.EnableSleep = false;
+        }
+
+        // GPU パーティクルの見本 / 計測
+        if (particleScene) ParticleDemo.Spawn(engine, box);
+        if (particleBench > 0) ParticleBench.Spawn(engine, box, particleBench);
+        if (particleScene || particleBench > 0) engine.AddSystem(new ParticleHotkeySystem(engine.Graphics.Particles));
+        if (options.TryGetValue("--particle-sort", out var particleSort))           engine.Graphics.Particles.Sorting   = particleSort != "off";
+        if (options.TryGetValue("--particle-collision", out var particleCollision)) engine.Graphics.Particles.Collision = particleCollision != "off";
+        if (options.TryGetValue("--particle-half", out var particleHalf))           engine.Graphics.Particles.HalfResolution = particleHalf != "off";
+        if (options.TryGetValue("--particle-capacity", out var capacityText) && int.TryParse(capacityText, out var particleCapacity))
+        {
+            engine.Graphics.Particles.Capacity = particleCapacity;
         }
 
         // 負荷テストでない時は、複数のモデル (OBJ / PMX) を並べた見本のシーン + 衝突判定の見本
@@ -131,7 +150,11 @@ internal static class Program
 
         // ---------- カメラ ----------
         var camera = world.CreateEntity();
-        world.Add(camera, physicsOnly ? Transform.LookingAt(new Vector3(0, 9, -24), new Vector3(0, 2, 0)) : Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
+        var cameraStart = particleScene ? ParticleDemo.CameraFor(view)
+                        : particleBench > 0 ? Transform.LookingAt(new Vector3(0, 6, -20), new Vector3(0, 4, 4))
+                        : physicsOnly ? Transform.LookingAt(new Vector3(0, 9, -24), new Vector3(0, 2, 0))
+                        : Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero);
+        world.Add(camera, cameraStart);
         world.Add(camera, new Camera());
 
         var animate = options.GetValueOrDefault("--animate", "off") == "on";

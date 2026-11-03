@@ -172,6 +172,17 @@ namespace RHI
             void                    SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
+            // ==========================================================
+            // GPU パーティクル (CommandContext_Particles.cpp)
+            //   発生 / 更新 / 生死の管理 / 描画の引数を全部 GPU で行う。CPU はエミッターと出す数を送るだけ
+            //   描画パスの命令 UpdateParticles / DrawParticles で実行する
+            // ==========================================================
+            // 容量 (2 の累乗に切り上げ。0 で使わない)。GPU の完了を待ってから作り直す (生きている物は消える)
+            void SetParticleCapacity(uint32_t capacity);
+            // エミッター (毎フレーム。UpdateParticles の時に GPU へ送る)
+            void SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings& settings);
+            const RHI::ParticleStats& GetParticleStats()const { return _particleStats; }
+
             /***********************************************************************************
              * @brief ExecuteIndirect で描くか (false なら 1 個ずつ DrawIndexedInstanced)
              * @details ExecuteIndirect : 描画の引数をバッファに並べ、1 回の命令で全部描く。
@@ -572,7 +583,61 @@ namespace RHI
             void transitionHiZ(D3D12_RESOURCE_STATES after);
             void     warnTooManyDraws();
 
-            // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり)
+            // ---------- GPU パーティクル (CommandContext_Particles.cpp) ----------
+            //   _particleData    : パーティクル本体 [2][容量] (64byte。シェーダーの struct Particle)。毎フレーム 入力 / 出力 を入れ替え、
+            //                      生き残りを出力の先頭から詰めて書く (以前は本体 1 本 + 空きの番号の列 + (キー, 番号) の列 2 本)
+            //   _particleKeys    : 生き残った物の (奥行きのキー, 出力の位置) [容量]。ソートしない時は描画がこれを読む
+            //   _particleSorted  : _particleKeys を奥から順に並べた物 [容量]。ソートした時は描画がこれを読む
+            //   _particleCounters: 数 (生存数 / 空きの数 / 出した数 ...)。Atomic で数えるので UAV のまま
+            //   _particleArgs    : 更新の DispatchIndirect と 描画の ExecuteIndirect の引数 (GPU が書く)
+            //   _particleEmitters: エミッター (UPLOAD からフレームごとに写す)
+            struct ParticleBuffer
+            {
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Resource;
+                D3D12_RESOURCE_STATES                           State = D3D12_RESOURCE_STATE_COMMON;
+            };
+            ParticleBuffer                                       _particleData[2];
+            ParticleBuffer                                       _particleKeys;
+            ParticleBuffer                                       _particleSorted;
+            ParticleBuffer                                       _particleDrawData;        // 描画用 32byte [容量] (更新が書き、頂点シェーダーが読む)
+            ParticleBuffer                                       _particleCounters;
+            ParticleBuffer                                       _particleArgs;
+            ParticleBuffer                                       _particleEmitters;
+            ParticleBuffer                                       _particleSortBins;        // 計数ソートの区間 [PARTICLE_SORT_BUCKETS]
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _particleEmitterUpload;   // [FRAME_COUNT][MAX_PARTICLE_EMITTERS] (UPLOAD。Map したまま)
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _particleReadback;        // [FRAME_COUNT][数 16 個] (READBACK)
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _particleQuadIndices;     // 四角のインデックス 0,1,2,0,2,3 (uint16。UPLOAD。12byte だけなので写さない)
+            std::vector<RHI::ParticleEmitterData>                _particleEmitterData;     // SetParticleEmitters の写し (UpdateParticles で送る)
+            RHI::ParticleFrameSettings                           _particleSettings;
+            RHI::ParticleStats                                   _particleStats;
+            uint32_t                                             _particleCapacity      = 0;
+            uint32_t                                             _particleSpawnRequested = 0;     // このフレームに出す数の合計 (CPU が頼んだ数)
+            uint32_t                                             _particleSpawnHistory[FRAME_COUNT] = {};   // フレームごとの出す数 (ソートの数の上限を出すため)
+            uint32_t                                             _particleAliveRead     = 0xFFFFFFFFu;    // 読み戻した生存数 (FRAME_COUNT フレーム前。不明なら 0xFFFFFFFF)
+            uint32_t                                             _particleInput         = 0;      // 入力のパーティクル本体 (0 / 1)。最後の更新の出力 = 次の入力 = 描く物
+            bool                                                 _particleDrawSorted    = false;  // 描く列 : true = _particleSorted / false = _particleKeys
+            bool                                                 _particleHasAlpha      = false;  // 半透明のエミッターがある (ソートが要る)
+            uint32_t                                             _particleFrameSeed     = 0;
+            bool                                                 _particleNeedInit      = false;  // バッファを作った後 (空きリストを作る)
+            bool                                                 _particleUpdated       = false;  // このフレームで UpdateParticles をしたか
+            bool                                                 _particleDrawn         = false;  // このフレームで DrawParticles をしたか
+            bool                                                 _particleEverUpdated   = false;  // 描く物がある (一度でも更新した)
+            bool                                                 _particleReadbackRecorded[FRAME_COUNT] = {};
+            bool                                                 _particleTimed[FRAME_COUNT] = {};   // このフレームでパーティクルのタイムスタンプを書いたか
+
+            bool createParticleBuffers(uint32_t capacity);
+            void releaseParticleBuffers();
+            void transitionParticle(ParticleBuffer& buffer, D3D12_RESOURCE_STATES after, D3D12_RESOURCE_BARRIER* barriers, UINT& count);
+            void readParticleResults();                 // RenderStart : FRAME_COUNT フレーム前の生存数 / GPU 時間を読む
+            void updateParticles(Buffer* buffer);       // 命令 UpdateParticles
+            void sortParticles(uint32_t upperBound);    // 出力の生存リストを、入力のリストへ写しながら奥行きで並べる (UpdateParticles の中)
+            void drawParticles(Buffer* buffer);         // 命令 DrawParticles
+            void finishParticleTimestamps();            // RenderEnd : タイムスタンプの欠けを埋める
+
+            // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり
+            //                   3〜7 = パーティクル (更新の始め / ソートの始め / 更新の終わり / 描画の始め / 描画の終わり))
+            static constexpr UINT TIMESTAMP_PARTICLE_BEGIN = 3;
+            static constexpr UINT TIMESTAMP_PARTICLE_COUNT = 5;
             std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;
             RHI::FrameStats                                      _stats;
             bool                                                 _allowTearing = false;

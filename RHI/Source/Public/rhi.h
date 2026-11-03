@@ -152,6 +152,16 @@ namespace RHI
 		virtual bool IsOcclusionCullingEnabled()const = 0;
 
 		// ======================================================================
+		// GPU パーティクル
+		// ======================================================================
+
+		// パーティクルの最大数 (2 の累乗に切り上げ。0 で使わない)。GPU の完了を待ってからバッファを作り直す (生きている物は消える)
+		virtual void SetParticleCapacity(uint32_t capacity) = 0;
+		// エミッター (毎フレーム。出す数は C# が決める)。描くのは C# の描画パスの UpdateParticles / DrawParticles
+		virtual void SetParticleEmitters(const ParticleEmitterData* emitters, uint32_t count, const ParticleFrameSettings& settings) = 0;
+		virtual ParticleStats GetParticleStats()const = 0;
+
+		// ======================================================================
 		// プロファイラー (ImGui のウィンドウ。F1 キーでも表示 / 非表示を切り替えられる)
 		// ======================================================================
 

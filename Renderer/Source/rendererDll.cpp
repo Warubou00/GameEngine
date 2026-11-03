@@ -127,6 +127,28 @@ extern "C"
 		if (g_renderer && settings) g_renderer->SetShadowSettings(*settings);
 	}
 
+	// ==========================================================================
+	// GPU パーティクル (C# の ParticleSystem が使う)
+	// ==========================================================================
+
+	// パーティクルの最大数 (2 の累乗に切り上げ。0 で使わない)。GPU の完了を待ってから作り直す (生きている物は消える)
+	RENDERER_API void Renderer_SetParticleCapacity(uint32_t capacity)
+	{
+		if (g_renderer) g_renderer->SetParticleCapacity(capacity);
+	}
+
+	// エミッター (毎フレーム。このフレームに出す数を含む) とフレームの設定。描くのは描画パスの UpdateParticles / DrawParticles
+	RENDERER_API void Renderer_SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings* settings)
+	{
+		if (g_renderer && settings) g_renderer->SetParticleEmitters(emitters, emitters ? count : 0, *settings);
+	}
+
+	// 計測値 (生存数 / GPU の時間。GPU の値は 2 フレーム前)
+	RENDERER_API void Renderer_GetParticleStats(RHI::ParticleStats* outStats)
+	{
+		if (outStats) *outStats = g_renderer ? g_renderer->GetParticleStats() : RHI::ParticleStats();
+	}
+
 	// MSAA で使えるサンプル数の上限 (1 なら MSAA は使えない)
 	RENDERER_API uint32_t Renderer_GetMaxSampleCount()
 	{

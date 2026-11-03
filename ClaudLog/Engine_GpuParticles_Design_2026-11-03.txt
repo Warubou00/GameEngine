@@ -1,0 +1,109 @@
+﻿GPU パーティクル : 資料の要点 / このエンジンでの設計 / ロードマップ (2026-11-03)
+==========================================================================
+
+参考資料 : CAPCOM R&D「MH:W | GPU Particle - モンスターハンター:ワールドにおけるGPU Particleの実装」(GCC2018, 米山哲平)
+           https://www.docswell.com/s/CAPCOM_RandD/Z7DPJK-2022-07-15-133910/1
+
+--------------------------------------------------------------------------
+1. 資料の要点
+--------------------------------------------------------------------------
+ ■ 方針
+  - エミッターごとに Dispatch しない (CPU の描画命令を増やさない。全エミッター / 全パーティクルを 1 回でまとめて処理)
+  - Interlock (Atomic) 命令を 0 にする (並列性を落とさない)
+  - 読みやすさ第一 (Stream Function で Load/Store を統一。HLSL はほぼインライン展開されるので細かく関数化してよい)
+  - バッファは起動時に大きく確保し、再生のたびに確保し直さない (断片化 / 確保のコストを避ける)
+
+ ■ CPU と GPU の分担
+  - CPU : エミッターの生成 (データ領域の確保)、毎フレームのエミッター更新 (親の移動の反映、出す数の決定、タイムライン)
+          → Emitter Table / Emitter Headers / Emitter Binary (CPU → GPU、GPU は読むだけ)
+  - GPU : 発生 / 更新 / ソート / 生死の管理 / 描画の引数の作成 / 頂点の作成 (Particle Headers / Particle Binary /
+          Particle Index List / Emitter Range / Indirect Args は GPU の中だけで読み書き)
+
+ ■ 毎フレームの GPU の流れ (10 pass。初回だけ Clear System / Clear Particles)
+  Begin Update (1 スレッド。前の数 + 出す予定の数 = 仮の総数) → Fill Unused Index (新しいエミッターの領域を -1 で埋める)
+  → Spawn Particles (出す数を決め、Particle Headers の末尾に追加) → Initialize Particles (空きインデックスを割り当て)
+  → Update Particle (1 スレッド 1 パーティクル。アイテムを Uber Shader 的に全部実行。隣のスレッドは同じエミッターなので分岐は揃う)
+  → Bitonic Sort (Alive / EmitterID / Depth を 64bit のキーで並べ替え。死んだ物は INVALID_TAG で末尾へ。半透明の深度ソートも兼ねる)
+  → Range Particles (ソート済みの列で隣と EmitterID が違う所 = 境界。エミッターごとの数を Atomic 無しで求める)
+  → Terminate Particles (死んだ物のインデックスを空きリストへ返す)
+  → Build Emitter Draw Args (エミッターごとの DrawInstanced の引数。頂点数 x6 = ビルボード)
+  → Build Primitive (ビルボード / リボンの頂点を作る)
+
+ ■ その他
+  - ソートの段数はパーティクル数で増える。CPU は生存数を知らないので、全エミッターの最大数の合計から段数を決める
+  - エミッターを消す時は 1 フレーム待って、配下のパーティクルを必ず消す (残ったパーティクルが消えた領域を読む)
+  - 速さ : 約 100 エミッター / 最大 50,000 個 (平均 25,000 個生存) で 1.0〜1.5 ms (PS4)。Async Compute で Z-Prepass の裏に隠す
+  - 高速化案 : 加算だけならソート不要 / エミッター単位のソート / Update の分割 / アイテムの値をシェーダーに焼き込む
+  - デバッグツール (エミッターごとの使用領域・不整合の監視) は最初に作るべき
+
+--------------------------------------------------------------------------
+2. このエンジンに合わせた設計
+--------------------------------------------------------------------------
+ ■ 資料から変える所と理由
+  - 生死の管理は「空きリスト (dead list) + 生きているリスト (alive list) 2 本の入れ替え」にする (資料はソートで分ける)。
+      資料のソートは 生死の分離 + エミッターの境界 + 深度 を 1 回で兼ねているが、ソートは毎フレーム全容量を並べ替えるので
+      数十万個では重い。このエンジンでは数十万〜百万個を目標にするので、ソートは「半透明を正しく重ねる時だけ」にし、
+      生死の管理は Atomic で数える。Atomic は SM6 の Wave 命令でウェーブ (32 スレッド) ごとに 1 回にまとめる
+      (WaveActiveCountBits / WavePrefixCountBits)。資料の「Atomic を 0 に」の狙い (並列性を落とさない) はこれで保つ。
+  - 発生 (Spawn) は Atomic 無し : CPU がエミッターごとの出す数とその累計 (SpawnOffset) を送り、
+      GPU は Begin で「出す数 = min(頼まれた数, 空きの数)」を 1 回だけ決める。スレッド i は 空きリストの [空き - 出す数 + i] を使う。
+  - エミッターごとの数 (Emitter Range) とエミッターごとの描画は持たない : 全パーティクルを 1 回の ExecuteIndirect で描く
+      (加算と半透明は「乗算済みアルファ」のブレンド 1 つで両方描ける : 加算は α = 0 で色を足す)。
+  - 頂点は作らない (Build Primitive の代わりに、更新で描画用の色 / 大きさまで決めておき、頂点シェーダーが SV_VertexID で四角を作る)
+  - エミッターを消した時は、C# がそのスロットを「寿命の最大値 + 2 フレーム」の間は使い回さない (資料 p.87 の不正アクセス対策)
+
+ ■ GPU のデータ (RHI : CommandContext が持つ。容量は C# から設定。2 の累乗に切り上げ)
+  Particles  [容量] 64byte : 位置 / 年齢 / 速度 / 寿命 / エミッター / 大きさ / 色 (half4) / 回転 / 角速度 / 乱数 / 形
+  DeadList   [容量] uint   : 空きのパーティクルの番号 (積み上げ。先頭から 空きの数 個が有効)
+  AliveList  [2][容量] uint2 : (ソートのキー = 奥行き, パーティクルの番号)。毎フレーム 入力 / 出力 を入れ替える
+  Counters   uint×16 (UAV) : [0] 入力の生存数 [1] 出力の生存数 (Atomic) [2] 空きの数 [3] このフレームに出した数 [4] 出し始めの位置 ...
+  Args       (UAV → INDIRECT_ARGUMENT) : 更新の DispatchIndirect の引数 / 描画の DrawInstanced の引数 (ExecuteIndirect)
+  Emitters   [最大 1024] 128byte : CPU が毎フレーム UPLOAD に書き、VRAM へ写す (Emitter Table + Header + Binary を 1 つにした物)
+  Readback   : 生存数 / 空きの数 (プロファイラー用。2 フレーム後に読む。ソートの段数の上限にも使う)
+
+ ■ 毎フレームの GPU の流れ (C# の RenderPipeline が積む命令で動く)
+  命令 UpdateParticles (不透明の後 : 深度が出来ているので衝突に使える)
+    1. エミッターを VRAM へコピー
+    2. CSParticleBegin (1 スレッド)  : 出す数を決める / 空きの数を減らす / 入力の生存数を増やす / 更新の Dispatch の引数
+    3. CSParticleEmit                : 出すパーティクルを初期化して、入力の生存リストの末尾に足す (Atomic 無し)
+    4. CSParticleSimulate (Indirect) : 年齢 / 重力 / 抵抗 / (衝突) / 色と大きさ。生きていれば出力の生存リストへ、死んだら空きリストへ
+    5. CSParticleFinish (1 スレッド) : 描画の引数 (6 頂点 × 生存数) / 次のフレームの入力の数
+    6. (ソートあり) CSParticleSort*  : 出力の生存リストを奥行きで並べ替える (バイトニックソート。段数は CPU が上限から決める)
+  命令 DrawParticles (半透明の後、トーンマップの前の HDR へ)
+    ExecuteIndirect (DrawInstanced 1 回)。頂点シェーダーが生存リスト → パーティクルを読み、カメラを向いた四角を作る。
+    深度はシェーダーがシーンの深度 (SRV) を読んで比べる (隠れていれば捨てる / 面の近くは薄くする = ソフトパーティクル)。
+    そのため描画先に深度は付けない (MSAA の時は解決した 1 サンプルの深度を読む)
+
+ ■ ルートシグネチャ
+  - コンピュート : 新しいルートシグネチャ (b0 フレームの定数 / b1 ルート定数 16 個 / t0 エミッター / u0〜u5 / t1 深度のテーブル)
+  - 描画 : 今のルートシグネチャのまま (ルート SRV の t1 = パーティクル / t2 = 生存リスト を描画の間だけ差し替え、終わったら戻す)。
+           ルートシグネチャを変えないので、既存の PSO / シェーダーは作り直しにならない
+
+ ■ C ABI (Renderer.dll) / C#
+  - Renderer_SetParticleCapacity(capacity) / Renderer_SetParticleEmitters(emitters, count, settings) / Renderer_GetParticleStats(stats)
+  - C# : ParticleEmitter コンポーネント (Transform と一緒に付ける) / ParticleSystem (エンジン組み込みの System。
+         スロットの管理・出す数の計算 (Rate × dt の端数の持ち越し、Burst)・毎フレームの送信) / Graphics.Particles (容量・ソート・衝突)
+  - RenderCommandBuffer : UpdateParticles() / DrawParticles()。Forward / Deferred のパイプラインに組み込む
+  - 見本 : --scene particles (噴水 / 花火 / 煙 / 群れ)、--particle-bench N (N 個を保つ計測)
+
+--------------------------------------------------------------------------
+3. ロードマップ (段ごとに見た目を確認し、ClaudLog/Engine_GpuParticles_*_日付.txt を書く)
+--------------------------------------------------------------------------
+ G1 基盤        : RHI のバッファ / Begin・Emit・Simulate・Finish / ExecuteIndirect のビルボード / C ABI / C# の
+                  ParticleEmitter・ParticleSystem / --scene particles (噴水)。Forward と Deferred の両方に組み込む
+                  確認 : 噴水が見える / F2 で Forward ⇔ Deferred / Debug でエラー 0
+ G2 見た目と管理 : 形 (点 / 球 / 円錐)、色 / 大きさの変化、バースト、加算 / 半透明、エミッターの削除と待ち、
+                  プロファイラー (生存数 / GPU 時間)、MSAA。確認 : 花火・煙・群れのシーン
+ G3 衝突        : シーンの深度で跳ね返る (法線は深度から) + ソフトパーティクル。確認 : 噴水の水が箱と床で跳ねる
+ G4 ソート      : 半透明のための奥行きソート (バイトニック)。確認 : 煙の重なりの前後
+ G5 計測        : Release で 個数ごと (1万 / 10万 / 50万 / 100万) の GPU 時間 (更新 / ソート / 描画)。Debug のエラー 0
+
+--------------------------------------------------------------------------
+4. その後の変更 (G5 の後の最適化。今の作りはこちら)
+--------------------------------------------------------------------------
+ - ソート : 多い時は計数ソート (奥行き 32768 区間)、少ない時は段をまとめたバイトニック  … Engine_GpuParticles_SortOptimization
+ - 更新   : 空きリストをやめ、本体 2 本 (16byte × 4 枚の SoA) を入れ替えて生き残りを詰め直す。描画用 32byte を書き出す
+                                                                                   … Engine_GpuParticles_UpdateOptimization
+ - 描画   : 画面に映る物だけを描く / インデックス付きの四角 (頂点 4 個)              … Engine_GpuParticles_DrawOptimization
+ - 縮小バッファ (半分の解像度) に描いて重ねる (既定)                                 … Engine_GpuParticles_HalfResolution
+   上の 2. の「空きリスト + 生存リスト 2 本」「AliveList」「DrawInstanced(6, 生存数)」は、今は上の形に変わっている

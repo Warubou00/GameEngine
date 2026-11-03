@@ -169,6 +169,55 @@ namespace RHI
             static constexpr uint32_t HIZ_CONSTANT_COUNT  = 8 + 4 * HIZ_LEVELS_PER_PASS;   // uint ×8 + uint4 ×5
             static constexpr uint32_t HIZ_THREAD_GROUP    = 16;          // numthreads(16, 16, 1)
 
+            // ----------------------------------------------------------
+            // GPU パーティクル (コンピュート) のルートシグネチャのパラメータ番号 (particleSim.shader と対応)
+            //   b0 / b1 は描画用と同じ並び (b0 = フレームの定数、b1 = ルート定数 16 個) にして、シェーダーを読みやすくする
+            // ----------------------------------------------------------
+            enum ParticleRootParameterIndex : unsigned int
+            {
+                PARTICLE_PARAM_FRAME     = 0,  // b0 : フレームの定数 (View / Projection。Root CBV)
+                PARTICLE_PARAM_CONSTANTS = 1,  // b1 : 経過時間 / 数 / ソートの段 (ルート定数)
+                PARTICLE_PARAM_EMITTERS  = 2,  // t0 : エミッター (Root SRV)
+                PARTICLE_PARAM_PARTICLES_IN  = 3,  // u0 : 入力のパーティクル本体 (Root UAV)
+                PARTICLE_PARAM_PARTICLES_OUT = 4,  // u1 : 出力のパーティクル本体 (生き残りを詰めて書く)
+                PARTICLE_PARAM_SORTED    = 5,  // u2 : 並べた (キー, 位置) の列
+                PARTICLE_PARAM_KEYS      = 6,  // u3 : 生き残った物の (キー, 位置) の列
+                // (以前は u0 パーティクル / u1 空きリスト / u2・u3 入力・出力の (キー, 番号) の列)
+                PARTICLE_PARAM_COUNTERS  = 7,  // u4 : 数
+                PARTICLE_PARAM_ARGS      = 8,  // u5 : DispatchIndirect / 描画の引数
+                PARTICLE_PARAM_DEPTH     = 9,  // t1 : シーンの深度 (衝突。ディスクリプタテーブル)
+                PARTICLE_PARAM_SORT_BINS = 10, // u6 : ソートの区間ごとの数 / 書く位置 (計数ソート)
+                PARTICLE_PARAM_DRAW_DATA = 11, // u7 : 描画用 32byte (更新が書き、頂点シェーダーが読む)
+                PARTICLE_PARAM_COUNT
+            };
+            static constexpr uint32_t PARTICLE_CONSTANT_COUNT = 16;
+            static constexpr uint32_t PARTICLE_THREAD_GROUP   = 256;   // CSParticleSimulate / CSParticleInit
+            static constexpr uint32_t PARTICLE_EMIT_GROUP     = 64;    // CSParticleEmit
+            static constexpr uint32_t PARTICLE_SORT_GROUP     = 2048;  // バイトニックソートで 1 グループの中 (共有メモリ) で並べる数 (1024 スレッド × 2。以前は 1024)
+            static constexpr uint32_t PARTICLE_SORT_STEP_LEVELS = 4;   // CSParticleSortStep で 1 回にまとめる段の数 (1 スレッド 16 個)
+            static constexpr uint32_t PARTICLE_SORT_BUCKETS   = 32768; // 計数ソートの奥行きの区間の数 (particleSim.shader の SORT_BUCKETS)
+            // 並べる長さ (2 の累乗) がこれを超えたら計数ソート、以下ならバイトニックソート
+            // (RTX 2070 : 2 万個 0.049 vs 0.093 ms / 6 万個 0.088 vs 0.103 ms / 10 万個 0.180 vs 0.111 ms (バイトニック vs 計数))
+            static constexpr uint32_t PARTICLE_COUNTING_SORT_MIN = 65536;
+
+            // GPU パーティクルのコンピュートシェーダー (作れなかった環境では nullptr = パーティクルを使わない)
+            enum ParticleKernel : unsigned int
+            {
+                PARTICLE_KERNEL_INIT = 0,    // CSParticleInit     : 数を 0 に (作り直した時だけ)
+                PARTICLE_KERNEL_BEGIN,       // CSParticleBegin    : 出す数を決める
+                PARTICLE_KERNEL_EMIT,        // CSParticleEmit     : 出す
+                PARTICLE_KERNEL_SIMULATE,    // CSParticleSimulate : 動かす / 生死を分ける
+                PARTICLE_KERNEL_FINISH,      // CSParticleFinish   : 描画の引数
+                PARTICLE_KERNEL_SORT_LOCAL,  // CSParticleSortLocal  : 1024 個ずつ共有メモリで並べる (最初の段)
+                PARTICLE_KERNEL_SORT_STEP,   // CSParticleSortStep   : 離れた 2 個を比べて入れ替える (段の大きい比較)
+                PARTICLE_KERNEL_SORT_MERGE,  // CSParticleSortMerge  : 段の残り (距離 512 以下) を共有メモリで
+                PARTICLE_KERNEL_BIN_CLEAR,   // CSParticleBinClear   : 計数ソート : 区間の数を 0 に
+                PARTICLE_KERNEL_BIN_COUNT,   // CSParticleBinCount   : 計数ソート : 区間ごとに数える
+                PARTICLE_KERNEL_BIN_SCAN,    // CSParticleBinScan    : 計数ソート : 区間の先頭の位置 (1 グループ)
+                PARTICLE_KERNEL_BIN_SCATTER, // CSParticleBinScatter : 計数ソート : 並べ先へ書く
+                PARTICLE_KERNEL_COUNT
+            };
+
         public:          /*---コンストラクタ・デストラクタ---*/
             Pipeline();
             ~Pipeline()override;
@@ -204,7 +253,7 @@ namespace RHI
             //   sampleCount : MSAA のサンプル数 (描画先と同じ。1 なら MSAA なし)
             ID3D12PipelineState* GetScenePso(uint32_t scenePass, uint32_t group, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount);
 
-            // 全画面を描く PSO (blend : 0 なし / 1 加算 / 2 アルファ)。シーンと同じく初めて使う時に作る
+            // 全画面を描く PSO (blend : 0 なし / 1 加算 / 2 アルファ / 3 乗算済みアルファ)。シーンと同じく初めて使う時に作る
             ID3D12PipelineState* GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount);
 
             // MSAA の深度を 1 サンプルの深度に解決する PSO (antiAliasing.shader の PSResolveDepth。初めて使う時に作る)
@@ -236,6 +285,15 @@ namespace RHI
             ID3D12PipelineState* GetHiZPipeline()const;          // CSDownsample
             ID3D12PipelineState* GetHiZPipelineMs()const;        // CSDownsampleMS (MSAA の深度から段 0 を作る。無ければ nullptr)
 
+            // GPU パーティクル
+            bool                    IsParticleAvailable()const;
+            ID3D12RootSignature*    GetParticleRootSignature()const;
+            ID3D12PipelineState*    GetParticlePipeline(ParticleKernel kernel)const;
+            ID3D12CommandSignature* GetParticleDrawSignature()const;     // DrawIndexedInstanced 1 回 (ExecuteIndirect)
+            ID3D12CommandSignature* GetParticleDispatchSignature()const; // Dispatch 1 回 (更新の DispatchIndirect)
+            // 描く PSO (乗算済みアルファのブレンド・深度なし。描画先の形式ごとに初めて使う時に作る)
+            ID3D12PipelineState*    GetParticleDrawPso(const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount);
+
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
 
@@ -262,6 +320,13 @@ namespace RHI
             std::unique_ptr<DirectX12::RootSignature>    _hiZRootSignature;        // Hi-Z 用
             std::unique_ptr<DirectX12::PipelineState>    _hiZPipeline;
             std::unique_ptr<DirectX12::PipelineState>    _hiZPipelineMs;
+            std::unique_ptr<DirectX12::RootSignature>    _particleRootSignature;   // GPU パーティクル用
+            std::unique_ptr<DirectX12::PipelineState>    _particlePipelines[PARTICLE_KERNEL_COUNT];
+            std::unique_ptr<DirectX12::CommandSignature> _particleDrawSignature;
+            std::unique_ptr<DirectX12::CommandSignature> _particleDispatchSignature;
+            struct ParticleDrawShaders;
+            std::unique_ptr<ParticleDrawShaders>         _particleDrawShaders;     // particleDraw.shader (初めて描く時にコンパイル)
+            bool                                         _particleDrawFailed = false;
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;
@@ -273,6 +338,7 @@ namespace RHI
             void       makeIndirectDrawSignature(Device* device);
             void       makeCullingPipeline(Device* device);
             void       makeHiZPipeline(Device* device);
+            void       makeParticlePipeline(Device* device);
         };
 
     }

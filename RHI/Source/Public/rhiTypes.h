@@ -225,6 +225,8 @@ namespace RHI
 		ClearDepth       = 2,   // 描画先の深度を ClearDepth で消す
 		DrawScene        = 3,   // Arg0 = ScenePass / Arg1 = RenderQueue / Inputs[0] = 視点 (0 カメラ / 1〜 影のカスケード)
 		DrawFullscreen   = 4,   // Arg0 = シェーダー / Arg1 = ブレンド (0 なし / 1 加算 / 2 アルファ) / Inputs / Params
+		UpdateParticles  = 5,   // GPU パーティクルの発生 / 更新 (/ ソート)。不透明の後に置く (衝突でシーンの深度を読む)。1 フレームに 1 回
+		DrawParticles    = 6,   // GPU パーティクルを今の描画先へ描く (深度はシェーダーがシーンの深度を読んで比べる。描画先に深度は付けない)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
@@ -321,6 +323,104 @@ namespace RHI
 		SHADOW_FLAG_UNION_CULLING = 1,   // 全カスケードを囲む箱で 1 回だけカリングする (既定は段ごと)
 		SHADOW_FLAG_SHOW_CASCADES = 2,   // 確認用 : 段ごとに色を付ける
 	};
+
+	// ==========================================================================
+	// GPU パーティクル (発生 / 更新 / 生死の管理 / 描画を GPU だけで行う)
+	//   CPU (C# の ParticleSystem) は毎フレーム、エミッターの置き場所と「このフレームに出す数」を送るだけ。
+	//   パーティクル 1 個 1 個のデータは GPU の中にしか無い (CPU は読まない)
+	//   参考 : CAPCOM「MH:W | GPU Particle」(GCC2018)。ClaudLog/Engine_GpuParticles_Design_2026-11-03.txt
+	// ==========================================================================
+	static constexpr uint32_t MAX_PARTICLE_EMITTERS = 1024;
+	static constexpr uint32_t MAX_PARTICLE_CAPACITY = 1u << 21;   // 約 210 万個 (パーティクル 64byte × 容量 = 128MB)
+
+	// 出す場所の形 (ParticleEmitterData::Shape の下位 8bit)
+	enum class ParticleSpawnShape : uint32_t
+	{
+		Point  = 0,   // エミッターの位置から
+		Sphere = 1,   // 半径 ShapeRadius の球の中
+		Shell  = 2,   // 半径 ShapeRadius の球の表面
+		Box    = 3,   // 半辺 ShapeRadius の立方体の中
+		Disc   = 4,   // 半径 ShapeRadius の円 (エミッターの向きに垂直な面)
+	};
+
+	// 見た目の形 (ParticleEmitterData::Shape の 8〜15bit)
+	enum class ParticleSprite : uint32_t
+	{
+		SoftCircle = 0,   // ふちがぼやけた丸 (煙 / 光)
+		Spark      = 1,   // 芯の明るい点 (火花)
+		Ring       = 2,   // 輪
+	};
+
+	enum ParticleEmitterFlags : uint32_t
+	{
+		PARTICLE_EMITTER_ADDITIVE = 1,   // 加算 (光る物。並び順に関係なく正しく重なる)。無ければ半透明 (アルファブレンド)
+		PARTICLE_EMITTER_COLLIDE  = 2,   // シーンの深度で跳ね返る (ParticleFrameSettings の衝突が有効な時)
+		PARTICLE_EMITTER_STRETCH  = 4,   // 速度の向きに伸ばす (StretchScale)。回転はしない
+	};
+
+	// エミッター 1 個分 (C# の ParticleSystem が毎フレーム送る。シェーダーの struct Emitter と同じ並び : 160byte)
+	struct ParticleEmitterData
+	{
+		float    Position[3]     = {};
+		uint32_t SpawnCount      = 0;      // このフレームに出す数
+		float    PrevPosition[3] = {};     // 前のフレームの位置 (動いている時は、この間に散らして出す)
+		uint32_t SpawnOffset     = 0;      // RHI が書く (前のエミッターまでの SpawnCount の合計)
+		float    Direction[3]    = { 0.0f, 1.0f, 0.0f };   // 出す向き (正規化済み)
+		float    ConeAngle       = 0.3f;   // 向きのばらつき (円錐の半角。ラジアン。π で全方向)
+		float    SpeedMin        = 1.0f;
+		float    SpeedMax        = 2.0f;
+		float    LifeMin         = 1.0f;   // 寿命 (秒)
+		float    LifeMax         = 2.0f;
+		float    Gravity[3]      = { 0.0f, -9.8f, 0.0f };   // 加速度 (m/s^2)
+		float    Drag            = 0.0f;   // 空気抵抗 (1 秒あたりに速度が e^-Drag 倍)
+		float    ColorStart[4]   = { 1.0f, 1.0f, 1.0f, 1.0f };   // 線形の色 (HDR。1 を超えてよい) とアルファ
+		float    ColorEnd[4]     = { 1.0f, 1.0f, 1.0f, 0.0f };
+		float    SizeStart       = 0.1f;   // 大きさ (四角の半分の幅。ワールド)
+		float    SizeEnd         = 0.1f;
+		uint32_t Shape           = 0;      // 下位 8bit : ParticleSpawnShape / 8〜15bit : ParticleSprite
+		float    ShapeRadius     = 0.0f;
+		uint32_t Flags           = 0;      // ParticleEmitterFlags
+		float    Restitution     = 0.5f;   // 跳ね返りの強さ (0〜1)
+		float    AngularSpeed    = 0.0f;   // 回転の速さの最大 (ラジアン / 秒。向きはランダム)
+		uint32_t Seed            = 0;      // 乱数の種 (エミッターごとに違う値)
+		float    Turbulence      = 0.0f;   // 乱れ (ふらふら揺れる強さ。m/s^2)
+		float    StretchScale    = 0.0f;   // 速度で伸ばす長さ (秒。速さ × これ だけ伸びる)
+		float    Padding[2]      = {};
+	};
+	static_assert(sizeof(ParticleEmitterData) == 160, "ParticleEmitterData must be 160 bytes (same as HLSL / C#)");
+
+	enum ParticleFrameFlags : uint32_t
+	{
+		PARTICLE_FRAME_COLLISION = 1,   // シーンの深度との衝突 (PARTICLE_EMITTER_COLLIDE のエミッターだけ)
+		PARTICLE_FRAME_SORT      = 2,   // 奥から手前へ並べ替えて描く (半透明を正しく重ねる)
+	};
+
+	// フレームごとの設定 (C# の Native.ParticleFrameSettings と同じ並び : 32byte)
+	struct ParticleFrameSettings
+	{
+		float    DeltaTime          = 0.0f;   // このフレームの経過時間 (秒)
+		uint32_t Flags              = 0;      // ParticleFrameFlags
+		float    CollisionThickness = 0.5f;   // 深度の面の後ろ、どこまでを「当たった」とみなすか (ワールド)
+		float    SoftDistance       = 0.3f;   // 面に近づくと薄くする距離 (ソフトパーティクル。0 なら切る)
+		float    Time               = 0.0f;   // 起動からの時間 (乱れの模様を動かす)
+		uint32_t Padding[3]         = {};
+	};
+	static_assert(sizeof(ParticleFrameSettings) == 32, "ParticleFrameSettings must be 32 bytes (same as C#)");
+
+	// 計測値 (C# の Native.ParticleStats と同じ並び : 36byte。以前は 32byte)。GPU の値は FRAME_COUNT フレーム前のもの
+	struct ParticleStats
+	{
+		uint32_t Capacity  = 0;
+		uint32_t Alive     = 0;      // 生きている数
+		uint32_t Free      = 0;      // 空きの数 (Capacity - Alive)
+		uint32_t Emitters  = 0;
+		float    UpdateMs  = 0.0f;   // GPU : 発生 + 更新 (+ ソート)
+		float    SortMs    = 0.0f;   // GPU : ソートだけ (UpdateMs に含む)
+		float    DrawMs    = 0.0f;   // GPU : 描画
+		uint32_t Valid     = 0;      // 1 : GPU の値が読めた
+		uint32_t Visible   = 0;      // 生きている物のうち画面に映った数 (描いた数)
+	};
+	static_assert(sizeof(ParticleStats) == 36, "ParticleStats must be 36 bytes (same as C#)");
 
 	// ==========================================================================
 	// 初期化

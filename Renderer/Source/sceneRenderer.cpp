@@ -447,6 +447,21 @@ namespace Renderer
 		if (IsInitialized()) _rhi->SetShadowSettings(settings);
 	}
 
+	void SceneRenderer::SetParticleCapacity(uint32_t capacity)
+	{
+		if (IsInitialized()) _rhi->SetParticleCapacity(capacity);
+	}
+
+	void SceneRenderer::SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings& settings)
+	{
+		if (IsInitialized()) _rhi->SetParticleEmitters(emitters, count, settings);
+	}
+
+	RHI::ParticleStats SceneRenderer::GetParticleStats() const
+	{
+		return IsInitialized() ? _rhi->GetParticleStats() : RHI::ParticleStats();
+	}
+
 	uint32_t SceneRenderer::GetMaxSampleCount() const
 	{
 		return IsInitialized() ? _rhi->GetMaxSampleCount() : 1;

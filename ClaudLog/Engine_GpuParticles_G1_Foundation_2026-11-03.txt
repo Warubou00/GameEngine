@@ -1,0 +1,69 @@
+﻿GPU パーティクル G1 : 基盤 (発生 / 更新 / 生死の管理 / ExecuteIndirect の描画 / C ABI / C# / 見本) (2026-11-03)
+==========================================================================
+設計とロードマップ : ClaudLog/Engine_GpuParticles_Design_2026-11-03.txt (資料 CAPCOM「MH:W | GPU Particle」の要点もここ)
+ブランチ : 作業ツリーは develop のまま (未コミット。共有の作業フォルダのためブランチは切り替えていない)
+
+--------------------------------------------------------------------------
+1. 変更したファイル
+--------------------------------------------------------------------------
+ RHI
+  - Public/rhiTypes.h : RenderCommandType に UpdateParticles = 5 / DrawParticles = 6。
+                        ParticleEmitterData (160byte) / ParticleFrameSettings (32byte) / ParticleStats (32byte) /
+                        ParticleSpawnShape / ParticleSprite / フラグ / MAX_PARTICLE_EMITTERS (1024) / MAX_PARTICLE_CAPACITY (2^21)
+  - Public/rhi.h, RenderHardwareInterface.h/.cpp : SetParticleCapacity / SetParticleEmitters / GetParticleStats。
+                        プロファイラー (F1) に Particles alive / emitters / GPU particles update・sort・draw (ms) を出す
+  - DirectX12/RHIObject/CommandContext_Particles.cpp (新規) : バッファの作成 / 毎フレームの更新 / ソート / 描画 / 読み戻し
+  - DirectX12/RHIObject/CommandContext.h/.cpp : パーティクルのメンバー、命令の分岐、RenderStart で読み戻し、RenderEnd でタイムスタンプ
+  - DirectX12/RHIObject/Pipeline.h/.cpp : パーティクルのコンピュートのルートシグネチャ (33 DWORD) / PSO 8 個 /
+                        ExecuteIndirect のコマンドシグネチャ 2 個 (DrawInstanced / Dispatch) / 描く PSO (乗算済みアルファ・深度なし)
+  - DirectX12/Object/dx12_gpuTimer.h/.cpp : タイムスタンプを 4 → 8 個 / フレーム (更新の始め・ソートの始め・更新の終わり・描画の始め・終わり)、
+                        ReadIntervalsFrom (途中の区間を読む)
+  - Shader/particleSim.shader (新規) : CSParticleInit / Begin / Emit / Simulate / Finish / SortLocal / SortStep / SortMerge
+  - Shader/particleDraw.shader (新規) : VSParticle (カメラを向いた四角 / 速度で伸ばす) / PSParticle (丸・火花・輪、シーンの深度と比べる)
+  - RHI.vcxproj / .filters : CommandContext_Particles.cpp を追加
+ Renderer
+  - rendererDll.cpp : Renderer_SetParticleCapacity / Renderer_SetParticleEmitters / Renderer_GetParticleStats
+  - sceneRenderer.h/.cpp : RHI へ渡すだけ
+ C#
+  - Components/ParticleEmitter.cs (新規) : ParticleEmitter コンポーネント + ParticleShape / ParticleSprite / ParticleBlend
+  - Systems/ParticleSystem.cs (新規) : ParticleSystem (エンジン組み込み) + ParticleSettings (Graphics.Particles)
+  - Engine.cs : Graphics.Particles、ライトの後に ParticleSystem.Update
+  - Native/NativeMethods.cs : 構造体 3 つと関数 3 つ
+  - Rendering/RenderCommandBuffer.cs : UpdateParticles() / DrawParticles()
+  - Rendering/RenderPipeline.cs : Forward (SSAO あり / なし) と Deferred に組み込み (不透明の後に更新、半透明の後に HDR へ描く)
+ 見本
+  - Samples/ParticleSamples.cs (新規) : ParticleDemo (--scene particles) / ParticleBench (--particle-bench N) / 花火 / 飛ぶ物 / 操作キー
+  - Program.cs : --scene particles / --particle-bench N / --particle-sort / --particle-collision / --particle-capacity / --view fountain|smoke
+
+--------------------------------------------------------------------------
+2. 仕組み
+--------------------------------------------------------------------------
+ ■ GPU のバッファ (容量は 2 の累乗。既定 2^18 = 262,144 個で約 21MB)
+   Particles [容量] 64byte / DeadList [容量] uint / AliveList [2][容量] uint2 (キー, 番号) / Counters / Args / Emitters [1024] 160byte
+ ■ 毎フレーム (命令 UpdateParticles)
+   エミッターを UPLOAD → VRAM へ写す → Begin (1 スレッド : 出す数 = min(頼んだ数, 空き)、更新の Dispatch の引数)
+   → Emit (頼んだ数のスレッド。SpawnOffset を二分探索してエミッターを決める。空きリストの決まった場所を使うので Atomic 無し)
+   → Simulate (DispatchIndirect。重力 / 乱れ / 空気抵抗 / 衝突 / 色と大きさ。生き残りは出力の列、死んだ物は空きリストへ。
+      どちらも Wave ごとに 1 回の Atomic : WaveActiveCountBits + WavePrefixCountBits)
+   → Finish (1 スレッド : DrawInstanced(6, 生存数) の引数) → (ソート) → 数を読み戻す (2 フレーム後に CPU が読む)
+ ■ 描画 (命令 DrawParticles) : ExecuteIndirect 1 回 (全エミッター・全パーティクル)。
+   ルートシグネチャはシーンと同じ物のまま、頂点シェーダーのルート SRV t1 / t2 を描く間だけパーティクル / 生存リストに差し替えて戻す
+   (ルートシグネチャを変えないので、既存の PSO は作り直しにならない)
+ ■ C# : ParticleSystem がエミッターごとに「このフレームに出す数」(Rate × dt の端数を持ち越す + Burst) を決め、
+        全エミッターを 1 回の P/Invoke で送る。エミッターの番号は、外した後も寿命の最大 + 0.25 秒は使い回さない (資料 p.87)
+
+--------------------------------------------------------------------------
+3. 確認 (見た目)
+--------------------------------------------------------------------------
+ - --scene particles (Debug) : 噴水 / 花火 / たき火と煙 / 光の群れ が表示され、約 15.5 万個が動く (プロファイラーの Particles alive)
+   撮影 : scratchpad/g1dbg_t48.png (プロファイラーあり)、g2_sceneparticles_t7.png
+ - 既存の見本 (--ssao on) / --stress 2000 --view inside : 変わらず表示、エラー 0
+
+--------------------------------------------------------------------------
+4. デバッグレイヤーで出たエラーと直し方
+--------------------------------------------------------------------------
+ - 「DATA_STATIC_WHILE_SET_AT_EXECUTE で結ばれたリソースが書ける状態に変わった。結び直すこと」が、更新の後の描画ごとに出た
+   原因 : パーティクルのコンピュートのルートシグネチャの「シーンの深度」のテーブルを DATA_STATIC にしていた。
+          更新の後に深度は描画先 (DEPTH_WRITE) に戻るが、コンピュートのルート引数は次のコンピュートまで結ばれたまま残る
+   直し : そのテーブルを DATA_VOLATILE に (STATIC に戻すと再発、VOLATILE だけで 0 になることを確認)
+ - (確認の手順の注意) RHI だけ作り直しても C# の出力フォルダの RHI.dll は古いまま (C# のビルドで写る)。毎回 C# も作り直すこと
