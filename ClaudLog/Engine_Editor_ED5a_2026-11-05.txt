@@ -1,0 +1,78 @@
+﻿エディター ED5 (前半) : アセット (Assets フォルダ / Id / アセットブラウザ / ドラッグ) 2026-11-05
+ブランチ : feature/editor-ed5
+
+■ ED5 の分け方 (ロードマップの「ED5 2 回」)
+  前半 (今回) : Assets フォルダとアセットの一覧 (Id を .meta に) / 取り込み / アセットブラウザ (サムネイル・フォルダ・検索) /
+               シーンビュー・Hierarchy・インスペクターへドラッグ / ファイルが増えたら一覧に出る
+  後半 (次回) : ファイルが変わったら読み直す (テクスチャ / モデル / シェーダー。C++ に読み直しが要る) / 使っていないアセットの解放 /
+               マテリアルのアセット (色 / テクスチャ / 粗さ・金属。C++ の描画の変更が要る)
+
+■ プロジェクトのフォルダ (ユーザーの選択 : 新しく Project/Assets)
+  CSharp_console/Project/Assets
+    Models/  : 最初の 1 回だけ、見本の出力フォルダの Model (bin/x64/<構成>/Model) から写す (元のファイルは変えない。DDS キャッシュは写さない)
+    Scenes/  : 見本のシーン (以前の CSharp_console/Scenes から移した。--resave-scenes でアセットの Id 付きに書き直した)
+  git : .meta / *.scene.json / *.material.json だけを入れる。モデル / テクスチャ / 音の本体は .gitignore で外す
+        (Tomimi など配布できない物を入れないため。.meta は入れるので、別の PC でも同じ Id になる)
+  Release と Debug のエディターは同じ Project を使う (以前の bin/<構成>/Model は 85MB ずつ 2 つあった)
+
+■ 使い方
+  Project の窓 (下の Console / Stats と同じ所)
+    左 : フォルダの木 / 右 : タイル (テクスチャは縮小画像、他は種類の色と名前) / 上 : 今のフォルダ (クリックで戻る)
+    Import... : Assets の外のファイルを今のフォルダへ写す (OBJ は同じフォルダの .mtl とテクスチャも)
+    New Folder / Show in Explorer / Refresh / 検索 (全部のフォルダから) / タイルの大きさ
+    ダブルクリック : フォルダに入る / シーンを開く
+    ドラッグ : モデル → シーンビュー (マウスの下の物の表面 / 地面 / 10 m 先に置く) / Hierarchy (原点、行の上なら子として)
+              シーン → シーンビュー (開く)
+              モデル / 音 → インスペクターのアセットの欄 (MeshRenderer.Model / AudioSource の音 / Collider.Mesh)
+    置く / 落とすのも元に戻せる
+  Explorer で Assets にファイルを置く / 消す / 名前を変えると、0.3 秒後に一覧が変わる (新しいファイルには .meta が付く)
+  GameEngine.Editor.exe --project <folder> : 別のプロジェクト
+  GameEngine.Editor.exe --resave-scenes : 全部のシーンを今の形式で保存し直す
+
+■ 仕組み
+  AssetDatabase (ランタイム。ゲームでも Id からパスを引けるように)
+    - 「ファイル名.meta」(JSON : guid / kind) に Id。無ければ作る。フォルダにも .meta (Unity と同じ)
+    - アセットのパスは "Assets/..." (/ 区切り、プロジェクトのフォルダから)。Id ↔ パスの表
+    - Refresh : 全部を見回る。消えた物を外してから新しい物を足す / .meta ごと複製した物 (同じ Id が 2 つ) には新しい Id
+    - 一覧に入れない物 : .meta / DDS キャッシュ (*.v1.dds) / . で始まる物
+    - 以前の見本のパス "../Model/x" は Assets/Models/x にあればそちらに読み替える
+  AssetManager.Database : 設定すると "Assets/..." のパスで読める (C++ には絶対パスを渡す。Model.Path はアセットのパスのまま)
+  シーン : アセットは { "guid": ..., "path": "Assets/..." }。読む時は Id を優先 (動かした / 名前を変えたファイルも見つかる)
+           Id の無い古いシーン / Database の無い見本 (GameEngine_console) は今まで通りパスで読む
+  サムネイル : 別のスレッドで System.Drawing で読んで 96px に縮め、メインのスレッドで 1 フレーム 4 枚まで GPU へ (CreateUITexture)
+  ファイルの見張り : FileSystemWatcher (別スレッド) は印だけ立て、最後の変化から 0.3 秒後にメインのスレッドで Refresh
+
+■ 変更
+  ランタイム : Assets/AssetDatabase.cs (新規) / Assets/Model.cs (AssetManager.Database、パスの読み替え) /
+               Serialization/SceneSerializer.cs (アセットの Id)
+  エディター : ProjectPanel.cs (新規) / EditorApp.cs (Project の窓、シーンビュー・Hierarchy へのドロップ) /
+               EditorApp.Edit.cs (PlaceModel / 落とす所) / Inspector.cs (アセットの欄へのドロップ) /
+               Program.cs (プロジェクト、見本のモデルを写す、--project / --resave-scenes) / EditorTest.cs (アセットの確認 8 項目)
+  .gitignore : Project/Assets の本体を外す
+  シーン : CSharp_console/Scenes → CSharp_console/Project/Assets/Scenes (git mv。中身はアセットの Id 付きに)
+  ※ C++ は変えていない
+
+■ 途中で直したこと
+  - 名前を変えたファイルに新しい Id が付いた (Refresh で、消えた物を外す前に新しい物を足していたので「同じ Id が 2 つ」に見えた) → 先に外す
+  - 長い名前を切った印「…」がフォントに無く「?」になった → "..."
+
+■ 確認
+  自動 (--editor-test) : 41 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    ED4 の 33 項目 + アセット 8 項目 :
+      Assets の box.obj が一覧にある / 以前のパス ../Model/obj/box.obj が Assets/Models/obj/box.obj として読まれる /
+      Assets にファイルを置くと一覧に出て .meta が付く (ファイルの見張り) / モデルを置く / 置いたのを元に戻す /
+      シーンに Id が書かれる / .meta ごと名前を変えても同じ Id / 開き直すと名前を変えたモデルが Id で見つかる
+  見た目 (エディターの窓だけを撮った。入力は PostMessage)
+    - Project の窓 : Assets > Models > obj のフォルダ、テクスチャのサムネイル (grass / gravel / Rock030 / Rock032)
+    - rock.obj のタイルをシーンビューへドラッグ → マウスの下の地面 (-3.95, 0, -5.20) に置かれ、選ばれ、タイトルに *
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0 (見本は今まで通り ../Model のパス)
+
+■ 速さ (Release)
+  エディターの C# update (平均、Project で obj のフォルダを出している時) : 0.115 〜 0.118 ms (ED4 の何も選んでいない時 0.103 ms)
+  見回り (Refresh) : 39 個で 1 ms 未満 (見張りで変化があった時だけ)
+  ※ Project の窓は毎フレーム一覧を LINQ で絞る。アセットが何千個になったら、フォルダごとの一覧を Refresh の時に作っておく必要がある
+
+■ 残り (後半)
+  - ファイルが変わったら読み直す / 使っていないアセットの解放 / マテリアルのアセット
+  - アセットの名前を変える / 消す / 動かすのをエディターの中で (今は Explorer で .meta も一緒に動かす)
+  - モデルのサムネイル (描いた絵) は無い (種類の色と名前)

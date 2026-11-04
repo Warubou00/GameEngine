@@ -288,7 +288,15 @@ internal sealed class Inspector
     private static bool drawAssetPath<T>(string label, string path, ref object? value, Func<string, T> load)
     {
         var edited = path;
-        if (!ImGui.InputText(label, ref edited, 512, ImGuiInputTextFlags.EnterReturnsTrue) || edited == path) return false;
+        var entered = ImGui.InputText(label, ref edited, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+        // Project からアセットを落とす (ED5。モデル / 当たりのメッシュはモデル、音は wav)
+        if (ImGui.BeginDragDropTarget())
+        {
+            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : AssetKind.Model;
+            if (ProjectPanel.AcceptDrop(kind) is { } asset) { edited = asset.Path; entered = true; }
+            ImGui.EndDragDropTarget();
+        }
+        if (!entered || edited == path) return false;
         try
         {
             value = string.IsNullOrWhiteSpace(edited) ? default(T) : load(edited);

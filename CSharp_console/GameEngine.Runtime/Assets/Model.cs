@@ -43,16 +43,33 @@ public sealed class AssetManager
     {
     }
 
+    // プロジェクトのアセットの一覧 (ED5。エディターが設定する)。あれば "Assets/..." のパスで読め、
+    // 以前の見本のパス (../Model/...) も Assets の同じファイルに読み替える (シーンを保存し直すと新しいパスになる)
+    public AssetDatabase? Database
+    {
+        get => _database;
+        set { _database = value; AssetDatabase.Current = value; }
+    }
+    private AssetDatabase? _database;
+
+    // パス → (覚える名前, 読むファイル)
+    private (string Key, string File) resolve(string path)
+    {
+        if (_database?.ToAssetPath(path) is { } assetPath) return (assetPath, _database.FullPath(assetPath));
+        return (path, path);
+    }
+
     /// <summary>
     /// サウンド (wav) を読み込む。パスは実行ファイルのフォルダからの相対パスか絶対パス
     /// 音の出る機器が無い環境でも読み込みはできる (鳴らないだけ)
     /// </summary>
     public Sound LoadSound(string path)
     {
+        (path, var file) = resolve(path);
         if (_sounds.TryGetValue(path, out var cached)) return cached;
         if (!AudioLoaded) throw new InvalidOperationException("Audio.dll is not loaded. Build the Audio project (x64) first.");
 
-        var handle = AudioNativeMethods.Audio_LoadSound(path, out var length);
+        var handle = AudioNativeMethods.Audio_LoadSound(file, out var length);
         if (handle == AudioNativeMethods.InvalidHandle)
         {
             throw new FileNotFoundException($"Failed to load sound: {path}", path);
@@ -117,9 +134,10 @@ public sealed class AssetManager
     /// </summary>
     public Model LoadModel(string path)
     {
+        (path, var file) = resolve(path);
         if (_models.TryGetValue(path, out var cached)) return cached;
 
-        var handle = NativeMethods.Renderer_LoadModel(path, out var subMeshCount);
+        var handle = NativeMethods.Renderer_LoadModel(file, out var subMeshCount);
         if (handle == NativeMethods.InvalidHandle)
         {
             throw new FileNotFoundException($"Failed to load model: {path}", path);

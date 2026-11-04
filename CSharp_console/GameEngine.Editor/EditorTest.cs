@@ -249,5 +249,48 @@ internal sealed class EditorTest
         for (int i = 0; i < 10; i++) picker.Pick(eye, Vector3.Normalize(new Vector3(0, -0.6f, 1)), out _);
         Console.WriteLine($"[Test] pick time {System.Diagnostics.Stopwatch.GetElapsedTime(pickStart).TotalMilliseconds / 10:F2} ms / click ({World.EntityCount} entities)");
         yield return 0;
+
+        // ---------- ED5 : アセット ----------
+        var database = _app.Database;
+        var boxAsset = database.Find("Assets/Models/obj/box.obj");
+        check(boxAsset != null && boxAsset.Kind == AssetKind.Model, "asset database knows box.obj");
+        check(_app.Engine.Assets.LoadModel("../Model/obj/box.obj").Path == "Assets/Models/obj/box.obj", "old sample path is read as the asset path");
+
+        // Assets にファイルを置くと一覧に出る (.meta が付く)
+        var testFolder = database.FullPath("Assets/_EditorTest");
+        if (Directory.Exists(testFolder)) Directory.Delete(testFolder, true);
+        Directory.CreateDirectory(testFolder);
+        foreach (var name in new[] { "box.obj", "box.mtl", "grass.jpg", "gravel.jpg" }) File.Copy(database.FullPath($"Assets/Models/obj/{name}"), Path.Combine(testFolder, name));
+        AssetEntry? added = null;
+        for (int i = 0; i < 300 && (added = database.Find("Assets/_EditorTest/box.obj")) == null; i++) yield return 0;
+        check(added != null && File.Exists(Path.Combine(testFolder, "box.obj.meta")), "new file in Assets appears with a .meta (file watcher)");
+        if (added == null) yield break;
+
+        // 置く (シーンビューへ落とすのと同じ) → 元に戻す / やり直す
+        var countBefore = World.EntityCount;
+        var placedModel = _app.PlaceModel(added, new Vector3(0, 0, 3), Entity.Null);
+        check(!placedModel.IsNull && World.Get<MeshRenderer>(placedModel).Model.Path == "Assets/_EditorTest/box.obj", "place model asset");
+        _app.Undo();
+        check(World.EntityCount == countBefore, "undo place");
+        _app.Redo();
+        placedModel = _app.Selected;
+        yield return 0;
+
+        // シーンには Id で書く → ファイルを .meta ごと名前を変えても、開き直すと見つかる
+        var scenePath = Path.Combine(Path.GetTempPath(), "ge_editor_test_assets.scene.json");
+        _app.SaveSceneTo(scenePath);
+        check(File.ReadAllText(scenePath).Contains(added.Guid.ToString()), "scene stores the asset id");
+        File.Move(Path.Combine(testFolder, "box.obj"), Path.Combine(testFolder, "renamed.obj"));
+        File.Move(Path.Combine(testFolder, "box.obj.meta"), Path.Combine(testFolder, "renamed.obj.meta"));
+        database.Refresh();
+        check(database.Find(added.Guid)?.Path == "Assets/_EditorTest/renamed.obj", "renamed file keeps its id");
+        _app.OpenScene(scenePath);
+        var reopened = World.Entities.FirstOrDefault(e => World.Has<MeshRenderer>(e) && World.Get<MeshRenderer>(e).Model.Path == "Assets/_EditorTest/renamed.obj");
+        check(!reopened.IsNull, "reopened scene finds the renamed model by id");
+        File.Delete(scenePath);
+        Directory.Delete(testFolder, true);
+        File.Delete(testFolder + ".meta");
+        database.Refresh();
+        yield return 0;
     }
 }
