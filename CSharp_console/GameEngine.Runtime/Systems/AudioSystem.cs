@@ -1,3 +1,4 @@
+using System.Numerics;
 using GameEngine.Native;
 
 namespace GameEngine;
@@ -48,10 +49,27 @@ internal sealed unsafe class AudioSystem : ISystem
         };
     }
 
-    public void Update(World world)
+    public void Update(World world) => Update(world, Vector3.Zero);
+
+    // listenerFallback : AudioListener が無い時に聞く位置 (カメラの位置。ED6)
+    public void Update(World world, Vector3 listenerFallback)
     {
         if (!_enabled) return;
         flushDestroy();
+
+        // 聞く位置と全体の音量 (ED6) : 最初の有効な AudioListener
+        var listenerPosition = listenerFallback;
+        var listenerVolume = 1.0f;
+        var listeners = world.GetPool<AudioListener>();
+        var transforms = world.GetPool<Transform>();
+        for (int i = 0; i < listeners.Count; i++)
+        {
+            var entity = listeners.Entities[i];
+            if (!world.IsActive(entity)) continue;
+            listenerVolume = listeners.Components[i].Volume;
+            if (transforms.Has(entity.Id)) listenerPosition = transforms.Get(entity.Id).WorldPosition;
+            break;
+        }
 
         var pool       = world.GetPool<AudioSource>();
         var entities   = pool.Entities;
@@ -98,11 +116,18 @@ internal sealed unsafe class AudioSystem : ISystem
                 continue;
             }
 
-            // 2. 変わった物だけ送る
-            if (source.Volume != state.Volume)
+            // 2. 変わった物だけ送る (音量 = Volume × 全体 × 距離。ED6)
+            var volume = source.Volume * listenerVolume;
+            if (source.Spatial && transforms.Has(id))
             {
-                AudioNativeMethods.Audio_SetVolume(state.Voice, source.Volume);
-                state.Volume = source.Volume;
+                var distance = Vector3.Distance(transforms.Get(id).WorldPosition, listenerPosition);
+                var range = MathF.Max(source.MaxDistance - source.MinDistance, 1e-3f);
+                volume *= Math.Clamp(1.0f - (distance - source.MinDistance) / range, 0.0f, 1.0f);
+            }
+            if (volume != state.Volume)
+            {
+                AudioNativeMethods.Audio_SetVolume(state.Voice, volume);
+                state.Volume = volume;
             }
             if (source.Loop != state.Loop)
             {

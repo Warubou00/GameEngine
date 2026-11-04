@@ -37,6 +37,10 @@ namespace GameEngine_console;
 //                                 J 噴水のエミッターを外す・付け直す。--view fountain|smoke で近くから見る
 //   --particle-bench N          : GPU パーティクルを N 個保ち続ける (計測。[ParticleBench] を出す)
 //   --particle-sort on|off / --particle-collision on|off / --particle-capacity N / --particle-half on|off : GPU パーティクルの設定
+//   見本のシーン (ED6) : 見本 (既定 / --scene physics / --scene particles) は、プロジェクトのシーンのファイル
+//                       (CSharp_console/Project/Assets/Scenes/showcase|physics|particles.scene.json) から読む。
+//                       プロジェクトの Assets/Models が無い時 (エディターを 1 回も起動していない時) / --view を付けた時 / 計測の時はコードで作る
+//   --code-scene on             : 見本をシーンのファイルではなくコードで作る (シーンのファイルを作り直す時 : --code-scene on --save-scene <path>)
 //   --save-scene <path>         : 起動時に作ったシーンを JSON に保存する (ED1)
 //   --load-scene <path>         : 起動時に作ったシーンを消して、JSON のシーンを読み込む (System は同じ引数の時と同じ物が入る)
 //   --serialize-test            : 全部のコンポーネントと見本のシーンで、保存 → 読み込み → 同じ値 を確かめて終わる
@@ -66,6 +70,15 @@ internal static class Program
 
         // ---------- 引数 ----------
         var options     = ParseArguments(args);
+
+        // ---------- プロジェクト (ED6) : 見本のシーンのファイルとアセット (Assets/Models) ----------
+        //   Assets/Models があれば、モデルのパス (../Model/...) も Assets/Models/... に読み替える (シーンのファイルと同じモデルを使う)
+        var project = findProject();
+        if (project != null)
+        {
+            engine.Assets.Database = new AssetDatabase(project);
+            engine.Assets.Database.Refresh();
+        }
         var stressCount = options.TryGetValue("--stress", out var stress) && int.TryParse(stress, out var n) ? n : 0;
         var view        = options.GetValueOrDefault("--view", "");
 
@@ -269,8 +282,34 @@ internal static class Program
             Console.WriteLine($"[Scene] Saved {Path.GetFullPath(savePath)} ({world.EntityCount} entities, {Stopwatch.GetElapsedTime(saveStart).TotalMilliseconds:F1} ms)");
         }
         if (options.TryGetValue("--load-scene", out var loadPath)) engine.LoadScene(loadPath);
+        else if (sampleSceneFile(project, options, stressCount, benchCount, physicsBench, particleBench) is { } sceneFile)
+        {
+            // 見本のシーンはファイルから (コードで作った物と置き換える。System はコードの時と同じ物が入っている。ED6)
+            engine.LoadScene(sceneFile);
+            Console.WriteLine($"[Sample] Scene from file : {sceneFile} (--code-scene on : build it in code)");
+        }
 
         engine.Run();
+    }
+
+    // リポジトリの CSharp_console/Project (Assets/Models がある時だけ。無ければ null)
+    private static string? findProject()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root != null && !File.Exists(Path.Combine(root.FullName, "GameEngine.sln"))) root = root.Parent;
+        if (root == null) return null;
+        var project = Path.Combine(root.FullName, "CSharp_console", "Project");
+        return Directory.Exists(Path.Combine(project, "Assets", "Models")) ? project : null;
+    }
+
+    // 見本のシーンのファイル (使わない時は null)
+    private static string? sampleSceneFile(string? project, Dictionary<string, string> options, int stressCount, int benchCount, int physicsBench, int particleBench)
+    {
+        if (project == null || options.GetValueOrDefault("--code-scene", "off") == "on" || options.ContainsKey("--view")) return null;
+        if (stressCount > 0 || benchCount > 0 || physicsBench > 0 || particleBench > 0) return null;
+        var name = options.GetValueOrDefault("--scene", "showcase");
+        var file = Path.Combine(project, "Assets", "Scenes", $"{name}.scene.json");
+        return File.Exists(file) ? file : null;
     }
 
     // "--name value" の組を読む

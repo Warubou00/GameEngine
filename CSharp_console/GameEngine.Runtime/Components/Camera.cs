@@ -4,6 +4,7 @@ namespace GameEngine;
 // カメラ (Transform と一緒に付ける。位置と向きは Transform から取る)
 //   今は最初に見つかったカメラ 1 台で描く (複数のカメラ / 画面分割は描画パスを C# で組む段階で)
 // ==========================================================================
+[ComponentInfo(Category = "Camera")]
 public struct Camera : IComponent
 {
     public float FieldOfView  = 57.29578f;   // 縦の視野角 (度)。既定は以前の C++ と同じ 1.0 ラジアン
@@ -21,6 +22,7 @@ public struct Camera : IComponent
 //   右ボタンを押しながらマウス : 向き / WASD : 前後左右 / E Q : 上下 / Shift : 速く
 //   ゲームパッド (1 台目) : 右スティック : 向き / 左スティック : 前後左右 / RT LT : 上下 / RB : 速く
 // ==========================================================================
+[ComponentInfo(DisplayName = "Free Camera", Category = "Camera")]
 public struct FreeCamera : IComponent
 {
     public float MoveSpeed       = 10.0f;    // 1 秒に進む距離
@@ -40,6 +42,7 @@ public struct FreeCamera : IComponent
 // ==========================================================================
 // 注視点の周りを回るカメラ (OrbitCameraSystem が動かす。カメラを動かし続けるテスト用)
 // ==========================================================================
+[ComponentInfo(DisplayName = "Orbit Camera", Category = "Camera")]
 public struct OrbitCamera : IComponent
 {
     public System.Numerics.Vector3 Target;
