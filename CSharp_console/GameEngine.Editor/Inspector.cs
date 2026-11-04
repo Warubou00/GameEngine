@@ -325,8 +325,10 @@ internal sealed class Inspector
         var changed = false;
         if (ImGui.TreeNode($"{label} ({list.Count})"))
         {
+            var removeAt = -1;
             for (int i = 0; i < list.Count; i++)
             {
+                ImGui.PushID(i);
                 var item = list[i];
                 if (drawValue($"[{i}]", elementType, ref item, null, owner))
                 {
@@ -335,11 +337,43 @@ internal sealed class Inspector
                     list[i] = item;
                     changed = true;
                 }
+                // 消す (ED6)
+                if (ImGui.BeginPopupContextItem("item"))
+                {
+                    if (ImGui.MenuItem("Remove")) removeAt = i;
+                    ImGui.EndPopup();
+                }
+                ImGui.PopID();
             }
+            // 足す / 消す (ED6) : 配列は 1 つ長い / 短い写しを作って差し替える
+            if (ImGui.SmallButton("+ Add")) { list = resizeList(list, elementType, list.Count, insert: true); changed = true; }
+            if (list.Count > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled("(right click an item to remove it)");
+            }
+            if (removeAt >= 0) { list = resizeList(list, elementType, removeAt, insert: false); changed = true; }
             ImGui.TreePop();
         }
         if (changed) value = list;
         return changed;
+    }
+
+    // 1 個足した (最後に既定の値) / 1 個消した写し
+    private static IList resizeList(IList list, Type elementType, int index, bool insert)
+    {
+        var items = list.Cast<object?>().ToList();
+        if (insert) items.Add(elementType == typeof(string) ? "" : elementType.IsValueType ? Activator.CreateInstance(elementType) : null);
+        else items.RemoveAt(index);
+        if (list is Array)
+        {
+            var array = Array.CreateInstance(elementType, items.Count);
+            for (int i = 0; i < items.Count; i++) array.SetValue(items[i], i);
+            return array;
+        }
+        var result = (IList)Activator.CreateInstance(list.GetType())!;
+        foreach (var item in items) result.Add(item);
+        return result;
     }
 
     // ---------------------------------------------------------------------

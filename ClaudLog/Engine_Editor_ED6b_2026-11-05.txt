@@ -1,0 +1,51 @@
+﻿エディター ED6 (後半) : 入力のアクション / AudioListener / カメラの部品 / 確認用の表示 / 見本をシーンのファイルから 2026-11-05
+ブランチ : feature/editor-ed6b
+
+■ 入力のアクション (ProjectSettings の InputActions / InputAxes。Edit > Project Settings)
+  ゲームのコードは名前で読む : InputActions.Get / GetDown / GetUp("Jump")、InputActions.GetAxis("Horizontal") (-1〜1)
+  アクション = 名前 + キーの並び + ゲームパッドのボタンの並び (どれかを押していれば true)
+  軸 = 名前 + キー (+ / - と予備の + / -) + ゲームパッドの軸 (遊び DeadZone、反転)。キーとパッドの大きい方
+  既定 : Jump (Space / A) / Fire (Enter / RT) / Cancel (Escape / B) / Horizontal (D A ← → / 左スティック X) / Vertical (W S ↑ ↓ / 左スティック Y)
+  ProjectSettings.json には列挙を名前で書く ("Space" など。以前の数値より読める)。知らない名前は false / 0 (1 回だけ Console に出す)
+  エンジンの起動時に既定の割り当てを入れる (ProjectSettings を読まない見本でも使える)
+  インスペクターの配列 : 「+ Add」で足す / 項目を右クリック → Remove で消す (以前は配列の長さを変えられなかった)
+
+■ 音
+  AudioListener (新規コンポーネント) : 聞く位置 (この Transform。無ければカメラの位置) と全体の音量 (Volume)
+  AudioSource.Spatial / MinDistance / MaxDistance : 聞く位置からの距離で音量を下げる (Min まではそのまま、Max で 0)。左右の変化は無い (Audio.dll に無い)
+  ※音のファイルが手元に無いので、鳴らして耳では確かめていない (コンパイルと、音の無い見本が動くことだけ)
+
+■ カメラ / 音の部品 : Camera / FreeCamera / OrbitCamera / AudioSource / AudioListener に分類 (Camera / Audio) を付け、コンポーネントを足すメニューで分かれて出る
+  (FreeCameraSystem / OrbitCameraSystem は以前からエンジン組み込み。付けるだけで動く)
+
+■ 確認用の表示 (エディターの View > Debug Display。シーンには保存しない)
+  Colliders / Contacts / Joints (新規 : ジョイントだけを出す。以前はコライダーと一緒にしか出せなかった) / Shadow Cascades / SSAO Only
+  Stats にパーティクルの数 (生きている / 描いた / エミッター)
+
+■ 見本をシーンのファイルから (GameEngine_console)
+  既定 / --scene physics / --scene particles は、CSharp_console/Project/Assets/Scenes/*.scene.json から読む
+  (プロジェクトの Assets/Models がある時。--view を付けた時 / 計測 (--stress など) / --code-scene on の時はコードで作る)
+  - 見本を動かす System (Spin / 周回 / レーザー / 物理の操作 / 花火 など) はゲームのコードとしてそのまま (--load-scene と同じ仕組み)
+  - プロジェクトがあれば、見本のモデルのパス (../Model/...) も Assets/Models/... に読み替える (シーンのファイルと同じモデル)
+  - 物理の見本の R (積み木を作り直す) : 積み木に StackBlock を付けて見分けるように直した
+    (以前は作った物を static の一覧で覚えていたので、ファイルから読んだシーンでは消せず、積み木が増えていた)。physics.scene.json を作り直した
+  - エディターの再生でも、花火 / 光の群れ (FireworkSystem / FlyerSystem) が動くように登録した (ED7 でゲームの DLL から自動に)
+  - 見本のシーンには RenderSettings を入れていない (入れると見本の起動の引数 --pipeline などが最初のフレームで上書きされるため)
+
+■ 確認
+  自動 (--editor-test) : 79 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    後半の 6 項目 : 既定のアクションと軸 / JSON にキーの名前で書く / Apply で効く / 知らない名前は false と 0 /
+      確認用の表示を全部入れて描いても落ちない / AudioListener とカメラの部品が分類付きで一覧に出る
+  見本 : ファイルから読んだ時とコードで作った時の画像の差 (平均の差 / 24 以上違うピクセルの割合) と、コードで 2 回撮った時の差 :
+      showcase  ファイル vs コード 3.51 / 3.70 %   コード vs コード 3.03 / 3.18 %
+      physics   ファイル vs コード 2.67 / 2.60 %   コード vs コード 1.92 / 1.85 %
+      particles ファイル vs コード 4.17 / 5.19 %   コード vs コード 4.35 / 5.28 %
+    → 回すたびの違い (キャラクターの回転 / 物理 / パーティクル / プロファイラーの数字) と同じくらい。物の数も同じ (描画 122 個、物 61)
+    物理の見本をファイルから読んで R → エンティティの数は 79 のまま (増えない)
+    --hierarchy-test 18 / 0、--serialize-test 4 / 0
+  速さ : 見本 showcase の C# update 0.064 〜 0.076 ms (ファイル / コード。回ごとの揺れの範囲)
+
+■ 残り
+  - タグ / 音の左右 (パン) / 入力のアクションの「押し続けた時間」などは無い
+  - 物理の見本の Space (球を撃つ) / R は見本のコードの System なので、エディターの再生では動かない (ED7 でゲームの DLL から)
+  - 次は ED7 (ゲームのコードを別の DLL に、ホットリロード、属性で登録、独自のインスペクター)

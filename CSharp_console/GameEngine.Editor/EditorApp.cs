@@ -303,8 +303,24 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Stats",     null, ref _showStats);
             ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.Separator();
-            var colliders = _engine.Physics.ShowColliders;
-            if (ImGui.MenuItem("Show Colliders", null, ref colliders)) _engine.Physics.ShowColliders = colliders;
+            // 確認用の表示 (ED6。シーンには保存しない)
+            if (ImGui.BeginMenu("Debug Display"))
+            {
+                var physics = _engine.Physics;
+                var graphics = _engine.Graphics;
+                var colliders = physics.ShowColliders;
+                if (ImGui.MenuItem("Colliders", null, ref colliders)) physics.ShowColliders = colliders;
+                var contacts = physics.ShowContacts;
+                if (ImGui.MenuItem("Contacts", null, ref contacts)) physics.ShowContacts = contacts;
+                var joints = physics.ShowJoints;
+                if (ImGui.MenuItem("Joints", null, ref joints)) physics.ShowJoints = joints;
+                ImGui.Separator();
+                var cascades = graphics.Shadows.ShowCascades;
+                if (ImGui.MenuItem("Shadow Cascades", null, ref cascades)) graphics.Shadows.ShowCascades = cascades;
+                var ssaoOnly = graphics.Ssao.ShowOnly;
+                if (ImGui.MenuItem("SSAO Only", null, ref ssaoOnly)) graphics.Ssao.ShowOnly = ssaoOnly;
+                ImGui.EndMenu();
+            }
             var profiler = _engine.Graphics.ProfilerVisible;
             if (ImGui.MenuItem("Profiler (F1)", null, ref profiler)) _engine.Graphics.ProfilerVisible = profiler;
             ImGui.Separator();
@@ -708,6 +724,8 @@ internal sealed partial class EditorApp
             ImGui.Text($"Scene view {rw} x {rh}");
             ImGui.Text($"Entities {World.EntityCount}");
             ImGui.Text($"Physics bodies {_engine.Physics.Bodies}, rigid {_engine.Physics.RigidBodies}");
+            var particles = _engine.Graphics.Particles;
+            ImGui.Text($"Particles {particles.AliveCount} alive, {particles.VisibleCount} visible, {particles.EmitterCount} emitters");
             ImGui.Text($"Undo {_undo.Count}{(_undo.UndoName is { } name ? $" (last : {name})" : "")}");
             ImGui.Text($"Models {_engine.Graphics.LoadedModelCount}, materials {_engine.Assets.LoadedMaterials.Count()}, mesh memory {_engine.Graphics.MeshBytesUsed / (1024.0 * 1024.0):F2} MB");
             ImGui.Text($"Asset reloads {_engine.Assets.ReloadCount}, shader reloads {_shaders?.ReloadCount ?? 0}");

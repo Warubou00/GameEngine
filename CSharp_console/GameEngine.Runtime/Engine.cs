@@ -408,6 +408,7 @@ public sealed class Engine : IDisposable
         // カメラを動かす System は既定で入れておく (コンポーネントを付けた物だけが動く)
         AddSystem(new FreeCameraSystem());
         AddSystem(new OrbitCameraSystem());
+        InputActions.Set(ProjectSettings.Current.InputActions, ProjectSettings.Current.InputAxes);   // 入力のアクションの既定 (ED6。ProjectSettings.Apply で置き換わる)
     }
 
     // ---------- エディター (ED3) ----------
@@ -473,7 +474,7 @@ public sealed class Engine : IDisposable
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
-            if (IsPlaying) _audioSystem.Update(World);   // 編集中は鳴らさない (ED3)
+            if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
             Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;

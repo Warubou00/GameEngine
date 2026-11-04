@@ -56,6 +56,8 @@ public sealed class PhysicsSettings
     public bool ShowColliders { get; set; }
     // 確認用 : 接触点を黄色の印と法線の線で描く
     public bool ShowContacts { get; set; }
+    // 確認用 : ジョイント (繋いだ 2 点を線で)。ShowColliders の時も出る (ED6)
+    public bool ShowJoints { get; set; }
 
     // ---------- レイヤーの衝突の表 (Unity の Physics.IgnoreLayerCollision と同じ) ----------
     //   既定は全部のレイヤーどうしを調べる。Collider.CollideWith (物ごと) と両方で許された組だけ調べる

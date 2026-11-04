@@ -54,6 +54,8 @@ internal static class Program
         // 再生中に動かすゲームの System (見本の物。ED7 でゲームの DLL から自動で登録する)。編集中は Engine が止めている
         engine.AddSystem(new GameEngine_console.SpinSystem());
         engine.AddSystem(new GameEngine_console.OrbitMoverSystem());
+        engine.AddSystem(new GameEngine_console.FireworkSystem());   // パーティクルの見本 (ED6)
+        engine.AddSystem(new GameEngine_console.FlyerSystem());
 
         using var imgui = new ImGuiBackend(engine, Path.Combine(exeDirectory, "imgui.ini"));
         var editor = new EditorApp(engine, imgui, log, database, scenes);

@@ -231,7 +231,8 @@ internal sealed unsafe partial class CollisionSystem
         _settings.IslandMs           = stats.IslandMs;
         _settings.SystemMs      = (float)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;   // 表示の線を描く前まで
 
-        if (_settings.ShowColliders) { drawColliders(world); drawJoints(world); }
+        if (_settings.ShowColliders) drawColliders(world);
+        if (_settings.ShowColliders || _settings.ShowJoints) drawJoints(world);   // ED6 : ジョイントだけも出せる
         if (_settings.ShowContacts)  drawContacts();
     }
 

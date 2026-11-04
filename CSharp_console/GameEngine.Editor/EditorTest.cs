@@ -460,9 +460,30 @@ internal sealed class EditorTest
         var json = project.ToJson();
         var parsed = ProjectSettings.FromJson(json);
         check(parsed.ToJson() == json && parsed.LayerName(1) == "Player" && !parsed.GetLayerCollision(2, 1) && parsed.LayerName(5) == "Layer 5", "project settings JSON round trip");
+        // 入力のアクション (ED6 後半) : 既定の名前 / JSON にキーの名前で書く / 知らない名前は false と 0
+        check(project.InputActions.Any(a => a.Name == "Jump") && project.InputAxes.Any(a => a.Name == "Horizontal"), "default input actions and axes");
+        check(json.Contains("\"Space\"") && parsed.InputActions.First(a => a.Name == "Jump").Keys.SequenceEqual(new[] { Keys.Space }), "input actions are written by key names");
+        check(InputActions.ActionNames.Contains("Jump", StringComparer.OrdinalIgnoreCase) && !InputActions.Get("Jump") && InputActions.GetAxis("Horizontal") == 0.0f, "input actions are applied");
+        check(!InputActions.Get("NoSuchAction") && InputActions.GetAxis("NoSuchAxis") == 0.0f, "unknown action / axis gives false / 0");
         _app.ProjectSettingsWindow.Settings.Apply(_app.Engine);   // 元の設定に戻す
         check(_app.Engine.Physics.Solver.Gravity == new Vector3(0, -9.81f, 0) && _app.Engine.Physics.GetLayerCollision(1, 2) == _app.ProjectSettingsWindow.Settings.GetLayerCollision(1, 2),
               "restore project settings");
+        yield return 0;
+
+        // 確認用の表示 (ED6 後半) : 全部入れて数フレーム描いても落ちない
+        _app.Engine.Physics.ShowJoints = true;
+        _app.Engine.Physics.ShowContacts = true;
+        graphics.Shadows.ShowCascades = true;
+        for (int i = 0; i < 3; i++) yield return 0;
+        _app.Engine.Physics.ShowJoints = false;
+        _app.Engine.Physics.ShowContacts = false;
+        graphics.Shadows.ShowCascades = false;
+        check(true, "debug displays draw");
+
+        // AudioListener / カメラのコンポーネントが一覧に出る (分類付き)
+        var known = ComponentRegistry.KnownComponents().ToList();
+        check(known.Any(t => t.Type == typeof(AudioListener) && t.Category == "Audio") && known.Any(t => t.Type == typeof(FreeCamera) && t.Category == "Camera"),
+              "audio listener / camera components are listed");
         yield return 0;
     }
 }

@@ -124,11 +124,10 @@ internal static class PhysicsDemo
         engine.AddSystem(new PhysicsDemoSystem(engine, box));
     }
 
-    public static readonly List<Entity> StackEntities = new();
-
+    // 積み木 (R で作り直す物) には StackBlock を付ける (ED6 : シーンのファイルから読んだ時も見分けられるように。
+    // 以前は作った物を static の一覧で覚えていたので、ファイルから読んだシーンでは消せなかった)
     public static void SpawnStacks(World world, Model box)
     {
-        StackEntities.Clear();
         var identity = Quaternion.Identity;
         const float h = 0.4f;
         for (int row = 0; row < 8; row++)
@@ -136,14 +135,19 @@ internal static class PhysicsDemo
             for (int i = 0; i < 8 - row; i++)
             {
                 var x = -8.0f + (i - (8 - row - 1) * 0.5f) * (2 * h + 0.02f);
-                StackEntities.Add(SpawnBox(world, box, new Vector3(x, h + row * 2 * h, 0), new Vector3(h), identity, Rigidbody.Dynamic()));
+                world.Add(SpawnBox(world, box, new Vector3(x, h + row * 2 * h, 0), new Vector3(h), identity, Rigidbody.Dynamic()), new StackBlock());
             }
         }
         for (int i = 0; i < 12; i++)
         {
-            StackEntities.Add(SpawnBox(world, box, new Vector3(-2, 0.3f + i * 0.6f, 2), new Vector3(0.3f), identity, Rigidbody.Dynamic()));
+            world.Add(SpawnBox(world, box, new Vector3(-2, 0.3f + i * 0.6f, 2), new Vector3(0.3f), identity, Rigidbody.Dynamic()), new StackBlock());
         }
     }
+}
+
+// R で作り直す積み木の印
+public struct StackBlock : IComponent
+{
 }
 
 // 往復する床 (キネマティック)
@@ -178,7 +182,9 @@ public sealed class PhysicsDemoSystem : ISystem, IFixedSystem
         if (Input.GetKeyDown(Keys.Space)) _shoot = true;   // 撃つのは FixedUpdate で (速度を変えるのは物理の前)
         if (Input.GetKeyDown(Keys.R))
         {
-            foreach (var entity in PhysicsDemo.StackEntities) world.DestroyEntity(entity);
+            var blocks = new List<Entity>();
+            world.ForEach((Entity entity, ref StackBlock _) => blocks.Add(entity));
+            foreach (var entity in blocks) world.DestroyEntity(entity);
             PhysicsDemo.SpawnStacks(world, _box);
         }
 

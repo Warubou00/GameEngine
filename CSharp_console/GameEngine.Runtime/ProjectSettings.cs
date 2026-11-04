@@ -33,6 +33,25 @@ public sealed class ProjectSettings
     // レイヤー a の物がどのレイヤーと当たるか (ビット)。対称に保つ (SetLayerCollision で両方を変える)
     [HideInInspector] public uint[] LayerCollision = Enumerable.Repeat(0xFFFFFFFFu, LayerCount).ToArray();
 
+    [Header("Input")]
+    [Tooltip("InputActions.Get / GetDown / GetUp(name) : どれかのキー / ボタン")]
+    public InputActionBinding[] InputActions = defaultActions();
+    [Tooltip("InputActions.GetAxis(name) : -1〜1")]
+    public InputAxisBinding[] InputAxes = defaultAxes();
+
+    private static InputActionBinding[] defaultActions() => new[]
+    {
+        new InputActionBinding { Name = "Jump",   Keys = new[] { Keys.Space },  Buttons = new[] { GamepadButton.A } },
+        new InputActionBinding { Name = "Fire",   Keys = new[] { Keys.Enter },  Buttons = new[] { GamepadButton.RightTrigger } },
+        new InputActionBinding { Name = "Cancel", Keys = new[] { Keys.Escape }, Buttons = new[] { GamepadButton.B } },
+    };
+
+    private static InputAxisBinding[] defaultAxes() => new[]
+    {
+        new InputAxisBinding { Name = "Horizontal", Positive = Keys.D, Negative = Keys.A, AltPositive = Keys.Right, AltNegative = Keys.Left, UseGamepadAxis = true, GamepadAxis = GamepadAxis.LeftX },
+        new InputAxisBinding { Name = "Vertical",   Positive = Keys.W, Negative = Keys.S, AltPositive = Keys.Up,    AltNegative = Keys.Down, UseGamepadAxis = true, GamepadAxis = GamepadAxis.LeftY },
+    };
+
     private static string[] defaultLayerNames()
     {
         var names = new string[LayerCount];
@@ -88,6 +107,7 @@ public sealed class ProjectSettings
                 if (engine.Physics.GetLayerCollision(a, b) != collide) engine.Physics.SetLayerCollision(a, b, collide);
             }
         }
+        GameEngine.InputActions.Set(InputActions, InputAxes);
         Current = this;
     }
 
@@ -97,7 +117,7 @@ public sealed class ProjectSettings
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         IncludeFields = true, WriteIndented = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true,
-        Converters = { new Vector3Converter() },
+        Converters = { new Vector3Converter(), new JsonStringEnumConverter() },   // 列挙は名前で書く (キーの名前が読める)
     };
 
     public string ToJson() => JsonSerializer.Serialize(this, JsonOptions);
