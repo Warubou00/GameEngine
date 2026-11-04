@@ -36,6 +36,18 @@ public sealed class TooltipAttribute : Attribute
     public TooltipAttribute(string text) => Text = text;
 }
 
+/// <summary>インスペクターで、この int をレイヤーの名前の一覧 (ProjectSettings) から選ぶ (ED6)</summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class LayerAttribute : Attribute
+{
+}
+
+/// <summary>インスペクターで、この uint をレイヤーのビットの組 (名前のチェックの並び) で出す (ED6)</summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class LayerMaskAttribute : Attribute
+{
+}
+
 /// <summary>インスペクターで、このフィールドの前に見出しを出す</summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class HeaderAttribute : Attribute

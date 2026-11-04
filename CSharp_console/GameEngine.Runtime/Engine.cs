@@ -302,6 +302,7 @@ public sealed class Engine : IDisposable
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
     private readonly LightSystem      _lightSystem     = new();
+    private readonly RenderSettingsSystem _renderSettingsSystem = new();   // RenderSettings / Volume → Graphics (ED6)
     private readonly ParticleSystem   _particleSystem;
     private readonly AudioSystem      _audioSystem;
     private readonly bool             _audioLoaded;
@@ -468,6 +469,7 @@ public sealed class Engine : IDisposable
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
             _cameraSystem.Update(World, Graphics.CameraOverride);
+            _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ

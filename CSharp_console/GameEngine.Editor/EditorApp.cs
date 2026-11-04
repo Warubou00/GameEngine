@@ -39,6 +39,8 @@ internal sealed partial class EditorApp
     private (EditCommand? Top, int Revision) _savedState;
     private bool    _layoutBuilt;
     private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true, _showProject = true;
+    private bool    _showProjectSettings;
+    private readonly ProjectSettingsWindow _projectSettings;   // ED6
     private bool    _resetLayout;
 
     // エディターのカメラ (シーンのカメラとは別。シーンには保存しない)
@@ -70,6 +72,7 @@ internal sealed partial class EditorApp
         _project = new ProjectPanel(engine, database, OpenScene);
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
+        _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
         _picker = new Picker(engine);
         engine.LateUpdate += update;
     }
@@ -211,6 +214,7 @@ internal sealed partial class EditorApp
         if (_showConsole)   _log.Draw(ref _showConsole);
         if (_showStats)     drawStats();
         if (_showProject)   _project.Draw(ref _showProject);
+        _projectSettings.Draw(ref _showProjectSettings);
         _shaders?.Update();
 
         handleShortcuts();
@@ -270,12 +274,18 @@ internal sealed partial class EditorApp
             ImGui.Separator();
             if (ImGui.MenuItem(_playing ? "Stop" : "Play", "Ctrl+P")) TogglePlay();
             if (ImGui.MenuItem("Pause", null, _paused, _playing)) TogglePause();
+            ImGui.Separator();
+            ImGui.MenuItem("Project Settings...", null, ref _showProjectSettings);
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu("GameObject"))
         {
             if (ImGui.MenuItem("Create Empty")) CreateEntity(Entity.Null);
             if (ImGui.MenuItem("Create Empty Child", null, false, World.IsAlive(_selected))) CreateEntity(_selected);
+            ImGui.Separator();
+            if (ImGui.MenuItem("Render Settings")) SelectRenderSettings();
+            if (ImGui.MenuItem("Volume (Box)"))    CreateVolume(VolumeShape.Box);
+            if (ImGui.MenuItem("Volume (Global)")) CreateVolume(VolumeShape.Global);
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu("Assets"))
@@ -368,6 +378,7 @@ internal sealed partial class EditorApp
             {
                 var camera = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, min, new Vector2(width, height));
                 drawSelection(camera, draw);
+                drawVolume(camera, draw);
                 updateGizmo(camera, draw);
                 // クリックで選ぶ (ギズモを掴んだ時 / カメラを回している時は選ばない)
                 if (_sceneHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_gizmo.Dragging && !_flying)
@@ -440,6 +451,57 @@ internal sealed partial class EditorApp
             {
                 if ((i & bit) == 0) draw.AddLine(points[i], points[i | bit], color, 1.5f);
             }
+        }
+    }
+
+    // 選んだ Volume の範囲 (箱 / 球の 3 つの輪)。BlendDistance の外側は薄く
+    private void drawVolume(SceneCamera camera, ImDrawListPtr draw)
+    {
+        if (!World.IsAlive(_selected) || !World.Has<Volume>(_selected) || !World.Has<Transform>(_selected)) return;
+        var volume = World.Get<Volume>(_selected);
+        if (volume.Shape == VolumeShape.Global) return;
+        Matrix4x4.Decompose(Hierarchy.GetWorldMatrix(World, _selected), out var scale, out var rotation, out var position);
+        void box(Vector3 half, uint color)
+        {
+            Span<Vector2> points = stackalloc Vector2[8];
+            for (int i = 0; i < 8; i++)
+            {
+                var corner = new Vector3((i & 1) != 0 ? half.X : -half.X, (i & 2) != 0 ? half.Y : -half.Y, (i & 4) != 0 ? half.Z : -half.Z);
+                if (!camera.Project(position + Vector3.Transform(corner, rotation), out points[i])) return;
+            }
+            for (int i = 0; i < 8; i++)
+                for (int bit = 1; bit < 8; bit <<= 1)
+                    if ((i & bit) == 0) draw.AddLine(points[i], points[i | bit], color, 1.5f);
+        }
+        void sphere(float radius, uint color)
+        {
+            for (int axis = 0; axis < 3; axis++)
+            {
+                Vector2 previous = default;
+                var hasPrevious = false;
+                for (int i = 0; i <= 48; i++)
+                {
+                    var a = i * MathF.Tau / 48;
+                    var p = axis == 0 ? new Vector3(0, MathF.Cos(a), MathF.Sin(a)) : axis == 1 ? new Vector3(MathF.Cos(a), 0, MathF.Sin(a)) : new Vector3(MathF.Cos(a), MathF.Sin(a), 0);
+                    var ok = camera.Project(position + p * radius, out var point);
+                    if (ok && hasPrevious) draw.AddLine(previous, point, color, 1.5f);
+                    previous = point;
+                    hasPrevious = ok;
+                }
+            }
+        }
+        const uint inner = 0xFF60E060, outer = 0x8060E060;   // 緑 / 薄い緑
+        if (volume.Shape == VolumeShape.Box)
+        {
+            var half = volume.Size * 0.5f * scale;
+            box(half, inner);
+            if (volume.BlendDistance > 0.0f) box(half + new Vector3(volume.BlendDistance), outer);
+        }
+        else
+        {
+            var radius = volume.Size.X * scale.X;
+            sphere(radius, inner);
+            if (volume.BlendDistance > 0.0f) sphere(radius + volume.BlendDistance, outer);
         }
     }
 

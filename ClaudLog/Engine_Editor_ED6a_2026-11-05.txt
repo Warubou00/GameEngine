@@ -1,0 +1,61 @@
+﻿エディター ED6 (前半) : 描画の設定 (RenderSettings) / 場所で効く上書き (Volume) / プロジェクトの設定 (ProjectSettings) 2026-11-05
+ブランチ : feature/editor-ed6
+
+■ ED6 の分け方 (ロードマップの「ED6 2 回」)
+  前半 (今回) : 描画の設定 → シーンの RenderSettings + Volume / 物理・時間・レイヤー → プロジェクトの設定 / エディターで触る
+  後半 (次回) : 入力のアクション (ゲームパッドとキーの割り当て) / 音 (AudioListener) とカメラの操作のコンポーネント /
+               確認用の表示 (コライダー / 接触点 / ジョイント / 影の段 / パーティクルの数) の切り替え / 見本をコードからシーンのファイルへ
+
+■ RenderSettings (コンポーネント。シーンに 1 つ。GameObject > Render Settings で作る / 選ぶ)
+  Path (Forward / Deferred) / LightingModel / AntiAliasing / AmbientColor / BackgroundColor / Exposure / Tonemapper / Gamma /
+  Ssao (Enabled / Radius / Intensity / Bias / SampleCount / ResolutionScale) /
+  Shadows (Enabled / Resolution / Distance / NormalBias / Softness / CascadeCount / SplitLambda / CascadeBlend) /
+  Fxaa (Subpixel / EdgeThreshold / EdgeThresholdMin) / Particles (Enabled / Capacity / Sorting / Collision / CollisionThickness / SoftDistance / HalfResolution)
+  既定の値は engine.Graphics の既定と同じ (置いただけでは見た目は変わらない。見た目で確かめた)
+  以前は engine.Graphics をコードで設定するだけだった (見本は起動の引数とキーで切り替えていた)
+
+■ Volume (コンポーネント。GameObject > Volume (Box) / Volume (Global))
+  範囲 : Global / Box (Transform の位置と回転、Size × 拡大縮小) / Sphere (半径 Size.X)。外側 BlendDistance の間でだんだん効く
+  Weight / Priority (小さい物から混ぜ、大きい物が勝つ)
+  上書きできる値 (Override... を付けた物) : Exposure / AmbientColor / BackgroundColor / SSAO の濃さ / 影の距離
+  選ぶとシーンビューに範囲 (緑) と混ざり始める所 (薄い緑) を描く
+
+■ RenderSettingsSystem (エンジン組み込み。カメラの後、描画パイプラインの前)
+  最初の有効な RenderSettings を元に、カメラの位置で効く Volume を混ぜ、前のフレームに書いた値と違う物だけ engine.Graphics へ書く
+  - 値が同じなら書かない : キーやコードで変えた値は、設定かカメラの位置が変わるまでそのまま (見本のキーの切り替えも動く)
+  - 元の RenderSettings のエンティティが替わった時 (シーンを開いた時) は全部を書き直す
+    (最初は値が同じなら書かなかったので、コードで変えた値が開き直したシーンでも残った。確認で見つけて直した)
+  - RenderSettings も Volume も無いシーンでは何もしない (前のシーンにあった時だけ既定の値に戻す)
+  - Path が変わったら ForwardRenderPipeline / DeferredRenderPipeline を作り直す
+
+■ ProjectSettings (プロジェクトのフォルダの ProjectSettings.json。Edit > Project Settings)
+  Time : FixedDeltaTime / MaxFixedSteps
+  Physics : 重力 / SubSteps / Iterations / RelaxIterations / 接触と関節の固さ / 速さの上限 / 眠り / WorkerCount (-1 = 自動)
+  Layers : 32 個のレイヤーの名前 / 衝突の表 (名前の付いたレイヤーどうしを三角のチェックの並びで)
+  値を変えるとすぐ engine へ書き (Apply)、触り終わったらファイルに書く。既定の値は今までのエンジンの既定と同じ (ファイルが無くても今まで通り)
+  ※プロジェクトの設定の変更は元に戻せない
+  インスペクター : Collider.Layer はレイヤーの名前から選ぶ ([Layer])、CollideWith は名前のチェックの並び ([LayerMask])
+
+■ 変更
+  ランタイム : Components/RenderSettings.cs (新規 : RenderSettings / Volume と入れ子の値) / Systems/RenderSettingsSystem.cs (新規) /
+    ProjectSettings.cs (新規) / Engine.cs (RenderSettingsSystem を回す) / CameraSystems.cs (最後に送った位置) /
+    Serialization/Attributes.cs ([Layer] / [LayerMask]) / ComponentRegistry.cs (IsLayer / IsLayerMask) / Components/Collider.cs (属性)
+  エディター : ProjectSettingsWindow.cs (新規) / Inspector.cs (レイヤーの部品、普通のクラスを出す DrawObject、入れ子の struct の見出しと説明) /
+    EditorApp.cs (メニュー、Volume の範囲を描く) / EditorApp.Edit.cs (SelectRenderSettings / CreateVolume / SetEditorCamera) / EditorTest.cs (16 項目)
+  ※C++ は変えていない
+
+■ 確認
+  自動 (--editor-test) : 73 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    ED6 の 16 項目 : 作る / 2 回目は選ぶだけ / 値が Graphics に効く / Deferred に替わる / コードで変えた値は設定を変えるまで残る /
+      保存して開き直すと同じ (入れ子の SSAO / 影の値も) / 開き直したシーンの設定が効く /
+      Volume : 中 (露出 6) / 混ざる所の真ん中 (4 = 2 と 6 の間) / 外 (2) / Global はどこでも /
+      設定と Volume を消すと既定に戻る / ProjectSettings が物理と時間に効く / レイヤーの表が効く / JSON の読み書き / 元に戻す
+  見た目 (エディターの窓だけを撮った) :
+    GameObject > Volume (Box) → 範囲の緑の箱と薄い緑の外側、インスペクターに Volume / Render Settings → インスペクターに全部の値 (見た目は変わらない) /
+    Edit > Project Settings → 時間 / 物理 / レイヤーの名前 / 衝突の表
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0。showcase : C# update 0.070 〜 0.072 ms、GPU 0.61 〜 0.62 ms (変わらず。
+    見本は RenderSettings も Volume も無いので、RenderSettingsSystem は 2 つの入れ物の数を見るだけ)
+
+■ 残り (後半へ)
+  - タグ (ロードマップにある) はまだ無い / 入力のアクション / AudioListener / カメラの操作 / 確認用の表示 / 見本のシーン化
+  - Volume で上書きできる値は 5 つだけ (必要になったら足す)

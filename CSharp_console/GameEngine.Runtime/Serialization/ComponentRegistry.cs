@@ -18,6 +18,8 @@ public sealed class ComponentField
     public RangeAttribute? Range  { get; }
     public string?   Tooltip   { get; }
     public string?   Header    { get; }
+    public bool      IsLayer     { get; }   // [Layer] (ED6)
+    public bool      IsLayerMask { get; }   // [LayerMask] (ED6)
 
     internal ComponentField(FieldInfo info)
     {
@@ -28,6 +30,8 @@ public sealed class ComponentField
         Range           = info.GetCustomAttribute<RangeAttribute>();
         Tooltip         = info.GetCustomAttribute<TooltipAttribute>()?.Text;
         Header          = info.GetCustomAttribute<HeaderAttribute>()?.Text;
+        IsLayer         = info.GetCustomAttribute<LayerAttribute>() != null;
+        IsLayerMask     = info.GetCustomAttribute<LayerMaskAttribute>() != null;
     }
 
     public object? GetValue(object boxedComponent) => Info.GetValue(boxedComponent);
