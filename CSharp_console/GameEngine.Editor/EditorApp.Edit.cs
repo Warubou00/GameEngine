@@ -60,6 +60,40 @@ internal sealed partial class EditorApp
         return entity;
     }
 
+    // マテリアルのアセットを物に付ける (MeshRenderer.Material。元に戻せる)
+    public bool AssignMaterial(Entity entity, AssetEntry asset)
+    {
+        if (!World.IsAlive(entity) || !World.Has<MeshRenderer>(entity))
+        {
+            Console.WriteLine("[Editor] Drop a material onto an object that has a MeshRenderer.");
+            return false;
+        }
+        Material material;
+        try { material = _engine.Assets.LoadMaterial(asset.Path); }
+        catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return false; }
+        var id = EditorWorld.IdOf(World, entity);
+        var before = SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer));
+        World.Get<MeshRenderer>(entity).Material = material;
+        _undo.Record(new ComponentEdit(id, typeof(MeshRenderer), before, SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer))));
+        Selected = entity;
+        Console.WriteLine($"[Editor] {NameOf(World, entity)} uses {asset.Path}");
+        return true;
+    }
+
+    // どの物も使っていないモデル / マテリアルを解放する (Assets メニュー)
+    public (int Models, int Materials) UnloadUnused()
+    {
+        var before = _engine.Graphics.MeshBytesUsed;
+        var result = _engine.Assets.UnloadUnused(World);
+        _picker.Clear();
+        Console.WriteLine($"[Assets] Unloaded {result.Models} models / {result.Materials} materials. Mesh memory {before / 1048576.0:F2} -> {_engine.Graphics.MeshBytesUsed / 1048576.0:F2} MB");
+        return result;
+    }
+
+    public void WatchShaders(string runtimeFolder, string? sourceFolder) => _shaders = new ShaderHotReload(_engine, runtimeFolder, sourceFolder);
+    public ShaderHotReload? Shaders => _shaders;
+    public ProjectPanel Project => _project;
+
     // シーンビューの光線の先で物を置く所 : 当たった物の表面 / 無ければ高さ 0 の地面 / それも無ければ 10 m 先
     private Vector3 dropPoint(Vector3 direction)
     {

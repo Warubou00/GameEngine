@@ -23,6 +23,7 @@
 ******************************************************************/
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 #include "../../RHIObject/ITexture.h"
 
@@ -119,12 +120,21 @@ namespace RHI
 
             void Dispose()override;
 
+            /***********************************************************************************
+             * @brief 読み込んだテクスチャを返す (ED5。モデルの読み直し / 解放)
+             * @details SRV の番号を空きに戻し、GPU のリソースを消す。既定テクスチャ (0) は返せない
+             *          ※GPU が使い終わってから呼ぶこと (RHI が GPU を待ってから呼ぶ)
+             ************************************************************************************/
+            void ReleaseTexture(RHI::ObjectInterface::IBuffer* iBuffer, uint32_t textureID);
+            size_t GetLoadedCount()const { return _loadedBuffers.size(); }
+
         public:          /*---アクセッサー関数群---*/
 
 
         private:         /*---メンバ変数---*/
             std::unique_ptr<RHI::DirectX12::Texture> _texture;
-            std::vector<std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _loadedBuffers;
+            // TextureID → リソース (以前は配列で、返す方法が無かった。ED5)
+            std::unordered_map<uint32_t, std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _loadedBuffers;
 
             // SRVを作り、シェーダーから見たテクスチャ番号(TextureID)を返す。失敗時は false
             bool createShaderResourceView(

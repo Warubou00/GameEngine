@@ -200,6 +200,19 @@ namespace RHI
              ************************************************************************************/
             RHI::MaterialHandle CreateMaterial(const RHI::MaterialDesc& desc);
 
+            // ---------- ED5 : 変える / 返す (GPU が使い終わってから呼ぶこと。RHI が GPU を待ってから呼ぶ) ----------
+            // マテリアルの値を変える (エディターのマテリアル)。ブレンド / 両面が変わったら描画のまとまりを作り直させる
+            void UpdateMaterial(RHI::MaterialHandle material, const RHI::MaterialDesc& desc);
+            // マテリアルを返す (番号は次の CreateMaterial で使い回す。0 = 既定は返せない)
+            void DestroyMaterial(RHI::MaterialHandle material);
+            // 頂点 / インデックスの範囲を返す (メガバッファの空きに戻す)
+            void FreeVertexData(const RHI::VertexRange& range);
+            void FreeIndexData(const RHI::IndexRange& range);
+            // 描画のまとまりの分け方が変わった回数 (CommandContext は描画リストが同じでも、これが変われば引数を書き直す)
+            uint64_t GetDrawLayoutVersion()const { return _drawLayoutVersion; }
+            uint64_t GetVertexBytesUsed()const;
+            uint64_t GetIndexBytesUsed()const;
+
             // マテリアルのブレンドの方法 (描く順番と PSO を決める。範囲外なら不透明)
             RHI::BlendMode GetMaterialBlend(uint32_t material)const
             {
@@ -350,7 +363,9 @@ namespace RHI
             uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT] = {};
 
             // ---------- GPU カリング用 ----------
-            std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;            // BaseVertex → 境界球
+            std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;
+            std::vector<uint32_t>                             _freeMaterials;          // 返されたマテリアルの番号 (ED5)
+            uint64_t                                          _drawLayoutVersion = 1;  // ED5            // BaseVertex → 境界球
             ::DirectX::XMFLOAT4                 _frustumPlanes[6] = {};
             uint64_t                            _frustumVersion   = 0;                      // 計算した時の _frameConstantsVersion
 

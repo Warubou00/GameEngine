@@ -13,6 +13,8 @@ namespace GameEngine.Editor;
 //     - 作る / 消す / 複製 (Ctrl+D) / 親を変える / コンポーネントを足す・外す / 値を変える → すべて元に戻せる (Ctrl+Z / Ctrl+Y)
 //     - 再生 / 一時停止 / 1 フレーム進める / 停止 (停止で再生前のシーンに戻す。再生前のシーンは JSON で覚えておく)
 //   ED5 : Project (アセットブラウザ)。モデルをシーンビュー / Hierarchy へドラッグして置く。シーンをシーンビューへ落とすと開く
+//         マテリアルを物へドラッグすると付く / Project でマテリアルを選ぶとインスペクターで値を変えられる
+//         ファイルが変わったら読み直す (モデル / テクスチャ / マテリアル / シェーダー)。Assets メニュー : 使っていない物の解放
 //   編集中は engine.IsPlaying = false (ゲームの System / 物理 / 音を止める)
 // ==========================================================================
 internal sealed partial class EditorApp
@@ -27,6 +29,9 @@ internal sealed partial class EditorApp
     private readonly string       _scenesDirectory;
     private readonly AssetDatabase _database;
     private readonly ProjectPanel _project;
+    private ShaderHotReload? _shaders;
+    private bool _inspectAsset;          // インスペクターに Project で選んだアセット (マテリアル) を出す
+    private int  _seenAssetSelection;
     private World World => _engine.World;
 
     private Entity  _dragged;
@@ -63,6 +68,7 @@ internal sealed partial class EditorApp
         _scenesDirectory = scenesDirectory;
         Directory.CreateDirectory(scenesDirectory);
         _project = new ProjectPanel(engine, database, OpenScene);
+        engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _picker = new Picker(engine);
         engine.LateUpdate += update;
@@ -84,6 +90,7 @@ internal sealed partial class EditorApp
         set
         {
             _selected   = World.IsAlive(value) ? value : Entity.Null;
+            _inspectAsset = false;
             _selectedId = _selected.IsNull ? Guid.Empty : EditorWorld.IdOf(World, _selected);
         }
     }
@@ -204,6 +211,7 @@ internal sealed partial class EditorApp
         if (_showConsole)   _log.Draw(ref _showConsole);
         if (_showStats)     drawStats();
         if (_showProject)   _project.Draw(ref _showProject);
+        _shaders?.Update();
 
         handleShortcuts();
         updateCamera();
@@ -268,6 +276,13 @@ internal sealed partial class EditorApp
         {
             if (ImGui.MenuItem("Create Empty")) CreateEntity(Entity.Null);
             if (ImGui.MenuItem("Create Empty Child", null, false, World.IsAlive(_selected))) CreateEntity(_selected);
+            ImGui.EndMenu();
+        }
+        if (ImGui.BeginMenu("Assets"))
+        {
+            if (ImGui.MenuItem("Create Material")) _project.CreateMaterial();
+            if (ImGui.MenuItem("Reload Shaders", null, false, _shaders != null)) _shaders!.Reload();
+            if (ImGui.MenuItem("Unload Unused Assets")) UnloadUnused();
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu("View"))
@@ -335,14 +350,13 @@ internal sealed partial class EditorApp
             // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
             if (ImGui.BeginDragDropTarget())
             {
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene) is { } asset)
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene, AssetKind.Material) is { } asset)
                 {
+                    var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
+                    var ray = view.RayDirection(ImGui.GetIO().MousePos);
                     if (asset.Kind == AssetKind.Scene) OpenScene(_database.FullPath(asset.Path));
-                    else
-                    {
-                        var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
-                        PlaceModel(asset, dropPoint(view.RayDirection(ImGui.GetIO().MousePos)), Entity.Null);
-                    }
+                    else if (asset.Kind == AssetKind.Material) AssignMaterial(_picker.Pick(_cameraPosition, ray, out _), asset);   // マウスの下の物に付ける
+                    else PlaceModel(asset, dropPoint(ray), Entity.Null);
                 }
                 ImGui.EndDragDropTarget();
             }
@@ -567,7 +581,11 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
-            if (ProjectPanel.AcceptDrop(AssetKind.Model) is { } asset) PlaceModel(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として親の位置に
+            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Material) is { } asset)
+            {
+                if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
+                else PlaceModel(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として親の位置に
+            }
             ImGui.EndDragDropTarget();
         }
         if (ImGui.BeginPopupContextItem())
@@ -597,7 +615,24 @@ internal sealed partial class EditorApp
 
     private void drawInspectorWindow()
     {
-        if (ImGui.Begin("Inspector", ref _showInspector)) _inspector.Draw(_selected);
+        // Project でマテリアルを選んだら、それを出す (Hierarchy / シーンビューで物を選ぶと物に戻る)
+        if (_project.SelectionVersion != _seenAssetSelection)
+        {
+            _seenAssetSelection = _project.SelectionVersion;
+            _inspectAsset = _project.Selected?.Kind == AssetKind.Material;
+        }
+        if (ImGui.Begin("Inspector", ref _showInspector))
+        {
+            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Material } entry)
+            {
+                try { _inspector.DrawMaterial(_engine.Assets.LoadMaterial(entry.Path)); }
+                catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }
+            }
+            else
+            {
+                _inspector.Draw(_selected);
+            }
+        }
         ImGui.End();
     }
 
@@ -612,6 +647,8 @@ internal sealed partial class EditorApp
             ImGui.Text($"Entities {World.EntityCount}");
             ImGui.Text($"Physics bodies {_engine.Physics.Bodies}, rigid {_engine.Physics.RigidBodies}");
             ImGui.Text($"Undo {_undo.Count}{(_undo.UndoName is { } name ? $" (last : {name})" : "")}");
+            ImGui.Text($"Models {_engine.Graphics.LoadedModelCount}, materials {_engine.Assets.LoadedMaterials.Count()}, mesh memory {_engine.Graphics.MeshBytesUsed / (1024.0 * 1024.0):F2} MB");
+            ImGui.Text($"Asset reloads {_engine.Assets.ReloadCount}, shader reloads {_shaders?.ReloadCount ?? 0}");
             ImGui.TextDisabled("Detailed GPU / CPU timings : View > Profiler (F1)");
         }
         ImGui.End();

@@ -36,6 +36,19 @@ internal sealed unsafe class RenderSyncSystem : ISystem
         };
     }
 
+    private static void syncMaterials(Span<MeshRenderer> components)
+    {
+        for (int i = 0; i < components.Length; i++)
+        {
+            ref var renderer = ref components[i];
+            if (!renderer.Created) continue;
+            var wanted = renderer.Material is { IsValid: true } material ? material.Handle + 1 : 0u;
+            if (wanted == renderer.AppliedMaterialPlusOne) continue;
+            NativeMethods.Renderer_SetRenderObjectMaterial(renderer.Handle, wanted == 0 ? NativeMethods.InvalidHandle : wanted - 1);
+            renderer.AppliedMaterialPlusOne = wanted;
+        }
+    }
+
     public void Update(World world)
     {
         flushDestroy();
@@ -44,6 +57,10 @@ internal sealed unsafe class RenderSyncSystem : ISystem
         var transforms = world.GetPool<Transform>();
         var entities   = renderers.Entities;
         var components = renderers.Components;
+
+        // マテリアルのアセット (ED5) : 1 つでもあれば、付け替えた物を探して C++ へ送る
+        // (マテリアルを使っていないシーンでは見回らない。使っている時は 1 万個で 0.054 ms / フレーム (計測))
+        if (Material.LiveCount > 0) syncMaterials(components);
 
         // 何も増えず、どの行列も変わっていなければ何もしない (止まっているシーンでは全部の物を見て回らない)
         // ※MeshRenderer を外して付け直すと数が同じになるので、外された時も _knownRenderers を減らしている
@@ -92,6 +109,7 @@ internal sealed unsafe class RenderSyncSystem : ISystem
                     ref var renderer = ref components[list[n]];
                     renderer.Handle  = _created[n];
                     renderer.Created = true;
+                    renderer.AppliedMaterialPlusOne = 0;   // 新しい描画オブジェクトはモデルのマテリアル (次のフレームで syncMaterials が付ける)
                     // 作ったばかりの物は、行列が変わっていなくても送る
                     if (transforms.Has(entities[list[n]].Id)) transforms.Get(entities[list[n]].Id).Changed = true;
                 }

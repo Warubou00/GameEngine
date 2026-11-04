@@ -66,6 +66,9 @@ internal static class Program
             }
             return;
         }
+        // シェーダーの読み直し (ED5) : 実行中に読むフォルダ (../Shader) と、元のファイル (RHI/Source/Shader) を見張る
+        editor.WatchShaders(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "Shader")),
+                            root != null ? Path.Combine(root.FullName, "RHI", "Source", "Shader") : null);
         if (args.Contains("--editor-test")) editor.FrameHook = new EditorTest(editor).Frame;   // 自動の確認 (ED4)
         var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);

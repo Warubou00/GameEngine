@@ -22,6 +22,7 @@
 * Include Headers
 ******************************************************************/
 #include <stdint.h>
+#include <vector>
 
 
 /******************************************************************
@@ -82,7 +83,18 @@ namespace RHI
          ************************************************************************************/
         ResourceBufferAllocation Allocate(uint32_t count, uint32_t stride);
 
+        /***********************************************************************************
+         * @brief 使い終わった範囲を返す (ED5。モデルの読み直し / 解放)
+         * @details 空きの一覧に入れ、隣の空きとつなげる。次の Allocate は空きから先に探す (最初に入る所)
+         *          以前は前へ進めるだけで、返す方法が無かった (読み直すたびに使う量が増えた)
+         *          ※GPU が使い終わってから呼ぶこと (呼ぶ側で GPU の完了を待つ)
+         *          1 つのアロケーターは 1 種類の大きさ (stride) で使う前提 (頂点 / インデックス)
+         ************************************************************************************/
+        void Free(const ResourceBufferAllocation& allocation, uint32_t stride);
+
         void Reset();
+
+        uint64_t GetUsedBytes() const { return _currentByteOffset - _freeBytes; }   // 使っている量 (空きを除く)
 
     public:          /*---アクセッサー関数群---*/
 
@@ -92,6 +104,16 @@ namespace RHI
         uint64_t _maxByteSize         = 0;
         uint64_t _currentByteOffset   = 0;     // 4GB を超えるバッファでも溢れないよう 64bit
         uint32_t _currentVertexOffset = 0;
+
+        // 空き (番号の順に並べる。隣どうしはつなげる)
+        struct FreeBlock
+        {
+            uint64_t ByteOffset;
+            uint32_t StrideOffset;
+            uint32_t Count;
+        };
+        std::vector<FreeBlock> _freeBlocks;
+        uint64_t               _freeBytes = 0;
 
 
     };

@@ -424,6 +424,40 @@ namespace RHI
     {
         if (_commandContext) _commandContext->WaitForGpu();
     }
+
+    // ==============================================================
+    // ED5 : エディターの読み直し / 解放
+    // ==============================================================
+    void RenderHardwareInterface::UpdateMaterial(MaterialHandle material, const MaterialDesc& desc)
+    {
+        if (!_isInitialized) return;
+        _buffer->UpdateMaterial(material, desc);
+    }
+
+    void RenderHardwareInterface::ReleaseResources(const VertexRange* vertices, uint32_t vertexCount, const IndexRange* indices, uint32_t indexCount,
+                                                   const MaterialHandle* materials, uint32_t materialCount, const TextureHandle* textures, uint32_t textureCount)
+    {
+        if (!_isInitialized) return;
+        // 前のフレームの描画がまだ読んでいるかもしれないので、GPU が終わるのを待ってから返す
+        // (エディターの操作でだけ呼ぶので、フレームの数を数えて遅らせて返す仕組みは作っていない)
+        WaitForGpu();
+        for (uint32_t i = 0; vertices  && i < vertexCount;   ++i) _buffer->FreeVertexData(vertices[i]);
+        for (uint32_t i = 0; indices   && i < indexCount;    ++i) _buffer->FreeIndexData(indices[i]);
+        for (uint32_t i = 0; materials && i < materialCount; ++i) _buffer->DestroyMaterial(materials[i]);
+        for (uint32_t i = 0; textures  && i < textureCount;  ++i) _buffer->GetTexture()->ReleaseTexture(_buffer.get(), textures[i].Index);
+    }
+
+    bool RenderHardwareInterface::ReloadShaders()
+    {
+        if (!_isInitialized) return false;
+        WaitForGpu();   // 使っている PSO を消すので
+        return _pipeline->ReloadShaders();
+    }
+
+    uint64_t RenderHardwareInterface::GetMeshBytesUsed()const
+    {
+        return _isInitialized ? _buffer->GetVertexBytesUsed() + _buffer->GetIndexBytesUsed() : 0;
+    }
 }
 
 /************************************

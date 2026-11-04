@@ -1633,7 +1633,8 @@ namespace RHI
 		{
 			// 描画リスト (とインスタンシングの ON / OFF) が前回このフレームで書いたものと同じなら、書き込みもコピーも省く
 			// (止まっているシーンでは毎フレーム同じなので、UPLOAD ヒープにも触らず、コピーも走らない)
-			if (frame.Valid && frame.Instanced == _useInstancing && frame.LastItems.size() == count &&
+			// マテリアルのブレンド / 両面が変わった時 (ED5) は、描画リストが同じでも PSO のまとまりが変わるので書き直す
+			if (frame.Valid && frame.Instanced == _useInstancing && frame.Layout == buffer->GetDrawLayoutVersion() && frame.LastItems.size() == count &&
 				(count == 0 || std::memcmp(frame.LastItems.data(), items, sizeof(RHI::DrawItem) * count) == 0))
 			{
 				return true;
@@ -1654,6 +1655,7 @@ namespace RHI
 			frame.Written   = written;
 			frame.Instances = instances;
 			frame.Instanced = _useInstancing;
+			frame.Layout    = buffer->GetDrawLayoutVersion();
 			frame.Valid     = true;
 
 			// VRAM 側へコピーする (書き直した時だけ。使った分だけ)

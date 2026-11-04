@@ -546,6 +546,55 @@ namespace RHI
             }
         }
 
+        bool Pipeline::ReloadShaders()
+        {
+            if (!_shaderCompiler) return false;
+            bool ok = true;
+
+            // シーン : 全部コンパイルできた時だけ差し替える
+            auto scene = std::make_unique<SceneShaders>();
+            const bool sceneOk =
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "VSMain",              Shader::Stage::Vertex, scene->Vs) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForward",           Shader::Stage::Pixel,  scene->PsForward) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlpha",      Shader::Stage::Pixel,  scene->PsForwardAlpha) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",           Shader::Stage::Pixel,  scene->PsGBuffer) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit",      Shader::Stage::Pixel,  scene->PsForwardSplit) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlphaSplit", Shader::Stage::Pixel,  scene->PsForwardAlphaSplit) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSShadowAlpha",       Shader::Stage::Pixel,  scene->PsShadowAlpha);
+            if (sceneOk) _sceneShaders = std::move(scene);
+            else { Core::Logger::Log("[Pipeline] Scene shader has errors. Keep the previous one."); ok = false; }
+
+            // 全画面 (番号は C# が持っているので、同じ場所で差し替える)
+            for (auto& shader : _fullscreenShaders)
+            {
+                if (!shader) continue;
+                Shader::CompiledShader vs, ps;
+                if (_shaderCompiler->Compile(shader->Path, "VSFullscreen", Shader::Stage::Vertex, vs) &&
+                    _shaderCompiler->Compile(shader->Path, shader->Entry, Shader::Stage::Pixel, ps))
+                {
+                    shader->Vs = std::move(vs);
+                    shader->Ps = std::move(ps);
+                }
+                else
+                {
+                    Core::Logger::Log(L"[Pipeline] Fullscreen shader has errors. Keep the previous one.");
+                    Core::Logger::Log(shader->Path.c_str());
+                    ok = false;
+                }
+            }
+
+            // 作った PSO を捨てる (次に使う時に新しいシェーダーで作る)。後から作る物も作り直させる
+            _psoMap.clear();
+            _debugLinePso.Reset();
+            _debugLineFailed = false;
+            _uiPso.Reset();
+            _uiFailed = false;
+            _particleDrawShaders.reset();
+            _particleDrawFailed = false;
+            Core::Logger::Log(ok ? "[Pipeline] Shaders reloaded." : "[Pipeline] Shaders reloaded (with errors).");
+            return ok;
+        }
+
         ID3D12PipelineState* Pipeline::createPso(uint64_t key, const wchar_t* prefix, D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc)
         {
             // PSO キャッシュの名前 : ルートシグネチャ・シェーダー・設定 (鍵) から作る (どれかが変われば別の PSO として作り直される)
