@@ -32,6 +32,7 @@ internal sealed unsafe class LightSystem : ISystem
         var lights      = directional.Components;
         for (int i = 0; i < lights.Length && count < MaxLights; i++)
         {
+            if (!world.IsActive(entities[i])) continue;   // 無効なライトは使わない (ED2)
             ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
             var forward = found ? transform.Forward : System.Numerics.Vector3.UnitZ;
             if (shadowLight < 0 && lights[i].CastShadows) shadowLight = count;
@@ -50,10 +51,11 @@ internal sealed unsafe class LightSystem : ISystem
         var points        = point.Components;
         for (int i = 0; i < points.Length && count < MaxLights; i++)
         {
+            if (!world.IsActive(pointEntities[i])) continue;
             ref var transform = ref transforms.TryGet(pointEntities[i].Id, out var found);
             _lights[count++] = new NativeMethods.LightData
             {
-                Position  = found ? transform.Position : default,
+                Position  = found ? transform.WorldPosition : default,   // 以前はローカル (Position)
                 Range     = points[i].Range,
                 Direction = new System.Numerics.Vector3(0, -1, 0),
                 Type      = 1,

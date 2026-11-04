@@ -108,22 +108,23 @@ internal sealed unsafe class ParticleSystem : ISystem
             }
 
             ref var transform = ref transforms.TryGet(entities[i].Id, out var hasTransform);
-            var position = hasTransform ? transform.Position : Vector3.Zero;
-            var rotation = hasTransform ? transform.Rotation : Quaternion.Identity;
+            var position = hasTransform ? transform.WorldPosition : Vector3.Zero;   // 以前はローカル (親子は ED2)
+            var rotation = hasTransform ? transform.WorldRotation : Quaternion.Identity;
+            var active   = world.IsActive(entities[i]);   // 無効なエミッターは出さない (出た物は寿命まで残る)
             var previous = emitter.HasLastPosition ? emitter.LastPosition : position;
             emitter.LastPosition    = position;
             emitter.HasLastPosition = true;
 
             // このフレームに出す数 : Rate × 経過時間 (端数は次へ持ち越す) + Burst
             uint spawn = 0;
-            if (emitter.Emitting && emitter.Rate > 0.0f)
+            if (emitter.Emitting && active && emitter.Rate > 0.0f)
             {
                 var exact = emitter.Rate * dt + emitter.SpawnRemainder;
                 var whole = MathF.Floor(exact);
                 emitter.SpawnRemainder = exact - whole;
                 spawn = (uint)Math.Min(whole, (float)NativeMethods.MaxParticleCapacity);
             }
-            if (emitter.Burst > 0)
+            if (emitter.Burst > 0 && active)
             {
                 spawn += (uint)emitter.Burst;
                 emitter.Burst = 0;

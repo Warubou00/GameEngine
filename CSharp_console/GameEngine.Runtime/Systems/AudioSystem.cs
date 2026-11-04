@@ -89,6 +89,15 @@ internal sealed unsafe class AudioSystem : ISystem
                 continue;
             }
 
+            // 無効な物 (ED2) : 鳴っていれば止める。Play の頼みは有効になるまで残す (PlayOnStart は有効になった時に鳴る)
+            if (!world.IsActive(entities[i]))
+            {
+                if (state.Playing) { AudioNativeMethods.Audio_Stop(state.Voice); state.Playing = false; }
+                if (source.Request == AudioRequest.Stop) source.Request = AudioRequest.None;
+                source.Playing = false;
+                continue;
+            }
+
             // 2. 変わった物だけ送る
             if (source.Volume != state.Volume)
             {
