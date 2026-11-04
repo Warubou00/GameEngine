@@ -46,7 +46,7 @@ public enum ForceMode
 //     IsSleeping で分かる。CanSleep = false で眠らない (いつも計算する)
 //   使い方 : ref var body = ref world.Get<Rigidbody>(entity); body.AddForce(new Vector3(0, 10, 0));
 // ==========================================================================
-public struct Rigidbody
+public struct Rigidbody : IComponent
 {
     public RigidbodyType Type = RigidbodyType.Dynamic;
     public float Mass           = 1.0f;    // kg

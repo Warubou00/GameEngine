@@ -1,0 +1,61 @@
+﻿====================================================================
+ エディター ED1 : 型の情報とシリアライズ (シーンの保存 / 読み込み)
+ 日付   : 2026-11-04
+ ブランチ : feature/editor-ed1 (develop 3063f65 から)
+ ロードマップ : Engine_Roadmap_Editor_2026-11-04.txt
+====================================================================
+
+■ 概要
+  - コンポーネントの型の情報 (保存する / インスペクターに出すフィールドの一覧) を、型ごとに 1 回だけ作って持つ (ComponentRegistry)
+  - シーンを JSON で保存 / 読み込みできるようにした (SceneSerializer / engine.SaveScene / engine.LoadScene)
+  - エンティティに名前 / 有効・無効 / 保存しても変わらない Id (GUID) を付けた (EntityInfo)
+  - エンティティへの参照 (Joint.Body など) は相手の Id、アセット (Model / Sound / CollisionMesh) はパスで保存
+  - ユーザーのコンポーネントも、struct を書くだけで保存できる (登録は要らない)。IComponent を付けると一覧に出る
+  以前は、シーンはコード (Program.cs / Samples) で作るだけで、保存も読み込みもできなかった
+
+■ 決めたこと (ロードマップのおすすめのまま)
+  - ファイルは JSON (UTF-8。手で読める / 差分が見やすい)。.NET に入っている System.Text.Json を使う (外部の取得なし)
+  - 保存する値 : public なフィールド ([NonSerialized] は除く) + [SerializeField] を付けた非 public のフィールド
+    internal のフィールド (C++ のハンドル / System の途中の値) とプロパティは保存しない
+    → 今のコンポーネントは、書き換えなしでそのまま正しく保存できた (エンジンの中の値は全部 internal だったため)
+  - 読み込みは「型の既定の値 (引数なしのコンストラクター)」から始め、ファイルにある値だけ上書きする
+    (後でフィールドを足しても古いファイルが読める / 型やアセットが無い時は警告を出して飛ばし、読み込みは止めない)
+  - リフレクションは保存 / 読み込み / エディターの時だけ。毎フレームの処理では使わない
+
+■ 足した物 (GameEngine.Runtime)
+  Ecs/IComponent.cs                : コンポーネントの印 (中身なし)。エンジンと見本の全部のコンポーネント (22 種類) に付けた
+  Ecs/EntityInfo.cs                : Id (GUID) / Name / Active。world.CreateEntity("名前") で付く。無い物は保存の時に付ける
+                                     Active は保存するだけ (無効な物を System が飛ばすのは ED2 / ED3)
+  Serialization/Attributes.cs      : [SerializeField] [HideInInspector] [Range] [Tooltip] [Header] [ComponentInfo(DisplayName / Category / Hidden / DontSave)]
+  Serialization/ComponentRegistry.cs : 型 → フィールドの一覧 (属性つき) / 名前 → 型 (読み込み済みのアセンブリから探す) /
+                                     KnownComponents (IComponent の一覧。コンポーネントを足すメニュー用)
+  Serialization/SceneSerializer.cs : Save / Load / SaveFile / LoadFile。値の書き方は型ごとに足せる (RegisterConverter)
+                                     数 / 文字列 / 列挙 (名前で) / Vector2〜4 / Quaternion / Guid / Entity (Id) / Model・Sound (パス) /
+                                     CollisionMesh (元のモデルのパス) / 入れ子の struct / 配列 / List
+                                     float は一番短く元に戻る書き方 (NaN / 無限大は文字列)
+  ComponentPool / World            : 型を知らずに読み書きする口 (GetBoxed / SetBoxed / GetPool(Type) / Pools / Entities / Clear)
+  Engine                           : SaveScene(path) / LoadScene(path, additive)
+
+■ 見本 (GameEngine_console)
+  --save-scene <path>  : 起動時に作ったシーンを JSON に保存
+  --load-scene <path>  : 起動時に作ったシーンを消して、JSON を読み込む (System は同じ引数の時と同じ物が入る)
+  --serialize-test     : 下の往復のテストを行って終わる (失敗があれば終了コード 1)
+
+■ 確認
+  往復のテスト (--serialize-test。Release / Debug とも全部 OK)
+    1. 全部のコンポーネント (22 種類 : エンジン 14 + 見本 8) に、既定と違う値 (エンティティ / モデル / 音 / 衝突判定のメッシュの参照も) を入れ、
+       保存 → 新しい World に読み込み → もう一度保存 : 2 つの JSON が同じ、163 のフィールドが全部元の値と同じ
+    2. 見本のシーン (起動時に作った物) でも同じ : 普通の見本 16 個 249 フィールド / 物理 79 個 2,022 フィールド (ジョイントの参照あり) /
+       パーティクル 13 個 271 フィールド
+  見た目 : 見本のシーンを保存し、--load-scene で読み直した絵と、コードで作った絵を比べた (ゲームの窓だけを撮った)。
+           岩 / 箱 / 地面 / キャラクター / カメラ / ライト / 影は同じ。違うのは回っている物の位置だけ (撮った時刻の違い)
+  Debug (D3D12 デバッグレイヤー有効) で、読み込んだシーンの D3D12 のエラー / 警告 0
+  計測 (Release)
+    10,003 個のエンティティ (--stress 10000) : 保存 163 ms (7.1 MB) / 読み込み 225 ms (モデルの読み込みは 1 回だけ)
+    毎フレームの処理は変わらない (C# の更新 0.055〜0.061 ms。保存 / 読み込みの物は毎フレーム動かない)
+    FPS は起動ごとに 590〜790 の間で揺れる (コードで作った時も読み込んだ時も同じ揺れ)
+
+■ 制限 / 次 (ED2)
+  - エンティティの名前は、コードで作った物は "Entity 番号" (見本に名前を付けるのは ED3 / ED6 で)
+  - アセットはパスで指す (Assets フォルダと GUID は ED5)。パスを変えると読めない (警告を出して飛ばす)
+  - 次は ED2 : Transform の親子 (階層)。Active で System が飛ばす形も入れる

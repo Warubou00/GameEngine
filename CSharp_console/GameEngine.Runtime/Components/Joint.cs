@@ -19,7 +19,7 @@ public enum JointType : uint
 //   - BreakForce を超える力がかかると壊れる (IsBroken。もう働かない。値を変えると作り直す)
 //   - C++ の Joint を継承すれば、新しい種類を足せる (joints.h)
 // ==========================================================================
-public struct Joint
+public struct Joint : IComponent
 {
     public JointType Type;
     public Entity    Body;                // Entity.Null ならこのエンティティ

@@ -147,14 +147,14 @@ internal static class PhysicsDemo
 }
 
 // 往復する床 (キネマティック)
-public struct MovingPlatform
+public struct MovingPlatform : IComponent
 {
     public Vector3 Origin;
     public float   Amplitude;
     public float   Period;
 }
 
-public struct TriggerZone
+public struct TriggerZone : IComponent
 {
 }
 

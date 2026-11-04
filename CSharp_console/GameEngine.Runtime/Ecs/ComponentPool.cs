@@ -7,6 +7,10 @@ public interface IComponentPool
     int  Count { get; }
     bool Has(int entityId);
     void Remove(int entityId);
+
+    // 型を知らずに読み書きする (保存 / 読み込み / エディター用。値は箱に入れたコピー。ED1)
+    object GetBoxed(int entityId);
+    void   SetBoxed(Entity entity, object component);   // 持っていれば置き換え、無ければ追加
 }
 
 // ==========================================================================
@@ -64,6 +68,14 @@ public sealed class ComponentPool<T> : IComponentPool where T : struct
         _entities[_count]   = entity;
         _count++;
         _sparse[entity.Id]  = _count;
+    }
+
+    public object GetBoxed(int entityId) => Get(entityId);
+
+    public void SetBoxed(Entity entity, object component)
+    {
+        if (Has(entity.Id)) Get(entity.Id) = (T)component;
+        else                Add(entity, (T)component);
     }
 
     public void Remove(int entityId)

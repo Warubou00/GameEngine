@@ -8,7 +8,7 @@ namespace GameEngine;
 //   描画オブジェクト (MeshRenderer) なら C++ へまとめて送られる。
 //   動かない物には Static も付けると、最初の 1 回しか計算しない (大量の背景向け)
 // ==========================================================================
-public struct Transform
+public struct Transform : IComponent
 {
     public Vector3    Position;
     public Quaternion Rotation;
@@ -58,7 +58,7 @@ public struct Transform
 }
 
 // 動かない物の印 (中身は無い)。TransformSystem は最初の 1 回だけ行列を計算する
-public struct Static
+public struct Static : IComponent
 {
 }
 

@@ -35,7 +35,7 @@ internal static class CollisionDemo
 }
 
 // 原点の周りを回る (向きも回す。カプセル / 箱が回転しても判定が合うかを見る)
-public struct OrbitMover
+public struct OrbitMover : IComponent
 {
     public float Radius;
     public float Height;
@@ -59,7 +59,7 @@ public sealed class OrbitMoverSystem : ISystem
 // ==========================================================================
 // 計測用 : N 個の物を箱の中でまっすぐ動かし、壁で跳ね返す (全部が毎フレーム動く)
 // ==========================================================================
-public struct BenchMover
+public struct BenchMover : IComponent
 {
     public Vector3 Velocity;
     public bool    Moving;   // 止まっている物もある (--bench-moving で割合)
