@@ -433,17 +433,23 @@ public static class SceneSerializer
         return result;
     }
 
+    // アセット : { "guid": "...", "path": "Assets/..." } (ED5。プロジェクトの外の物はパスだけ)
     private static void writeAsset(Utf8JsonWriter w, string? path, string key = "path")
     {
         if (path == null) { w.WriteNullValue(); return; }
         w.WriteStartObject();
+        if (AssetDatabase.Current?.Find(path) is { } entry) w.WriteString("guid", entry.Guid.ToString());
         w.WriteString(key, path);
         w.WriteEndObject();
     }
 
     private static T readAsset<T>(JsonElement e, ReadContext context, Func<string, T> load, T fallback, string key = "path")
     {
-        if (e.ValueKind != JsonValueKind.Object || !e.TryGetProperty(key, out var p) || p.GetString() is not { } path) return fallback;
+        if (e.ValueKind != JsonValueKind.Object) return fallback;
+        string? path = e.TryGetProperty(key, out var p) ? p.GetString() : null;
+        // Id があれば Id を優先する (ファイルを動かした / 名前を変えた後も見つかる。ED5)
+        if (e.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var guid) && AssetDatabase.Current?.Find(guid) is { } entry) path = entry.Path;
+        if (path == null) return fallback;
         if (context.Assets == null)
         {
             context.Warnings.Add($"No AssetManager : '{path}' was not loaded");

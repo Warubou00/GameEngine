@@ -25,3 +25,14 @@ ClaudLog/_tmp_*
 
 # テクスチャの DDS キャッシュ (初回読み込み時に自動生成。例: grass.jpg.v1.dds)
 *.v[0-9]*.dds
+
+# ==============================================================
+# エディターのプロジェクト (ED5)
+#   Assets のモデル / テクスチャ / 音の本体は git に入れない (見本のモデルはエディターが最初に bin/.../Model から写す)
+#   .meta (アセットの Id) / シーン / マテリアルは入れる
+# ==============================================================
+CSharp_console/Project/Assets/**/*.*
+!CSharp_console/Project/Assets/**/*.meta
+!CSharp_console/Project/Assets/**/*.scene.json
+!CSharp_console/Project/Assets/**/*.material.json
+CSharp_console/Project/Library/

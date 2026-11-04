@@ -30,7 +30,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -86,7 +87,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -151,7 +153,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -216,7 +219,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -281,7 +285,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -346,7 +351,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -411,7 +417,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -476,7 +483,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -541,7 +549,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -606,7 +615,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -671,7 +681,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -736,7 +747,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -801,7 +813,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -866,7 +879,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -931,7 +945,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -996,7 +1011,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1061,7 +1077,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1126,7 +1143,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1191,7 +1209,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1256,7 +1275,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1321,7 +1341,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1386,7 +1407,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1451,7 +1473,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1516,7 +1539,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1581,7 +1605,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1646,7 +1671,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1711,7 +1737,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1776,7 +1803,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1841,7 +1869,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1906,7 +1935,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -1971,7 +2001,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2036,7 +2067,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2101,7 +2133,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2166,7 +2199,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2231,7 +2265,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2296,7 +2331,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2361,7 +2397,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2426,7 +2463,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2491,7 +2529,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2556,7 +2595,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2621,7 +2661,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2686,7 +2727,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2751,7 +2793,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2816,7 +2859,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2881,7 +2925,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -2946,7 +2991,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3011,7 +3057,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3076,7 +3123,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3141,7 +3189,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3206,7 +3255,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3262,7 +3312,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3327,7 +3378,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -3392,7 +3444,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4372,7 +4425,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4542,7 +4596,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4607,7 +4662,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4672,7 +4728,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4797,7 +4854,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4862,7 +4920,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -4937,7 +4996,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -5002,7 +5062,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {

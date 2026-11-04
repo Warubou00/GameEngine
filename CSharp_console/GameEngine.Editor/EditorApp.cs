@@ -12,6 +12,7 @@ namespace GameEngine.Editor;
 //     - クリックで選ぶ (Picker) / 選んだ物の箱 / ギズモ (W 移動 / E 回転 / R 拡大縮小、ローカル・ワールド、スナップ)
 //     - 作る / 消す / 複製 (Ctrl+D) / 親を変える / コンポーネントを足す・外す / 値を変える → すべて元に戻せる (Ctrl+Z / Ctrl+Y)
 //     - 再生 / 一時停止 / 1 フレーム進める / 停止 (停止で再生前のシーンに戻す。再生前のシーンは JSON で覚えておく)
+//   ED5 : Project (アセットブラウザ)。モデルをシーンビュー / Hierarchy へドラッグして置く。シーンをシーンビューへ落とすと開く
 //   編集中は engine.IsPlaying = false (ゲームの System / 物理 / 音を止める)
 // ==========================================================================
 internal sealed partial class EditorApp
@@ -24,13 +25,15 @@ internal sealed partial class EditorApp
     private readonly Picker       _picker;
     private readonly Gizmo        _gizmo = new();
     private readonly string       _scenesDirectory;
+    private readonly AssetDatabase _database;
+    private readonly ProjectPanel _project;
     private World World => _engine.World;
 
     private Entity  _dragged;
     private string? _scenePath;
     private (EditCommand? Top, int Revision) _savedState;
     private bool    _layoutBuilt;
-    private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true;
+    private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true, _showProject = true;
     private bool    _resetLayout;
 
     // エディターのカメラ (シーンのカメラとは別。シーンには保存しない)
@@ -51,12 +54,15 @@ internal sealed partial class EditorApp
     // 自動の確認 (--editor-test)
     public Action<EditorApp>? FrameHook;
 
-    public EditorApp(Engine engine, ImGuiBackend imgui, ConsoleLog log, string scenesDirectory)
+    public EditorApp(Engine engine, ImGuiBackend imgui, ConsoleLog log, AssetDatabase database, string scenesDirectory)
     {
         _engine = engine;
         _imgui  = imgui;
         _log    = log;
+        _database = database;
         _scenesDirectory = scenesDirectory;
+        Directory.CreateDirectory(scenesDirectory);
+        _project = new ProjectPanel(engine, database, OpenScene);
         _inspector = new Inspector(engine, _undo);
         _picker = new Picker(engine);
         engine.LateUpdate += update;
@@ -197,6 +203,7 @@ internal sealed partial class EditorApp
         if (_showInspector) drawInspectorWindow();
         if (_showConsole)   _log.Draw(ref _showConsole);
         if (_showStats)     drawStats();
+        if (_showProject)   _project.Draw(ref _showProject);
 
         handleShortcuts();
         updateCamera();
@@ -227,6 +234,7 @@ internal sealed partial class EditorApp
         DockBuilder.DockWindow("Inspector", right);
         DockBuilder.DockWindow("Console", bottom);
         DockBuilder.DockWindow("Stats", bottom);
+        DockBuilder.DockWindow("Project", bottom);
         DockBuilder.DockWindow("Scene", scene);
         DockBuilder.igDockBuilderFinish(dockspace);
     }
@@ -268,6 +276,7 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Inspector", null, ref _showInspector);
             ImGui.MenuItem("Console",   null, ref _showConsole);
             ImGui.MenuItem("Stats",     null, ref _showStats);
+            ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.Separator();
             var colliders = _engine.Physics.ShowColliders;
             if (ImGui.MenuItem("Show Colliders", null, ref colliders)) _engine.Physics.ShowColliders = colliders;
@@ -323,6 +332,20 @@ internal sealed partial class EditorApp
             _engine.Graphics.SetRenderSize(width, height);   // 変わった時だけ C++ が作り直す
             ImGui.Image((IntPtr)GraphicsSettings.ViewTexture, new Vector2(width, height));
             _sceneHovered = ImGui.IsItemHovered();
+            // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
+            if (ImGui.BeginDragDropTarget())
+            {
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene) is { } asset)
+                {
+                    if (asset.Kind == AssetKind.Scene) OpenScene(_database.FullPath(asset.Path));
+                    else
+                    {
+                        var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
+                        PlaceModel(asset, dropPoint(view.RayDirection(ImGui.GetIO().MousePos)), Entity.Null);
+                    }
+                }
+                ImGui.EndDragDropTarget();
+            }
             var min = ImGui.GetItemRectMin();
             var draw = ImGui.GetWindowDrawList();
             if (_playing) draw.AddRect(min, min + new Vector2(width, height), _paused ? 0xFF20B0FFu : 0xFF3080FFu, 0, ImDrawFlags.None, 3.0f);   // 再生中は枠の色
@@ -510,6 +533,7 @@ internal sealed partial class EditorApp
             if (ImGui.BeginDragDropTarget())
             {
                 if (acceptEntity()) SetParent(_dragged, Entity.Null);
+                if (ProjectPanel.AcceptDrop(AssetKind.Model) is { } asset) PlaceModel(asset, Vector3.Zero, Entity.Null);
                 ImGui.EndDragDropTarget();
             }
             if (ImGui.IsItemClicked()) Selected = Entity.Null;
@@ -543,6 +567,7 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
+            if (ProjectPanel.AcceptDrop(AssetKind.Model) is { } asset) PlaceModel(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として親の位置に
             ImGui.EndDragDropTarget();
         }
         if (ImGui.BeginPopupContextItem())

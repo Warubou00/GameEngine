@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace GameEngine.Editor;
 
 // ==========================================================================
@@ -10,6 +12,7 @@ internal sealed partial class EditorApp
     public string? PlaySnapshot => _playSnapshot;
     public bool IsPlaying => _playing;
     public bool IsPaused  => _paused;
+    public AssetDatabase Database => _database;
     public bool IsDirty   => _undo.State != _savedState;   // 保存していない変更があるか
 
     public void Undo()
@@ -34,6 +37,35 @@ internal sealed partial class EditorApp
         Selected = entity;
         _undo.Record(new EntitiesEdit("Create Entity", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
         return entity;
+    }
+
+    // モデルのアセットを置く (ED5)。position はワールドの位置。parent があればその子に
+    public Entity PlaceModel(AssetEntry asset, Vector3 position, Entity parent)
+    {
+        Model model;
+        try { model = _engine.Assets.LoadModel(asset.Path); }
+        catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return Entity.Null; }
+        var entity = World.CreateEntity(Path.GetFileNameWithoutExtension(asset.Name));
+        var transform = new Transform(position);
+        if (World.IsAlive(parent) && World.Has<Transform>(parent) && Matrix4x4.Invert(Hierarchy.GetWorldMatrix(World, parent), out var inverse))
+        {
+            transform.Parent   = parent;
+            transform.Position = Vector3.Transform(position, inverse);
+        }
+        World.Add(entity, transform);
+        World.Add(entity, new MeshRenderer(model));
+        Selected = entity;
+        _undo.Record(new EntitiesEdit($"Place {asset.Name}", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        Console.WriteLine($"[Editor] Placed {asset.Path} at {position:F2}");
+        return entity;
+    }
+
+    // シーンビューの光線の先で物を置く所 : 当たった物の表面 / 無ければ高さ 0 の地面 / それも無ければ 10 m 先
+    private Vector3 dropPoint(Vector3 direction)
+    {
+        if (!_picker.Pick(_cameraPosition, direction, out var distance).IsNull) return _cameraPosition + direction * distance;
+        if (direction.Y < -1e-3f && _cameraPosition.Y > 0.0f) return _cameraPosition + direction * (-_cameraPosition.Y / direction.Y);
+        return _cameraPosition + direction * 10.0f;
     }
 
     // 選んだ物を子ごと消す

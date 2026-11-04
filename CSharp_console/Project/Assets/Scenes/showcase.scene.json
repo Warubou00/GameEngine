@@ -30,7 +30,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -86,7 +87,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -135,7 +137,8 @@
           "Layer": 0,
           "CollideWith": 4294967295,
           "Mesh": {
-            "model": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "model": "Assets/Models/obj/rock.obj"
           },
           "Friction": 0.5,
           "Restitution": 0,
@@ -144,7 +147,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "path": "Assets/Models/obj/rock.obj"
           }
         },
         {
@@ -193,7 +197,8 @@
           "Layer": 0,
           "CollideWith": 4294967295,
           "Mesh": {
-            "model": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "model": "Assets/Models/obj/rock.obj"
           },
           "Friction": 0.5,
           "Restitution": 0,
@@ -202,7 +207,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "path": "Assets/Models/obj/rock.obj"
           }
         },
         {
@@ -251,7 +257,8 @@
           "Layer": 0,
           "CollideWith": 4294967295,
           "Mesh": {
-            "model": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "model": "Assets/Models/obj/rock.obj"
           },
           "Friction": 0.5,
           "Restitution": 0,
@@ -260,7 +267,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "path": "Assets/Models/obj/rock.obj"
           }
         },
         {
@@ -309,7 +317,8 @@
           "Layer": 0,
           "CollideWith": 4294967295,
           "Mesh": {
-            "model": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "model": "Assets/Models/obj/rock.obj"
           },
           "Friction": 0.5,
           "Restitution": 0,
@@ -318,7 +327,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/rock.obj"
+            "guid": "62e3d1a9-2276-4c68-800f-668ba0a84a60",
+            "path": "Assets/Models/obj/rock.obj"
           }
         },
         {
@@ -354,7 +364,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -391,7 +402,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -444,7 +456,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/obj/box.obj"
+            "guid": "b22a6fa1-1cd2-440f-95b7-a78f988b2099",
+            "path": "Assets/Models/obj/box.obj"
           }
         },
         {
@@ -501,7 +514,8 @@
         {
           "type": "GameEngine.MeshRenderer",
           "Model": {
-            "path": "../Model/pmx/Sour\u5F0F\u30C8\u30DF\u30DF/Tomimi.pmx"
+            "guid": "52775454-951d-4405-a626-452b8810379d",
+            "path": "Assets/Models/pmx/Sour\u5F0F\u30C8\u30DF\u30DF/Tomimi.pmx"
           }
         },
         {
