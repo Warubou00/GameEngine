@@ -25,8 +25,8 @@ public struct Collider : IComponent
     public ColliderShape Shape;
     public Vector3       Size;
     public Vector3       Center;                     // 形の中心 (Transform の位置からのずれ。ローカル)
-    public int           Layer       = 0;
-    public uint          CollideWith = 0xFFFFFFFFu;  // 全部のレイヤー
+    [Layer]     public int  Layer       = 0;
+    [LayerMask] public uint CollideWith = 0xFFFFFFFFu;  // 全部のレイヤー
     public CollisionMesh? Mesh;                      // Shape = Mesh の時 (engine.Assets.LoadCollisionMesh)
     public float         Friction    = 0.5f;         // 摩擦 (0 で氷。1 前後でゴム)
     public float         Restitution = 0.0f;         // 反発 (0 で跳ねない。1 でそのまま跳ね返る)

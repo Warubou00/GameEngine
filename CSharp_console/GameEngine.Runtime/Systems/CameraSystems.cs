@@ -12,6 +12,9 @@ internal sealed class CameraSystem : ISystem
     private NativeMethods.CameraDesc _last;
     private bool _sent;
 
+    // 最後に送ったカメラの位置 (Volume の効きを決めるのに使う。ED6)
+    public Vector3 Position => _last.Position;
+
     public void Update(World world) => Update(world, null);
 
     // cameraOverride : エディターのカメラ (あればシーンのカメラの代わりに使う。ED3)

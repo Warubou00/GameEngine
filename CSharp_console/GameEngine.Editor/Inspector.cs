@@ -79,7 +79,7 @@ internal sealed class Inspector
                     if (field.HideInInspector) continue;
                     if (field.Header != null) ImGui.SeparatorText(field.Header);
                     var value = field.GetValue(boxed);
-                    if (drawValue(field.Name, field.FieldType, ref value, field.Range, entity))
+                    if (drawValue(field.Name, field.FieldType, ref value, field.Range, entity, field))
                     {
                         field.SetValue(boxed, value);
                         changed = true;
@@ -124,8 +124,12 @@ internal sealed class Inspector
     }
 
     // 値 1 つ分の部品。戻り値 : 変えたか
-    private bool drawValue(string label, Type type, ref object? value, RangeAttribute? range, Entity owner)
+    private bool drawValue(string label, Type type, ref object? value, RangeAttribute? range, Entity owner, ComponentField? field = null)
     {
+        // レイヤー (ED6) : 名前は ProjectSettings から
+        if (field?.IsLayer == true && value is int layer) return drawLayer(label, ref value, layer);
+        if (field?.IsLayerMask == true && value is uint mask) return drawLayerMask(label, ref value, mask);
+
         switch (value)
         {
         case float f:
@@ -188,15 +192,17 @@ internal sealed class Inspector
             var changed = false;
             if (ImGui.TreeNode(label))
             {
-                foreach (var field in ComponentType.SerializedFields(type))
+                foreach (var inner in ComponentType.SerializedFields(type))
                 {
-                    if (field.HideInInspector) continue;
-                    var inner = field.GetValue(value);
-                    if (drawValue(field.Name, field.FieldType, ref inner, field.Range, owner))
+                    if (inner.HideInInspector) continue;
+                    if (inner.Header != null) ImGui.SeparatorText(inner.Header);
+                    var innerValue = inner.GetValue(value);
+                    if (drawValue(inner.Name, inner.FieldType, ref innerValue, inner.Range, owner, inner))
                     {
-                        field.SetValue(value, inner);   // value は箱に入れたコピーなので、そのまま書ける
+                        inner.SetValue(value, innerValue);   // value は箱に入れたコピーなので、そのまま書ける
                         changed = true;
                     }
+                    if (inner.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(inner.Tooltip);
                 }
                 ImGui.TreePop();
             }
@@ -384,6 +390,71 @@ internal sealed class Inspector
         if (!_materialDirty || _editingMaterial == null) return;
         _editingMaterial.Save();
         _materialDirty = false;
+    }
+
+    // ---------------------------------------------------------------------
+    // レイヤー (ED6)
+    // ---------------------------------------------------------------------
+    private static bool drawLayer(string label, ref object? value, int layer)
+    {
+        var settings = ProjectSettings.Current;
+        var changed = false;
+        if (ImGui.BeginCombo(label, $"{layer} : {settings.LayerName(layer)}"))
+        {
+            for (int i = 0; i < ProjectSettings.LayerCount; i++)
+            {
+                if (string.IsNullOrEmpty(settings.LayerNames[i]) && i != layer) continue;   // 名前の無いレイヤーは出さない
+                if (ImGui.Selectable($"{i} : {settings.LayerName(i)}", i == layer)) { value = i; changed = true; }
+            }
+            ImGui.Separator();
+            ImGui.TextDisabled("Name layers in Edit > Project Settings");
+            ImGui.EndCombo();
+        }
+        return changed;
+    }
+
+    private static bool drawLayerMask(string label, ref object? value, uint mask)
+    {
+        var settings = ProjectSettings.Current;
+        var preview = mask == 0xFFFFFFFFu ? "Everything" : mask == 0 ? "Nothing" : string.Join(", ",
+            Enumerable.Range(0, ProjectSettings.LayerCount).Where(i => (mask & (1u << i)) != 0).Take(4).Select(settings.LayerName)) + (System.Numerics.BitOperations.PopCount(mask) > 4 ? ", ..." : "");
+        var changed = false;
+        if (ImGui.BeginCombo(label, preview))
+        {
+            if (ImGui.Selectable("Everything", mask == 0xFFFFFFFFu, ImGuiSelectableFlags.NoAutoClosePopups)) { mask = 0xFFFFFFFFu; changed = true; }
+            if (ImGui.Selectable("Nothing", mask == 0, ImGuiSelectableFlags.NoAutoClosePopups)) { mask = 0; changed = true; }
+            ImGui.Separator();
+            for (int i = 0; i < ProjectSettings.LayerCount; i++)
+            {
+                var on = (mask & (1u << i)) != 0;
+                if (string.IsNullOrEmpty(settings.LayerNames[i]) && !on) continue;
+                if (ImGui.Checkbox($"{i} : {settings.LayerName(i)}", ref on)) { mask = on ? mask | (1u << i) : mask & ~(1u << i); changed = true; }
+            }
+            ImGui.EndCombo();
+        }
+        if (changed) value = mask;
+        return changed;
+    }
+
+    // ---------------------------------------------------------------------
+    // 普通のクラスの値 (ProjectSettings など。ED6)。戻り値 : 変えたか
+    // ---------------------------------------------------------------------
+    public bool DrawObject(object target)
+    {
+        var changed = false;
+        foreach (var field in ComponentType.SerializedFields(target.GetType()))
+        {
+            if (field.HideInInspector) continue;
+            if (field.Header != null) ImGui.SeparatorText(field.Header);
+            var value = field.GetValue(target);
+            if (drawValue(field.Name, field.FieldType, ref value, field.Range, Entity.Null, field))
+            {
+                field.SetValue(target, value);
+                changed = true;
+            }
+            if (field.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(field.Tooltip);
+        }
+        return changed;
     }
 
     private static IList copyList(IList list) =>

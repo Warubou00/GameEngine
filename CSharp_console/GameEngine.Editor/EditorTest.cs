@@ -376,5 +376,93 @@ internal sealed class EditorTest
         File.Delete(folder2 + ".meta");
         database.Refresh();
         yield return 0;
+
+        // ---------- ED6 : RenderSettings / Volume / ProjectSettings ----------
+        var countBeforeSettings = World.EntityCount;
+        var settingsEntity = _app.SelectRenderSettings();
+        check(World.EntityCount == countBeforeSettings + 1 && World.Has<RenderSettings>(settingsEntity), "create render settings");
+        check(_app.SelectRenderSettings() == settingsEntity, "render settings is selected, not created twice");
+        ref var rs = ref World.Get<RenderSettings>(settingsEntity);
+        rs.Exposure = 2.0f;
+        rs.Path = RenderPath.Deferred;
+        rs.Ssao.Intensity = 0.7f;
+        rs.Shadows.CascadeCount = 2;
+        rs.BackgroundColor = new Vector3(0.5f, 0.1f, 0.1f);
+        yield return 0;
+        yield return 0;
+        check(graphics.Exposure == 2.0f && graphics.Ssao.Intensity == 0.7f && graphics.Shadows.CascadeCount == 2 && graphics.BackgroundColor == new Vector3(0.5f, 0.1f, 0.1f),
+              "render settings are applied to Graphics");
+        check(graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline, "render path switches to Deferred");
+        graphics.Exposure = 3.0f;   // キーやコードで変えた値は、設定を変えるまでそのまま
+        yield return 0;
+        check(graphics.Exposure == 3.0f, "code changes stay until the settings change");
+        World.Get<RenderSettings>(settingsEntity).Exposure = 2.0f;
+        yield return 0;
+
+        // 保存して開き直すと同じ (入れ子の値も)
+        var settingsScene = Path.Combine(Path.GetTempPath(), "ge_editor_test_settings.scene.json");
+        _app.SaveSceneTo(settingsScene);
+        graphics.Exposure = 1.0f;
+        _app.OpenScene(settingsScene);
+        yield return 0;
+        yield return 0;
+        settingsEntity = World.Entities.First(e => World.Has<RenderSettings>(e));
+        var reopenedSettings = World.Get<RenderSettings>(settingsEntity);
+        check(reopenedSettings.Exposure == 2.0f && reopenedSettings.Path == RenderPath.Deferred && reopenedSettings.Ssao.Intensity == 0.7f && reopenedSettings.Shadows.CascadeCount == 2,
+              "render settings round trip (nested values)");
+        check(graphics.Exposure == 2.0f && graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline, "reopened scene applies its render settings");
+        File.Delete(settingsScene);
+
+        // Volume : 箱 (原点、辺 10 m、外側 4 m で混ざる)。中 → 上書き、混ざる所 → 間、外 → 元の値
+        var volumeEntity = _app.CreateVolume(VolumeShape.Box);
+        World.Get<Transform>(volumeEntity).Position = new Vector3(0, 50, 0);
+        World.Get<Transform>(volumeEntity).MarkDirty();
+        ref var vol = ref World.Get<Volume>(volumeEntity);
+        vol.Size = new Vector3(10);
+        vol.BlendDistance = 4.0f;
+        vol.OverrideExposure = true;
+        vol.Exposure = 6.0f;
+        _app.SetEditorCamera(new Vector3(0, 50, 0));
+        yield return 0;
+        yield return 0;
+        check(MathF.Abs(graphics.Exposure - 6.0f) < 1e-4f, $"inside the volume ({graphics.Exposure})");
+        _app.SetEditorCamera(new Vector3(7, 50, 0));   // 箱の面から 2 m 外 = 重み 0.5
+        yield return 0;
+        yield return 0;
+        check(MathF.Abs(graphics.Exposure - 4.0f) < 1e-3f, $"half way in the blend distance ({graphics.Exposure})");
+        _app.SetEditorCamera(new Vector3(20, 50, 0));
+        yield return 0;
+        yield return 0;
+        check(MathF.Abs(graphics.Exposure - 2.0f) < 1e-4f, $"outside the volume ({graphics.Exposure})");
+        World.Get<Volume>(volumeEntity).Shape = VolumeShape.Global;
+        yield return 0;
+        check(MathF.Abs(graphics.Exposure - 6.0f) < 1e-4f, "global volume works everywhere");
+
+        // 設定と Volume を消すと既定の値に戻る
+        World.DestroyEntity(volumeEntity);
+        World.DestroyEntity(settingsEntity);
+        yield return 0;
+        yield return 0;
+        check(graphics.Exposure == 1.0f && graphics.Pipeline is GameEngine.Rendering.ForwardRenderPipeline && graphics.Ssao.Intensity == 1.5f,
+              "removing the settings returns to defaults");
+
+        // ProjectSettings : engine へ書く / JSON の読み書き (プロジェクトのファイルには書かない)
+        var project = new ProjectSettings();
+        project.Physics.Gravity = new Vector3(0, -3.0f, 0);
+        project.FixedDeltaTime = 1.0f / 120.0f;
+        project.LayerNames[1] = "Player";
+        project.LayerNames[2] = "Enemy";
+        project.SetLayerCollision(1, 2, false);
+        project.Apply(_app.Engine);
+        check(_app.Engine.Physics.Solver.Gravity == new Vector3(0, -3.0f, 0) && Math.Abs(Time.FixedDeltaTime - 1.0f / 120.0f) < 1e-7f, "project settings apply physics and time");
+        check(!_app.Engine.Physics.Available || (!_app.Engine.Physics.GetLayerCollision(1, 2) && !_app.Engine.Physics.GetLayerCollision(2, 1) && _app.Engine.Physics.GetLayerCollision(1, 1)),
+              "project settings apply the layer collision table");
+        var json = project.ToJson();
+        var parsed = ProjectSettings.FromJson(json);
+        check(parsed.ToJson() == json && parsed.LayerName(1) == "Player" && !parsed.GetLayerCollision(2, 1) && parsed.LayerName(5) == "Layer 5", "project settings JSON round trip");
+        _app.ProjectSettingsWindow.Settings.Apply(_app.Engine);   // 元の設定に戻す
+        check(_app.Engine.Physics.Solver.Gravity == new Vector3(0, -9.81f, 0) && _app.Engine.Physics.GetLayerCollision(1, 2) == _app.ProjectSettingsWindow.Settings.GetLayerCollision(1, 2),
+              "restore project settings");
+        yield return 0;
     }
 }

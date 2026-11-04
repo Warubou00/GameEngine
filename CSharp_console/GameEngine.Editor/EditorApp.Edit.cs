@@ -102,6 +102,44 @@ internal sealed partial class EditorApp
         return _cameraPosition + direction * 10.0f;
     }
 
+    // シーンの描画の設定を選ぶ (無ければ作る。ED6)
+    public Entity SelectRenderSettings()
+    {
+        foreach (var e in World.Entities)
+        {
+            if (!World.Has<RenderSettings>(e)) continue;
+            Selected = e;
+            return e;
+        }
+        var entity = World.CreateEntity("Render Settings");
+        World.Add(entity, new RenderSettings());
+        Selected = entity;
+        _undo.Record(new EntitiesEdit("Create Render Settings", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        return entity;
+    }
+
+    // Volume を作る (箱はエディターのカメラの前 10 m に)
+    public Entity CreateVolume(VolumeShape shape)
+    {
+        var entity = World.CreateEntity(shape == VolumeShape.Global ? "Global Volume" : "Volume");
+        var forward = Vector3.Transform(Vector3.UnitZ, cameraRotation);
+        World.Add(entity, new Transform(shape == VolumeShape.Global ? Vector3.Zero : _cameraPosition + forward * 10.0f));
+        World.Add(entity, new Volume { Shape = shape });
+        Selected = entity;
+        _undo.Record(new EntitiesEdit("Create Volume", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        return entity;
+    }
+
+    public ProjectSettingsWindow ProjectSettingsWindow => _projectSettings;
+
+    // エディターのカメラを動かす (自動の確認用)
+    public void SetEditorCamera(Vector3 position, float yawDegrees = 0.0f, float pitchDegrees = 0.0f)
+    {
+        _cameraPosition = position;
+        _yaw = yawDegrees;
+        _pitch = pitchDegrees;
+    }
+
     // 選んだ物を子ごと消す
     public void DeleteSelected()
     {
