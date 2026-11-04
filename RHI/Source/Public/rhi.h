@@ -89,6 +89,19 @@ namespace RHI
 		// 満杯なら MaterialHandle::DEFAULT (白・不透明)
 		virtual MaterialHandle CreateMaterial(const MaterialDesc& desc) = 0;
 
+		// ---------- ED5 : エディターの読み直し / 解放 ----------
+		// マテリアルの値を変える (次のフレームから。GPU を待たない)
+		virtual void UpdateMaterial(MaterialHandle material, const MaterialDesc& desc) = 0;
+		// 使い終わった頂点 / インデックス / マテリアル / テクスチャをまとめて返す
+		// GPU の完了を待ってから返すので、毎フレーム呼ぶ物ではない (エディターの読み直し / 解放用)。null / 0 個は飛ばす
+		virtual void ReleaseResources(const VertexRange* vertices, uint32_t vertexCount, const IndexRange* indices, uint32_t indexCount,
+		                              const MaterialHandle* materials, uint32_t materialCount, const TextureHandle* textures, uint32_t textureCount) = 0;
+		// シェーダーを読み直す (GPU を待ってからコンパイルし直し、PSO は次に使う時に作る)
+		// コンパイルに失敗したシェーダーは前の物を使い続ける。戻り値 = 全部成功したか
+		virtual bool ReloadShaders() = 0;
+		// 使っている頂点 / インデックスの量 (byte。返した分は除く)
+		virtual uint64_t GetMeshBytesUsed()const = 0;
+
 		// 描画オブジェクト (ワールド行列の置き場) を作る (削除された番号があれば使い回す)
 		virtual ObjectHandle CreateObject() = 0;
 

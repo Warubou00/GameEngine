@@ -171,6 +171,10 @@ internal sealed class Inspector
             return drawAssetPath(label, model.IsValid ? model.Path : "", ref value, path => _engine.Assets.LoadModel(path));
         case Sound sound:
             return drawAssetPath(label, sound.IsValid ? sound.Path : "", ref value, path => _engine.Assets.LoadSound(path));
+        case Material material:
+            return drawAssetPath(label, material.Path, ref value, path => _engine.Assets.LoadMaterial(path));
+        case null when type == typeof(Material):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadMaterial(path));
         case CollisionMesh mesh:
             return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
         case null when type == typeof(CollisionMesh):
@@ -292,7 +296,7 @@ internal sealed class Inspector
         // Project からアセットを落とす (ED5。モデル / 当たりのメッシュはモデル、音は wav)
         if (ImGui.BeginDragDropTarget())
         {
-            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : AssetKind.Model;
+            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material : AssetKind.Model;
             if (ProjectPanel.AcceptDrop(kind) is { } asset) { edited = asset.Path; entered = true; }
             ImGui.EndDragDropTarget();
         }
@@ -330,6 +334,56 @@ internal sealed class Inspector
         }
         if (changed) value = list;
         return changed;
+    }
+
+    // ---------------------------------------------------------------------
+    // マテリアルのアセット (ED5)。値を変えるとすぐ C++ へ送り (同じマテリアルの物が全部変わる)、触り終わったらファイルに書く
+    // ※アセットの変更は元に戻せない (シーンの変更ではないので UndoStack に積まない)
+    // ---------------------------------------------------------------------
+    private bool _materialDirty;
+    private Material? _editingMaterial;
+
+    public void DrawMaterial(Material material)
+    {
+        if (_editingMaterial != material) { saveMaterial(); _editingMaterial = material; }
+        ImGui.Text(Path.GetFileName(material.Path));
+        ImGui.TextDisabled(material.Path);
+        ImGui.Separator();
+        var changed = false;
+        var color = material.Color;
+        if (ImGui.ColorEdit4("Color", ref color, ImGuiColorEditFlags.Float | ImGuiColorEditFlags.AlphaBar)) { material.Color = color; changed = true; }
+        var texture = material.Texture ?? "";
+        var entered = ImGui.InputText("Texture", ref texture, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+        if (ImGui.BeginDragDropTarget())
+        {
+            if (ProjectPanel.AcceptDrop(AssetKind.Texture) is { } asset) { texture = asset.Path; entered = true; }
+            ImGui.EndDragDropTarget();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drop a texture from Project (empty = white)");
+        if (entered) { material.Texture = string.IsNullOrWhiteSpace(texture) ? null : texture; changed = true; }
+        var metallic = material.Metallic;
+        if (ImGui.SliderFloat("Metallic", ref metallic, 0.0f, 1.0f)) { material.Metallic = metallic; changed = true; }
+        var roughness = material.Roughness;
+        if (ImGui.SliderFloat("Roughness", ref roughness, 0.02f, 1.0f)) { material.Roughness = roughness; changed = true; }
+        var transparent = material.Transparent;
+        if (ImGui.Checkbox("Transparent", ref transparent)) { material.Transparent = transparent; changed = true; }
+        var doubleSided = material.DoubleSided;
+        if (ImGui.Checkbox("Double Sided", ref doubleSided)) { material.DoubleSided = doubleSided; changed = true; }
+        if (changed)
+        {
+            material.Apply();
+            _materialDirty = true;
+        }
+        if (_materialDirty && !ImGui.IsAnyItemActive()) saveMaterial();
+        ImGui.Spacing();
+        ImGui.TextDisabled("Drag this material from Project onto an object (Scene / Hierarchy) to use it.");
+    }
+
+    private void saveMaterial()
+    {
+        if (!_materialDirty || _editingMaterial == null) return;
+        _editingMaterial.Save();
+        _materialDirty = false;
     }
 
     private static IList copyList(IList list) =>

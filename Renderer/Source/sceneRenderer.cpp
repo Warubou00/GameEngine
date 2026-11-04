@@ -91,6 +91,7 @@ namespace Renderer
 		RHI_DestroyRenderHardwareInterface(_rhi);
 		_rhi = nullptr;
 		_models.clear();
+		_freeModels.clear();
 		_renderObjects.clear();
 		_freeRenderObjects.clear();
 		_aliveRenderObjects = 0;
@@ -116,10 +117,10 @@ namespace Renderer
 	// モデル
 	// ==============================================================
 
-	uint32_t SceneRenderer::LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount)
+	// ファイルを読んで GPU へ登録し、使った物 (頂点 / インデックス / マテリアル / テクスチャ) を model に覚える (ED5)
+	// (以前は LoadModel の中身。読み直しでも使うので分けた)
+	bool SceneRenderer::loadModelResource(const std::wstring& filePath, ModelResource& model)
 	{
-		if (outSubMeshCount) *outSubMeshCount = 0;
-		if (!IsInitialized()) return INVALID_HANDLE;
 
 		// 1. ファイルを読む (CPU 側)。拡張子でローダーを選ぶ
 		std::wstring extension = std::filesystem::path(filePath).extension().wstring();
@@ -131,14 +132,14 @@ namespace Renderer
 		{
 			Core::Logger::Log(L"[SceneRenderer] Unsupported model format (.obj / .pmx only).");
 			Core::Logger::Log(filePath.c_str());
-			return INVALID_HANDLE;
+			return false;
 		}
 		MeshPtr mesh(loader->LoadModel(filePath));
 		if (!mesh)
 		{
 			Core::Logger::Log(L"[SceneRenderer] Failed load model.");
 			Core::Logger::Log(filePath.c_str());
-			return INVALID_HANDLE;
+			return false;
 		}
 
 		// 2. 頂点 (メッシュ全体で 1 回)
@@ -146,8 +147,9 @@ namespace Renderer
 		if (!vertices.IsValid())
 		{
 			Core::Logger::Log("[SceneRenderer] Failed upload vertices.");
-			return INVALID_HANDLE;
+			return false;
 		}
+		model.Vertices = vertices;
 
 		// 3. テクスチャ : 使うものだけ集めてまとめて読み込む (デコードは RHI の中で並列に行われる)
 		//    同じパスは 1 回だけ読む (PMX は多くの材質が同じテクスチャを使う)
@@ -177,6 +179,8 @@ namespace Renderer
 				for (const auto& path : paths) pathPointers.push_back(path.c_str());
 				std::vector<RHI::TextureHandle> loaded(paths.size());
 				_rhi->LoadTextures(pathPointers.data(), static_cast<uint32_t>(pathPointers.size()), loaded.data());
+				for (const auto& texture : loaded) if (texture.Index != RHI::TextureHandle::DEFAULT) model.Textures.push_back(texture);
+				model.TexturePaths = paths;
 				for (size_t m = 0; m < owners.size(); ++m)
 				{
 					if (owners[m] != SIZE_MAX) materialTextures[m] = loaded[owners[m]];
@@ -188,7 +192,6 @@ namespace Renderer
 		//    マテリアル : テクスチャがあれば色は白 (テクスチャそのまま。不透明度だけ材質から)、無ければ材質の色
 		//    半透明の材質 (PMX は全部) は、不透明な物の後にブレンドして描く
 		//    描画オブジェクトはまだ作らない (以前は読み込みと同時に原点に 1 個置いていた)
-		ModelResource model;
 		for (size_t i = 0; i < mesh->Indecies.size(); ++i)
 		{
 			const auto& indices = mesh->Indecies[i];
@@ -199,6 +202,7 @@ namespace Renderer
 				Core::Logger::Log("[SceneRenderer] Failed upload indices.");
 				continue;
 			}
+			model.IndexRanges.push_back(range);
 
 			RHI::MaterialDesc desc;
 			const Material* material = i < mesh->Materials.size() ? mesh->Materials[i] : nullptr;
@@ -226,14 +230,14 @@ namespace Renderer
 			item.FirstIndex = range.FirstIndex;
 			item.IndexCount = range.Count;
 			item.Material   = _rhi->CreateMaterial(desc);
+			model.Materials.push_back(item.Material);
 			model.SubMeshes.push_back(item);
 		}
 		if (model.SubMeshes.empty())
 		{
-			return INVALID_HANDLE;
+			releaseModelResource(model);
+			return false;
 		}
-
-		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
 
 		// 衝突判定のメッシュ用に、位置とインデックスだけ CPU 側に残す (頂点 12byte + インデックス 4byte。色や UV は捨てる)
 		model.Positions.reserve(mesh->Vertices.size() * 3);
@@ -245,10 +249,154 @@ namespace Renderer
 		}
 		for (const auto& indices : mesh->Indecies) model.Indices.insert(model.Indices.end(), indices.begin(), indices.end());
 
-		_models.push_back(std::move(model));
+		model.Path = filePath;
+		// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
+		return true;
+	}
 
-				// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
+	uint32_t SceneRenderer::LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (!IsInitialized()) return INVALID_HANDLE;
+		ModelResource model;
+		if (!loadModelResource(filePath, model)) return INVALID_HANDLE;
+		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
+
+		// 解放したモデルの番号があれば使い回す (ED5)
+		if (!_freeModels.empty())
+		{
+			const uint32_t handle = _freeModels.back();
+			_freeModels.pop_back();
+			_models[handle] = std::move(model);
+			return handle;
+		}
+		_models.push_back(std::move(model));
 		return static_cast<uint32_t>(_models.size() - 1);
+	}
+
+	// ==============================================================
+	// ED5 : 読み直し / 解放 / マテリアル
+	// ==============================================================
+
+	void SceneRenderer::releaseModelResource(ModelResource& model)
+	{
+		std::vector<RHI::VertexRange> vertices;
+		if (model.Vertices.IsValid()) vertices.push_back(model.Vertices);
+		_rhi->ReleaseResources(vertices.data(), static_cast<uint32_t>(vertices.size()),
+		                       model.IndexRanges.data(), static_cast<uint32_t>(model.IndexRanges.size()),
+		                       model.Materials.data(), static_cast<uint32_t>(model.Materials.size()),
+		                       model.Textures.data(), static_cast<uint32_t>(model.Textures.size()));
+		model = ModelResource();
+	}
+
+	bool SceneRenderer::ReloadModel(uint32_t handle, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (!IsInitialized() || handle >= _models.size() || _models[handle].Path.empty()) return false;
+		// 新しい物を先に読む (読めなければ前の物のまま。書きかけのファイルで消えないように)
+		ModelResource fresh;
+		if (!loadModelResource(_models[handle].Path, fresh)) return false;
+		ModelResource old = std::move(_models[handle]);
+		_models[handle] = std::move(fresh);
+		releaseModelResource(old);   // GPU を待ってから返す
+		_drawListDirty = true;       // 描画オブジェクトは同じ番号のまま、新しいサブメッシュで描く
+		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(_models[handle].SubMeshes.size());
+		return true;
+	}
+
+	bool SceneRenderer::UnloadModel(uint32_t handle)
+	{
+		if (!IsInitialized() || handle >= _models.size() || _models[handle].Path.empty()) return false;
+		for (const auto& object : _renderObjects)
+		{
+			if (object.Model == handle) return false;   // まだ置いてある
+		}
+		releaseModelResource(_models[handle]);
+		_freeModels.push_back(handle);
+		return true;
+	}
+
+	uint32_t SceneRenderer::ReloadModelsUsingTexture(const std::wstring& texturePath)
+	{
+		if (!IsInitialized()) return 0;
+		std::error_code error;
+		const auto target = std::filesystem::weakly_canonical(texturePath, error);
+		uint32_t count = 0;
+		for (uint32_t handle = 0; handle < _models.size(); ++handle)
+		{
+			bool uses = false;
+			for (const auto& path : _models[handle].TexturePaths)
+			{
+				std::error_code e;
+				if (std::filesystem::weakly_canonical(path, e) == target) { uses = true; break; }
+			}
+			if (uses && ReloadModel(handle, nullptr)) count++;
+		}
+		return count;
+	}
+
+	uint32_t SceneRenderer::LoadTexture(const std::wstring& filePath)
+	{
+		if (!IsInitialized()) return RHI::TextureHandle::DEFAULT;
+		const std::wstring path = resolveTexturePath(filePath);
+		const wchar_t* pointer = path.c_str();
+		RHI::TextureHandle handle;
+		_rhi->LoadTextures(&pointer, 1, &handle);
+		return handle.Index;
+	}
+
+	void SceneRenderer::ReleaseTexture(uint32_t texture)
+	{
+		if (!IsInitialized() || texture == RHI::TextureHandle::DEFAULT) return;
+		RHI::TextureHandle handle;
+		handle.Index = texture;
+		_rhi->ReleaseResources(nullptr, 0, nullptr, 0, nullptr, 0, &handle, 1);
+	}
+
+	uint32_t SceneRenderer::CreateMaterial(const RHI::MaterialDesc& desc)
+	{
+		return IsInitialized() ? _rhi->CreateMaterial(desc).Index : RHI::MaterialHandle::DEFAULT;
+	}
+
+	void SceneRenderer::UpdateMaterial(uint32_t material, const RHI::MaterialDesc& desc)
+	{
+		if (!IsInitialized()) return;
+		RHI::MaterialHandle handle;
+		handle.Index = material;
+		_rhi->UpdateMaterial(handle, desc);
+	}
+
+	void SceneRenderer::DestroyMaterial(uint32_t material)
+	{
+		if (!IsInitialized() || material == RHI::MaterialHandle::DEFAULT) return;
+		// まだ使っている描画オブジェクトがあれば、モデルのマテリアルに戻す
+		for (auto& object : _renderObjects)
+		{
+			if (object.MaterialOverride == material) { object.MaterialOverride = INVALID_HANDLE; _drawListDirty = true; }
+		}
+		RHI::MaterialHandle handle;
+		handle.Index = material;
+		_rhi->ReleaseResources(nullptr, 0, nullptr, 0, &handle, 1, nullptr, 0);
+	}
+
+	void SceneRenderer::SetRenderObjectMaterial(uint32_t handle, uint32_t material)
+	{
+		if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) return;
+		if (_renderObjects[handle].MaterialOverride == material) return;
+		_renderObjects[handle].MaterialOverride = material;
+		_drawListDirty = true;
+	}
+
+	uint64_t SceneRenderer::GetMeshBytesUsed() const
+	{
+		return IsInitialized() ? _rhi->GetMeshBytesUsed() : 0;
+	}
+
+	uint32_t SceneRenderer::GetLoadedModelCount() const
+	{
+		uint32_t count = 0;
+		for (const auto& model : _models) if (!model.Path.empty()) count++;
+		return count;
 	}
 
 	// ==============================================================
@@ -360,6 +508,7 @@ namespace Renderer
 			for (RHI::DrawItem item : _models[object.Model].SubMeshes)
 			{
 				item.Object = object.Object;
+				if (object.MaterialOverride != INVALID_HANDLE) item.Material.Index = object.MaterialOverride;   // ED5 : マテリアルのアセット
 				_drawItems.push_back(item);
 			}
 		}

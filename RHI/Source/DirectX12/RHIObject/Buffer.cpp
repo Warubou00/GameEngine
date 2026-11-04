@@ -416,12 +416,72 @@ namespace RHI
 			return _lightGpu->GetGPUVirtualAddress() + frameOffset;
 		}
 
+		void Buffer::UpdateMaterial(RHI::MaterialHandle material, const RHI::MaterialDesc& desc)
+		{
+			if (material.Index >= _materials.size()) return;
+			MaterialData& data = _materials[material.Index];
+			const uint32_t blend = static_cast<uint32_t>(desc.Blend);
+			const uint8_t doubleSided = desc.DoubleSided ? 1 : 0;
+			if (data.Blend != blend || _materialDoubleSided[material.Index] != doubleSided) _drawLayoutVersion++;   // PSO のまとまりが変わる
+			for (int i = 0; i < 4; ++i) data.Color[i] = desc.Color[i];
+			data.TextureIndex = desc.Texture.Index;
+			data.Blend        = blend;
+			data.Metallic     = desc.Metallic;
+			data.Roughness    = desc.Roughness;
+			_materialDoubleSided[material.Index] = doubleSided;
+			_materialsVersion++;   // 全部のフレームの領域に書き直す
+		}
+
+		void Buffer::DestroyMaterial(RHI::MaterialHandle material)
+		{
+			if (material.Index == RHI::MaterialHandle::DEFAULT || material.Index >= _materials.size()) return;
+			if (std::find(_freeMaterials.begin(), _freeMaterials.end(), material.Index) != _freeMaterials.end()) return;   // 2 回返さない
+			UpdateMaterial(material, RHI::MaterialDesc());   // 白に戻しておく (間違って使われても目立たない)
+			_freeMaterials.push_back(material.Index);
+		}
+
+		void Buffer::FreeVertexData(const RHI::VertexRange& range)
+		{
+			if (!range.IsValid() || !_sceneVBAllocator) return;
+			RHI::ResourceBufferAllocation allocation;
+			allocation.ByteOffset   = static_cast<uint64_t>(range.BaseVertex) * sizeof(RHI::Vertex);
+			allocation.StrideOffset = range.BaseVertex;
+			allocation.Count        = range.Count;
+			allocation.IsValid      = true;
+			_sceneVBAllocator->Free(allocation, sizeof(RHI::Vertex));
+			_vertexBounds.erase(range.BaseVertex);
+			_drawLayoutVersion++;   // GPU カリングの境界球を書き直させる
+		}
+
+		void Buffer::FreeIndexData(const RHI::IndexRange& range)
+		{
+			if (!range.IsValid() || !_sceneIBAllocator) return;
+			RHI::ResourceBufferAllocation allocation;
+			allocation.ByteOffset   = static_cast<uint64_t>(range.FirstIndex) * sizeof(uint32_t);
+			allocation.StrideOffset = range.FirstIndex;
+			allocation.Count        = range.Count;
+			allocation.IsValid      = true;
+			_sceneIBAllocator->Free(allocation, sizeof(uint32_t));
+		}
+
+		uint64_t Buffer::GetVertexBytesUsed()const { return _sceneVBAllocator ? _sceneVBAllocator->GetUsedBytes() : 0; }
+		uint64_t Buffer::GetIndexBytesUsed()const  { return _sceneIBAllocator ? _sceneIBAllocator->GetUsedBytes() : 0; }
+
 		RHI::MaterialHandle Buffer::CreateMaterial(const RHI::MaterialDesc& desc)
 		{
 			RHI::MaterialHandle handle;
-			if (_materials.size() >= MAX_MATERIALS)
+			if (_freeMaterials.empty() && _materials.size() >= MAX_MATERIALS)
 			{
 				Core::Logger::Log("[Buffer] Too many materials. Use the default material.");
+				return handle;
+			}
+
+			// 返された番号があれば使い回す (ED5)
+			if (!_freeMaterials.empty())
+			{
+				handle.Index = _freeMaterials.back();
+				_freeMaterials.pop_back();
+				UpdateMaterial(handle, desc);
 				return handle;
 			}
 

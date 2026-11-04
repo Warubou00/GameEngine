@@ -398,6 +398,7 @@ namespace RHI
                 uint32_t                   Instances = 0;           // 描くオブジェクトの数 (DrawData の数)
                 uint64_t                   Triangles = 0;
                 bool                       Instanced = false;       // インスタンシングでまとめて書いたか
+                uint64_t                   Layout    = 0;           // 書いた時の Buffer::GetDrawLayoutVersion (ED5)
                 bool                       Valid     = false;
             };
             DrawFrame                                            _draws[FRAME_COUNT];

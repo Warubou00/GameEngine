@@ -185,6 +185,15 @@ public sealed class GraphicsSettings
         fixed (byte* p = rgba) return NativeMethods.Renderer_CreateUITexture((uint)width, (uint)height, p);
     }
 
+    /// <summary>シェーダーを読み直す (ED5。GPU を待ってからコンパイルし直す。失敗したシェーダーは前の物のまま)。戻り値 = 全部成功したか</summary>
+    public bool ReloadShaders() => NativeMethods.Renderer_ReloadShaders();
+
+    /// <summary>GPU のメガバッファで使っている頂点 / インデックスの量 (byte。解放した分は除く。ED5)</summary>
+    public long MeshBytesUsed => (long)NativeMethods.Renderer_GetMeshBytesUsed();
+
+    /// <summary>C++ に読み込んであるモデルの数 (ED5)</summary>
+    public int LoadedModelCount => (int)NativeMethods.Renderer_GetLoadedModelCount();
+
     /// <summary>C++ のプロファイラー (F1) を出すか</summary>
     public bool ProfilerVisible
     {

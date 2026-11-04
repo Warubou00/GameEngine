@@ -86,6 +86,9 @@ public static class SceneSerializer
         RegisterConverter<Sound>(
             (w, v, _) => writeAsset(w, v.IsValid ? v.Path : null),
             (e, c) => readAsset(e, c, path => c.Assets!.LoadSound(path), default(Sound)));
+        RegisterConverter<Material?>(
+            (w, v, _) => writeAsset(w, string.IsNullOrEmpty(v?.Path) ? null : v.Path),
+            (e, c) => readAsset<Material?>(e, c, path => c.Assets!.LoadMaterial(path), null));
         RegisterConverter<CollisionMesh?>(
             (w, v, _) => writeAsset(w, v?.Path, "model"),
             (e, c) => readAsset<CollisionMesh?>(e, c, path => c.Assets!.LoadCollisionMesh(c.Assets.LoadModel(path)), null, "model"));

@@ -250,8 +250,18 @@ namespace RHI
             }
 
             // ★重要: GPUが使い続けるため、配列に保存して寿命を管理する
-            _loadedBuffers.push_back(std::move(texture));
+            _loadedBuffers[*outTextureID] = std::move(texture);
             return true;
+        }
+
+        void Texture::ReleaseTexture(RHI::ObjectInterface::IBuffer* iBuffer, uint32_t textureID)
+        {
+            if (!iBuffer || textureID == 0) return;   // 0 = 既定テクスチャ (白)
+            auto found = _loadedBuffers.find(textureID);
+            if (found == _loadedBuffers.end()) return;
+            auto buffer = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
+            buffer->GetDescHeapManager()->FreeSrv(textureID + Buffer::SRV_INDEX_TEXTURE_BEGIN);
+            _loadedBuffers.erase(found);
         }
 
         bool Texture::createShaderResourceView(

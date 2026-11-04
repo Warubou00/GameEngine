@@ -16,6 +16,9 @@ namespace GameEngine.Editor;
 //     シーンをシーンビューへ落とすと開く
 //   - ダブルクリック : フォルダは入る / シーンは開く
 //   - Assets のファイルが増えた / 消えた / 名前が変わったら (FileSystemWatcher)、一覧を作り直す (新しいファイルには .meta が付く)
+//   - ファイルが書き換わったら読み直す (ED5 後半) : モデル → 同じ番号のまま読み直す / テクスチャ → 使っているモデルとマテリアル /
+//     マテリアル → 値を読み直す。自分 (エディター) が書いたファイルは読み直さない
+//   - Create Material : 今のフォルダにマテリアルを作る。マテリアルを選ぶとインスペクターで値を変えられる
 // ==========================================================================
 internal sealed class ProjectPanel : IDisposable
 {
@@ -29,6 +32,11 @@ internal sealed class ProjectPanel : IDisposable
     private readonly FileSystemWatcher? _watcher;
     private volatile bool _changed;
     private double _changedAt;
+    private readonly ConcurrentDictionary<string, byte> _modified = new(StringComparer.OrdinalIgnoreCase);   // 書き換わったファイル (別スレッドから)
+
+    // 選んだアセット (インスペクターがマテリアルを出すのに使う)。Version は選び直した回数
+    public AssetEntry? Selected => _selected;
+    public int SelectionVersion { get; private set; }
 
     private string  _folder = AssetDatabase.AssetsFolder;
     private string  _search = "";
@@ -52,6 +60,7 @@ internal sealed class ProjectPanel : IDisposable
             _watcher.Created += (_, e) => onChanged(e.FullPath);
             _watcher.Deleted += (_, e) => onChanged(e.FullPath);
             _watcher.Renamed += (_, e) => onChanged(e.FullPath);
+            _watcher.Changed += (_, e) => onModified(e.FullPath);
         }
         catch (Exception ex)
         {
@@ -66,7 +75,44 @@ internal sealed class ProjectPanel : IDisposable
         _changed = true;
     }
 
+    // 別のスレッドから呼ばれる : 書き換わったファイルを覚えて、0.3 秒後にメインのスレッドで読み直す
+    private void onModified(string path)
+    {
+        if (path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".dds", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) || Directory.Exists(path)) return;
+        _modified[path] = 0;
+        _changed = true;
+    }
+
     public void Dispose() => _watcher?.Dispose();
+
+    // 書き換わったファイルを読み直す (メインのスレッド)
+    private void reloadModified()
+    {
+        foreach (var file in _modified.Keys.ToList())
+        {
+            _modified.TryRemove(file, out _);
+            if (_engine.Assets.IsOwnWrite(file)) continue;   // エディターが書いた (マテリアルの保存など)
+            var path = _database.ToAssetPath(file);
+            if (path == null || _database.Find(path) is not { } entry) continue;
+            try
+            {
+                var reloaded = entry.Kind switch
+                {
+                    AssetKind.Model    => _engine.Assets.ReloadModel(path) ? 1 : 0,
+                    AssetKind.Texture  => _engine.Assets.ReloadTexture(path),
+                    AssetKind.Material => _engine.Assets.ReloadMaterial(path) ? 1 : 0,
+                    _ => 0,
+                };
+                if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); }   // サムネイルも作り直す
+                if (reloaded > 0) Console.WriteLine($"[Assets] Reloaded {path}{(entry.Kind == AssetKind.Texture ? $" ({reloaded} users)" : "")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Assets] Failed to reload {path} : {ex.Message}");
+            }
+        }
+    }
 
     public unsafe void Draw(ref bool open)
     {
@@ -75,8 +121,10 @@ internal sealed class ProjectPanel : IDisposable
         if (_changedAt > 0 && Time.TotalTime - _changedAt > 0.3)
         {
             _changedAt = 0;
+            var before = _database.Version;
             var created = _database.Refresh();
-            Console.WriteLine($"[Assets] Refreshed : {_database.Entries.Count()} assets{(created > 0 ? $" ({created} new)" : "")}");
+            if (_database.Version != before) Console.WriteLine($"[Assets] Refreshed : {_database.Entries.Count()} assets{(created > 0 ? $" ({created} new)" : "")}");
+            reloadModified();
         }
         uploadThumbnails();
         if (Dragged != null && !ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.GetDragDropPayload().NativePtr == null) Dragged = null;
@@ -112,6 +160,8 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.Button("Import...")) import();
         ImGui.SameLine();
         if (ImGui.Button("New Folder")) newFolder();
+        ImGui.SameLine();
+        if (ImGui.Button("Create Material")) CreateMaterial();
         ImGui.SameLine();
         if (ImGui.Button("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(_selected?.Path ?? _folder)}\"");
         ImGui.SameLine();
@@ -200,7 +250,7 @@ internal sealed class ProjectPanel : IDisposable
         if (name != entry.Name) name = name[..^2] + "...";   // 「…」はフォントの字の範囲に無い
         draw.AddText(start + new Vector2((_tileSize - ImGui.CalcTextSize(name).X) * 0.5f, _tileSize), ImGui.GetColorU32(ImGuiCol.Text), name);
 
-        if (clicked) _selected = entry;
+        if (clicked) Select(entry);
         if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
         {
             if (entry.Kind == AssetKind.Folder) { _folder = entry.Path; _search = ""; }
@@ -308,12 +358,35 @@ internal sealed class ProjectPanel : IDisposable
             {
                 var path = _database.Import(file, _folder);
                 Console.WriteLine($"[Assets] Imported {file} -> {path}");
-                _selected = _database.Find(path);
+                Select(_database.Find(path));
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[Assets] Failed to import {file} : {ex.Message}");
             }
+        }
+    }
+
+    public void Select(AssetEntry? entry)
+    {
+        _selected = entry;
+        SelectionVersion++;
+    }
+
+    // 今のフォルダにマテリアルを作って選ぶ
+    public Material? CreateMaterial()
+    {
+        try
+        {
+            var material = _engine.Assets.CreateMaterialAsset(_folder);
+            Select(_database.Find(material.Path));
+            Console.WriteLine($"[Assets] Created {material.Path}");
+            return material;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Assets] Failed to create a material : {ex.Message}");
+            return null;
         }
     }
 

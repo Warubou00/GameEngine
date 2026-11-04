@@ -64,6 +64,9 @@ internal sealed class Picker
     private readonly Dictionary<string, Shape?> _shapes = new();
     public Picker(Engine engine) => _engine = engine;
 
+    // 覚えた形を捨てる (モデルを読み直した / 解放した時。ED5)
+    public void Clear() => _shapes.Clear();
+
     // モデルの形 (ローカルの箱)。形が無ければ false
     public bool TryGetBounds(Model model, out Vector3 min, out Vector3 max)
     {

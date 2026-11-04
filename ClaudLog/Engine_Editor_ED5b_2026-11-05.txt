@@ -1,0 +1,88 @@
+﻿エディター ED5 (後半) : ファイルが変わったら読み直す / 使っていないアセットの解放 / マテリアルのアセット 2026-11-05
+ブランチ : feature/editor-ed5b
+
+■ 目的 (ロードマップ ED5 の残り)
+  - ファイルが変わったら読み直す (テクスチャ / モデル / シェーダー)。使っていないアセットの解放
+  - マテリアルをアセットにする (色 / テクスチャ / 粗さ・金属)
+  - 確認 : テクスチャを描き直すとすぐ変わる
+
+■ 使い方 (エディター)
+  - Explorer や他のアプリで Assets のファイルを書き換えると、0.3 秒後に読み直す
+      モデル (.obj / .pmx) → 同じ番号のまま読み直す (置いてある物は全部新しい形で描かれる)
+      テクスチャ → それを使うモデル / マテリアルを読み直す (DDS キャッシュは日付で作り直される)
+      マテリアル (.material.json) → 値を読み直す
+    書きかけ / 壊れたファイルで読めなければ、前の物のまま (Console にエラー)
+  - シェーダー : リポジトリの RHI/Source/Shader/*.shader を書き換えると、実行中に読むフォルダ (作業フォルダの ../Shader) へ写して
+    コンパイルし直す (Assets > Reload Shaders でも)。エラーのあるシェーダーは前の物を使い続ける
+  - Project > Create Material / Assets > Create Material : 今のフォルダに「New Material.material.json」を作る
+    Project でマテリアルを選ぶ → インスペクターで Color / Texture (テクスチャをドラッグ) / Metallic / Roughness / Transparent / Double Sided
+    値はすぐ描画に効き、触り終わったらファイルに書く (アセットの変更は元に戻せない : シーンの変更ではないため)
+  - マテリアルをシーンビューの物 / Hierarchy の行へドラッグ → その物の MeshRenderer.Material に付く (元に戻せる)。
+    インスペクターの MeshRenderer の Material の欄へも落とせる
+  - Assets > Unload Unused Assets : どの物も使っていないモデル / マテリアルを解放する (GPU の頂点 / インデックス / テクスチャ / マテリアルを返す)
+  - Stats : 読み込んだモデル / マテリアルの数、GPU の頂点・インデックスの量、読み直した回数
+
+■ マテリアルのアセット
+  {"format":"GameEngineMaterial","version":1,"color":[r,g,b,a],"texture":{"guid":...,"path":"Assets/..."}|null,
+   "metallic":0,"roughness":0.6,"transparent":false,"doubleSided":false}
+  MeshRenderer.Material (null ならモデルに付いているマテリアル)。全部のサブメッシュに使う。同じ Material は C++ のマテリアル 1 つを共有
+  シーンには Id とパスで書く (ED5 前半と同じ)。コードからも new Material() → Apply → MeshRenderer.Material に入れられる
+
+■ 変更 (C++)
+  RHI
+    ResourceBufferAllocator : 空きの一覧 (Free)。返した範囲を次の Allocate が使う (最初に入る所)、隣の空きとつなげる、
+      一番後ろの空きは進めた位置を戻す。以前は前へ進めるだけだった (読み直すたびに使う量が増えた)
+    Buffer : UpdateMaterial / DestroyMaterial (番号を使い回す) / FreeVertexData / FreeIndexData / GetDrawLayoutVersion
+    Texture : 読み込んだテクスチャを TextureID → リソースの表で持ち (以前は配列)、ReleaseTexture で SRV の番号とリソースを返す
+    CommandContext : 描画リストが同じでも、マテリアルのブレンド / 両面 / 頂点の範囲が変わったら (GetDrawLayoutVersion) 引数を書き直す
+      (以前は描画リストを memcmp で比べるだけで、マテリアルを半透明にしても描くまとまり (PSO) が変わらなかった)
+    Pipeline::ReloadShaders : シーン / 全画面 / 線 / UI / パーティクルを描くシェーダーをコンパイルし直し、作った PSO を捨てる
+      (次に使う時に作る。PSO のディスクキャッシュの名前はバイトコードから作るので古い物は読まない)。失敗したら前の物のまま
+      ※コンピュート (GPU カリング / Hi-Z / パーティクルの計算) は読み直さない
+    IRenderHardwareInterface : UpdateMaterial / ReleaseResources (GPU を待ってからまとめて返す) / ReloadShaders / GetMeshBytesUsed
+  Renderer
+    SceneRenderer : モデルが使った物 (頂点 / インデックス / マテリアル / テクスチャ / テクスチャのパス) を覚える。
+      LoadModel の中身を loadModelResource に分けた。ReloadModel (新しい物を先に読み、読めたら差し替えて前の物を返す) /
+      UnloadModel (置いてある物があれば解放しない。番号は使い回す) / ReloadModelsUsingTexture /
+      LoadTexture / ReleaseTexture / CreateMaterial / UpdateMaterial / DestroyMaterial /
+      SetRenderObjectMaterial (描画オブジェクトのマテリアル。描画リストを作る時にモデルのマテリアルの代わりに使う)
+    rendererDll : Renderer_ReloadModel / UnloadModel / ReloadModelsUsingTexture / ReloadShaders / LoadTexture / ReleaseTexture /
+      CreateMaterial / UpdateMaterial / DestroyMaterial / SetRenderObjectMaterial / GetMeshBytesUsed / GetLoadedModelCount
+  ※GPU を待ってから返すので、エディターの操作 (読み直し / 解放) の時だけ使う。ゲーム中に毎フレーム呼ぶ物ではない
+
+■ 変更 (C#)
+  ランタイム : Assets/Material.cs (新規) / AssetManager (LoadMaterial / CreateMaterialAsset / ReloadModel / ReloadTexture /
+    ReloadMaterial / UnloadUnused / 自分で書いたファイルの印 / AssetReloaded) / MeshRenderer.Material / RenderSyncSystem (マテリアルを送る) /
+    SceneSerializer (Material) / GraphicsSettings (ReloadShaders / MeshBytesUsed / LoadedModelCount) / NativeMethods
+  エディター : ShaderHotReload.cs (新規) / ProjectPanel (書き換わったファイルを読み直す / Create Material / 選んだアセット) /
+    Inspector (マテリアルの編集 / Material の欄) / EditorApp (Assets メニュー / マテリアルのドロップ / インスペクターにマテリアル / Stats) /
+    EditorApp.Edit (AssignMaterial / UnloadUnused) / SceneTools (Picker.Clear) / Program (シェーダーの見張り) / EditorTest (16 項目)
+
+■ 確認
+  自動 (--editor-test) : 57 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    ED5 後半の 16 項目 :
+      マテリアルを作る / 付ける / 次のフレームで C++ の描画オブジェクトに付く / ファイルの読み書き / テクスチャの Id を書く /
+      付けたのを元に戻す / 保存して開き直すと同じマテリアル (Id) / 開き直した後も付く /
+      モデルを 10 回読み直しても GPU の頂点・インデックスの量が同じ (8,585,760 byte → 8,585,760 byte。返した所を使い回す) /
+      モデルのファイルを書き換えると読み直す (見張り) / 読み直したモデルが使える / テクスチャを書き換えるとマテリアルが読み直す /
+      シェーダーの読み直し (10.9 ms) / 使っていない物の解放 (モデル 2・マテリアル 1、8,779,800 → 8,569,920 byte) /
+      解放した後にもう一度読める (空いた所を使う) / もう一度解放すると同じ量に戻る
+  見た目 (エディターの窓だけを撮った。入力は PostMessage)
+    - 赤のマテリアル (Assets/Red.material.json。確認のために作り、確認後に消した) を箱へドラッグ → その箱だけ赤くなった (同じモデルの他の箱は元のまま)
+    - エディターを動かしたまま外でファイルを書き換えて青・金属 0.9 に → すぐに青くなった ([Assets] Reloaded Assets/Red.material.json)
+    - Project でマテリアルを選ぶ → インスペクターに Color / Texture / Metallic / Roughness / Transparent / Double Sided
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0
+
+■ 速さ (Release, RTX 2070)
+  見本 (showcase 1280x720) : C# update 0.064 〜 0.078 ms、GPU 0.61 〜 0.67 ms (変わらず。マテリアルの見回りはマテリアルが無いと動かない)
+  マテリアルを使っている時の見回り (RenderSyncSystem.syncMaterials) : 1 万個で 0.054 ms / フレーム (Stopwatch で単独に計測)
+    ※最初はコメントに「0.02 ms 程度」と書いていたが、計ると 0.054 ms だったので直した
+  シェーダーの読み直し 10.9 ms (キャッシュがある時) / 読み直し・解放は GPU を待つ (エディターの操作の時だけ)
+
+■ 残り / 次
+  - コンピュートのシェーダー (GPU カリング / Hi-Z / パーティクルの計算) は読み直さない
+  - #include した別のシェーダーのファイルの変更は見ない (今のシェーダーは #include を使っていない)
+  - 音 (wav) の読み直し / 解放は無い (Audio.dll に解放の関数が無い)
+  - 当たりのメッシュ (CollisionMesh) は、元のモデルを読み直しても作り直さない
+  - マテリアルの値の変更は元に戻せない (アセットの変更)。サブメッシュごとのマテリアルは無い (全部に同じ物)
+  - 次は ED6 (今までの設定のコンポーネント化 : RenderSettings / Volume / ProjectSettings)

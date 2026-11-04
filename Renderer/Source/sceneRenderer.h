@@ -95,6 +95,25 @@ namespace Renderer
 		bool GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
 		                      uint32_t* outVertexCount, uint32_t* outIndexCount) const;
 
+		// ---------- ED5 : エディターの読み直し / 解放 / マテリアル (GPU を待つ物があるので、毎フレーム呼ぶ物ではない) ----------
+		// 同じファイルを読み直す (番号は同じまま。置いてある物は次のフレームから新しい形で描かれる)。読めなければ前の物のまま
+		bool     ReloadModel(uint32_t model, uint32_t* outSubMeshCount);
+		// モデルを解放する (頂点 / インデックス / マテリアル / テクスチャを返す)。置いてある物があれば解放しない (false)
+		bool     UnloadModel(uint32_t model);
+		// そのテクスチャを使っているモデルを読み直す。戻り値 = 読み直した数
+		uint32_t ReloadModelsUsingTexture(const std::wstring& texturePath);
+		// マテリアルのアセット用のテクスチャ (0 = 読めなかった / 既定の白)
+		uint32_t LoadTexture(const std::wstring& filePath);
+		void     ReleaseTexture(uint32_t texture);
+		uint32_t CreateMaterial(const RHI::MaterialDesc& desc);
+		void     UpdateMaterial(uint32_t material, const RHI::MaterialDesc& desc);
+		void     DestroyMaterial(uint32_t material);
+		// 描画オブジェクトのマテリアルを変える (INVALID_HANDLE = モデルのマテリアルに戻す)。全部のサブメッシュに使う
+		void     SetRenderObjectMaterial(uint32_t object, uint32_t material);
+		uint64_t GetMeshBytesUsed() const;
+		uint32_t GetLoadedModelCount() const;
+		bool     ReloadShaders() { return IsInitialized() && _rhi->ReloadShaders(); }
+
 		// ==========================================================
 		// 描画オブジェクト (モデル 1 個を 1 か所に置いたもの)
 		// ==========================================================
@@ -177,6 +196,13 @@ namespace Renderer
 			// 以前は GPU へ送った後に CPU 側のメッシュを全部捨てていた
 			std::vector<float>    Positions;
 			std::vector<uint32_t> Indices;
+			// ED5 : 読み直し / 解放のために、使った物を覚える (Path が空 = 空いている番号)
+			std::wstring                     Path;
+			RHI::VertexRange                 Vertices;
+			std::vector<RHI::IndexRange>     IndexRanges;
+			std::vector<RHI::MaterialHandle> Materials;
+			std::vector<RHI::TextureHandle>  Textures;
+			std::vector<std::wstring>        TexturePaths;
 		};
 
 		// 描画オブジェクト : どのモデルを、どの RHI のオブジェクト (ワールド行列) で描くか
@@ -184,6 +210,7 @@ namespace Renderer
 		{
 			uint32_t          Model = INVALID_HANDLE;   // INVALID_HANDLE なら空き
 			RHI::ObjectHandle Object;                   // 全サブメッシュで共有する
+			uint32_t          MaterialOverride = INVALID_HANDLE;   // ED5 : マテリアルのアセット (INVALID_HANDLE ならモデルのマテリアル)
 		};
 
 		// テクスチャのファイルが無ければ、拡張子を変えて探す (見つからなければそのまま返す)
@@ -195,9 +222,13 @@ namespace Renderer
 		// 描画オブジェクトから描画リストを作り直す (増減した時だけ)
 		void rebuildDrawList();
 
+		bool loadModelResource(const std::wstring& filePath, ModelResource& model);
+		void releaseModelResource(ModelResource& model);
+
 		RHI::IRenderHardwareInterface* _rhi = nullptr;          // RHI_CreateRenderHardwareInterface で作り、Shutdown で破棄する
 
 		std::vector<ModelResource>     _models;
+		std::vector<uint32_t>          _freeModels;             // 解放したモデルの番号 (ED5)
 		std::vector<RenderObject>      _renderObjects;
 		std::vector<uint32_t>          _freeRenderObjects;      // 削除されて使い回せるハンドル
 		uint32_t                       _aliveRenderObjects = 0;

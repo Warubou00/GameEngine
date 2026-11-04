@@ -68,6 +68,11 @@ namespace RHI
         IndexRange   UploadIndices(const uint32_t* indices, uint32_t count)override;
         void         LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles)override;
         MaterialHandle CreateMaterial(const MaterialDesc& desc)override;
+        void UpdateMaterial(MaterialHandle material, const MaterialDesc& desc)override;
+        void ReleaseResources(const VertexRange* vertices, uint32_t vertexCount, const IndexRange* indices, uint32_t indexCount,
+                              const MaterialHandle* materials, uint32_t materialCount, const TextureHandle* textures, uint32_t textureCount)override;
+        bool ReloadShaders()override;
+        uint64_t GetMeshBytesUsed()const override;
         ObjectHandle CreateObject()override;
         void         DestroyObject(ObjectHandle object)override;
         void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;

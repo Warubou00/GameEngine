@@ -1,4 +1,5 @@
-﻿using GameEngine.Native;
+﻿using System.Text.Json;
+using GameEngine.Native;
 
 namespace GameEngine;
 
@@ -32,6 +33,7 @@ public sealed class AssetManager
     private readonly Dictionary<string, Model> _models = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Sound> _sounds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<uint, CollisionMesh> _collisionMeshes = new();
+    private readonly Dictionary<string, Material> _materials = new(StringComparer.OrdinalIgnoreCase);   // ED5
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
     internal bool PhysicsLoaded { get; set; }
@@ -127,6 +129,127 @@ public sealed class AssetManager
         _collisionMeshes.Add(model.Handle, result);
         return result;
     }
+
+    // =====================================================================
+    // ED5 : マテリアル / 読み直し / 解放
+    // =====================================================================
+
+    // アセットを読み直した時 (アセットのパス)。エディターがクリックの当たりの形などを捨てるのに使う
+    public event Action<string>? AssetReloaded;
+    public int ReloadCount { get; private set; }
+
+    public IEnumerable<Model>    LoadedModels    => _models.Values;
+    public IEnumerable<Material> LoadedMaterials => _materials.Values;
+
+    /// <summary>マテリアルのアセット (.material.json) を読み込む。同じパスは同じ Material を返す</summary>
+    public Material LoadMaterial(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_materials.TryGetValue(path, out var cached)) return cached;
+        var material = new Material(path, this);
+        try
+        {
+            material.FromJson(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+        {
+            material.Dispose();
+            throw new FileNotFoundException($"Failed to load material: {path} ({ex.Message})", path, ex);
+        }
+        material.Apply();
+        _materials.Add(path, material);
+        return material;
+    }
+
+    /// <summary>新しいマテリアルのファイルを作る (folder はアセットのパス)。戻り値 = 読み込んだ Material</summary>
+    public Material CreateMaterialAsset(string folder, string name = "New Material")
+    {
+        if (_database == null) throw new InvalidOperationException("No asset database.");
+        var path = $"{folder}/{name}.material.json";
+        for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{folder}/{name} {i}.material.json";
+        var material = new Material(path, this);
+        NoteOwnWrite(_database.FullPath(path));
+        File.WriteAllText(_database.FullPath(path), material.ToJson(), new System.Text.UTF8Encoding(false));
+        material.Dispose();   // 書くためだけに作った物 (読み込みは LoadMaterial で)
+        _database.Refresh();
+        return LoadMaterial(path);
+    }
+
+    /// <summary>モデルのファイルが変わった時 : 同じ番号のまま読み直す (置いてある物も新しい形で描かれる)。読めなければ前のまま</summary>
+    public bool ReloadModel(string path)
+    {
+        (path, _) = resolve(path);
+        if (!_models.TryGetValue(path, out var model)) return false;
+        if (!NativeMethods.Renderer_ReloadModel(model.Handle, out var subMeshCount)) return false;
+        _models[path] = new Model(model.Handle, (int)subMeshCount, path);
+        ReloadCount++;
+        AssetReloaded?.Invoke(path);
+        return true;
+    }
+
+    /// <summary>テクスチャのファイルが変わった時 : 使っているモデルとマテリアルを読み直す。戻り値 = 読み直した数</summary>
+    public int ReloadTexture(string path)
+    {
+        (path, var file) = resolve(path);
+        var count = (int)NativeMethods.Renderer_ReloadModelsUsingTexture(Path.GetFullPath(file));
+        foreach (var material in _materials.Values)
+        {
+            if (material.Texture == null || !string.Equals(resolve(material.Texture).Key, path, StringComparison.OrdinalIgnoreCase)) continue;
+            material.ReloadTexture();
+            count++;
+        }
+        if (count > 0) { ReloadCount++; AssetReloaded?.Invoke(path); }
+        return count;
+    }
+
+    /// <summary>マテリアルのファイルが (外で) 変わった時 : 値を読み直して送る</summary>
+    public bool ReloadMaterial(string path)
+    {
+        (path, var file) = resolve(path);
+        if (!_materials.TryGetValue(path, out var material)) return false;
+        material.FromJson(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        material.Apply();
+        ReloadCount++;
+        AssetReloaded?.Invoke(path);
+        return true;
+    }
+
+    /// <summary>
+    /// どの MeshRenderer も使っていないモデル / マテリアルを解放する (GPU の頂点 / テクスチャ / マテリアルを返す)
+    /// 次に LoadModel / LoadMaterial した時はファイルから読み直す。戻り値 = (モデルの数, マテリアルの数)
+    /// </summary>
+    public (int Models, int Materials) UnloadUnused(World world)
+    {
+        var usedModels = new HashSet<uint>();
+        var usedMaterials = new HashSet<Material>();
+        foreach (ref var renderer in world.GetPool<MeshRenderer>().Components)
+        {
+            if (renderer.Model.IsValid) usedModels.Add(renderer.Model.Handle);
+            if (renderer.Material != null) usedMaterials.Add(renderer.Material);
+        }
+        var models = 0;
+        foreach (var (path, model) in _models.ToList())
+        {
+            if (usedModels.Contains(model.Handle) || !NativeMethods.Renderer_UnloadModel(model.Handle)) continue;
+            _models.Remove(path);
+            models++;
+        }
+        var materials = 0;
+        foreach (var (path, material) in _materials.ToList())
+        {
+            if (usedMaterials.Contains(material)) continue;
+            material.Dispose();
+            _materials.Remove(path);
+            materials++;
+        }
+        return (models, materials);
+    }
+
+    // 自分で書いたファイル (エディターの見張りが「外で変わった」と思って読み直さないように)
+    private readonly Dictionary<string, DateTime> _ownWrites = new(StringComparer.OrdinalIgnoreCase);
+    public void NoteOwnWrite(string file) => _ownWrites[Path.GetFullPath(file)] = DateTime.UtcNow;
+    public bool IsOwnWrite(string file) =>
+        _ownWrites.TryGetValue(Path.GetFullPath(file), out var time) && (DateTime.UtcNow - time).TotalSeconds < 2.0;
 
     /// <summary>
     /// モデル (今は OBJ) を読み込む。パスは実行ファイルのフォルダからの相対パスか絶対パス

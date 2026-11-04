@@ -136,6 +136,99 @@ extern "C"
 		return g_renderer ? g_renderer->CreateUITexture(width, height, rgba) : 0xFFFFFFFFu;
 	}
 
+	// ==============================================================
+	// ED5 : アセットの読み直し / 解放 / マテリアル (エディター用。GPU を待つ物があるので毎フレームは呼ばない)
+	// ==============================================================
+
+	// C# の MaterialDesc と同じ並び (32 byte)
+	struct RendererMaterialDesc
+	{
+		float    Color[4];
+		float    Metallic;
+		float    Roughness;
+		uint32_t Texture;   // Renderer_LoadTexture の番号 (0 = 白)
+		uint32_t Flags;     // bit0 : 半透明 / bit1 : 両面
+	};
+	static_assert(sizeof(RendererMaterialDesc) == 32, "RendererMaterialDesc must be 32 bytes (same as C#)");
+
+	static RHI::MaterialDesc toMaterialDesc(const RendererMaterialDesc& d)
+	{
+		RHI::MaterialDesc desc;
+		for (int i = 0; i < 4; ++i) desc.Color[i] = d.Color[i];
+		desc.Metallic      = d.Metallic;
+		desc.Roughness     = d.Roughness;
+		desc.Texture.Index = d.Texture;
+		desc.Blend         = (d.Flags & 1u) ? RHI::BlendMode::AlphaBlend : RHI::BlendMode::Opaque;
+		desc.DoubleSided   = (d.Flags & 2u) != 0;
+		return desc;
+	}
+
+	// 同じファイルを読み直す (番号は同じまま)。読めなければ前の物のまま (false)
+	RENDERER_API bool Renderer_ReloadModel(uint32_t model, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		return g_renderer && g_renderer->ReloadModel(model, outSubMeshCount);
+	}
+
+	// モデルを解放する。置いてある物があれば解放しない (false)
+	RENDERER_API bool Renderer_UnloadModel(uint32_t model)
+	{
+		return g_renderer && g_renderer->UnloadModel(model);
+	}
+
+	// そのテクスチャを使っているモデルを読み直す。戻り値 = 読み直したモデルの数
+	RENDERER_API uint32_t Renderer_ReloadModelsUsingTexture(const wchar_t* filePath)
+	{
+		return g_renderer && filePath ? g_renderer->ReloadModelsUsingTexture(filePath) : 0;
+	}
+
+	// シェーダーを読み直す (失敗したシェーダーは前の物のまま)。戻り値 = 全部コンパイルできたか
+	RENDERER_API bool Renderer_ReloadShaders()
+	{
+		return g_renderer && g_renderer->ReloadShaders();
+	}
+
+	RENDERER_API uint32_t Renderer_LoadTexture(const wchar_t* filePath)
+	{
+		return g_renderer && filePath ? g_renderer->LoadTexture(filePath) : 0;
+	}
+
+	RENDERER_API void Renderer_ReleaseTexture(uint32_t texture)
+	{
+		if (g_renderer) g_renderer->ReleaseTexture(texture);
+	}
+
+	RENDERER_API uint32_t Renderer_CreateMaterial(const RendererMaterialDesc* desc)
+	{
+		return g_renderer && desc ? g_renderer->CreateMaterial(toMaterialDesc(*desc)) : 0;
+	}
+
+	RENDERER_API void Renderer_UpdateMaterial(uint32_t material, const RendererMaterialDesc* desc)
+	{
+		if (g_renderer && desc) g_renderer->UpdateMaterial(material, toMaterialDesc(*desc));
+	}
+
+	RENDERER_API void Renderer_DestroyMaterial(uint32_t material)
+	{
+		if (g_renderer) g_renderer->DestroyMaterial(material);
+	}
+
+	// 描画オブジェクトのマテリアル (0xFFFFFFFF = モデルのマテリアルに戻す)
+	RENDERER_API void Renderer_SetRenderObjectMaterial(uint32_t object, uint32_t material)
+	{
+		if (g_renderer) g_renderer->SetRenderObjectMaterial(object, material);
+	}
+
+	RENDERER_API uint64_t Renderer_GetMeshBytesUsed()
+	{
+		return g_renderer ? g_renderer->GetMeshBytesUsed() : 0;
+	}
+
+	RENDERER_API uint32_t Renderer_GetLoadedModelCount()
+	{
+		return g_renderer ? g_renderer->GetLoadedModelCount() : 0;
+	}
+
 	// 確認用の線 (2 頂点で 1 本)。毎フレーム呼ぶ (0 本で消える)
 	RENDERER_API void Renderer_SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
 	{

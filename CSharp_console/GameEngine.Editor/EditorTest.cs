@@ -292,5 +292,89 @@ internal sealed class EditorTest
         File.Delete(testFolder + ".meta");
         database.Refresh();
         yield return 0;
+
+        // ---------- ED5 後半 : マテリアル / 読み直し / 解放 ----------
+        var assets = _app.Engine.Assets;
+        var graphics = _app.Engine.Graphics;
+        var folder2 = database.FullPath("Assets/_EditorTest2");
+        if (Directory.Exists(folder2)) Directory.Delete(folder2, true);
+        Directory.CreateDirectory(folder2);
+        foreach (var name in new[] { "box.obj", "box.mtl", "grass.jpg", "gravel.jpg" }) File.Copy(database.FullPath($"Assets/Models/obj/{name}"), Path.Combine(folder2, name));
+        database.Refresh();
+        var boxEntry = database.Find("Assets/_EditorTest2/box.obj")!;
+        var placedBox = _app.PlaceModel(boxEntry, new Vector3(2, 0, 2), Entity.Null);
+        var placedBoxId = World.Get<EntityInfo>(placedBox).Id;
+        yield return 0;
+
+        // マテリアルを作って付ける → 次のフレームで C++ の描画オブジェクトに付く
+        var material = assets.CreateMaterialAsset("Assets/_EditorTest2", "Test Material");
+        check(File.Exists(database.FullPath(material.Path)) && database.Find(material.Path)?.Kind == AssetKind.Material, "create material asset");
+        check(_app.AssignMaterial(placedBox, database.Find(material.Path)!), "assign material");
+        yield return 0;
+        yield return 0;
+        check(World.Get<MeshRenderer>(placedBox).IsMaterialApplied, "material is applied to the render object");
+        material.Color = new Vector4(1.0f, 0.2f, 0.1f, 1.0f);
+        material.Texture = "Assets/_EditorTest2/gravel.jpg";
+        material.Roughness = 0.25f;
+        material.Apply();
+        material.Save();
+        using var reread = new Material();
+        reread.FromJson(File.ReadAllText(database.FullPath(material.Path)));
+        check(reread.Color == material.Color && reread.Texture == material.Texture && reread.Roughness == 0.25f, "material file round trip");
+        check(File.ReadAllText(database.FullPath(material.Path)).Contains(database.Find("Assets/_EditorTest2/gravel.jpg")!.Guid.ToString()), "material stores the texture id");
+        _app.Undo();
+        check(World.Get<MeshRenderer>(SceneSerializer.FindEntity(World, placedBoxId)).Material == null, "undo assign material");
+        _app.Redo();
+        placedBox = SceneSerializer.FindEntity(World, placedBoxId);
+        var materialScene = Path.Combine(Path.GetTempPath(), "ge_editor_test_material.scene.json");
+        _app.SaveSceneTo(materialScene);
+        _app.OpenScene(materialScene);
+        yield return 0;
+        placedBox = SceneSerializer.FindEntity(World, placedBoxId);
+        check(World.Get<MeshRenderer>(placedBox).Material == material, "reopened scene uses the same material (by id)");
+        yield return 0;
+        yield return 0;
+        check(World.Get<MeshRenderer>(placedBox).IsMaterialApplied, "material applied after reopen");
+        File.Delete(materialScene);
+
+        // モデルの読み直し : 何回読み直しても GPU の頂点 / インデックスの量は増えない (返した所を使い回す)
+        var bytesBefore = graphics.MeshBytesUsed;
+        var reloads = assets.ReloadCount;
+        for (int i = 0; i < 10; i++) assets.ReloadModel("Assets/_EditorTest2/box.obj");
+        check(assets.ReloadCount == reloads + 10 && graphics.MeshBytesUsed == bytesBefore, $"reload model x10 keeps mesh memory ({bytesBefore} -> {graphics.MeshBytesUsed} bytes)");
+        yield return 0;
+
+        // ファイルを書き換えると読み直す (見張り) : モデル → rock.obj の中身に / テクスチャ → 別の画像に
+        reloads = assets.ReloadCount;
+        File.Copy(database.FullPath("Assets/Models/obj/rock.obj"), Path.Combine(folder2, "box.obj"), true);
+        for (int i = 0; i < 300 && assets.ReloadCount == reloads; i++) yield return 0;
+        check(assets.ReloadCount > reloads, "changed model file is reloaded (file watcher)");
+        check(_app.Engine.Assets.LoadedModels.First(m => m.Path == "Assets/_EditorTest2/box.obj").IsValid, "reloaded model is valid");
+        reloads = assets.ReloadCount;
+        File.Copy(database.FullPath("Assets/Models/obj/Rock030_1K_Color.jpg"), Path.Combine(folder2, "gravel.jpg"), true);
+        for (int i = 0; i < 300 && assets.ReloadCount == reloads; i++) yield return 0;
+        check(assets.ReloadCount > reloads, "changed texture file is reloaded (material uses it)");
+
+        // シェーダーの読み直し (中身は変えない : 全部コンパイルできる)
+        check(_app.Shaders != null && _app.Shaders.Reload(), "reload shaders");
+        for (int i = 0; i < 3; i++) yield return 0;   // 次のフレームで PSO を作り直して描ける
+
+        // 使っていない物の解放 → 減る。もう一度読むと読める
+        World.DestroyEntity(placedBox);
+        yield return 0;
+        var modelsBefore = graphics.LoadedModelCount;
+        bytesBefore = graphics.MeshBytesUsed;
+        var (unloadedModels, unloadedMaterials) = _app.UnloadUnused();
+        check(unloadedModels >= 1 && unloadedMaterials >= 1 && graphics.LoadedModelCount < modelsBefore && graphics.MeshBytesUsed < bytesBefore,
+              $"unload unused ({unloadedModels} models, {unloadedMaterials} materials, {bytesBefore} -> {graphics.MeshBytesUsed} bytes)");
+        var bytesAfterUnload = graphics.MeshBytesUsed;
+        check(assets.LoadModel("Assets/_EditorTest2/box.obj").IsValid && graphics.MeshBytesUsed <= bytesBefore, "load again after unload reuses the freed memory");
+        assets.UnloadUnused(World);
+        check(graphics.MeshBytesUsed == bytesAfterUnload, "unload again returns to the same size");
+
+        Directory.Delete(folder2, true);
+        File.Delete(folder2 + ".meta");
+        database.Refresh();
+        yield return 0;
     }
 }

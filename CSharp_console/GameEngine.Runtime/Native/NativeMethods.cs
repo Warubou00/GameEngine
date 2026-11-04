@@ -336,4 +336,56 @@ internal static unsafe class NativeMethods
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Renderer_GetModelGeometry(uint model, float* positions, uint maxVertices, uint* indices, uint maxIndices,
                                                         out uint vertexCount, out uint indexCount);
+
+    // ---------- ED5 : アセットの読み直し / 解放 / マテリアル ----------
+
+    // C++ の RendererMaterialDesc と同じ並び (32 byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MaterialDesc
+    {
+        public Vector4 Color;
+        public float   Metallic;
+        public float   Roughness;
+        public uint    Texture;   // Renderer_LoadTexture の番号 (0 = 白)
+        public uint    Flags;     // bit0 : 半透明 / bit1 : 両面
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_ReloadModel(uint model, out uint subMeshCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_UnloadModel(uint model);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_ReloadModelsUsingTexture([MarshalAs(UnmanagedType.LPWStr)] string filePath);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_ReloadShaders();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_LoadTexture([MarshalAs(UnmanagedType.LPWStr)] string filePath);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_ReleaseTexture(uint texture);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateMaterial(in MaterialDesc desc);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_UpdateMaterial(uint material, in MaterialDesc desc);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_DestroyMaterial(uint material);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetRenderObjectMaterial(uint renderObject, uint material);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern ulong Renderer_GetMeshBytesUsed();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetLoadedModelCount();
 }
