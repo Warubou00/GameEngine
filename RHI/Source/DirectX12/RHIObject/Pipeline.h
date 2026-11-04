@@ -261,6 +261,7 @@ namespace RHI
 
             // 確認用の線の PSO (debug.shader。バックバッファへ、深度なし、アルファブレンド。初めて使う時に作る)
             ID3D12PipelineState* GetDebugLinePso();
+            ID3D12PipelineState* GetUIPso();   // UI (エディターの ImGui。ED3)
 
             /***********************************************************************************
              * @brief 全画面のシェーダーを読み込む (ファイルの VSFullscreen と、entry のピクセルシェーダー)
@@ -308,6 +309,8 @@ namespace RHI
             uint32_t                                       _depthResolveShader = 0xFFFFFFFFu;   // _fullscreenShaders の番号
             Microsoft::WRL::ComPtr<ID3D12PipelineState>    _debugLinePso;
             bool                                           _debugLineFailed = false;
+            Microsoft::WRL::ComPtr<ID3D12PipelineState>    _uiPso;
+            bool                                           _uiFailed = false;
             // 作った PSO (鍵 = シェーダー / 描き方 / 描画先の形式 のハッシュ)
             std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID3D12PipelineState>> _psoMap;
             Device*                                        _device = nullptr;   // PSO を後から作るのに使う (所有しない)

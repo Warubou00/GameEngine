@@ -1,0 +1,296 @@
+using System.Collections;
+using System.Numerics;
+using System.Reflection;
+using ImGuiNET;
+
+namespace GameEngine.Editor;
+
+// ==========================================================================
+// インスペクター (ED3)。選んだエンティティのコンポーネントを、ED1 の型の情報 (ComponentRegistry) から自動で並べる
+//   - 値の種類ごとの部品 : 数 (Range ならスライダー) / 真偽 / 文字列 / 列挙 (Flags はチェックの並び) / ベクトル (名前に Color が
+//     入っていれば色) / 回転 (オイラー角の度) / エンティティ (一覧から選ぶ) / アセット (パス。Enter で読み込む) / 入れ子の struct / 配列
+//   - 変えた値はその場でコンポーネントに書き戻す (次のフレームから効く)
+//   - コンポーネントを足す (IComponent の一覧) / 外す (見出しの右クリック)
+//   ※ユーザーの独自のインスペクターは ED7
+// ==========================================================================
+internal sealed class Inspector
+{
+    private readonly Engine _engine;
+    private World World => _engine.World;
+    private string _addFilter = "";
+    private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)
+
+    public Inspector(Engine engine) => _engine = engine;
+
+    public void Draw(Entity entity)
+    {
+        if (!World.IsAlive(entity))
+        {
+            ImGui.TextDisabled("Nothing selected");
+            return;
+        }
+
+        // ---------- エンティティ (名前 / 有効) ----------
+        if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo($"Entity {entity.Id}"));
+        ref var info = ref World.Get<EntityInfo>(entity);
+        var active = info.Active;
+        if (ImGui.Checkbox("##active", ref active)) World.SetActive(entity, active);
+        ImGui.SameLine();
+        var name = info.Name ?? "";
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.InputText("##name", ref name, 256)) World.Get<EntityInfo>(entity).Name = name;
+        ImGui.TextDisabled($"Id {info.Id}");
+        ImGui.Separator();
+
+        // ---------- コンポーネント ----------
+        IComponentPool? remove = null;
+        foreach (var pool in World.Pools.ToList())
+        {
+            if (!pool.Has(entity.Id) || pool.ComponentType == typeof(EntityInfo)) continue;
+            var type = ComponentRegistry.Get(pool.ComponentType);
+            ImGui.PushID(type.TypeName);
+            var open = ImGui.CollapsingHeader(type.DisplayName, ImGuiTreeNodeFlags.DefaultOpen);
+            if (ImGui.BeginPopupContextItem("component"))
+            {
+                if (ImGui.MenuItem("Remove Component")) remove = pool;
+                ImGui.EndPopup();
+            }
+            if (open)
+            {
+                var boxed = pool.GetBoxed(entity.Id);
+                var changed = false;
+                foreach (var field in type.Fields)
+                {
+                    if (field.HideInInspector) continue;
+                    if (field.Header != null) ImGui.SeparatorText(field.Header);
+                    var value = field.GetValue(boxed);
+                    if (drawValue(field.Name, field.FieldType, ref value, field.Range, entity))
+                    {
+                        field.SetValue(boxed, value);
+                        changed = true;
+                    }
+                    if (field.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(field.Tooltip);
+                }
+                if (type.Fields.Count == 0) ImGui.TextDisabled("(no values)");
+                if (changed) pool.SetBoxed(entity, boxed);
+            }
+            ImGui.PopID();
+        }
+        if (remove != null) remove.Remove(entity.Id);
+
+        // ---------- コンポーネントを足す ----------
+        ImGui.Spacing();
+        if (ImGui.Button("Add Component", new Vector2(-1, 0))) ImGui.OpenPopup("add");
+        if (ImGui.BeginPopup("add"))
+        {
+            ImGui.SetNextItemWidth(240);
+            ImGui.InputTextWithHint("##filter", "Search", ref _addFilter, 64);
+            foreach (var type in ComponentRegistry.KnownComponents())
+            {
+                if (type.Hidden || World.GetPool(type.Type).Has(entity.Id)) continue;
+                var label = string.IsNullOrEmpty(type.Category) ? type.DisplayName : $"{type.Category}/{type.DisplayName}";
+                if (_addFilter.Length > 0 && !label.Contains(_addFilter, StringComparison.OrdinalIgnoreCase)) continue;
+                if (ImGui.Selectable(label))
+                {
+                    World.GetPool(type.Type).SetBoxed(entity, type.CreateDefault());
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+            ImGui.EndPopup();
+        }
+    }
+
+    // 値 1 つ分の部品。戻り値 : 変えたか
+    private bool drawValue(string label, Type type, ref object? value, RangeAttribute? range, Entity owner)
+    {
+        switch (value)
+        {
+        case float f:
+            if (range != null ? ImGui.SliderFloat(label, ref f, range.Min, range.Max) : ImGui.DragFloat(label, ref f, 0.01f)) { value = f; return true; }
+            return false;
+        case double d:
+            var df = (float)d;
+            if (ImGui.DragFloat(label, ref df, 0.01f)) { value = (double)df; return true; }
+            return false;
+        case int i:
+            if (range != null ? ImGui.SliderInt(label, ref i, (int)range.Min, (int)range.Max) : ImGui.DragInt(label, ref i)) { value = i; return true; }
+            return false;
+        case uint u:
+            var ui = (int)Math.Min(u, int.MaxValue);
+            if (u > int.MaxValue) { ImGui.LabelText(label, $"0x{u:X8}"); return false; }   // ビットの値 (CollideWith の全部など)
+            if (ImGui.DragInt(label, ref ui, 1.0f, 0, int.MaxValue)) { value = (uint)ui; return true; }
+            return false;
+        case bool b:
+            if (ImGui.Checkbox(label, ref b)) { value = b; return true; }
+            return false;
+        case string s:
+            if (ImGui.InputText(label, ref s, 512)) { value = s; return true; }
+            return false;
+        case Enum e:
+            return drawEnum(label, type, ref value, e);
+        case Vector2 v2:
+            if (ImGui.DragFloat2(label, ref v2, 0.01f)) { value = v2; return true; }
+            return false;
+        case Vector3 v3:
+            if (label.Contains("Color") ? ImGui.ColorEdit3(label, ref v3, ImGuiColorEditFlags.Float | ImGuiColorEditFlags.HDR) : ImGui.DragFloat3(label, ref v3, 0.01f)) { value = v3; return true; }
+            return false;
+        case Vector4 v4:
+            if (label.Contains("Color") ? ImGui.ColorEdit4(label, ref v4, ImGuiColorEditFlags.Float | ImGuiColorEditFlags.HDR) : ImGui.DragFloat4(label, ref v4, 0.01f)) { value = v4; return true; }
+            return false;
+        case Quaternion q:
+            return drawRotation(label, ref value, q, owner);
+        case Entity target:
+            return drawEntity(label, ref value, target);
+        case Guid g:
+            ImGui.LabelText(label, g.ToString());
+            return false;
+        case Model model:
+            return drawAssetPath(label, model.IsValid ? model.Path : "", ref value, path => _engine.Assets.LoadModel(path));
+        case Sound sound:
+            return drawAssetPath(label, sound.IsValid ? sound.Path : "", ref value, path => _engine.Assets.LoadSound(path));
+        case CollisionMesh mesh:
+            return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
+        case null when type == typeof(CollisionMesh):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
+        case IList list:
+            return drawList(label, list, ref value, owner);
+        }
+        if (value != null && type.IsValueType)
+        {
+            // 入れ子の struct
+            var changed = false;
+            if (ImGui.TreeNode(label))
+            {
+                foreach (var field in ComponentType.SerializedFields(type))
+                {
+                    if (field.HideInInspector) continue;
+                    var inner = field.GetValue(value);
+                    if (drawValue(field.Name, field.FieldType, ref inner, field.Range, owner))
+                    {
+                        field.SetValue(value, inner);   // value は箱に入れたコピーなので、そのまま書ける
+                        changed = true;
+                    }
+                }
+                ImGui.TreePop();
+            }
+            return changed;
+        }
+        ImGui.LabelText(label, value?.ToString() ?? "(null)");
+        return false;
+    }
+
+    private static bool drawEnum(string label, Type type, ref object? value, Enum current)
+    {
+        var names  = Enum.GetNames(type);
+        var values = Enum.GetValues(type);
+        if (type.IsDefined(typeof(FlagsAttribute), false))
+        {
+            // ビットの並び : 1 ビットの値だけチェックにする
+            var bits = Convert.ToUInt64(current);
+            var changed = false;
+            if (ImGui.TreeNode($"{label} ({current})"))
+            {
+                for (int i = 0; i < names.Length; i++)
+                {
+                    var bit = Convert.ToUInt64(values.GetValue(i));
+                    if (bit == 0 || (bit & (bit - 1)) != 0) continue;
+                    var on = (bits & bit) != 0;
+                    if (ImGui.Checkbox(names[i], ref on))
+                    {
+                        bits = on ? bits | bit : bits & ~bit;
+                        changed = true;
+                    }
+                }
+                ImGui.TreePop();
+            }
+            if (changed) value = Enum.ToObject(type, bits);
+            return changed;
+        }
+        var index = Array.IndexOf(values, current);
+        if (ImGui.Combo(label, ref index, names, names.Length))
+        {
+            value = values.GetValue(index);
+            return true;
+        }
+        return false;
+    }
+
+    // 回転 : オイラー角 (度。Y → X → Z の順に回す = Quaternion.CreateFromYawPitchRoll)
+    private bool drawRotation(string label, ref object? value, Quaternion q, Entity owner)
+    {
+        var key = (owner.Id, label);
+        if (!_eulerCache.TryGetValue(key, out var euler) || Quaternion.Dot(fromEuler(euler), q) is < 0.99999f and > -0.99999f) euler = toEuler(q);
+        var edited = euler;
+        if (ImGui.DragFloat3(label, ref edited, 0.5f))
+        {
+            _eulerCache[key] = edited;
+            value = fromEuler(edited);
+            return true;
+        }
+        _eulerCache[key] = euler;
+        return false;
+    }
+
+    private static Quaternion fromEuler(Vector3 degrees) =>
+        Quaternion.CreateFromYawPitchRoll(degrees.Y * MathEx.Deg2Rad, degrees.X * MathEx.Deg2Rad, degrees.Z * MathEx.Deg2Rad);
+
+    private static Vector3 toEuler(Quaternion q)
+    {
+        // CreateFromYawPitchRoll の逆 (pitch = X, yaw = Y, roll = Z)
+        var sinPitch = 2.0f * (q.W * q.X - q.Y * q.Z);
+        float pitch = MathF.Abs(sinPitch) >= 1.0f ? MathF.CopySign(MathF.PI / 2, sinPitch) : MathF.Asin(sinPitch);
+        float yaw   = MathF.Atan2(2.0f * (q.W * q.Y + q.X * q.Z), 1.0f - 2.0f * (q.X * q.X + q.Y * q.Y));
+        float roll  = MathF.Atan2(2.0f * (q.W * q.Z + q.X * q.Y), 1.0f - 2.0f * (q.X * q.X + q.Z * q.Z));
+        return new Vector3(pitch, yaw, roll) * MathEx.Rad2Deg;
+    }
+
+    // エンティティ : 一覧から選ぶ (None = 無し)
+    private bool drawEntity(string label, ref object? value, Entity target)
+    {
+        var current = World.IsAlive(target) ? EditorApp.NameOf(World, target) : "None";
+        var changed = false;
+        if (ImGui.BeginCombo(label, current))
+        {
+            if (ImGui.Selectable("None", target.IsNull)) { value = Entity.Null; changed = true; }
+            foreach (var e in World.Entities)
+            {
+                if (ImGui.Selectable($"{EditorApp.NameOf(World, e)}##{e.Id}", e == target)) { value = e; changed = true; }
+            }
+            ImGui.EndCombo();
+        }
+        return changed;
+    }
+
+    // アセット : パス (Enter で読み込む。読めなければコンソールに出して元のまま)
+    private static bool drawAssetPath<T>(string label, string path, ref object? value, Func<string, T> load)
+    {
+        var edited = path;
+        if (!ImGui.InputText(label, ref edited, 512, ImGuiInputTextFlags.EnterReturnsTrue) || edited == path) return false;
+        try
+        {
+            value = string.IsNullOrWhiteSpace(edited) ? default(T) : load(edited);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Inspector] {ex.Message}");
+            return false;
+        }
+    }
+
+    private bool drawList(string label, IList list, ref object? value, Entity owner)
+    {
+        var elementType = list.GetType().IsArray ? list.GetType().GetElementType()! : list.GetType().GetGenericArguments()[0];
+        var changed = false;
+        if (ImGui.TreeNode($"{label} ({list.Count})"))
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                var item = list[i];
+                if (drawValue($"[{i}]", elementType, ref item, null, owner)) { list[i] = item; changed = true; }
+            }
+            ImGui.TreePop();
+        }
+        return changed;
+    }
+}

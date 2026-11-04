@@ -62,6 +62,7 @@ namespace RHI
         bool     Resize(uint32_t width, uint32_t height)override;
         uint32_t GetWidth()const override;
         uint32_t GetHeight()const override;
+        bool     SetRenderSize(uint32_t width, uint32_t height)override;
 
         VertexRange  UploadVertices(const Vertex* vertices, uint32_t count)override;
         IndexRange   UploadIndices(const uint32_t* indices, uint32_t count)override;
@@ -82,6 +83,9 @@ namespace RHI
         void                   SetLightingSettings(const LightingSettings& settings)override;
         void                   SetShadowSettings(const ShadowSettings& settings)override;
         void                   SetDebugLines(const DebugLineVertex* vertices, uint32_t count)override;
+        void                   SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                                             const UIDrawCommand* commands, uint32_t commandCount)override;
+        uint32_t               CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)override;
         void                   SetParticleCapacity(uint32_t capacity)override;
         void                   SetParticleEmitters(const ParticleEmitterData* emitters, uint32_t count, const ParticleFrameSettings& settings)override;
         ParticleStats          GetParticleStats()const override;

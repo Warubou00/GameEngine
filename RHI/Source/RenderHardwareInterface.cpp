@@ -253,6 +253,22 @@ namespace RHI
         if (_isInitialized) _commandContext->SetDebugLines(vertices, count);
     }
 
+    bool RenderHardwareInterface::SetRenderSize(uint32_t width, uint32_t height)
+    {
+        return _isInitialized && _commandContext->SetRenderSize(_buffer.get(), width, height);
+    }
+
+    void RenderHardwareInterface::SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                                                const UIDrawCommand* commands, uint32_t commandCount)
+    {
+        if (_isInitialized) _commandContext->SetUIDrawData(vertices, vertexCount, indices, indexCount, commands, commandCount);
+    }
+
+    uint32_t RenderHardwareInterface::CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)
+    {
+        return _isInitialized ? _commandContext->CreateUITexture(_buffer.get(), width, height, rgba) : 0xFFFFFFFFu;
+    }
+
     void RenderHardwareInterface::SetShadowSettings(const ShadowSettings& settings)
     {
         if (_isInitialized) _commandContext->SetShadowSettings(_buffer.get(), settings);

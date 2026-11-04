@@ -313,6 +313,25 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetDebugLines(DebugLineVertex* vertices, uint count);
 
+    // ---------- エディター (ED3) ----------
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_SetRenderSize(uint width, uint height);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetUIDrawData(Rendering.UIVertex* vertices, uint vertexCount, ushort* indices, uint indexCount,
+                                                     Rendering.UIDrawCommand* commands, uint commandCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateUITexture(uint width, uint height, byte* rgba);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetProfilerVisible([MarshalAs(UnmanagedType.I1)] bool visible);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_IsProfilerVisible();
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Renderer_GetModelGeometry(uint model, float* positions, uint maxVertices, uint* indices, uint maxIndices,

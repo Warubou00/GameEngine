@@ -14,6 +14,18 @@ public sealed class EngineSettings
     public int    Width  { get; init; } = 1280;   // 描画領域 (クライアント領域) の大きさ
     public int    Height { get; init; } = 720;
     public bool   VSync  { get; init; } = false;  // false : 対応環境ではテアリングを許可して上限なしで描く
+    // 相対パス (モデル / シェーダー / キャッシュ) の起点。null なら実行ファイルのフォルダ (ED3 : エディターは見本の出力フォルダを使う)
+    public string? WorkingDirectory { get; init; }
+}
+
+// シーンのカメラの代わりに使うカメラ (エディターのカメラ。ED3)
+public struct CameraOverride
+{
+    public Vector3    Position;
+    public Quaternion Rotation;
+    public float      FieldOfView;   // 縦の視野角 (度)
+    public float      NearClip;
+    public float      FarClip;
 }
 
 // ==========================================================================
@@ -138,6 +150,53 @@ public sealed class GraphicsSettings
         }
     }
 
+    // ---------- エディター (ED3) : シーンを描く大きさ / UI ----------
+
+    /// <summary>シーンを描いたテクスチャ (RenderSize を決めた時。UI の Texture に入れるとシーンビューになる)</summary>
+    public const uint ViewTexture = 0xFFFFFFF0u;
+
+    /// <summary>シーンを描く大きさ (0 x 0 = 画面と同じ。以前と同じ)。決めると、シーンは ViewTexture に描かれ、画面には UI だけ</summary>
+    public (int Width, int Height) RenderSize { get; private set; }
+
+    public void SetRenderSize(int width, int height)
+    {
+        width  = Math.Max(0, width);
+        height = Math.Max(0, height);
+        if (width == 0 || height == 0) width = height = 0;
+        if ((width, height) == RenderSize) return;
+        if (NativeMethods.Renderer_SetRenderSize((uint)width, (uint)height)) RenderSize = (width, height);
+    }
+
+    /// <summary>UI の描画 (毎フレーム呼ぶ。空なら消える)。描くのはこのフレームの一番最後</summary>
+    public unsafe void SubmitUI(ReadOnlySpan<UIVertex> vertices, ReadOnlySpan<ushort> indices, ReadOnlySpan<UIDrawCommand> commands)
+    {
+        fixed (UIVertex* v = vertices)
+        fixed (ushort* i = indices)
+        fixed (UIDrawCommand* c = commands)
+        {
+            NativeMethods.Renderer_SetUIDrawData(v, (uint)vertices.Length, i, (uint)indices.Length, c, (uint)commands.Length);
+        }
+    }
+
+    /// <summary>UI のテクスチャ (RGBA8。フォントなど)。戻り値は UIDrawCommand.Texture に入れる番号 (失敗時 0xFFFFFFFF)</summary>
+    public unsafe uint CreateUITexture(int width, int height, ReadOnlySpan<byte> rgba)
+    {
+        if (rgba.Length < width * height * 4) throw new ArgumentException("rgba is too small.");
+        fixed (byte* p = rgba) return NativeMethods.Renderer_CreateUITexture((uint)width, (uint)height, p);
+    }
+
+    /// <summary>C++ のプロファイラー (F1) を出すか</summary>
+    public bool ProfilerVisible
+    {
+        get => NativeMethods.Renderer_IsProfilerVisible();
+        set => NativeMethods.Renderer_SetProfilerVisible(value);
+    }
+
+    /// <summary>
+    /// シーンのカメラの代わりに使うカメラ (エディターのカメラ。null ならシーンの最初の Camera)
+    /// </summary>
+    public CameraOverride? CameraOverride { get; set; }
+
     internal void RenderFrame(RenderCommandBuffer commands)
     {
         commands.Clear();
@@ -260,8 +319,9 @@ public sealed class Engine : IDisposable
 
     public Engine(EngineSettings settings)
     {
-        // 相対パス (モデル / シェーダー / キャッシュ) は実行ファイルのフォルダから辿る
-        Environment.CurrentDirectory = AppContext.BaseDirectory;
+        // 相対パス (モデル / シェーダー / キャッシュ) は実行ファイルのフォルダ (か WorkingDirectory) から辿る
+        // (以前は必ず実行ファイルのフォルダだった。エディターが先に変えた作業フォルダも上書きされていた)
+        Environment.CurrentDirectory = settings.WorkingDirectory ?? AppContext.BaseDirectory;
 
         // Width / Height は枠とタイトルバーを含んだサイズなので、描画領域 (ClientSize) で指定する (2-4)
         _window = new Form
@@ -340,6 +400,23 @@ public sealed class Engine : IDisposable
         AddSystem(new OrbitCameraSystem());
     }
 
+    // ---------- エディター (ED3) ----------
+
+    /// <summary>
+    /// 再生中か (既定 true)。false (エディターの編集中) の間は、登録した System / FixedUpdate / 物理の時間 / 音を止める
+    /// (描画 / 衝突判定の形 / パーティクルの見た目は動く)
+    /// </summary>
+    public bool IsPlaying { get; set; } = true;
+
+    /// <summary>System と物理の後、カメラと描画への反映の前に毎フレーム呼ばれる (エディターの GUI はここで作る)</summary>
+    public event Action? LateUpdate;
+
+    /// <summary>描画領域 (クライアント領域) の大きさ (ピクセル)</summary>
+    public (int Width, int Height) ClientSize => (_window.ClientSize.Width, _window.ClientSize.Height);
+
+    /// <summary>ウィンドウ (エディターがファイルのダイアログなどの親にする)</summary>
+    public Form Window => _window;
+
     // 毎フレーム呼ばれる System を足す (登録した順に呼ばれる)。IFixedSystem も実装していれば FixedUpdate も呼ぶ
     public void AddSystem(ISystem system)
     {
@@ -374,17 +451,18 @@ public sealed class Engine : IDisposable
             // ゲームパッドはフレームの頭で 1 回、全パッド分をまとめて読む (System の中ではこの値を見る)
             Gamepad.Update();
 
-            foreach (var system in _systems) system.Update(World);
+            if (IsPlaying) foreach (var system in _systems) system.Update(World);   // 編集中 (ED3) は止める
             _transformSystem.Update(World);
-            _collisionSystem.Update(World, _fixedSystems);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
+            _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
             // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
-            _cameraSystem.Update(World);
+            LateUpdate?.Invoke();   // エディターの GUI (ED3)
+            _cameraSystem.Update(World, Graphics.CameraOverride);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
-            _audioSystem.Update(World);
+            if (IsPlaying) _audioSystem.Update(World);   // 編集中は鳴らさない (ED3)
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
             Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;

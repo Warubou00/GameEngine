@@ -21,6 +21,12 @@ public static class Input
     private static Vector2      _mouseDelta;
     private static float        _scrollDelta;
 
+    // このフレームに打った文字 / 押した・離したキー (順番どおり。エディターの GUI (ImGui) に渡す。ED3)
+    private static readonly List<char> _typed = new();
+    private static readonly List<(Keys Key, bool Down)> _keyEvents = new();
+    public static IReadOnlyList<char> TypedCharacters => _typed;
+    public static IReadOnlyList<(Keys Key, bool Down)> KeyEvents => _keyEvents;
+
     public static bool GetKey(Keys key)     => _down.Contains(key);
     public static bool GetKeyDown(Keys key) => _pressed.Contains(key);
     public static bool GetKeyUp(Keys key)   => _released.Contains(key);
@@ -38,11 +44,14 @@ public static class Input
         form.KeyDown += (_, e) =>
         {
             if (_down.Add(e.KeyCode)) _pressed.Add(e.KeyCode);
+            _keyEvents.Add((e.KeyCode, true));
         };
         form.KeyUp += (_, e) =>
         {
             if (_down.Remove(e.KeyCode)) _released.Add(e.KeyCode);
+            _keyEvents.Add((e.KeyCode, false));
         };
+        form.KeyPress += (_, e) => _typed.Add(e.KeyChar);
         form.MouseDown  += (_, e) => _buttons |= e.Button;
         form.MouseUp    += (_, e) => _buttons &= ~e.Button;
         form.MouseWheel += (_, e) => _scrollDelta += e.Delta / 120.0f;
@@ -68,6 +77,8 @@ public static class Input
     {
         _pressed.Clear();
         _released.Clear();
+        _typed.Clear();
+        _keyEvents.Clear();
         _mouseDelta  = Vector2.Zero;
         _scrollDelta = 0;
     }

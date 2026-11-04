@@ -437,6 +437,24 @@ namespace Renderer
 		if (IsInitialized()) _rhi->DestroyRenderTarget(handle);
 	}
 
+	bool SceneRenderer::SetRenderSize(uint32_t width, uint32_t height)
+	{
+		if (!IsInitialized() || !_rhi->SetRenderSize(width, height)) return false;
+		if (_hasCamera) updateViewProjection();   // アスペクト比が変わる
+		return true;
+	}
+
+	void SceneRenderer::SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+	                                  const RHI::UIDrawCommand* commands, uint32_t commandCount)
+	{
+		if (IsInitialized()) _rhi->SetUIDrawData(vertices, vertexCount, indices, indexCount, commands, commandCount);
+	}
+
+	uint32_t SceneRenderer::CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)
+	{
+		return IsInitialized() ? _rhi->CreateUITexture(width, height, rgba) : 0xFFFFFFFFu;
+	}
+
 	void SceneRenderer::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
 	{
 		if (IsInitialized()) _rhi->SetDebugLines(vertices, count);

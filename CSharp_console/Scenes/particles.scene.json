@@ -1,0 +1,761 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "52737093-460a-47b3-a290-db0c643dae74",
+      "name": "Entity 0",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            -1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            25,
+            0.5,
+            25
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "c9e2392e-ad41-4630-b1fc-d3116cadfeda",
+      "name": "Entity 1",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -1.6,
+            0,
+            1.2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.8,
+            0.6,
+            0.8
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "28b69c4e-68c8-4cfc-8834-147b2a8266d1",
+      "name": "Entity 2",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            1.8,
+            0,
+            -0.6
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.6,
+            1,
+            0.6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "34e2b837-92df-4d52-892b-625f6ae60997",
+      "name": "Entity 3",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            9,
+            0,
+            5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.5,
+            0.3,
+            1.5
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "cdd846b0-6a10-4b2f-88fc-a9d681b8d1be",
+      "name": "Entity 4",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 20000,
+          "Burst": 0,
+          "Shape": "Disc",
+          "ShapeRadius": 0.15,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 9,
+          "SpeedMin": 7.5,
+          "SpeedMax": 9,
+          "LifeMin": 3,
+          "LifeMax": 4,
+          "Gravity": [
+            0,
+            -9.8,
+            0
+          ],
+          "Drag": 0.1,
+          "Turbulence": 0,
+          "ColorStart": [
+            0.45,
+            0.75,
+            1.6,
+            0.35
+          ],
+          "ColorEnd": [
+            0.1,
+            0.25,
+            0.9,
+            0
+          ],
+          "SizeStart": 0.035,
+          "SizeEnd": 0.025,
+          "Sprite": "SoftCircle",
+          "Blend": "Additive",
+          "AngularSpeed": 0,
+          "StretchScale": 0,
+          "Collide": true,
+          "Restitution": 0.35
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0.2,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Fountain"
+        }
+      ]
+    },
+    {
+      "id": "ded08931-642a-46cc-a3f8-290ee0a963c6",
+      "name": "Entity 5",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 0,
+          "Burst": 0,
+          "Shape": "Point",
+          "ShapeRadius": 0,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 180,
+          "SpeedMin": 5,
+          "SpeedMax": 7,
+          "LifeMin": 1.4,
+          "LifeMax": 2.2,
+          "Gravity": [
+            0,
+            -3,
+            0
+          ],
+          "Drag": 1.2,
+          "Turbulence": 0,
+          "ColorStart": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "ColorEnd": [
+            1,
+            1,
+            1,
+            0
+          ],
+          "SizeStart": 0.06,
+          "SizeEnd": 0.02,
+          "Sprite": "Spark",
+          "Blend": "Additive",
+          "AngularSpeed": 0,
+          "StretchScale": 0.05,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -8,
+            12,
+            12
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Firework",
+          "Interval": 1.6,
+          "Timer": 0
+        }
+      ]
+    },
+    {
+      "id": "da6c739c-af79-47cc-988b-6f5ae5f068b2",
+      "name": "Entity 6",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 0,
+          "Burst": 0,
+          "Shape": "Point",
+          "ShapeRadius": 0,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 180,
+          "SpeedMin": 5,
+          "SpeedMax": 7,
+          "LifeMin": 1.4,
+          "LifeMax": 2.2,
+          "Gravity": [
+            0,
+            -3,
+            0
+          ],
+          "Drag": 1.2,
+          "Turbulence": 0,
+          "ColorStart": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "ColorEnd": [
+            1,
+            1,
+            1,
+            0
+          ],
+          "SizeStart": 0.06,
+          "SizeEnd": 0.02,
+          "Sprite": "Spark",
+          "Blend": "Additive",
+          "AngularSpeed": 0,
+          "StretchScale": 0.05,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            12,
+            12
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Firework",
+          "Interval": 1.95,
+          "Timer": 0.5
+        }
+      ]
+    },
+    {
+      "id": "0cf52116-f5de-456b-a354-6f4dab44e627",
+      "name": "Entity 7",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 0,
+          "Burst": 0,
+          "Shape": "Point",
+          "ShapeRadius": 0,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 180,
+          "SpeedMin": 5,
+          "SpeedMax": 7,
+          "LifeMin": 1.4,
+          "LifeMax": 2.2,
+          "Gravity": [
+            0,
+            -3,
+            0
+          ],
+          "Drag": 1.2,
+          "Turbulence": 0,
+          "ColorStart": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "ColorEnd": [
+            1,
+            1,
+            1,
+            0
+          ],
+          "SizeStart": 0.06,
+          "SizeEnd": 0.02,
+          "Sprite": "Spark",
+          "Blend": "Additive",
+          "AngularSpeed": 0,
+          "StretchScale": 0.05,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            8,
+            12,
+            12
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Firework",
+          "Interval": 2.3,
+          "Timer": 1
+        }
+      ]
+    },
+    {
+      "id": "4cca6ab0-c0d1-4a03-8fca-e4f7961ed5b1",
+      "name": "Entity 8",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 1500,
+          "Burst": 0,
+          "Shape": "Disc",
+          "ShapeRadius": 0.6,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 10,
+          "SpeedMin": 0.8,
+          "SpeedMax": 1.6,
+          "LifeMin": 0.6,
+          "LifeMax": 1.1,
+          "Gravity": [
+            0,
+            1.5,
+            0
+          ],
+          "Drag": 0,
+          "Turbulence": 2,
+          "ColorStart": [
+            3,
+            1.2,
+            0.3,
+            0.8
+          ],
+          "ColorEnd": [
+            1.2,
+            0.15,
+            0.02,
+            0
+          ],
+          "SizeStart": 0.22,
+          "SizeEnd": 0.05,
+          "Sprite": "SoftCircle",
+          "Blend": "Additive",
+          "AngularSpeed": 90,
+          "StretchScale": 0,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            9,
+            0.7,
+            5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "3c48ba30-3de3-46a7-a9c9-b310fb4e3e69",
+      "name": "Entity 9",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 350,
+          "Burst": 0,
+          "Shape": "Sphere",
+          "ShapeRadius": 0.4,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 15,
+          "SpeedMin": 0.6,
+          "SpeedMax": 1.2,
+          "LifeMin": 5,
+          "LifeMax": 7,
+          "Gravity": [
+            0.25,
+            0.35,
+            0
+          ],
+          "Drag": 0.4,
+          "Turbulence": 1.2,
+          "ColorStart": [
+            0.1,
+            0.1,
+            0.11,
+            0.55
+          ],
+          "ColorEnd": [
+            0.35,
+            0.35,
+            0.37,
+            0
+          ],
+          "SizeStart": 0.35,
+          "SizeEnd": 1.6,
+          "Sprite": "SoftCircle",
+          "Blend": "Alpha",
+          "AngularSpeed": 25,
+          "StretchScale": 0,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            9,
+            1.6,
+            5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "58b7cde4-8f67-4c0d-a21a-06fbadebc68a",
+      "name": "Entity 10",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.ParticleEmitter",
+          "Emitting": true,
+          "Rate": 30000,
+          "Burst": 0,
+          "Shape": "Point",
+          "ShapeRadius": 0,
+          "Direction": [
+            0,
+            1,
+            0
+          ],
+          "ConeAngle": 180,
+          "SpeedMin": 0.2,
+          "SpeedMax": 1,
+          "LifeMin": 1.8,
+          "LifeMax": 2.8,
+          "Gravity": [
+            0,
+            0,
+            0
+          ],
+          "Drag": 0.6,
+          "Turbulence": 3,
+          "ColorStart": [
+            0.3,
+            1.8,
+            1,
+            1
+          ],
+          "ColorEnd": [
+            0.6,
+            0.2,
+            1.6,
+            0
+          ],
+          "SizeStart": 0.03,
+          "SizeEnd": 0.01,
+          "Sprite": "SoftCircle",
+          "Blend": "Additive",
+          "AngularSpeed": 0,
+          "StretchScale": 0,
+          "Collide": false,
+          "Restitution": 0.4
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            4,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Flyer",
+          "Center": [
+            0,
+            4.5,
+            0
+          ],
+          "Radius": 6,
+          "Height": 1.5,
+          "Speed": 0.9
+        }
+      ]
+    },
+    {
+      "id": "5413e09d-0627-4dae-a654-c454fd67cabb",
+      "name": "Entity 11",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "FieldOfView": 57.29578,
+          "NearClip": 1,
+          "FarClip": 10000,
+          "Orthographic": false
+        },
+        {
+          "type": "GameEngine.FreeCamera",
+          "MoveSpeed": 10,
+          "FastMultiplier": 5,
+          "LookSensitivity": 0.2,
+          "GamepadLookSpeed": 120
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            6,
+            -20
+          ],
+          "Rotation": [
+            0.041558642,
+            0,
+            0,
+            0.9991361
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "6e0a8a80-68cb-47a7-9bd6-9367531793d4",
+      "name": "Entity 12",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.95,
+            0.88
+          ],
+          "Intensity": 1.6,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0.43602994,
+            0.25796467,
+            -0.13201924,
+            0.85199946
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}

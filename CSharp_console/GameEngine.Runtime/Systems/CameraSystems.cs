@@ -12,8 +12,24 @@ internal sealed class CameraSystem : ISystem
     private NativeMethods.CameraDesc _last;
     private bool _sent;
 
-    public void Update(World world)
+    public void Update(World world) => Update(world, null);
+
+    // cameraOverride : エディターのカメラ (あればシーンのカメラの代わりに使う。ED3)
+    public void Update(World world, CameraOverride? cameraOverride)
     {
+        if (cameraOverride is { } editor)
+        {
+            send(new NativeMethods.CameraDesc
+            {
+                Position     = editor.Position,
+                Forward      = Vector3.Transform(Vector3.UnitZ, editor.Rotation),
+                Up           = Vector3.Transform(Vector3.UnitY, editor.Rotation),
+                FieldOfViewY = editor.FieldOfView * MathEx.Deg2Rad,
+                NearZ        = editor.NearClip,
+                FarZ         = editor.FarClip,
+            });
+            return;
+        }
         var cameras    = world.GetPool<Camera>();
         var transforms = world.GetPool<Transform>();
         var entities   = cameras.Entities;
@@ -33,14 +49,17 @@ internal sealed class CameraSystem : ISystem
                 FarZ         = camera.FarClip,
                 Orthographic = camera.Orthographic ? 1u : 0u,
             };
-            if (!_sent || !desc.Equals(_last))
-            {
-                NativeMethods.Renderer_SetCamera(ref desc);
-                _last = desc;
-                _sent = true;
-            }
+            send(desc);
             return;   // 今は 1 台だけ
         }
+    }
+
+    private void send(NativeMethods.CameraDesc desc)
+    {
+        if (_sent && desc.Equals(_last)) return;
+        NativeMethods.Renderer_SetCamera(ref desc);
+        _last = desc;
+        _sent = true;
     }
 }
 

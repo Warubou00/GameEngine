@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    エディター (ED3)。GUI でシーン / エンティティ / コンポーネントを操作する
+      - GUI は ImGui (ImGui.NET。docking 版)。描画はエンジンの RHI (Renderer.dll の UI の描画) で行う
+      - シーンは編集中は動かさない (物理 / 音 / ゲームの System は再生 (ED4) の時だけ)
+      - ゲームのコード (見本のコンポーネント) は、今は GameEngine_console を参照して型を読む (ED7 で別の DLL に)
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>AnyCPU;x64</Platforms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GameEngine.Editor</RootNamespace>
+  </PropertyGroup>
+
+  <Import Project="..\NativeEngine.targets" />
+
+  <ItemGroup>
+    <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine.Runtime\GameEngine.Runtime.csproj" />
+    <ProjectReference Include="..\GameEngine_console\GameEngine_console.csproj" />
+  </ItemGroup>
+
+</Project>

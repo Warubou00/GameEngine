@@ -1,0 +1,956 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "71a5b27f-e650-4324-a51d-a3bd362b29c3",
+      "name": "Entity 0",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Box",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            1,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "f03f22b3-201b-46da-9cfc-2cc718031e0d",
+      "name": "Entity 1",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Box",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            1,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            -0.1,
+            1
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            12,
+            0.05,
+            10
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "9ecf92e3-049a-4970-8406-da52fb459d93",
+      "name": "Entity 2",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Mesh",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": {
+            "model": "../Model/obj/rock.obj"
+          },
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/rock.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -4,
+            0,
+            -1
+          ],
+          "Rotation": [
+            0,
+            0.17364818,
+            0,
+            0.9848077
+          ],
+          "Scale": [
+            4,
+            4,
+            4
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "8b6ade1a-72ee-4665-9115-c653ebb9c66c",
+      "name": "Entity 3",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Mesh",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": {
+            "model": "../Model/obj/rock.obj"
+          },
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/rock.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -6.5,
+            0,
+            3
+          ],
+          "Rotation": [
+            0,
+            0.9063078,
+            0,
+            0.42261824
+          ],
+          "Scale": [
+            6,
+            6,
+            6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "32cbe9f6-030b-4c52-92c4-7297113a513a",
+      "name": "Entity 4",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Mesh",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": {
+            "model": "../Model/obj/rock.obj"
+          },
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/rock.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            3,
+            0,
+            -2.5
+          ],
+          "Rotation": [
+            0,
+            0.819152,
+            0,
+            -0.57357645
+          ],
+          "Scale": [
+            3,
+            3,
+            3
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "939fec5d-5f58-481e-8c11-c20b19d2ed6a",
+      "name": "Entity 5",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Mesh",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": {
+            "model": "../Model/obj/rock.obj"
+          },
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/rock.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -1.5,
+            0,
+            5
+          ],
+          "Rotation": [
+            0,
+            0.6087614,
+            0,
+            0.7933533
+          ],
+          "Scale": [
+            5,
+            5,
+            5
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "02607cf7-7c23-4a83-b67c-fbcee1ad0387",
+      "name": "Hierarchy pivot",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -1.5,
+            0,
+            -5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.6,
+            0.05,
+            0.6
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": 30
+        }
+      ]
+    },
+    {
+      "id": "917544f6-5d72-4449-9156-bbd6de4f8d19",
+      "name": "Hierarchy child",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.8333333,
+            10,
+            0.8333333
+          ],
+          "Parent": "02607cf7-7c23-4a83-b67c-fbcee1ad0387"
+        }
+      ]
+    },
+    {
+      "id": "f1b0c940-4439-4d12-b874-3efb0e51ac29",
+      "name": "Hierarchy grandchild",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Box",
+          "Size": [
+            1,
+            1,
+            1
+          ],
+          "Center": [
+            0,
+            1,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/obj/box.obj"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2.5,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "Parent": "917544f6-5d72-4449-9156-bbd6de4f8d19"
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": 120
+        }
+      ]
+    },
+    {
+      "id": "4d46d5dd-1215-4354-b504-07c0cc88acef",
+      "name": "Entity 9",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Capsule",
+          "Size": [
+            2,
+            3.5,
+            0
+          ],
+          "Center": [
+            0,
+            5.6,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "../Model/pmx/Sour\u5F0F\u30C8\u30DF\u30DF/Tomimi.pmx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            4,
+            0,
+            1
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.25,
+            0.25,
+            0.25
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": 20
+        }
+      ]
+    },
+    {
+      "id": "f1367110-d8e4-4c1a-9bd1-2c6f44db4b93",
+      "name": "Entity 10",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.PointLight",
+          "Color": [
+            1,
+            0.55,
+            0.25
+          ],
+          "Intensity": 10,
+          "Range": 8
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            6,
+            2,
+            -1
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "708cb186-a994-4a96-ae7d-8a4aca0d17e0",
+      "name": "Entity 11",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.PointLight",
+          "Color": [
+            0.3,
+            0.55,
+            1
+          ],
+          "Intensity": 10,
+          "Range": 9
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -5.5,
+            2.5,
+            -1.5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "87178369-0e42-41b4-adcf-64179a8319a3",
+      "name": "Entity 12",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Sphere",
+          "Size": [
+            0.5,
+            0,
+            0
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            1.6,
+            0.8,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.OrbitMover",
+          "Radius": 1.6,
+          "Height": 0.8,
+          "DegreesPerSecond": 40,
+          "Angle": 0
+        }
+      ]
+    },
+    {
+      "id": "86963358-04fe-4b75-a7dd-a4d587d87cd9",
+      "name": "Entity 13",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Box",
+          "Size": [
+            0.4,
+            0.4,
+            0.4
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2.6,
+            0.6,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.OrbitMover",
+          "Radius": 2.6,
+          "Height": 0.6,
+          "DegreesPerSecond": -30,
+          "Angle": 0
+        }
+      ]
+    },
+    {
+      "id": "cb7b8683-61f0-4796-b963-0d9213434fae",
+      "name": "Entity 14",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Capsule",
+          "Size": [
+            0.3,
+            0.5,
+            0
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            4,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.OrbitMover",
+          "Radius": 4,
+          "Height": 1,
+          "DegreesPerSecond": 25,
+          "Angle": 0
+        }
+      ]
+    },
+    {
+      "id": "a2b5767a-71ab-45cc-a1c8-852dd441065d",
+      "name": "Entity 15",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Sphere",
+          "Size": [
+            0.6,
+            0,
+            0
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            4,
+            0.7,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.OrbitMover",
+          "Radius": 4,
+          "Height": 0.7,
+          "DegreesPerSecond": -35,
+          "Angle": 0
+        }
+      ]
+    },
+    {
+      "id": "2fd8bc9c-e7c0-4194-9224-1a0f73aba8ce",
+      "name": "Entity 16",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Collider",
+          "Shape": "Box",
+          "Size": [
+            0.6,
+            0.3,
+            0.5
+          ],
+          "Center": [
+            0,
+            0,
+            0
+          ],
+          "Layer": 0,
+          "CollideWith": 4294967295,
+          "Mesh": null,
+          "Friction": 0.5,
+          "Restitution": 0,
+          "IsTrigger": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            5.3,
+            0.9,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine_console.OrbitMover",
+          "Radius": 5.3,
+          "Height": 0.9,
+          "DegreesPerSecond": 18,
+          "Angle": 0
+        }
+      ]
+    },
+    {
+      "id": "c353a423-8904-4fc4-b0da-a7580feb7472",
+      "name": "Entity 17",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "FieldOfView": 57.29578,
+          "NearClip": 1,
+          "FarClip": 10000,
+          "Orthographic": false
+        },
+        {
+          "type": "GameEngine.FreeCamera",
+          "MoveSpeed": 10,
+          "FastMultiplier": 5,
+          "LookSensitivity": 0.2,
+          "GamepadLookSpeed": 120
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            5,
+            -10
+          ],
+          "Rotation": [
+            0.22975294,
+            0,
+            0,
+            0.973249
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "8f3673ab-7468-4ed3-91bb-5f92a9611b50",
+      "name": "Entity 18",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.95,
+            0.88
+          ],
+          "Intensity": 1.6,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0.43602994,
+            0.25796467,
+            -0.13201924,
+            0.85199946
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}
