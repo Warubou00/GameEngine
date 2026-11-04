@@ -67,6 +67,11 @@ namespace RHI
 		virtual uint32_t GetWidth()const  = 0;
 		virtual uint32_t GetHeight()const = 0;
 
+		// シーンを描く大きさ (ED3)。0 x 0 なら画面 (スワップチェーン) と同じ (以前と同じ)
+		// 決めると、シーンはその大きさのテクスチャ (UI_TEXTURE_VIEW) に描かれ、画面には UI だけを描く
+		// (C# の描画パスが「画面 (BACK_BUFFER)」に描いた物は、そのテクスチャに入る)。GetWidth / GetHeight もこの大きさを返す
+		virtual bool SetRenderSize(uint32_t width, uint32_t height) = 0;
+
 		// ======================================================================
 		// データの登録 (GPU への転送は次の Render でまとめて行われる)
 		// ======================================================================
@@ -120,6 +125,12 @@ namespace RHI
 		virtual void SetShadowSettings(const ShadowSettings& settings) = 0;
 		// 確認用の線 (毎フレーム呼ぶ。0 本で消える)。描くのはこのフレームの描画の最後
 		virtual void SetDebugLines(const DebugLineVertex* vertices, uint32_t count) = 0;
+
+		// UI (毎フレーム呼ぶ。0 個で消える)。描くのはこのフレームの一番最後 (画面へ。プロファイラーの下)
+		virtual void SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+		                           const UIDrawCommand* commands, uint32_t commandCount) = 0;
+		// UI のテクスチャ (RGBA8。フォントなど)。戻り値はテクスチャの番号 (失敗時 0xFFFFFFFF)
+		virtual uint32_t CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba) = 0;
 
 		/***********************************************************************************
 		 * @brief 1 フレーム分の描画 (開始 → 描画パスの命令を順に実行 → UI → 表示)。GPU の完了は待たない

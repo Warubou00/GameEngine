@@ -170,6 +170,11 @@ namespace RHI
             void                    SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings);
             // 確認用の線 (このフレームの描画の最後に、バックバッファへ描く)
             void                    SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
+            // シーンを描く大きさ (ED3。0 x 0 = 画面と同じ)。決めるとシーンは「見る用のテクスチャ」に描き、画面には UI を描く
+            bool                    SetRenderSize(Buffer* buffer, uint32_t width, uint32_t height);
+            void                    SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+                                                  const RHI::UIDrawCommand* commands, uint32_t commandCount);
+            uint32_t                CreateUITexture(Buffer* buffer, uint32_t width, uint32_t height, const uint8_t* rgba);
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             // ==========================================================
@@ -497,6 +502,19 @@ namespace RHI
             std::vector<RHI::DebugLineVertex>                    _debugLines;      // 確認用の線 (CPU 側の写し)
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _debugLineBuffer[FRAME_COUNT];   // UPLOAD (フレームごと。初めて使う時に作る)
             void drawDebugLines();
+
+            // ---------- エディター (ED3) ----------
+            uint32_t _renderWidth  = 0;   // シーンを描く大きさ (0 = 画面と同じ)
+            uint32_t _renderHeight = 0;
+            uint32_t _viewTarget   = 0xFFFFFFFFu;   // シーンを描くテクスチャ (_renderTargets の番号。BACK_BUFFER の代わり)
+            std::vector<RHI::UIVertex>      _uiVertices;
+            std::vector<uint16_t>           _uiIndices;
+            std::vector<RHI::UIDrawCommand> _uiCommands;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _uiBuffer[FRAME_COUNT];   // UPLOAD (頂点 + インデックス。足りなければ作り直す)
+            UINT64 _uiBufferSize[FRAME_COUNT] = {};
+            std::vector<std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _uiTextures;
+            void drawUI();
+            bool recreateSceneTargets();   // 深度 / Hi-Z / 画面に合わせるレンダーターゲットを今の大きさで作り直す
             uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ
             Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
             // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)

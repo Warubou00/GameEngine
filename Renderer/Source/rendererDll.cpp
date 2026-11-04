@@ -115,6 +115,27 @@ extern "C"
 		if (g_renderer) g_renderer->DestroyRenderTarget(target);
 	}
 
+	// ---------- エディター (ED3) ----------
+
+	// シーンを描く大きさ (0 x 0 = 画面と同じ)。決めると、シーンはテクスチャ (UI の番号 0xFFFFFFF0) に描かれ、画面には UI だけ
+	RENDERER_API bool Renderer_SetRenderSize(uint32_t width, uint32_t height)
+	{
+		return g_renderer && g_renderer->SetRenderSize(width, height);
+	}
+
+	// UI (ImGui などの頂点 / インデックス (16bit) / 描画の命令)。毎フレーム呼ぶ (0 個で消える)
+	RENDERER_API void Renderer_SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+	                                         const RHI::UIDrawCommand* commands, uint32_t commandCount)
+	{
+		if (g_renderer) g_renderer->SetUIDrawData(vertices, vertexCount, indices, indexCount, commands, commandCount);
+	}
+
+	// UI のテクスチャ (RGBA8)。戻り値は UI の描画の命令で使う番号 (失敗時 0xFFFFFFFF)
+	RENDERER_API uint32_t Renderer_CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)
+	{
+		return g_renderer ? g_renderer->CreateUITexture(width, height, rgba) : 0xFFFFFFFFu;
+	}
+
 	// 確認用の線 (2 頂点で 1 本)。毎フレーム呼ぶ (0 本で消える)
 	RENDERER_API void Renderer_SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
 	{
@@ -254,6 +275,17 @@ extern "C"
 	RENDERER_API void Renderer_ReportProfilerValue(const char* name, double value)
 	{
 		if (g_renderer && name) g_renderer->ReportProfilerValue(name, value);
+	}
+
+	// プロファイラー (F1) を出す / 隠す (ED3。エディターは最初は隠す)
+	RENDERER_API void Renderer_SetProfilerVisible(bool visible)
+	{
+		if (g_renderer) g_renderer->SetProfilerVisible(visible);
+	}
+
+	RENDERER_API bool Renderer_IsProfilerVisible()
+	{
+		return g_renderer && g_renderer->IsProfilerVisible();
 	}
 
 	// プロファイラー (F1) に任意の文字列を表示する (例 : 描画パイプラインの名前)

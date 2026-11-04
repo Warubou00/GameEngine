@@ -1,0 +1,98 @@
+﻿エディター ED3 : エディターの外枠 (ImGui.NET) 2026-11-04
+ブランチ : feature/editor-ed3
+
+■ 目的
+  ロードマップ (Engine_Roadmap_Editor_2026-11-04.txt) の ED3。
+  別の exe (GameEngine.Editor) として、ドッキングできる窓の並びで
+  Scene (シーンビュー) / Hierarchy / Inspector / Console / Stats を出す。
+  シーンは編集中は動かさない (再生 / 停止は ED4)。
+
+■ 使い方
+  CSharp_console/GameEngine.Editor/bin/x64/Release/net9.0-windows/GameEngine.Editor.exe [--scene <path>]
+    既定は CSharp_console/Scenes/showcase.scene.json を開く
+    File   : New / Open (Ctrl+O) / Save (Ctrl+S) / Save As / Exit
+    GameObject : Create Empty / Delete (Delete キー)
+    View   : 各窓の表示 / Show Colliders / Profiler (C++ のプロファイラー。F1) / Reset Layout
+    Scene  : 右ドラッグで向き / 右ボタン中に WASD QE で移動 / Shift で速く / ホイールで移動の速さ
+    Hierarchy : クリックで選ぶ / ドラッグで親を変える (空いている所へ落とすと親を外す) / 右クリックで子を作る・消す
+             無効 (Active = false) の物は薄い色
+    Inspector : 名前 / 有効、コンポーネントの全フィールド (数値 / bool / enum (Flags はチェック) / Vector / 色 /
+               Quaternion (オイラー角で編集) / Entity (選択) / モデルのパス (Enter で読み込み) / 配列 / 入れ子の struct)
+               右クリックでコンポーネントを外す / Add Component (絞り込みつき。読み込み済みの DLL の IComponent すべて)
+    Console : Console.WriteLine と C++ のログを写す (絞り込み / Clear / エラーは赤・警告は黄色)
+  窓の並びは exe の隣の imgui.ini に保存される (消すと最初の並びに戻る)
+
+■ 変更 (C++)
+  RHI
+    rhiTypes.h : UIVertex (ImDrawVert と同じ 20 B) / UIDrawCommand (32 B) / UI_TEXTURE_VIEW (= 0xFFFFFFF0 : シーンビューの画像)
+    rhi.h / RenderHardwareInterface : SetRenderSize / SetUIDrawData / CreateUITexture
+    CommandContext :
+      - SetRenderSize(w, h) : シーンを窓 (バックバッファ) ではなく別の大きさの描画先 (_viewTarget, RGBA8) へ描く。
+        GetWidth / GetHeight はこの大きさを返すので、深度 / G-Buffer / SSAO などはすべてこの大きさで作られる
+        (recreateSceneTargets。大きさが変わった時だけ作り直す)。0 なら今まで通りバックバッファへ直接描く (見本はこちら)
+      - BACK_BUFFER を描き先にした命令は _viewTarget へ振り替える。デバッグ線も _viewTarget へ
+      - 命令の後 : _viewTarget を PIXEL_SHADER_RESOURCE にして、本当のバックバッファを消して drawUI
+      - drawUI : C# から受け取った頂点 / インデックス / 命令をフレームごとのバッファへ入れて描く。
+        テクスチャはバインドレスの番号 (g_Inputs[0].x)、クリップはシザー
+    Pipeline : GetUIPso (アルファブレンド / 深度なし / カリングなし)
+    Shader/ui.shader (新規) : VSUI / PSUI
+  Renderer
+    sceneRenderer / rendererDll : Renderer_SetRenderSize / Renderer_SetUIDrawData / Renderer_CreateUITexture /
+      Renderer_SetProfilerVisible / Renderer_IsProfilerVisible
+
+■ 変更 (C# ランタイム)
+  Engine.cs
+    - EngineSettings.WorkingDirectory : 相対パスの起点 (以前は必ず実行ファイルのフォルダだった)
+    - Engine.IsPlaying : false の間はユーザーの System / 物理の計算 / 音を止める (エディターの編集中)
+    - Engine.LateUpdate : System の後、カメラの前に呼ぶ (エディターの UI)
+    - Engine.ClientSize / Engine.Window
+    - GraphicsSettings : SetRenderSize / RenderSize / SubmitUI / CreateUITexture / ProfilerVisible / CameraOverride
+  CameraSystems.cs : CameraOverride があればシーンのカメラの代わりに使う
+  CollisionSystem.cs : Update(..., simulate) (編集中は剛体を動かさない)
+  Input.cs : TypedCharacters (打った文字) / KeyEvents (押した / 離したキーの順番)
+  Rendering/UIDraw.cs (新規) : UIVertex / UIDrawCommand
+  NativeEngine.targets (新規) : C++ の DLL / シェーダーを出力フォルダへ写す処理を見本の csproj から切り出し、エディターと共用
+
+■ エディター (GameEngine.Editor, 新規)
+  GameEngine.Editor.csproj : net9.0-windows / WinForms / ImGui.NET 1.91.6.1 (NuGet)
+  ImGuiBackend.cs : 入力の受け渡し / 描画の内容を 1 つの配列にまとめて SubmitUI /
+                    フォント (英数字 Segoe UI + 日本語メイリオを重ねる) / DockBuilder (cimgui を直接 P/Invoke)
+  EditorApp.cs    : メニュー / 窓の並び / Scene / エディターのカメラ / Hierarchy / Stats / シーンの開く・保存
+  Inspector.cs    : コンポーネントの表示と編集 (ED1 の ComponentRegistry のフィールド情報を使う)
+  ConsoleLog.cs   : Console の出力を写す TextWriter (C++ のログは別スレッドからも来るので lock)
+  Program.cs      : 作業フォルダ = 見本の出力フォルダ (../Model を読むため。Assets は ED5) /
+                    見本の DLL (GameEngine_console) を Assembly.Load で読み込み、Spin などを使えるようにする
+  CSharp_console/Scenes/ : showcase / physics / particles の見本のシーン (見本の --save-scene で作った)
+
+■ 途中で直したこと
+  - 見本のシーンを作る時、最小化で起動すると CreateSwapChain が E_INVALIDARG (大きさ 0) → 普通の窓で起動
+  - Engine のコンストラクターが作業フォルダを exe のフォルダへ戻していた → モデルが読めない
+    → EngineSettings.WorkingDirectory を追加
+  - _ = typeof(Spin) で見本の DLL を読ませていたが、Release では読み込まれず Spin / OrbitMover が「知らない型」になった
+    → Assembly.Load("GameEngine_console")
+  - メイリオは \ を ¥ で描くのでパスが読みにくい → 英数字は Segoe UI、日本語だけメイリオを重ねる
+  - ImGui の BackendFlags に RendererHasVtxOffset を立てる (65536 頂点を超えても uint16 のインデックスで描ける)
+
+■ 確認
+  見た目 (エディターの窓だけを PrintWindow で撮った)
+    - 最初の並び : 左 Hierarchy / 中央 Scene / 右 Inspector / 下 Console・Stats。メニュー、ファイル名の表示
+    - Hierarchy の親子 (Hierarchy pivot > child > grandchild) が木で出る
+    - クリックで選ぶ → Inspector に EntityInfo (名前 / 有効 / Id)、Collider / MeshRenderer / Transform (Parent は名前) /
+      Rigidbody (enum / bool / 折りたたんだ Constraints) / Spin (見本のユーザーコンポーネント) が出る
+    - Console : 読み込みのログが出る / Stats : FPS / シーンビューの大きさ (968 x 627)
+    - 右ドラッグ + W (PostMessage) でエディターのカメラが右を向いて前へ進んだ
+    - physics シーン (79 entities) も開ける
+  D3D12 検証 (Debug, debug layer) : physics シーンで 5529 フレーム、エラー / 警告なし
+  見本 (GameEngine_console) : 今まで通り窓全体に描かれ、プロファイラーも出る (SetRenderSize を使わない道)
+  テスト : --hierarchy-test 18 / 0、--serialize-test 4 / 0
+
+■ 速さ (Release, RTX 2070, 1600x900 の窓 / シーンビュー 968x627)
+  エディター showcase : 1.43 〜 1.86 ms / フレーム (540 〜 700 FPS)、C# update 0.065 〜 0.16 ms (ImGui の組み立てを含む)
+  見本 showcase (1280x720) : 1.54 ms / フレーム、C# update 0.059 ms
+  ※ 窓の大きさと描く大きさが違うので厳密な比較ではない。ImGui の GPU 時間は C++ のプロファイラーの UI 欄には入っていない
+    (プロファイラーの UI は C++ の DebugUI のもの)
+
+■ 残り / 次 (ED4)
+  - 編集中は物理のステップ (solver) を回さないので、solver が数える Stats の rigid は 0 のまま (ED4 の Play で動く)
+  - 見本のエンティティの多くは名前が無いので "Entity 9" のように出る (見本のシーンに名前を付けるのは別途)
+  - Undo / ピッキング / ギズモ / Play・Stop は ED4

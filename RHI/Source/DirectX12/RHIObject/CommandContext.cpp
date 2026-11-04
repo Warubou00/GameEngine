@@ -39,6 +39,7 @@
 #include "../Object/dx12_descriptorHeap.h"
 #include "../dx12_descriptorHeapManager.h"
 #include "../dx12_uploadManager.h"
+#include "../dx12_textureManager.h"
 #include "../Object/dx12_fence.h"
 #include "../Object/dx12_gpuTimer.h"
 #include "../Object/dx12_commandSignature.h"
@@ -391,9 +392,9 @@ namespace RHI
 			// GPU のタイムスタンプ : フレームの開始
 			if (_gpuTimer) _gpuTimer->Timestamp(cmdList, _frameIndex, TIMESTAMP_FRAME_BEGIN);
 
-			// 4. ビューポートとシザー矩形の設定 (スワップチェーンのサイズに合わせる)
-			const UINT width  = _swapChain->GetWidth();
-			const UINT height = _swapChain->GetHeight();
+			// 4. ビューポートとシザー矩形の設定 (シーンを描く大きさ。エディターでなければスワップチェーンのサイズ)
+			const UINT width  = GetWidth();
+			const UINT height = GetHeight();
 			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
 			const D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 			cmdList->RSSetViewports(1, &viewport);
@@ -624,18 +625,196 @@ namespace RHI
 			transitionMsaaDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 			_boundSamples   = 1;
 			_boundDepthMsaa = false;
-			const UINT width  = _swapChain->GetWidth();
-			const UINT height = _swapChain->GetHeight();
-			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f, 1.0f };
-			const D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-			cmdList->RSSetViewports(1, &viewport);
-			cmdList->RSSetScissorRects(1, &scissorRect);
-			const auto rtvHandle = _rtvHeap->GetCpuHandle(_swapChain->GetCurrentBackBufferIndex());
-			cmdList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+			auto setTarget = [&](D3D12_CPU_DESCRIPTOR_HANDLE rtv, UINT w, UINT h)
+			{
+				const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h), 0.0f, 1.0f };
+				const D3D12_RECT scissorRect  = { 0, 0, static_cast<LONG>(w), static_cast<LONG>(h) };
+				cmdList->RSSetViewports(1, &viewport);
+				cmdList->RSSetScissorRects(1, &scissorRect);
+				cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+			};
+			const auto backBufferRtv = _rtvHeap->GetCpuHandle(_swapChain->GetCurrentBackBufferIndex());
 			_boundColorCount = 0;
 			_boundDepth      = RHI::RenderTargetHandle::INVALID;
-			drawDebugLines();   // 確認用の線 (トーンマップ / FXAA の後のバックバッファへ。ImGui の下)
+			if (_viewTarget != 0xFFFFFFFFu && _viewTarget < _renderTargets.size() && _renderTargets[_viewTarget].Alive)
+			{
+				// エディター (ED3) : 確認用の線もシーンを見る用のテクスチャへ描き、UI が読めるようにしてから画面へ
+				RenderTarget& view = _renderTargets[_viewTarget];
+				if (view.State != D3D12_RESOURCE_STATE_RENDER_TARGET)
+				{
+					const auto toTarget = makeTransitionBarrier(view.Resource.Get(), view.State, D3D12_RESOURCE_STATE_RENDER_TARGET);
+					cmdList->ResourceBarrier(1, &toTarget);
+					view.State = D3D12_RESOURCE_STATE_RENDER_TARGET;
+				}
+				setTarget(_targetRtvHeap->GetCpuHandle(_viewTarget), view.Width, view.Height);
+				drawDebugLines();
+				const auto toRead = makeTransitionBarrier(view.Resource.Get(), view.State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+				cmdList->ResourceBarrier(1, &toRead);
+				view.State = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+				setTarget(backBufferRtv, _swapChain->GetWidth(), _swapChain->GetHeight());
+				const float clear[4] = { 0.10f, 0.10f, 0.11f, 1.0f };
+				cmdList->ClearRenderTargetView(backBufferRtv, clear, 0, nullptr);
+			}
+			else
+			{
+				setTarget(backBufferRtv, _swapChain->GetWidth(), _swapChain->GetHeight());
+				drawDebugLines();   // 確認用の線 (トーンマップ / FXAA の後のバックバッファへ。ImGui の下)
+			}
+			drawUI();   // UI (エディター。ED3) : 画面の一番上 (C++ のプロファイラーの下)
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
+		}
+
+		// ==============================================================
+		// エディター (ED3) : シーンを描く大きさ / UI
+		// ==============================================================
+
+		bool CommandContext::SetRenderSize(Buffer* buffer, uint32_t width, uint32_t height)
+		{
+			if (width == _renderWidth && height == _renderHeight) return true;
+			if ((width == 0) != (height == 0)) return false;
+			WaitForGpu();
+			_renderWidth  = width;
+			_renderHeight = height;
+			if (width == 0)
+			{
+				// 画面に描く (以前と同じ) に戻す
+				if (_viewTarget != 0xFFFFFFFFu)
+				{
+					RHI::RenderTargetHandle handle;
+					handle.Index = _viewTarget;
+					DestroyRenderTarget(handle);
+					_viewTarget = 0xFFFFFFFFu;
+				}
+			}
+			else if (_viewTarget == 0xFFFFFFFFu)
+			{
+				// 見る用のテクスチャ : 画面と同じ形式 (画面へ描いていた PSO をそのまま使える)。大きさはシーンの大きさに合わせて作り直される
+				RHI::RenderTargetDesc desc;
+				desc.Format = RHI::RenderTargetFormat::RGBA8;
+				desc.Scale  = 1.0f;
+				const RHI::RenderTargetHandle handle = CreateRenderTarget(buffer, desc);
+				if (handle.Index == RHI::RenderTargetHandle::INVALID) { _renderWidth = _renderHeight = 0; return false; }
+				_viewTarget = handle.Index;
+			}
+			return recreateSceneTargets();
+		}
+
+		bool CommandContext::recreateSceneTargets()
+		{
+			_depthBuffer.reset();
+			_msaaDepth.Reset();
+			_msaaDepthSamples = 0;
+			if (!createDepthBuffer(GetWidth(), GetHeight())) return false;
+			for (uint32_t i = 0; i < _renderTargets.size(); ++i)
+			{
+				RenderTarget& target = _renderTargets[i];
+				if (target.Alive && target.Scale > 0.0f && !createRenderTargetResource(target, i)) return false;
+			}
+			return true;
+		}
+
+		void CommandContext::SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+		                                   const RHI::UIDrawCommand* commands, uint32_t commandCount)
+		{
+			if (!vertices || !indices || !commands) vertexCount = indexCount = commandCount = 0;
+			_uiVertices.assign(vertices, vertices + vertexCount);
+			_uiIndices.assign(indices, indices + indexCount);
+			_uiCommands.assign(commands, commands + commandCount);
+		}
+
+		uint32_t CommandContext::CreateUITexture(Buffer* buffer, uint32_t width, uint32_t height, const uint8_t* rgba)
+		{
+			if (!buffer || !rgba || width == 0 || height == 0) return 0xFFFFFFFFu;
+			::DirectX::Image image = {};
+			image.width      = width;
+			image.height     = height;
+			image.format     = DXGI_FORMAT_R8G8B8A8_UNORM;
+			image.rowPitch   = static_cast<size_t>(width) * 4;
+			image.slicePitch = image.rowPitch * height;
+			image.pixels     = const_cast<uint8_t*>(rgba);
+			DirectX12::Texture loader;
+			auto texture = loader.CreateTextureFromImage(_device->GetDevice(), _uploadManager.get(), image);
+			if (!texture) { Core::Logger::Log("[CommandContext] Failed create UI texture."); return 0xFFFFFFFFu; }
+
+			auto heapManager = buffer->GetDescHeapManager();
+			const uint32_t srvIndex = heapManager->AllocateSrv();
+			if (srvIndex == DirectX12::DescriptorHeapManager::INVALID_INDEX) return 0xFFFFFFFFu;
+			D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+			srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			srvDesc.Format                  = DXGI_FORMAT_R8G8B8A8_UNORM;
+			srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+			srvDesc.Texture2D.MipLevels     = 1;
+			_device->GetDevice()->GetDevice()->CreateShaderResourceView(texture->Get(), &srvDesc, heapManager->GetSrvCpuHandle(srvIndex));
+			_uiTextures.push_back(std::move(texture));
+			return srvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+		}
+
+		void CommandContext::drawUI()
+		{
+			// ==============================================================
+			// UI : このフレームの UPLOAD バッファへ頂点とインデックスを写し、命令ごとに切り取りの四角とテクスチャを変えて描く
+			//   深度は使わない。アルファブレンド。座標はピクセル (パスの値で -1〜1 に直す)
+			// ==============================================================
+			if (_uiCommands.empty() || _uiVertices.empty() || _uiIndices.empty()) return;
+			ID3D12PipelineState* pso = _currentPipeline->GetUIPso();
+			if (!pso) return;
+			const UINT64 vertexBytes = _uiVertices.size() * sizeof(RHI::UIVertex);
+			const UINT64 indexBytes  = _uiIndices.size() * sizeof(uint16_t);
+			const UINT64 needed = ((vertexBytes + 255) & ~255ull) + indexBytes;
+			auto& upload = _uiBuffer[_frameIndex];
+			if (!upload || _uiBufferSize[_frameIndex] < needed)
+			{
+				const UINT64 size = (std::max)(needed * 2, UINT64(1) << 20);   // 足りなくなったら倍の大きさで作り直す
+				upload = std::make_unique<DirectX12::ResourceBuffer>();
+				if (FAILED(upload->Create(_device->GetDevice()->GetDevice(), size, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(upload->Map()))
+				{
+					Core::Logger::Log("[CommandContext] Failed create UI buffer.");
+					upload.reset();
+					_uiBufferSize[_frameIndex] = 0;
+					return;
+				}
+				_uiBufferSize[_frameIndex] = size;
+			}
+			uint8_t* mapped = static_cast<uint8_t*>(upload->GetMappedData());
+			const UINT64 indexOffset = (vertexBytes + 255) & ~255ull;
+			std::memcpy(mapped, _uiVertices.data(), vertexBytes);
+			std::memcpy(mapped + indexOffset, _uiIndices.data(), indexBytes);
+
+			const D3D12_GPU_VIRTUAL_ADDRESS base = upload->Get()->GetGPUVirtualAddress();
+			D3D12_VERTEX_BUFFER_VIEW vbv = { base, static_cast<UINT>(vertexBytes), sizeof(RHI::UIVertex) };
+			D3D12_INDEX_BUFFER_VIEW  ibv = { base + indexOffset, static_cast<UINT>(indexBytes), DXGI_FORMAT_R16_UINT };
+			auto cmdList = _frameCommandList->GetCmdList();
+			cmdList->SetPipelineState(pso);
+			cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			cmdList->IASetVertexBuffers(0, 1, &vbv);
+			cmdList->IASetIndexBuffer(&ibv);
+
+			const float width  = static_cast<float>(_swapChain->GetWidth());
+			const float height = static_cast<float>(_swapChain->GetHeight());
+			uint32_t viewTexture = 0xFFFFFFFFu;
+			if (_viewTarget != 0xFFFFFFFFu && _viewTarget < _renderTargets.size() && _renderTargets[_viewTarget].Alive)
+				viewTexture = _renderTargets[_viewTarget].SrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+			for (const RHI::UIDrawCommand& command : _uiCommands)
+			{
+				if (command.IndexCount == 0) continue;
+				if (static_cast<UINT64>(command.IndexOffset) + command.IndexCount > _uiIndices.size()) continue;
+				const uint32_t texture = command.Texture == RHI::UI_TEXTURE_VIEW ? viewTexture : command.Texture;
+				if (texture == 0xFFFFFFFFu) continue;
+				D3D12_RECT clip = {
+					static_cast<LONG>((std::max)(command.Clip[0], 0.0f)), static_cast<LONG>((std::max)(command.Clip[1], 0.0f)),
+					static_cast<LONG>((std::min)(command.Clip[2], width)), static_cast<LONG>((std::min)(command.Clip[3], height)) };
+				if (clip.right <= clip.left || clip.bottom <= clip.top) continue;
+				cmdList->RSSetScissorRects(1, &clip);
+				uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
+				constants[0] = texture;
+				// g_Params[0] : ピクセル → -1〜1 の倍率と足す値
+				const float params[4] = { 2.0f / width, -2.0f / height, -1.0f, 1.0f };
+				std::memcpy(&constants[8], params, sizeof(params));
+				cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
+				cmdList->DrawIndexedInstanced(command.IndexCount, 1, command.IndexOffset, static_cast<INT>(command.VertexOffset), 0);
+			}
+			const D3D12_RECT full = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+			cmdList->RSSetScissorRects(1, &full);
 		}
 
 		void CommandContext::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
@@ -694,7 +873,9 @@ namespace RHI
 			const uint32_t colorCount = (std::min)(command.ColorCount, RHI::MAX_PASS_COLOR_TARGETS);
 			for (uint32_t c = 0; c < colorCount; ++c)
 			{
-				const uint32_t index = command.Colors[c];
+				uint32_t index = command.Colors[c];
+				// エディター (ED3) : 画面の代わりに、シーンを見る用のテクスチャへ描く
+				if (index == RHI::RenderTargetHandle::BACK_BUFFER && _viewTarget != 0xFFFFFFFFu) index = _viewTarget;
 				uint32_t w = 0, h = 0, s = 1;
 				if (index == RHI::RenderTargetHandle::BACK_BUFFER)
 				{
@@ -1971,16 +2152,10 @@ namespace RHI
 			HRESULT hr = _swapChain->Resize(width, height);
 			if (FAILED(hr)) { logFailed("SwapChain::Resize", hr); return false; }
 
-			if (!createRenderTargetViews())        return false;
-			if (!createDepthBuffer(width, height)) return false;
-
-			// 画面に合わせるレンダーターゲット (Scale > 0) を作り直す (RTV / SRV の番号はそのまま)
-			for (uint32_t i = 0; i < _renderTargets.size(); ++i)
-			{
-				RenderTarget& target = _renderTargets[i];
-				if (target.Alive && target.Scale > 0.0f && !createRenderTargetResource(target, i)) return false;
-			}
-			return true;
+			if (!createRenderTargetViews()) return false;
+			// 深度 / 画面に合わせるレンダーターゲット (Scale > 0) を作り直す (RTV / SRV の番号はそのまま)
+			// シーンの大きさを決めている時 (エディター) は、その大きさのまま (GetWidth / GetHeight がシーンの大きさを返す)
+			return recreateSceneTargets();
 		}
 
 		void CommandContext::WaitForGpu()
@@ -2019,6 +2194,8 @@ namespace RHI
 			_drawIdBuffer.reset();
 			releaseParticleBuffers();
 			for (auto& lines : _debugLineBuffer) lines.reset();
+			for (auto& ui : _uiBuffer) ui.reset();
+			_uiTextures.clear();
 			_renderTargets.clear();
 			_freeRenderTargets.clear();
 			_targetRtvHeap.reset();
@@ -2056,13 +2233,16 @@ namespace RHI
 			return _swapChain.get();
 		}
 
+		// シーンを描く大きさ (エディターで決めた時はその大きさ。以前はいつもスワップチェーンの大きさ)
 		uint32_t CommandContext::GetWidth()const
 		{
+			if (_renderWidth != 0) return _renderWidth;
 			return _swapChain ? _swapChain->GetWidth() : 0;
 		}
 
 		uint32_t CommandContext::GetHeight()const
 		{
+			if (_renderHeight != 0) return _renderHeight;
 			return _swapChain ? _swapChain->GetHeight() : 0;
 		}
 

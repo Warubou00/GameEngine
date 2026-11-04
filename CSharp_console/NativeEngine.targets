@@ -1,0 +1,55 @@
+﻿<Project>
+
+  <!--
+    ==========================================================================
+    C++ 側の成果物を出力フォルダへ自動コピーする (見本 / エディターの共通。ED3 で GameEngine_console.csproj から分けた)
+      - DLL (Core / Renderer / RHI) とシェーダーを、ビルドのたびに最新にする
+      - 以前は手作業でコピーしていたため、ソースと実行時のファイルがずれていた
+      - C++ 側は自動ではビルドされない。先に GameEngine.sln (C++) をビルドしておくこと
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <!-- リポジトリのルート (この targets のある CSharp_console から 1 つ上) -->
+    <EngineRootDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</EngineRootDir>
+    <!-- C# の Debug / Release に合わせて C++ 側の構成を選ぶ -->
+    <NativeConfiguration Condition="'$(Configuration)' == 'Release'">Release</NativeConfiguration>
+    <NativeConfiguration Condition="'$(NativeConfiguration)' == ''">Debug</NativeConfiguration>
+    <!--
+      DXC (シェーダーコンパイラ)。Windows 本体には入っていないので Windows SDK のものをコピーする
+      Redist\D3D の DXC は古く (10.0.19041)、IDxcUtils に対応していないため、
+      SDK 10.0.26100 の bin にある新しい DXC (1.8) を優先する。無い環境では Redist の版 (RHI が FXC に戻す)
+    -->
+    <DxcRedistDir>$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.0.26100.0\x64\</DxcRedistDir>
+    <DxcRedistDir Condition="!Exists('$(DxcRedistDir)dxcompiler.dll')">$(MSBuildProgramFiles32)\Windows Kits\10\Redist\D3D\x64\</DxcRedistDir>
+  </PropertyGroup>
+
+  <Target Name="CopyNativeEngineFiles" AfterTargets="Build">
+    <ItemGroup>
+      <!-- DLL と、デバッグ用の PDB (あれば) -->
+      <NativeEngineFile Include="$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.dll;$(EngineRootDir)Core\x64\$(NativeConfiguration)\Core.pdb" />
+      <NativeEngineFile Include="$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.dll;$(EngineRootDir)Renderer\x64\$(NativeConfiguration)\Renderer.pdb" />
+      <NativeEngineFile Include="$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll;$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.pdb" />
+      <!-- 音 (XAudio2)。以前の Audio は静的ライブラリで、C# からは使えなかった -->
+      <NativeEngineFile Include="$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.dll;$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.pdb" />
+      <!-- 衝突判定。無ければ衝突判定だけ無効になる -->
+      <NativeEngineFile Include="$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.dll;$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.pdb" Condition="Exists('$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.dll')" />
+      <!-- DXC : dxcompiler.dll (コンパイラ) と dxil.dll (シェーダーの署名)。無い時は RHI が FXC に戻す -->
+      <NativeEngineFile Include="$(DxcRedistDir)dxcompiler.dll;$(DxcRedistDir)dxil.dll" />
+      <!-- シェーダー : RHI は実行時に "../Shader/" から読むので、出力フォルダの 1 つ上に置く -->
+      <EngineShaderFile Include="$(EngineRootDir)RHI\Source\Shader\*.shader" />
+    </ItemGroup>
+
+    <!-- DLL が無い = C++ 側をビルドしていない。古い DLL のまま動いてしまわないよう警告を出す -->
+    <Warning Condition="!Exists('$(EngineRootDir)RHI\x64\$(NativeConfiguration)\RHI.dll')"
+             Text="RHI.dll ($(NativeConfiguration)) が見つかりません。先に C++ 側 (GameEngine.sln) をビルドしてください。" />
+    <!-- Audio.dll が無くても動く (音だけ鳴らない) が、気付けるように警告を出す -->
+    <Warning Condition="!Exists('$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.dll')"
+             Text="Audio.dll ($(NativeConfiguration)) が見つかりません。音を鳴らすには Audio プロジェクト (x64) をビルドしてください。" />
+
+    <Copy SourceFiles="@(NativeEngineFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+    <Copy SourceFiles="@(EngineShaderFile)" DestinationFolder="$(OutDir)..\Shader\" SkipUnchangedFiles="true" />
+
+    <Message Importance="high" Text="[Engine] C++ ($(NativeConfiguration)) の DLL とシェーダーを $(OutDir) にコピーしました" />
+  </Target>
+
+</Project>

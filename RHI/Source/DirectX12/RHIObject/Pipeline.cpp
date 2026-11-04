@@ -76,6 +76,7 @@ namespace RHI
 			constexpr const wchar_t* HIZ_SHADER_PATH     = L"../Shader/hiZ.shader";
 			constexpr const wchar_t* ANTI_ALIASING_SHADER_PATH = L"../Shader/antiAliasing.shader";   // MSAA の深度の解決
 			constexpr const wchar_t* DEBUG_SHADER_PATH         = L"../Shader/debug.shader";          // 確認用の線
+			constexpr const wchar_t* UI_SHADER_PATH            = L"../Shader/ui.shader";             // UI (エディター。ED3)
 			constexpr const wchar_t* PARTICLE_SIM_SHADER_PATH  = L"../Shader/particleSim.shader";    // GPU パーティクル (コンピュート)
 			constexpr const wchar_t* PARTICLE_DRAW_SHADER_PATH = L"../Shader/particleDraw.shader";   // GPU パーティクル (描画)
 
@@ -721,6 +722,40 @@ namespace RHI
             ID3D12PipelineState* pso = createPso(fnv1a("DebugLine", 9, 0xDEB61Eull), L"DebugLine", desc);
             if (!pso) { _debugLineFailed = true; return nullptr; }
             _debugLinePso = pso;
+            return pso;
+        }
+
+        ID3D12PipelineState* Pipeline::GetUIPso()
+        {
+            if (_uiPso) return _uiPso.Get();
+            if (_uiFailed) return nullptr;
+            Shader::CompiledShader vs, ps;
+            if (!_shaderCompiler->Compile(UI_SHADER_PATH, "VSUI", Shader::Stage::Vertex, vs) ||
+                !_shaderCompiler->Compile(UI_SHADER_PATH, "PSUI", Shader::Stage::Pixel, ps))
+            {
+                Core::Logger::Log("[Pipeline] Failed compile UI shader.");
+                _uiFailed = true;
+                return nullptr;
+            }
+            static const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT,   0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+                { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,   0, 8,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            };
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = vs.View();
+            desc.PS = ps.View();
+            desc.InputLayout = { inputElements, _countof(inputElements) };
+            // 切り取りの四角 (シザー) は D3D12 ではいつも効く (命令ごとに RSSetScissorRects で変える)
+            desc.DepthStencilState.DepthEnable    = FALSE;
+            desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            desc.NumRenderTargets = 1;
+            desc.RTVFormats[0]    = DirectX12::SwapChain::FORMAT;
+            desc.DSVFormat        = DXGI_FORMAT_UNKNOWN;
+            ID3D12PipelineState* pso = createPso(fnv1a("EditorUI", 8, 0x0E1D10Eull), L"UI", desc);
+            if (!pso) { _uiFailed = true; return nullptr; }
+            _uiPso = pso;
             return pso;
         }
 

@@ -141,6 +141,11 @@ namespace Renderer
 		void SetLightingSettings(const RHI::LightingSettings& settings);
 		void SetShadowSettings(const RHI::ShadowSettings& settings);
 		void SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
+		// エディター (ED3) : シーンを描く大きさ / UI
+		bool     SetRenderSize(uint32_t width, uint32_t height);
+		void     SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
+		                       const RHI::UIDrawCommand* commands, uint32_t commandCount);
+		uint32_t CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba);
 		// GPU パーティクル (RHI に渡すだけ)
 		void SetParticleCapacity(uint32_t capacity);
 		void SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings& settings);
@@ -158,6 +163,8 @@ namespace Renderer
 
 		// プロファイラー (RHI の ImGui ウィンドウ) に値を表示する
 		void ReportProfilerValue(const char* name, double value);
+		void SetProfilerVisible(bool visible) { if (_rhi) _rhi->SetProfilerVisible(visible); }   // ED3 (エディターは最初は隠す)
+		bool IsProfilerVisible() const { return _rhi && _rhi->IsProfilerVisible(); }
 
 		bool IsInitialized()const { return _rhi && _rhi->IsInitialized(); }
 

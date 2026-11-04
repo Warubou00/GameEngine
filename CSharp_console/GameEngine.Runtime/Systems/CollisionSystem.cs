@@ -62,7 +62,8 @@ internal sealed unsafe partial class CollisionSystem
         initializeRigidbodies(world);
     }
 
-    public void Update(World world, IReadOnlyList<IFixedSystem> fixedSystems)
+    // simulate : 物理の時間を進めるか (エディターの編集中は false。衝突判定の形は作り、重なりは毎フレーム調べる。ED3)
+    public void Update(World world, IReadOnlyList<IFixedSystem> fixedSystems, bool simulate = true)
     {
         _settings.EventList.Clear();
         Time.FixedStepsThisFrame = 0;
@@ -194,7 +195,7 @@ internal sealed unsafe partial class CollisionSystem
 
         // 剛体 / ジョイント / FixedUpdate がある時は固定の刻みで進める (重なりも刻みごとに調べる)
         // 無い時は以前と同じく、毎フレーム重なりだけ調べる
-        var useFixedSteps = rigidbodies.Count > 0 || world.GetPool<Joint>().Count > 0 || fixedSystems.Count > 0;
+        var useFixedSteps = simulate && (rigidbodies.Count > 0 || world.GetPool<Joint>().Count > 0 || fixedSystems.Count > 0);
         if (useFixedSteps)
         {
             var steps = runFixedSteps(world, fixedSystems);

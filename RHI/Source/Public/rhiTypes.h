@@ -301,6 +301,31 @@ namespace RHI
 	static_assert(sizeof(DebugLineVertex) == 16, "DebugLineVertex must be 16 bytes (same as C#)");
 	static constexpr uint32_t MAX_DEBUG_LINE_VERTICES = 256 * 1024;
 
+	// ==============================================================
+	// UI (エディターの ImGui など。ED3)。全部描いた後に、画面 (スワップチェーン) へ一番上に描く
+	//   頂点 / インデックス / 描画の命令は ImGui の ImDrawVert / ImDrawIdx / ImDrawCmd と同じ考え方 (C# がまとめて渡す)
+	// ==============================================================
+	struct UIVertex
+	{
+		float    Position[2];    // 画面のピクセル
+		float    UV[2];
+		uint32_t Color;          // R8G8B8A8 (下位バイトが R)
+	};
+	static_assert(sizeof(UIVertex) == 20, "UIVertex must be 20 bytes (same as ImDrawVert / C#)");
+
+	struct UIDrawCommand
+	{
+		uint32_t IndexCount;
+		uint32_t IndexOffset;    // インデックスの何個目から
+		uint32_t VertexOffset;   // インデックスに足す頂点の番号
+		uint32_t Texture;        // CreateUITexture の番号 / UI_TEXTURE_VIEW = シーンの描画の結果
+		float    Clip[4];        // 切り取る四角 (左 / 上 / 右 / 下。ピクセル)
+	};
+	static_assert(sizeof(UIDrawCommand) == 32, "UIDrawCommand must be 32 bytes (same as C#)");
+
+	// シーンを描いたテクスチャ (SetRenderSize で大きさを決めた時。エディターのシーンビュー)
+	static constexpr uint32_t UI_TEXTURE_VIEW = 0xFFFFFFF0u;
+
 	struct ShadowSettings
 	{
 		uint32_t Enabled      = 0;
