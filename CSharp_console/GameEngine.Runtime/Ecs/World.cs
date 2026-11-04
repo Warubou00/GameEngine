@@ -20,6 +20,7 @@ public sealed class World
 {
     private int[]      _versions = new int[256];   // 番号ごとの世代 (生きている間の値)
     private bool[]     _alive    = new bool[256];
+    private bool[]     _inactive = new bool[256];   // 無効 (自分か親の EntityInfo.Active が false。ED2)
     private int        _nextId;
     private readonly Stack<int> _freeIds = new();
 
@@ -46,11 +47,13 @@ public sealed class World
             {
                 Array.Resize(ref _versions, _versions.Length * 2);
                 Array.Resize(ref _alive,    _alive.Length * 2);
+                Array.Resize(ref _inactive, _inactive.Length * 2);
             }
         }
 
         _versions[id]++;          // 使い回した番号は世代が上がる (古い Entity は IsAlive = false になる)
         _alive[id] = true;
+        _inactive[id] = false;
         EntityCount++;
         return new Entity(id, _versions[id]);
     }
@@ -110,6 +113,36 @@ public sealed class World
         !entity.IsNull && entity.Id < _nextId && _alive[entity.Id] && _versions[entity.Id] == entity.Version;
 
     // ---------------------------------------------------------------------
+    // 有効 / 無効 (ED2。Unity の activeInHierarchy / SetActive と同じ)
+    //   無効な物は、エンジンの System (描画 / 物理 / ライト / カメラ / 音 / パーティクル) も ForEach も飛ばす
+    //   自分の EntityInfo.Active が false か、親 (Transform.Parent を辿る) のどれかが無効なら無効
+    //   親から子への伝わりは TransformSystem が毎フレーム計算する (SetActive の自分の分はすぐ効く)
+    // ---------------------------------------------------------------------
+
+    /// <summary>有効か (自分と親が全部有効)。生きていなければ false</summary>
+    public bool IsActive(Entity entity) => IsAlive(entity) && !_inactive[entity.Id];
+
+    /// <summary>自分の有効 / 無効を変える (EntityInfo.Active。無ければ付ける)</summary>
+    public void SetActive(Entity entity, bool active)
+    {
+        ThrowIfDead(entity);
+        var infos = GetPool<EntityInfo>();
+        if (!infos.Has(entity.Id)) infos.Add(entity, new EntityInfo($"Entity {entity.Id}") { Active = active });
+        else infos.Get(entity.Id).Active = active;
+        SetActiveInHierarchy(entity.Id, active);
+    }
+
+    // 有効 / 無効が変わった回数 (描画などが「作り直す物があるか」を見るのに使う)
+    public int ActivityVersion { get; private set; }
+
+    internal void SetActiveInHierarchy(int id, bool active)
+    {
+        if (_inactive[id] != active) return;   // 変わっていない
+        _inactive[id] = !active;
+        ActivityVersion++;
+    }
+
+    // ---------------------------------------------------------------------
     // コンポーネント
     // ---------------------------------------------------------------------
 
@@ -165,6 +198,7 @@ public sealed class World
         var components = pool.Components;
         for (int i = 0; i < entities.Length; i++)
         {
+            if (_inactive[entities[i].Id]) continue;   // 無効な物は飛ばす (ED2)
             action(entities[i], ref components[i]);
         }
     }
@@ -177,7 +211,7 @@ public sealed class World
         for (int i = 0; i < entities.Length; i++)
         {
             var id = entities[i].Id;
-            if (!p1.Has(id) || !p2.Has(id)) continue;
+            if (!p1.Has(id) || !p2.Has(id) || _inactive[id]) continue;
             action(entities[i], ref p1.Get(id), ref p2.Get(id));
         }
     }
@@ -192,7 +226,7 @@ public sealed class World
         for (int i = 0; i < entities.Length; i++)
         {
             var id = entities[i].Id;
-            if (!p1.Has(id) || !p2.Has(id) || !p3.Has(id)) continue;
+            if (!p1.Has(id) || !p2.Has(id) || !p3.Has(id) || _inactive[id]) continue;
             action(entities[i], ref p1.Get(id), ref p2.Get(id), ref p3.Get(id));
         }
     }

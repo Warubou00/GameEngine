@@ -51,6 +51,21 @@ internal static class Showcase
             world.Add(entity, Collider.FromMesh(rockMesh));
         }
 
+        // ---------- 親子 (ED2) : 回る台の上の箱と、その周りを回る小さな箱 (親が回ると子も回る / 子のコライダーも付いて行く) ----------
+        var box = engine.Assets.LoadModel("../Model/obj/box.obj");
+        var pivot = world.CreateEntity("Hierarchy pivot");
+        world.Add(pivot, new Transform(new Vector3(-1.5f, 0.0f, -5.0f)) { Scale = new Vector3(0.6f, 0.05f, 0.6f) });
+        world.Add(pivot, new MeshRenderer(box));
+        world.Add(pivot, new Spin { DegreesPerSecond = 30.0f });
+        var arm = world.CreateEntity("Hierarchy child");
+        world.Add(arm, new Transform(new Vector3(0.0f, 1.0f, 0.0f)) { Parent = pivot, Scale = new Vector3(0.5f / 0.6f, 0.5f / 0.05f, 0.5f / 0.6f) });
+        world.Add(arm, new MeshRenderer(box));
+        var moon = world.CreateEntity("Hierarchy grandchild");
+        world.Add(moon, new Transform(new Vector3(2.5f, 1.0f, 0.0f)) { Parent = arm, Scale = new Vector3(0.3f) });
+        world.Add(moon, new MeshRenderer(box));
+        world.Add(moon, new Spin { DegreesPerSecond = 120.0f });
+        world.Add(moon, Collider.Box(Vector3.One, new Vector3(0, 1, 0)));
+
         // ---------- PMX のキャラクター (MMD の 1 単位 ≒ 8cm。身長 20 前後なので小さくして箱の横に立たせる) ----------
         stopwatch.Restart();
         var tomimi = engine.Assets.LoadModel("../Model/pmx/Sour式トミミ/Tomimi.pmx");

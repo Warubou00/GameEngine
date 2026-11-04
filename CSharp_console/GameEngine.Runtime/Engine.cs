@@ -378,6 +378,8 @@ public sealed class Engine : IDisposable
             _transformSystem.Update(World);
             _collisionSystem.Update(World, _fixedSystems);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
+            // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
+            if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
             _cameraSystem.Update(World);
             _renderSyncSystem.Update(World);
             _lightSystem.Update(World);
@@ -441,6 +443,12 @@ public sealed class Engine : IDisposable
         Console.WriteLine($"[Scene] Loaded {path} : {created.Count} entities{(warnings.Count > 0 ? $", {warnings.Count} warnings" : "")}, " +
                           $"{Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms");
         return created;
+    }
+
+    // ウィンドウを閉じる (Run が終わる)
+    public void Quit()
+    {
+        if (!_window.IsDisposed) _window.Close();
     }
 
     // GPU の処理 (描画 + 転送) が全て終わるまで待つ (読み込み時間の計測など)

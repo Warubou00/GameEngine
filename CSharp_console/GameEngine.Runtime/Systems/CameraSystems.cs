@@ -20,12 +20,12 @@ internal sealed class CameraSystem : ISystem
         for (int i = 0; i < entities.Length; i++)
         {
             ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
-            if (!found) continue;
+            if (!found || !world.IsActive(entities[i])) continue;   // 無効なカメラは使わない (ED2)
             ref var camera = ref cameras.Components[i];
 
             var desc = new NativeMethods.CameraDesc
             {
-                Position     = transform.Position,
+                Position     = transform.WorldPosition,   // 以前はローカル (Position)。親が無ければ同じ
                 Forward      = transform.Forward,
                 Up           = transform.Up,
                 FieldOfViewY = camera.FieldOfView * MathEx.Deg2Rad,

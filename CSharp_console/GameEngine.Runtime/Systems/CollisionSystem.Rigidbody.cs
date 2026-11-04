@@ -83,10 +83,11 @@ internal sealed unsafe partial class CollisionSystem
             rigid.DynamicsSent = true;
             if (motion != 0 && state.Rigid == 0)
             {
-                rigid.PrevPosition = rigid.CurPosition = rigid.WrittenPosition = transform.Position;
-                rigid.PrevRotation = rigid.CurRotation = rigid.WrittenRotation = transform.Rotation;
-                rb._position = transform.Position;
-                rb._rotation = transform.Rotation;
+                // 剛体の位置はワールドの値で持つ (親子 : ED2。以前はローカル = ワールドだった)
+                rigid.PrevPosition = rigid.CurPosition = rigid.WrittenPosition = transform.WorldPosition;
+                rigid.PrevRotation = rigid.CurRotation = rigid.WrittenRotation = transform.WorldRotation;
+                rb._position = transform.WorldPosition;
+                rb._rotation = transform.WorldRotation;
             }
             state.Rigid = motion;
         }
@@ -96,24 +97,37 @@ internal sealed unsafe partial class CollisionSystem
     // 剛体の Transform を自分で書き換えたか (物理が書いた値と違う)。戻り値 : 瞬間移動として送る
     private bool userMovedRigidbody(int id, ref BodyState state, ref Transform transform)
     {
+        // ワールドの値で比べる (親が動いた時も「動かされた」になる。親と一緒に動く : Unity と同じ)
         ref var rigid = ref rigidStateOf(id);
-        if (transform.Position == rigid.WrittenPosition && transform.Rotation == rigid.WrittenRotation) return false;
-        rigid.WrittenPosition = transform.Position;
-        rigid.WrittenRotation = transform.Rotation;
+        var worldPosition = transform.WorldPosition;
+        var worldRotation = transform.WorldRotation;
+        if (transform.Parent.IsNull)
+        {
+            if (worldPosition == rigid.WrittenPosition && worldRotation == rigid.WrittenRotation) return false;
+        }
+        else
+        {
+            // 親がある時は、書いた値を親から計算し直すので、浮動小数の誤差の分だけずれる。そのくらいは同じ位置とみなす
+            // (ぴったり比べると毎フレーム「動かされた」になり、瞬間移動し続けて落ちなかった)
+            if (Vector3.DistanceSquared(worldPosition, rigid.WrittenPosition) < 1e-8f &&
+                MathF.Abs(Quaternion.Dot(worldRotation, rigid.WrittenRotation)) > 1.0f - 1e-7f) return false;
+        }
+        rigid.WrittenPosition = worldPosition;
+        rigid.WrittenRotation = worldRotation;
         if (state.Rigid == (uint)RigidbodyType.Kinematic)
         {
             // キネマティック : 次の刻みでそこへ動く (途中の物を押す)。このフレームは Transform をそのまま使う
             _commandList.Add(new PhysicsNativeMethods.BodyCommand
             {
                 Handle = state.Body, Flags = PhysicsNativeMethods.CommandKinematicTarget,
-                TargetPosition = transform.Position, TargetRotation = transform.Rotation,
+                TargetPosition = worldPosition, TargetRotation = worldRotation,
             });
             rigid.UserDriven = true;
             return false;
         }
         // Dynamic : 瞬間移動 (速度はそのまま)。補間も今の位置から。眠っていれば C++ が起こす
-        rigid.PrevPosition = rigid.CurPosition = transform.Position;
-        rigid.PrevRotation = rigid.CurRotation = transform.Rotation;
+        rigid.PrevPosition = rigid.CurPosition = worldPosition;
+        rigid.PrevRotation = rigid.CurRotation = worldRotation;
         rigid.Sleeping = false;
         return true;
     }
@@ -141,6 +155,12 @@ internal sealed unsafe partial class CollisionSystem
             if (entity.Id >= _jointRecords.Length) Array.Resize(ref _jointRecords, Math.Max(_jointRecords.Length * 2, entity.Id + 1));
             ref var record = ref _jointRecords[entity.Id];
 
+            if (!world.IsActive(entity))
+            {
+                if (record.Active) PhysicsNativeMethods.Physics_DestroyJoint(record.Handle);
+                record = default;
+                continue;
+            }
             var bodyA = bodyHandleOf(world, joint.Body.IsNull ? entity : joint.Body);
             var bodyB = joint.ConnectedBody.IsNull ? PhysicsNativeMethods.InvalidHandle : bodyHandleOf(world, joint.ConnectedBody);
             var ready = bodyA != PhysicsNativeMethods.InvalidHandle && (joint.ConnectedBody.IsNull || bodyB != PhysicsNativeMethods.InvalidHandle);
@@ -286,10 +306,12 @@ internal sealed unsafe partial class CollisionSystem
             var rotation = rigid.Interpolate ? Quaternion.Slerp(rigid.PrevRotation, rigid.CurRotation, alpha) : rigid.CurRotation;
             rigid.WrittenPosition = position;
             rigid.WrittenRotation = rotation;
-            if (transform.Position == position && transform.Rotation == rotation) continue;
-            transform.Position = position;
-            transform.Rotation = rotation;
-            transform.UpdateMatrix();   // TransformSystem は先に動いたので、ここで行列を作り直す (描画へ送る印も立つ)
+            if (transform.WorldPosition == position && transform.WorldRotation == rotation) continue;
+            // 物理の位置はワールドの値。親があれば親から見た値に直して入れる (ED2。以前はそのまま入れていた)
+            var parent = transform.Parent;
+            var hasParent = !parent.IsNull && world.IsAlive(parent) && transforms.Has(parent.Id);
+            if (hasParent) transform.SetWorldPose(position, rotation, transforms.Get(parent.Id), true);
+            else           transform.SetWorldPose(position, rotation, transform, false);   // TransformSystem は先に動いたので、ここで行列を作り直す (描画へ送る印も立つ)
             TransformsWritten++;
         }
     }
@@ -308,14 +330,14 @@ internal sealed unsafe partial class CollisionSystem
             ref var joint = ref items[i];
             var bodyEntity = joint.Body.IsNull ? entities[i] : joint.Body;
             ref var a = ref transforms.TryGet(bodyEntity.Id, out var hasA);
-            if (!hasA) continue;
-            var pointA = a.Position + Vector3.Transform(joint.Anchor * a.Scale, a.Rotation);
+            if (!hasA || !world.IsActive(entities[i])) continue;
+            var pointA = a.WorldPosition + Vector3.Transform(joint.Anchor * a.WorldScale, a.WorldRotation);
             var pointB = joint.ConnectedAnchor;
             if (!joint.ConnectedBody.IsNull)
             {
                 ref var b = ref transforms.TryGet(joint.ConnectedBody.Id, out var hasB);
                 if (!hasB) continue;
-                pointB = b.Position + Vector3.Transform(joint.ConnectedAnchor * b.Scale, b.Rotation);
+                pointB = b.WorldPosition + Vector3.Transform(joint.ConnectedAnchor * b.WorldScale, b.WorldRotation);
             }
             var color = joint.IsBroken ? brokenColor : activeColor;
             DebugDraw.Line(pointA, pointB, color);

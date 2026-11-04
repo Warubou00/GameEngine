@@ -12,6 +12,9 @@ public struct MeshRenderer : IComponent
     internal uint Handle;    // C++ の描画オブジェクト (Created の時だけ有効)
     internal bool Created;
 
+    // C++ に描画オブジェクトがあるか (無効なエンティティ / 作る前は false)
+    public readonly bool IsCreated => Created;
+
     public MeshRenderer(Model model)
     {
         Model = model;

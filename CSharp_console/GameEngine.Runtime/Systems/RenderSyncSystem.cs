@@ -15,6 +15,7 @@ internal sealed unsafe class RenderSyncSystem : ISystem
     private readonly World _world;
     private readonly TransformSystem _transforms;
     private int _knownRenderers;   // 前のフレームの MeshRenderer の数 (増えていなければ「作る物」を探さない)
+    private int _knownActivity = -1;   // 前のフレームの World.ActivityVersion (変われば、無効になった物を消し、有効になった物を作る。ED2)
 
     // 毎フレームの割り当てを避けるため、配列は使い回す (足りなくなった時だけ大きくする)
     private uint[]      _handles  = new uint[1024];
@@ -47,14 +48,29 @@ internal sealed unsafe class RenderSyncSystem : ISystem
         // 何も増えず、どの行列も変わっていなければ何もしない (止まっているシーンでは全部の物を見て回らない)
         // ※MeshRenderer を外して付け直すと数が同じになるので、外された時も _knownRenderers を減らしている
         TransformsSentLastFrame = 0;
-        if (components.Length <= _knownRenderers && _transforms.ChangedCount == 0) return;
+        var activityChanged = world.ActivityVersion != _knownActivity;
+        if (components.Length <= _knownRenderers && _transforms.ChangedCount == 0 && !activityChanged) return;
+
+        // 0. 無効になった物の描画オブジェクトを消す (有効に戻ると 1 で作り直す。ED2)
+        if (activityChanged)
+        {
+            for (int i = 0; i < components.Length; i++)
+            {
+                ref var renderer = ref components[i];
+                if (!renderer.Created || world.IsActive(entities[i])) continue;
+                _pendingDestroy.Add(renderer.Handle);
+                renderer.Created = false;
+            }
+            flushDestroy();
+            _knownActivity = world.ActivityVersion;
+        }
 
         // 1. C++ 側に描画オブジェクトを作る (モデルごとにまとめて)
         foreach (var list in _pendingCreate.Values) list.Clear();
         var anyCreate = false;
         for (int i = 0; i < components.Length; i++)
         {
-            if (components[i].Created || !components[i].Model.IsValid) continue;
+            if (components[i].Created || !components[i].Model.IsValid || !world.IsActive(entities[i])) continue;
             var model = components[i].Model.Handle;
             if (!_pendingCreate.TryGetValue(model, out var list)) _pendingCreate[model] = list = new List<int>();
             list.Add(i);

@@ -40,6 +40,7 @@ namespace GameEngine_console;
 //   --save-scene <path>         : 起動時に作ったシーンを JSON に保存する (ED1)
 //   --load-scene <path>         : 起動時に作ったシーンを消して、JSON のシーンを読み込む (System は同じ引数の時と同じ物が入る)
 //   --serialize-test            : 全部のコンポーネントと見本のシーンで、保存 → 読み込み → 同じ値 を確かめて終わる
+//   --hierarchy-test            : 親子 / 有効・無効 を確かめて終わる (ED2)
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -241,6 +242,18 @@ internal static class Program
         else
         {
             Console.WriteLine($"[Sample] No sound file ({Path.GetFullPath(soundPath)}). Put a wav there or use --sound <path>.");
+        }
+
+        // ---------- 親子のテスト (ED2) : 何も無いシーンで、フレームを進めながら確かめて終わる ----------
+        if (args.Contains("--hierarchy-test"))
+        {
+            world.Clear();
+            var testCamera = world.CreateEntity("Camera");
+            world.Add(testCamera, Transform.LookingAt(new Vector3(0, 8, -20), Vector3.Zero));
+            world.Add(testCamera, new Camera());
+            engine.AddSystem(new HierarchyTest(engine, box));
+            engine.Run();
+            return;
         }
 
         // ---------- シーンの保存 / 読み込み (ED1) ----------
