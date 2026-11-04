@@ -1,27 +1,34 @@
-using System.Numerics;
+﻿using System.Numerics;
 using ImGuiNET;
 
 namespace GameEngine.Editor;
 
 // ==========================================================================
-// エディターの画面 (ED3)
-//   メニュー (シーンを開く / 保存) / Scene (シーンビュー。エディターのカメラで見る) / Hierarchy (親子のツリー) /
+// エディターの画面 (ED3 / ED4)
+//   メニュー (シーンを開く / 保存、元に戻す) / Scene (シーンビュー。エディターのカメラで見る) / Hierarchy (親子のツリー) /
 //   Inspector / Console (ログ) / Stats
-//   シーンは編集中は動かさない (engine.IsPlaying = false。再生は ED4)
 //   シーンビューの大きさでシーンを描く (Graphics.SetRenderSize)。窓の大きさを変えると描く大きさも変わる
+//   ED4 : シーンの編集
+//     - クリックで選ぶ (Picker) / 選んだ物の箱 / ギズモ (W 移動 / E 回転 / R 拡大縮小、ローカル・ワールド、スナップ)
+//     - 作る / 消す / 複製 (Ctrl+D) / 親を変える / コンポーネントを足す・外す / 値を変える → すべて元に戻せる (Ctrl+Z / Ctrl+Y)
+//     - 再生 / 一時停止 / 1 フレーム進める / 停止 (停止で再生前のシーンに戻す。再生前のシーンは JSON で覚えておく)
+//   編集中は engine.IsPlaying = false (ゲームの System / 物理 / 音を止める)
 // ==========================================================================
-internal sealed class EditorApp
+internal sealed partial class EditorApp
 {
     private readonly Engine       _engine;
     private readonly ImGuiBackend _imgui;
     private readonly Inspector    _inspector;
     private readonly ConsoleLog   _log;
+    private readonly UndoStack    _undo = new();
+    private readonly Picker       _picker;
+    private readonly Gizmo        _gizmo = new();
     private readonly string       _scenesDirectory;
     private World World => _engine.World;
 
-    private Entity  _selected;
     private Entity  _dragged;
     private string? _scenePath;
+    private (EditCommand? Top, int Revision) _savedState;
     private bool    _layoutBuilt;
     private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true;
     private bool    _resetLayout;
@@ -30,9 +37,19 @@ internal sealed class EditorApp
     private Vector3 _cameraPosition = new(0, 5, -10);
     private float   _yaw, _pitch = 20.0f;
     private float   _cameraSpeed = 8.0f;
+    private const float FieldOfView = 57.29578f;
     private bool    _sceneHovered;
+    private bool    _flying;
     private int     _frames;
     private double  _frameMs;
+
+    // 再生
+    private bool    _playing, _paused, _stepRequest, _stepping;
+    private string? _playSnapshot;
+    private bool    _gameView;   // シーンのカメラで見る (再生中の既定)
+
+    // 自動の確認 (--editor-test)
+    public Action<EditorApp>? FrameHook;
 
     public EditorApp(Engine engine, ImGuiBackend imgui, ConsoleLog log, string scenesDirectory)
     {
@@ -40,7 +57,8 @@ internal sealed class EditorApp
         _imgui  = imgui;
         _log    = log;
         _scenesDirectory = scenesDirectory;
-        _inspector = new Inspector(engine);
+        _inspector = new Inspector(engine, _undo);
+        _picker = new Picker(engine);
         engine.LateUpdate += update;
     }
 
@@ -48,18 +66,40 @@ internal sealed class EditorApp
         world.Has<EntityInfo>(entity) && !string.IsNullOrEmpty(world.Get<EntityInfo>(entity).Name) ? world.Get<EntityInfo>(entity).Name : $"Entity {entity.Id}";
 
     // ---------------------------------------------------------------------
+    // 選んでいる物 (元に戻す / 再生の停止で番号が変わるので、Id でも覚えておく)
+    // ---------------------------------------------------------------------
+
+    private Entity _selected;
+    private Guid   _selectedId;
+
+    public Entity Selected
+    {
+        get => _selected;
+        set
+        {
+            _selected   = World.IsAlive(value) ? value : Entity.Null;
+            _selectedId = _selected.IsNull ? Guid.Empty : EditorWorld.IdOf(World, _selected);
+        }
+    }
+
+    private void reselect() =>
+        _selected = _selectedId == Guid.Empty ? Entity.Null : SceneSerializer.FindEntity(World, _selectedId);
+
+    // ---------------------------------------------------------------------
     // シーンのファイル
     // ---------------------------------------------------------------------
 
     public void OpenScene(string path)
     {
+        if (_playing) stop();
         try
         {
             _engine.LoadScene(path);
             _scenePath = path;
-            _selected  = Entity.Null;
+            Selected   = Entity.Null;
+            _undo.Clear();
+            _savedState = _undo.State;
             focusSceneCamera();
-            _engine.Window.Text = $"GameEngine Editor - {Path.GetFileName(path)}";
         }
         catch (Exception ex)
         {
@@ -69,20 +109,31 @@ internal sealed class EditorApp
 
     private void newScene()
     {
+        if (_playing) stop();
         World.Clear();
         _scenePath = null;
-        _selected  = Entity.Null;
+        Selected   = Entity.Null;
+        _undo.Clear();
+        _savedState = _undo.State;
         var light = World.CreateEntity("Directional Light");
         World.Add(light, Transform.LookingAt(Vector3.Zero, new Vector3(0.4f, -1.0f, 0.6f)));
         World.Add(light, new DirectionalLight { Color = new Vector3(1.0f, 0.95f, 0.88f), Intensity = 1.6f });
         var camera = World.CreateEntity("Main Camera");
         World.Add(camera, Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero));
         World.Add(camera, new Camera());
-        _engine.Window.Text = "GameEngine Editor - (new scene)";
+    }
+
+    public void SaveSceneTo(string path)
+    {
+        _engine.SaveScene(path);
+        _scenePath = path;
+        _savedState = _undo.State;
+        Console.WriteLine($"[Editor] Saved {path}");
     }
 
     private void saveScene(bool saveAs)
     {
+        if (_playing) { Console.WriteLine("[Editor] Stop playing before saving."); return; }
         var path = _scenePath;
         if (saveAs || path == null)
         {
@@ -90,10 +141,7 @@ internal sealed class EditorApp
             if (dialog.ShowDialog(_engine.Window) != DialogResult.OK) return;
             path = dialog.FileName;
         }
-        _engine.SaveScene(path);
-        _scenePath = path;
-        _engine.Window.Text = $"GameEngine Editor - {Path.GetFileName(path)}";
-        Console.WriteLine($"[Editor] Saved {path}");
+        SaveSceneTo(path);
     }
 
     private void openSceneDialog()
@@ -101,6 +149,18 @@ internal sealed class EditorApp
         using var dialog = new OpenFileDialog { Filter = "Scene (*.scene.json)|*.scene.json|All files|*.*", InitialDirectory = _scenesDirectory };
         if (dialog.ShowDialog(_engine.Window) == DialogResult.OK) OpenScene(dialog.FileName);
     }
+
+    private void updateTitle()
+    {
+        var name = _scenePath != null ? Path.GetFileName(_scenePath) : "(new scene)";
+        var dirty = _undo.State != _savedState ? "*" : "";
+        var state = _playing ? (_paused ? " [Paused]" : " [Playing]") : "";
+        var title = $"GameEngine Editor - {name}{dirty}{state}";
+        if (title == _title) return;   // Window.Text を読むと毎フレーム Win32 を呼ぶので、自分で覚えた値と比べる
+        _title = title;
+        _engine.Window.Text = title;
+    }
+    private string _title = "";
 
     // シーンの最初のカメラの位置 / 向きから、エディターのカメラを始める
     private void focusSceneCamera()
@@ -123,6 +183,9 @@ internal sealed class EditorApp
 
     private void update()
     {
+        if (_stepping) { _engine.IsPlaying = false; _stepping = false; }   // 1 フレーム進めた後は止める
+        if (!World.IsAlive(_selected)) _selected = Entity.Null;
+
         _frameMs = _frameMs * 0.95 + Time.DeltaTime * 1000.0 * 0.05;
         _imgui.NewFrame();
         drawMenu();
@@ -135,8 +198,14 @@ internal sealed class EditorApp
         if (_showConsole)   _log.Draw(ref _showConsole);
         if (_showStats)     drawStats();
 
+        handleShortcuts();
         updateCamera();
+        FrameHook?.Invoke(this);
+        _undo.EndFrame(ImGui.IsAnyItemActive() || _gizmo.Dragging);
+        updateTitle();
         _imgui.Render();
+
+        if (_stepRequest) { _engine.IsPlaying = true; _stepping = true; _stepRequest = false; }
         _frames++;
     }
 
@@ -169,16 +238,28 @@ internal sealed class EditorApp
         {
             if (ImGui.MenuItem("New Scene")) newScene();
             if (ImGui.MenuItem("Open Scene...", "Ctrl+O")) openSceneDialog();
-            if (ImGui.MenuItem("Save Scene", "Ctrl+S")) saveScene(false);
-            if (ImGui.MenuItem("Save Scene As...")) saveScene(true);
+            if (ImGui.MenuItem("Save Scene", "Ctrl+S", false, !_playing)) saveScene(false);
+            if (ImGui.MenuItem("Save Scene As...", null, false, !_playing)) saveScene(true);
             ImGui.Separator();
             if (ImGui.MenuItem("Exit")) _engine.Quit();
             ImGui.EndMenu();
         }
+        if (ImGui.BeginMenu("Edit"))
+        {
+            if (ImGui.MenuItem(_undo.UndoName is { } u ? $"Undo {u}" : "Undo", "Ctrl+Z", false, _undo.CanUndo)) Undo();
+            if (ImGui.MenuItem(_undo.RedoName is { } r ? $"Redo {r}" : "Redo", "Ctrl+Y", false, _undo.CanRedo)) Redo();
+            ImGui.Separator();
+            if (ImGui.MenuItem("Duplicate", "Ctrl+D", false, World.IsAlive(_selected))) Duplicate();
+            if (ImGui.MenuItem("Delete", "Del", false, World.IsAlive(_selected))) DeleteSelected();
+            ImGui.Separator();
+            if (ImGui.MenuItem(_playing ? "Stop" : "Play", "Ctrl+P")) TogglePlay();
+            if (ImGui.MenuItem("Pause", null, _paused, _playing)) TogglePause();
+            ImGui.EndMenu();
+        }
         if (ImGui.BeginMenu("GameObject"))
         {
-            if (ImGui.MenuItem("Create Empty")) createEntity(Entity.Null);
-            if (ImGui.MenuItem("Delete", null, false, World.IsAlive(_selected))) deleteSelected();
+            if (ImGui.MenuItem("Create Empty")) CreateEntity(Entity.Null);
+            if (ImGui.MenuItem("Create Empty Child", null, false, World.IsAlive(_selected))) CreateEntity(_selected);
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu("View"))
@@ -196,44 +277,172 @@ internal sealed class EditorApp
             if (ImGui.MenuItem("Reset Layout")) _resetLayout = true;
             ImGui.EndMenu();
         }
-        ImGui.TextDisabled(_scenePath != null ? $"   {Path.GetFileName(_scenePath)}" : "   (new scene)");
+        ImGui.TextDisabled(_scenePath != null ? $"   {Path.GetFileName(_scenePath)}{(_undo.State != _savedState ? " *" : "")}" : "   (new scene)");
         ImGui.EndMainMenuBar();
+    }
 
-        // ショートカット (文字の入力中でない時)
+    // ショートカット (文字の入力中でない時。カメラを飛ばしている間の W / E / R は移動に使う)
+    private void handleShortcuts()
+    {
         var io = ImGui.GetIO();
-        if (!io.WantTextInput && io.KeyCtrl)
+        if (io.WantTextInput) return;
+        if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);
             if (ImGui.IsKeyPressed(ImGuiKey.O)) openSceneDialog();
+            if (ImGui.IsKeyPressed(ImGuiKey.Z)) { if (io.KeyShift) Redo(); else Undo(); }
+            if (ImGui.IsKeyPressed(ImGuiKey.Y)) Redo();
+            if (ImGui.IsKeyPressed(ImGuiKey.D)) Duplicate();
+            if (ImGui.IsKeyPressed(ImGuiKey.P)) TogglePlay();
+            return;
         }
-        if (!io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected) && !_sceneHovered) deleteSelected();
+        if (ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected)) DeleteSelected();
+        if (_flying) return;
+        if (ImGui.IsKeyPressed(ImGuiKey.W)) _gizmo.Mode = GizmoMode.Translate;
+        if (ImGui.IsKeyPressed(ImGuiKey.E)) _gizmo.Mode = GizmoMode.Rotate;
+        if (ImGui.IsKeyPressed(ImGuiKey.R)) _gizmo.Mode = GizmoMode.Scale;
+        if (ImGui.IsKeyPressed(ImGuiKey.F) && World.IsAlive(_selected)) FocusSelected();
     }
 
     // ---------------------------------------------------------------------
     // Scene (シーンビュー)
     // ---------------------------------------------------------------------
 
+    private Quaternion cameraRotation => Quaternion.CreateFromYawPitchRoll(_yaw * MathEx.Deg2Rad, _pitch * MathEx.Deg2Rad, 0.0f);
+
     private void drawScene()
     {
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
         if (ImGui.Begin("Scene"))
         {
+            ImGui.PopStyleVar();
+            drawToolbar();
             var size = ImGui.GetContentRegionAvail();
             var width  = Math.Max(1, (int)size.X);
             var height = Math.Max(1, (int)size.Y);
             _engine.Graphics.SetRenderSize(width, height);   // 変わった時だけ C++ が作り直す
             ImGui.Image((IntPtr)GraphicsSettings.ViewTexture, new Vector2(width, height));
             _sceneHovered = ImGui.IsItemHovered();
-            // 操作の説明 (左上)
             var min = ImGui.GetItemRectMin();
-            ImGui.GetWindowDrawList().AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Right drag : look / WASD QE : move / Shift : fast / Wheel : speed");
+            var draw = ImGui.GetWindowDrawList();
+            if (_playing) draw.AddRect(min, min + new Vector2(width, height), _paused ? 0xFF20B0FFu : 0xFF3080FFu, 0, ImDrawFlags.None, 3.0f);   // 再生中は枠の色
+
+            if (!_gameView)
+            {
+                var camera = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, min, new Vector2(width, height));
+                drawSelection(camera, draw);
+                updateGizmo(camera, draw);
+                // クリックで選ぶ (ギズモを掴んだ時 / カメラを回している時は選ばない)
+                if (_sceneHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_gizmo.Dragging && !_flying)
+                {
+                    var mouse = ImGui.GetIO().MousePos;
+                    Selected = _picker.Pick(_cameraPosition, camera.RayDirection(mouse), out _);
+                }
+                draw.AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Click : select / Right drag : look / WASD QE : move / W E R : gizmo / F : focus");
+            }
+            else
+            {
+                draw.AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Game camera");
+            }
         }
         else
         {
+            ImGui.PopStyleVar();
             _sceneHovered = false;
         }
         ImGui.End();
-        ImGui.PopStyleVar();
+    }
+
+    private void drawToolbar()
+    {
+        ImGui.SetCursorPos(ImGui.GetCursorPos() + new Vector2(6, 4));
+        toolButton("Move", _gizmo.Mode == GizmoMode.Translate, () => _gizmo.Mode = GizmoMode.Translate);
+        toolButton("Rotate", _gizmo.Mode == GizmoMode.Rotate, () => _gizmo.Mode = GizmoMode.Rotate);
+        toolButton("Scale", _gizmo.Mode == GizmoMode.Scale, () => _gizmo.Mode = GizmoMode.Scale);
+        ImGui.SameLine(0, 14);
+        toolButton(_gizmo.Local ? "Local" : "World", false, () => _gizmo.Local = !_gizmo.Local);
+        toolButton("Snap", _gizmo.Snap, () => _gizmo.Snap = !_gizmo.Snap);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Move {_gizmo.TranslateSnap} m / Rotate {_gizmo.RotateSnap} deg / Scale {_gizmo.ScaleSnap} (hold Ctrl while dragging also snaps)");
+
+        // 再生のボタンは真ん中に
+        var center = ImGui.GetWindowWidth() * 0.5f - 90.0f;
+        ImGui.SameLine(Math.Max(center, ImGui.GetCursorPosX() + 14));
+        toolButton(_playing ? "Stop" : "Play", _playing, TogglePlay);
+        toolButton("Pause", _paused, TogglePause);
+        toolButton("Step", false, Step);
+        ImGui.SameLine(0, 14);
+        toolButton(_gameView ? "Game Camera" : "Editor Camera", _gameView, () => _gameView = !_gameView);
+        ImGui.NewLine();   // 最後のボタンの SameLine を終わらせる (シーンの画像は次の行)
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 2);
+    }
+
+    private static void toolButton(string label, bool selected, Action onClick)
+    {
+        if (selected) ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetColorU32(ImGuiCol.ButtonActive));
+        if (ImGui.Button(label)) onClick();
+        if (selected) ImGui.PopStyleColor();
+        ImGui.SameLine();
+    }
+
+    // 選んだ物の箱 (モデルの形の箱をワールドへ移して、12 本の線で描く)
+    private void drawSelection(SceneCamera camera, ImDrawListPtr draw)
+    {
+        if (!World.IsAlive(_selected) || !World.Has<MeshRenderer>(_selected) || !World.Has<Transform>(_selected)) return;
+        if (!_picker.TryGetBounds(World.Get<MeshRenderer>(_selected).Model, out var min, out var max)) return;
+        var matrix = Hierarchy.GetWorldMatrix(World, _selected);
+        Span<Vector2> points = stackalloc Vector2[8];
+        for (int i = 0; i < 8; i++)
+        {
+            var corner = new Vector3((i & 1) != 0 ? max.X : min.X, (i & 2) != 0 ? max.Y : min.Y, (i & 4) != 0 ? max.Z : min.Z);
+            if (!camera.Project(Vector3.Transform(corner, matrix), out points[i])) return;
+        }
+        const uint color = 0xFF30A0FF;   // 橙
+        for (int i = 0; i < 8; i++)
+        {
+            for (int bit = 1; bit < 8; bit <<= 1)
+            {
+                if ((i & bit) == 0) draw.AddLine(points[i], points[i | bit], color, 1.5f);
+            }
+        }
+    }
+
+    private void updateGizmo(SceneCamera camera, ImDrawListPtr draw)
+    {
+        if (!World.IsAlive(_selected) || !World.Has<Transform>(_selected)) return;
+        if (_gizmo.Update(camera, draw, World, _selected, _sceneHovered && !_flying, out var transform))
+        {
+            ref var t = ref World.Get<Transform>(_selected);
+            if (t.Position == transform.Position && t.Rotation == transform.Rotation && t.Scale == transform.Scale) return;
+            WriteTransform(_selected, transform.Position, transform.Rotation, transform.Scale);
+        }
+    }
+
+    // Transform の位置 / 回転 / 大きさを変えて、元に戻す記録を積む (ドラッグ中は 1 つにまとめる)
+    public void WriteTransform(Entity entity, Vector3 position, Quaternion rotation, Vector3 scale)
+    {
+        var id = EditorWorld.IdOf(World, entity);
+        var before = SceneSerializer.SaveComponent(World, entity, typeof(Transform));
+        ref var t = ref World.Get<Transform>(entity);
+        t.Position = position;
+        t.Rotation = rotation;
+        t.Scale    = scale;
+        t.MarkDirty();
+        _undo.Record(new ComponentEdit(id, typeof(Transform), before, SceneSerializer.SaveComponent(World, entity, typeof(Transform))), (id, typeof(Transform)));
+    }
+
+    // 選んだ物が画面に収まる所へカメラを動かす
+    public void FocusSelected()
+    {
+        var matrix = Hierarchy.GetWorldMatrix(World, _selected);
+        var center = matrix.Translation;
+        var radius = 1.0f;
+        if (World.Has<MeshRenderer>(_selected) && _picker.TryGetBounds(World.Get<MeshRenderer>(_selected).Model, out var min, out var max))
+        {
+            center = Vector3.Transform((min + max) * 0.5f, matrix);
+            radius = Math.Max((Vector3.TransformNormal(max - min, matrix)).Length() * 0.5f, 0.1f);
+        }
+        var forward = Vector3.Transform(Vector3.UnitZ, cameraRotation);
+        _cameraPosition = center - forward * (radius / MathF.Tan(FieldOfView * MathEx.Deg2Rad * 0.5f) * 1.3f);
     }
 
     // エディターのカメラ : シーンビューの上で右ボタンを押している間だけ動く (FreeCamera と同じ操作)
@@ -248,7 +457,7 @@ internal sealed class EditorApp
             _yaw   += delta.X * 0.2f;
             _pitch  = Math.Clamp(_pitch + delta.Y * 0.2f, -89.0f, 89.0f);
         }
-        var rotation = Quaternion.CreateFromYawPitchRoll(_yaw * MathEx.Deg2Rad, _pitch * MathEx.Deg2Rad, 0.0f);
+        var rotation = cameraRotation;
         if (flying)
         {
             var move = Vector3.Zero;
@@ -261,12 +470,11 @@ internal sealed class EditorApp
             var speed = _cameraSpeed * (Input.GetKey(Keys.ShiftKey) ? 4.0f : 1.0f) * Time.DeltaTime;
             _cameraPosition += (Vector3.Transform(Vector3.UnitX, rotation) * move.X + Vector3.UnitY * move.Y + Vector3.Transform(Vector3.UnitZ, rotation) * move.Z) * speed;
         }
-        _engine.Graphics.CameraOverride = new CameraOverride
+        _engine.Graphics.CameraOverride = _gameView ? null : new CameraOverride
         {
-            Position = _cameraPosition, Rotation = rotation, FieldOfView = 57.29578f, NearClip = 0.1f, FarClip = 10000.0f,
+            Position = _cameraPosition, Rotation = rotation, FieldOfView = FieldOfView, NearClip = 0.1f, FarClip = 10000.0f,
         };
     }
-    private bool _flying;
 
     // ---------------------------------------------------------------------
     // Hierarchy (親子のツリー。ドラッグで親を変える / 右クリックで作る・消す)
@@ -279,7 +487,7 @@ internal sealed class EditorApp
     {
         if (ImGui.Begin("Hierarchy", ref _showHierarchy))
         {
-            if (ImGui.Button("+ Create")) createEntity(Entity.Null);
+            if (ImGui.Button("+ Create")) CreateEntity(Entity.Null);
             ImGui.SameLine();
             ImGui.TextDisabled($"{World.EntityCount} entities");
             ImGui.Separator();
@@ -301,10 +509,10 @@ internal sealed class EditorApp
             ImGui.Dummy(new Vector2(-1, Math.Max(20.0f, ImGui.GetContentRegionAvail().Y)));
             if (ImGui.BeginDragDropTarget())
             {
-                if (acceptEntity()) Hierarchy.SetParent(World, _dragged, Entity.Null);
+                if (acceptEntity()) SetParent(_dragged, Entity.Null);
                 ImGui.EndDragDropTarget();
             }
-            if (ImGui.IsItemClicked()) _selected = Entity.Null;
+            if (ImGui.IsItemClicked()) Selected = Entity.Null;
             ImGui.EndChild();
         }
         ImGui.End();
@@ -320,7 +528,8 @@ internal sealed class EditorApp
         if (inactive) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
         var open = ImGui.TreeNodeEx($"{NameOf(World, entity)}##{entity.Id}", flags);
         if (inactive) ImGui.PopStyleColor();
-        if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) _selected = entity;
+        if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) Selected = entity;
+        if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) { Selected = entity; FocusSelected(); }
 
         // ドラッグで親を変える
         if (ImGui.BeginDragDropSource())
@@ -333,19 +542,15 @@ internal sealed class EditorApp
         }
         if (ImGui.BeginDragDropTarget())
         {
-            if (acceptEntity() && _dragged != entity)
-            {
-                if (!World.Has<Transform>(_dragged)) World.Add(_dragged, new Transform());
-                if (!World.Has<Transform>(entity))   World.Add(entity, new Transform());
-                if (!Hierarchy.SetParent(World, _dragged, entity)) Console.WriteLine("[Editor] Cannot make a cycle in the hierarchy.");
-            }
+            if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
             ImGui.EndDragDropTarget();
         }
         if (ImGui.BeginPopupContextItem())
         {
-            _selected = entity;
-            if (ImGui.MenuItem("Create Child")) createEntity(entity);
-            if (ImGui.MenuItem("Delete")) deleteSelected();
+            Selected = entity;
+            if (ImGui.MenuItem("Create Child")) CreateEntity(entity);
+            if (ImGui.MenuItem("Duplicate")) Duplicate();
+            if (ImGui.MenuItem("Delete")) DeleteSelected();
             ImGui.EndPopup();
         }
         if (open)
@@ -359,20 +564,6 @@ internal sealed class EditorApp
     {
         var payload = ImGui.AcceptDragDropPayload("ENTITY");
         return payload.NativePtr != null;
-    }
-
-    private void createEntity(Entity parent)
-    {
-        var entity = World.CreateEntity("Entity");
-        World.Add(entity, new Transform { Parent = World.IsAlive(parent) && World.Has<Transform>(parent) ? parent : Entity.Null });
-        _selected = entity;
-    }
-
-    private void deleteSelected()
-    {
-        if (!World.IsAlive(_selected)) return;
-        Hierarchy.DestroyWithChildren(World, _selected);
-        _selected = Entity.Null;
     }
 
     // ---------------------------------------------------------------------
@@ -395,6 +586,7 @@ internal sealed class EditorApp
             ImGui.Text($"Scene view {rw} x {rh}");
             ImGui.Text($"Entities {World.EntityCount}");
             ImGui.Text($"Physics bodies {_engine.Physics.Bodies}, rigid {_engine.Physics.RigidBodies}");
+            ImGui.Text($"Undo {_undo.Count}{(_undo.UndoName is { } name ? $" (last : {name})" : "")}");
             ImGui.TextDisabled("Detailed GPU / CPU timings : View > Profiler (F1)");
         }
         ImGui.End();
