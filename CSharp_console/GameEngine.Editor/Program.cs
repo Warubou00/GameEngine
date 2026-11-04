@@ -1,8 +1,8 @@
-namespace GameEngine.Editor;
+﻿namespace GameEngine.Editor;
 
 // ==========================================================================
 // エディター (ED3)
-//   GameEngine.Editor.exe [--scene <path>]
+//   GameEngine.Editor.exe [--scene <path>] [--editor-test]
 //     既定は CSharp_console/Scenes/showcase.scene.json を開く (無ければ空のシーン)
 //   アセットの置き場 : 今は見本 (GameEngine_console) の出力フォルダを作業フォルダにして、../Model を読む
 //   (Assets フォルダは ED5)
@@ -13,7 +13,7 @@ internal static class Program
     public static void Main(string[] args)
     {
         var options = new Dictionary<string, string>();
-        for (int i = 0; i + 1 < args.Length; i++) if (args[i].StartsWith("--")) options[args[i]] = args[++i];
+        for (int i = 0; i + 1 < args.Length; i++) if (args[i].StartsWith("--") && !args[i + 1].StartsWith("--")) options[args[i]] = args[++i];
 
         // リポジトリのルート (GameEngine.sln のあるフォルダ) を探す
         var exeDirectory = AppContext.BaseDirectory;
@@ -41,8 +41,13 @@ internal static class Program
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
 
+        // 再生中に動かすゲームの System (見本の物。ED7 でゲームの DLL から自動で登録する)。編集中は Engine が止めている
+        engine.AddSystem(new GameEngine_console.SpinSystem());
+        engine.AddSystem(new GameEngine_console.OrbitMoverSystem());
+
         using var imgui = new ImGuiBackend(engine, Path.Combine(exeDirectory, "imgui.ini"));
         var editor = new EditorApp(engine, imgui, log, scenes);
+        if (args.Contains("--editor-test")) editor.FrameHook = new EditorTest(editor).Frame;   // 自動の確認 (ED4)
         var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");

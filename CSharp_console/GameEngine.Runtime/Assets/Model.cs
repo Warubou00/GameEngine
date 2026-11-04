@@ -1,4 +1,4 @@
-using GameEngine.Native;
+﻿using GameEngine.Native;
 
 namespace GameEngine;
 
@@ -61,6 +61,25 @@ public sealed class AssetManager
         var sound = new Sound(handle, length, path);
         _sounds.Add(path, sound);
         return sound;
+    }
+
+    /// <summary>
+    /// モデルの形 (位置 xyz の並びと三角形のインデックス) を写す (エディターのクリックで選ぶ時の当たり。ED4)
+    /// 毎回 C++ から写すので、使う側で覚えておくこと。形が無ければ false
+    /// </summary>
+    public unsafe bool GetModelGeometry(Model model, out float[] positions, out uint[] indices)
+    {
+        positions = Array.Empty<float>();
+        indices   = Array.Empty<uint>();
+        if (!model.IsValid || !NativeMethods.Renderer_GetModelGeometry(model.Handle, null, 0, null, 0, out var vertexCount, out var indexCount) || indexCount < 3) return false;
+        positions = new float[vertexCount * 3];
+        indices   = new uint[indexCount];
+        fixed (float* p = positions)
+        fixed (uint* i = indices)
+        {
+            NativeMethods.Renderer_GetModelGeometry(model.Handle, p, vertexCount, i, indexCount, out _, out _);
+        }
+        return true;
     }
 
     /// <summary>

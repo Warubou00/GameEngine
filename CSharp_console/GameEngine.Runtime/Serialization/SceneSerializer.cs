@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
@@ -32,18 +32,29 @@ public static class SceneSerializer
         internal readonly Dictionary<Entity, Guid> Ids = new();
         public World World { get; }
         internal WriteContext(World world) => World = world;
-        public Guid? IdOf(Entity entity) => Ids.TryGetValue(entity, out var id) ? id : null;
+        // 表に無い物は World から引く (コンポーネント 1 つだけを書く時に、全部の物の表を作らないため。ED4)
+        public Guid? IdOf(Entity entity)
+        {
+            if (Ids.TryGetValue(entity, out var id)) return id;
+            if (!World.IsAlive(entity)) return null;
+            if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo($"Entity {entity.Id}"));
+            ref var info = ref World.Get<EntityInfo>(entity);
+            if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
+            return Ids[entity] = info.Id;
+        }
     }
 
     // 読む時 : Id → エンティティ / アセット
     public sealed class ReadContext
     {
         internal readonly Dictionary<Guid, Entity> Entities = new();
+        internal Dictionary<Guid, Entity>? Existing;   // ファイルに無い Id は、World に今ある物から探す (一部だけを書いた JSON。ED4)
         public World         World  { get; }
         public AssetManager? Assets { get; }
         public List<string>  Warnings { get; } = new();
         internal ReadContext(World world, AssetManager? assets) { World = world; Assets = assets; }
-        public Entity EntityOf(Guid id) => Entities.TryGetValue(id, out var e) ? e : Entity.Null;
+        public Entity EntityOf(Guid id) =>
+            Entities.TryGetValue(id, out var e) ? e : Existing != null && Existing.TryGetValue(id, out var found) && World.IsAlive(found) ? found : Entity.Null;
     }
 
     private sealed record Converter(Action<Utf8JsonWriter, object, WriteContext> Write, Func<JsonElement, ReadContext, object?> Read);
@@ -85,18 +96,16 @@ public static class SceneSerializer
     // ---------------------------------------------------------------------
 
     /// <summary>World の全部のエンティティを JSON にする (EntityInfo が無い物には付ける)</summary>
-    public static string Save(World world)
+    public static string Save(World world) => Save(world, world.Entities.ToList());
+
+    /// <summary>
+    /// 一部のエンティティだけを JSON にする (エディターの元に戻す / 複製。ED4)
+    /// 外の物への参照も Id で書く (読む時に World に今ある物から探す)
+    /// </summary>
+    public static string Save(World world, IReadOnlyList<Entity> entities)
     {
-        var context = new WriteContext(world);
-        var entities = world.Entities.ToList();
+        var context = assignIds(world);
         var infos = world.GetPool<EntityInfo>();
-        foreach (var entity in entities)
-        {
-            if (!infos.Has(entity.Id)) world.Add(entity, new EntityInfo($"Entity {entity.Id}"));
-            ref var info = ref infos.Get(entity.Id);
-            if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
-            context.Ids[entity] = info.Id;
-        }
 
         // 型の名前の順 (ファイルの差分が見やすいように、毎回同じ順で書く)
         var pools = world.Pools
@@ -143,6 +152,79 @@ public static class SceneSerializer
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
+    // 全部のエンティティに Id を付けて、エンティティ → Id の表を作る
+    private static WriteContext assignIds(World world)
+    {
+        var context = new WriteContext(world);
+        var infos = world.GetPool<EntityInfo>();
+        foreach (var entity in world.Entities)
+        {
+            if (!infos.Has(entity.Id)) world.Add(entity, new EntityInfo($"Entity {entity.Id}"));
+            ref var info = ref infos.Get(entity.Id);
+            if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
+            context.Ids[entity] = info.Id;
+        }
+        return context;
+    }
+
+    /// <summary>Id (EntityInfo.Id) → 今のエンティティ (無ければ Entity.Null)</summary>
+    public static Entity FindEntity(World world, Guid id)
+    {
+        var infos = world.GetPool<EntityInfo>();
+        var entities = infos.Entities;
+        var components = infos.Components;
+        for (int i = 0; i < components.Length; i++) if (components[i].Id == id) return entities[i];
+        return Entity.Null;
+    }
+
+    /// <summary>コンポーネント 1 つの保存する値を JSON にする (エディターの元に戻す。ED4)</summary>
+    public static string SaveComponent(World world, Entity entity, Type componentType)
+    {
+        var context = new WriteContext(world);
+        var type = ComponentRegistry.Get(componentType);
+        var boxed = world.GetPool(componentType).GetBoxed(entity.Id);
+        using var stream = new MemoryStream();
+        using (var w = new Utf8JsonWriter(stream))
+        {
+            w.WriteStartObject();
+            foreach (var field in type.Fields)
+            {
+                w.WritePropertyName(field.Name);
+                writeValue(w, field.FieldType, field.GetValue(boxed), context);
+            }
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// SaveComponent の JSON を、箱に入れたコンポーネントへ書き戻す (保存しないフィールド (C++ のハンドルなど) はそのまま残る)
+    /// 箱が null なら型の既定の値から作る。戻り値 = 書いた箱
+    /// </summary>
+    public static object LoadComponent(World world, Type componentType, string json, object? boxed, AssetManager? assets)
+    {
+        var type = ComponentRegistry.Get(componentType);
+        boxed ??= type.CreateDefault();
+        var context = new ReadContext(world, assets) { Existing = existingIds(world) };
+        using var document = JsonDocument.Parse(json);
+        foreach (var field in type.Fields)
+        {
+            if (!document.RootElement.TryGetProperty(field.Name, out var value)) continue;
+            field.SetValue(boxed, readValue(value, field.FieldType, context));
+        }
+        return boxed;
+    }
+
+    private static Dictionary<Guid, Entity> existingIds(World world)
+    {
+        var map = new Dictionary<Guid, Entity>();
+        var infos = world.GetPool<EntityInfo>();
+        var entities = infos.Entities;
+        var components = infos.Components;
+        for (int i = 0; i < components.Length; i++) map.TryAdd(components[i].Id, entities[i]);
+        return map;
+    }
+
     public static void SaveFile(World world, string path)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -160,7 +242,7 @@ public static class SceneSerializer
     /// </summary>
     public static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings = null)
     {
-        var context = new ReadContext(world, assets);
+        var context = new ReadContext(world, assets) { Existing = existingIds(world) };
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
         var root = document.RootElement;
         if (root.TryGetProperty("format", out var format) && format.GetString() != Format) throw new InvalidDataException($"Not a scene file (format {format.GetString()}).");
@@ -168,14 +250,13 @@ public static class SceneSerializer
         if (!root.TryGetProperty("entities", out var entities)) return created;
 
         // 1. エンティティを全部作る (参照が後の物を指していても引けるように)
-        var existing = new HashSet<Guid>();
-        foreach (var e in world.Entities) if (world.Has<EntityInfo>(e)) existing.Add(world.Get<EntityInfo>(e).Id);
+        var existing = context.Existing!;
         foreach (var element in entities.EnumerateArray())
         {
             var fileId = element.TryGetProperty("id", out var idElement) && Guid.TryParse(idElement.GetString(), out var parsed) ? parsed : Guid.NewGuid();
             var info = new EntityInfo
             {
-                Id     = existing.Contains(fileId) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
+                Id     = existing.ContainsKey(fileId) && world.IsAlive(existing[fileId]) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
                 Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                 Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
             };

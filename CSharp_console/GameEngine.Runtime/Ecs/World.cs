@@ -1,4 +1,4 @@
-namespace GameEngine;
+﻿namespace GameEngine;
 
 // ForEach に渡す処理 (コンポーネントは ref で受け取るので、その場で書き換えられる)
 public delegate void ForEachAction<T1>(Entity entity, ref T1 c1);
@@ -92,7 +92,10 @@ public sealed class World
     // 全てのエンティティを削除する (シーンを読み込み直す前など)
     public void Clear()
     {
-        foreach (var entity in Entities.ToList()) DestroyEntity(entity);
+        // 後ろから消す (空いた番号は積み上げなので、次に作る物が 0 番から順に使う。
+        //  以前は前から消していたので、読み直したシーンの番号が逆順になり、階層の並びが逆になった)
+        var entities = Entities.ToList();
+        for (int i = entities.Count - 1; i >= 0; i--) DestroyEntity(entities[i]);
     }
 
     // エンティティと、その全てのコンポーネントを削除する

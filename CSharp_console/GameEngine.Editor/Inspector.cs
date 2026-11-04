@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Numerics;
 using System.Reflection;
 using ImGuiNET;
@@ -11,16 +11,31 @@ namespace GameEngine.Editor;
 //     入っていれば色) / 回転 (オイラー角の度) / エンティティ (一覧から選ぶ) / アセット (パス。Enter で読み込む) / 入れ子の struct / 配列
 //   - 変えた値はその場でコンポーネントに書き戻す (次のフレームから効く)
 //   - コンポーネントを足す (IComponent の一覧) / 外す (見出しの右クリック)
+//   - 変更はすべて元に戻せる (ED4。UndoStack に「前の値 → 後の値」を積む。ドラッグ中の変更は 1 つにまとめる)
 //   ※ユーザーの独自のインスペクターは ED7
 // ==========================================================================
 internal sealed class Inspector
 {
     private readonly Engine _engine;
+    private readonly UndoStack _undo;
     private World World => _engine.World;
     private string _addFilter = "";
     private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)
 
-    public Inspector(Engine engine) => _engine = engine;
+    public Inspector(Engine engine, UndoStack undo)
+    {
+        _engine = engine;
+        _undo   = undo;
+    }
+
+    // コンポーネントの値を書いて、元に戻す記録を積む (before は書く前に取っておいた値)
+    private void write(Entity entity, Type type, object boxed, string? before)
+    {
+        before ??= World.GetPool(type).Has(entity.Id) ? SceneSerializer.SaveComponent(World, entity, type) : null;
+        EditorWorld.WriteComponent(World, entity, type, boxed);
+        var id = EditorWorld.IdOf(World, entity);
+        _undo.Record(new ComponentEdit(id, type, before, SceneSerializer.SaveComponent(World, entity, type)), (id, type));
+    }
 
     public void Draw(Entity entity)
     {
@@ -32,13 +47,13 @@ internal sealed class Inspector
 
         // ---------- エンティティ (名前 / 有効) ----------
         if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo($"Entity {entity.Id}"));
-        ref var info = ref World.Get<EntityInfo>(entity);
+        var info = World.Get<EntityInfo>(entity);
         var active = info.Active;
-        if (ImGui.Checkbox("##active", ref active)) World.SetActive(entity, active);
+        if (ImGui.Checkbox("##active", ref active)) write(entity, typeof(EntityInfo), info with { Active = active }, null);
         ImGui.SameLine();
         var name = info.Name ?? "";
         ImGui.SetNextItemWidth(-1);
-        if (ImGui.InputText("##name", ref name, 256)) World.Get<EntityInfo>(entity).Name = name;
+        if (ImGui.InputText("##name", ref name, 256)) write(entity, typeof(EntityInfo), info with { Name = name }, null);
         ImGui.TextDisabled($"Id {info.Id}");
         ImGui.Separator();
 
@@ -72,11 +87,17 @@ internal sealed class Inspector
                     if (field.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(field.Tooltip);
                 }
                 if (type.Fields.Count == 0) ImGui.TextDisabled("(no values)");
-                if (changed) pool.SetBoxed(entity, boxed);
+                if (changed) write(entity, pool.ComponentType, boxed, null);   // 以前は pool.SetBoxed (元に戻せず、Static な物の行列も作り直されなかった)
             }
             ImGui.PopID();
         }
-        if (remove != null) remove.Remove(entity.Id);
+        if (remove != null)
+        {
+            var id = EditorWorld.IdOf(World, entity);
+            var before = SceneSerializer.SaveComponent(World, entity, remove.ComponentType);
+            remove.Remove(entity.Id);
+            _undo.Record(new ComponentEdit(id, remove.ComponentType, before, null));
+        }
 
         // ---------- コンポーネントを足す ----------
         ImGui.Spacing();
@@ -93,6 +114,8 @@ internal sealed class Inspector
                 if (ImGui.Selectable(label))
                 {
                     World.GetPool(type.Type).SetBoxed(entity, type.CreateDefault());
+                    var id = EditorWorld.IdOf(World, entity);
+                    _undo.Record(new ComponentEdit(id, type.Type, null, SceneSerializer.SaveComponent(World, entity, type.Type)));
                     ImGui.CloseCurrentPopup();
                 }
             }
@@ -287,10 +310,20 @@ internal sealed class Inspector
             for (int i = 0; i < list.Count; i++)
             {
                 var item = list[i];
-                if (drawValue($"[{i}]", elementType, ref item, null, owner)) { list[i] = item; changed = true; }
+                if (drawValue($"[{i}]", elementType, ref item, null, owner))
+                {
+                    // 写しを書き換えて差し替える (以前はその場で書き換えていたので、元に戻す記録の「前の値」まで変わってしまった)
+                    if (!changed) list = copyList(list);
+                    list[i] = item;
+                    changed = true;
+                }
             }
             ImGui.TreePop();
         }
+        if (changed) value = list;
         return changed;
     }
+
+    private static IList copyList(IList list) =>
+        list is Array array ? (IList)array.Clone() : (IList)Activator.CreateInstance(list.GetType(), list)!;
 }
