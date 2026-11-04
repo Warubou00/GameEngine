@@ -159,7 +159,7 @@ internal static class ParticleDemo
 }
 
 // 花火 : Interval 秒ごとに、場所と色を変えて Burst を出す
-public struct Firework
+public struct Firework : IComponent
 {
     public float Interval;
     public float Timer;
@@ -198,7 +198,7 @@ public sealed class FireworkSystem : ISystem
 }
 
 // 円を描いて飛ぶ (高さは波打つ)
-public struct Flyer
+public struct Flyer : IComponent
 {
     public Vector3 Center;
     public float   Radius;
@@ -221,7 +221,7 @@ public sealed class FlyerSystem : ISystem
 }
 
 // 噴水の印 (J でエミッターを外す / 付け直す確認用)
-public struct Fountain
+public struct Fountain : IComponent
 {
 }
 

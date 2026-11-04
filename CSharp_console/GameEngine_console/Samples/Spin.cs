@@ -7,7 +7,7 @@ namespace GameEngine_console;
 // 自分で書くコンポーネントと System の例 (Unity のスクリプトに当たるもの)
 //   Spin を付けた物を、Y 軸の周りに回し続ける
 // ==========================================================================
-public struct Spin
+public struct Spin : IComponent
 {
     public float DegreesPerSecond;
 }

@@ -34,7 +34,7 @@ public enum ParticleBlend : uint
 //   外す / エンティティを削除すると新しく出さなくなり、出た物は寿命まで残る
 //   (資料 MH:W p.87 : エミッターの領域は、配下のパーティクルが消えるまで使い回さない)
 // ==========================================================================
-public struct ParticleEmitter
+public struct ParticleEmitter : IComponent
 {
     public bool    Emitting;        // false で新しく出さない (出た物は寿命まで残る)
     public float   Rate;            // 1 秒に出す数

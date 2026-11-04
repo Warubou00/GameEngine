@@ -55,6 +55,43 @@ public sealed class World
         return new Entity(id, _versions[id]);
     }
 
+    // 名前を付けて作る (EntityInfo が付く。保存しても変わらない Id も付く。ED1)
+    public Entity CreateEntity(string name)
+    {
+        var entity = CreateEntity();
+        Add(entity, new EntityInfo(name));
+        return entity;
+    }
+
+    // 生きている全てのエンティティ (番号の順)
+    public IEnumerable<Entity> Entities
+    {
+        get
+        {
+            for (int id = 0; id < _nextId; id++)
+            {
+                if (_alive[id]) yield return new Entity(id, _versions[id]);
+            }
+        }
+    }
+
+    // 全ての型の入れ物 (保存 / エディター用)
+    public IReadOnlyList<IComponentPool> Pools => _poolList;
+
+    // 型を知らずに入れ物を取る (無ければ作る。保存 / エディター用)
+    public IComponentPool GetPool(Type type)
+    {
+        if (_pools.TryGetValue(type, out var pool)) return pool;
+        var method = typeof(World).GetMethod(nameof(GetPool), 1, Type.EmptyTypes)!.MakeGenericMethod(type);
+        return (IComponentPool)method.Invoke(this, null)!;
+    }
+
+    // 全てのエンティティを削除する (シーンを読み込み直す前など)
+    public void Clear()
+    {
+        foreach (var entity in Entities.ToList()) DestroyEntity(entity);
+    }
+
     // エンティティと、その全てのコンポーネントを削除する
     public void DestroyEntity(Entity entity)
     {

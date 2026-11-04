@@ -7,7 +7,7 @@ namespace GameEngine;
 //   Volume / Loop は書き換えると、変わった時だけ C++ へ送られる
 //   Loop を再生中に false にすると今の周の終わりで止まる。再生中に true にした時は次の Play から
 // ==========================================================================
-public struct AudioSource
+public struct AudioSource : IComponent
 {
     public Sound Clip;
     public float Volume;        // 1 = そのまま、0 = 無音

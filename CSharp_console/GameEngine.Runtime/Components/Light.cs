@@ -9,7 +9,7 @@ namespace GameEngine;
 //   Intensity は「真上から当たった白い面がその明るさになる」単位 (Lambert / PBR 共通)
 //   色は線形 (1, 1, 1 が白)
 // ==========================================================================
-public struct DirectionalLight
+public struct DirectionalLight : IComponent
 {
     public Vector3 Color;
     public float   Intensity;
@@ -23,7 +23,7 @@ public struct DirectionalLight
     }
 }
 
-public struct PointLight
+public struct PointLight : IComponent
 {
     public Vector3 Color;
     public float   Intensity;

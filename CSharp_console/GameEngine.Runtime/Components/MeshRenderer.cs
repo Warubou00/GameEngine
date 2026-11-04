@@ -5,7 +5,7 @@ namespace GameEngine;
 //   付けると、RenderSyncSystem が C++ 側に描画オブジェクトを作り (同じフレームの分はまとめて)、
 //   Transform の行列が変わった時だけ C++ へ送る。外す / エンティティを削除すると C++ 側も削除される
 // ==========================================================================
-public struct MeshRenderer
+public struct MeshRenderer : IComponent
 {
     public Model Model;
 

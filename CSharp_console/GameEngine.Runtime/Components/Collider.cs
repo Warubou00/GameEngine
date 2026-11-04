@@ -20,7 +20,7 @@ public enum ColliderShape : uint
 //   Rigidbody と一緒に付けると物理で動く。Friction / Restitution は 2 つの物の組で
 //   摩擦 = √(a × b) / 反発 = 大きい方 (P1)。IsTrigger なら重なりのイベントだけで押し戻さない
 // ==========================================================================
-public struct Collider
+public struct Collider : IComponent
 {
     public ColliderShape Shape;
     public Vector3       Size;

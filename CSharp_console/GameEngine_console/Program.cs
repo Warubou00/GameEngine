@@ -37,6 +37,9 @@ namespace GameEngine_console;
 //                                 J 噴水のエミッターを外す・付け直す。--view fountain|smoke で近くから見る
 //   --particle-bench N          : GPU パーティクルを N 個保ち続ける (計測。[ParticleBench] を出す)
 //   --particle-sort on|off / --particle-collision on|off / --particle-capacity N / --particle-half on|off : GPU パーティクルの設定
+//   --save-scene <path>         : 起動時に作ったシーンを JSON に保存する (ED1)
+//   --load-scene <path>         : 起動時に作ったシーンを消して、JSON のシーンを読み込む (System は同じ引数の時と同じ物が入る)
+//   --serialize-test            : 全部のコンポーネントと見本のシーンで、保存 → 読み込み → 同じ値 を確かめて終わる
 //   --sound <path>              : 鳴らす wav (既定は ../Sound/bgm.wav。無ければ鳴らさない)
 //   --sound-loop on|off         : ループするか (既定は on)
 //
@@ -239,6 +242,20 @@ internal static class Program
         {
             Console.WriteLine($"[Sample] No sound file ({Path.GetFullPath(soundPath)}). Put a wav there or use --sound <path>.");
         }
+
+        // ---------- シーンの保存 / 読み込み (ED1) ----------
+        if (args.Contains("--serialize-test"))
+        {
+            Environment.ExitCode = SerializationTest.Run(engine);
+            return;
+        }
+        if (options.TryGetValue("--save-scene", out var savePath))
+        {
+            var saveStart = Stopwatch.GetTimestamp();
+            engine.SaveScene(savePath);
+            Console.WriteLine($"[Scene] Saved {Path.GetFullPath(savePath)} ({world.EntityCount} entities, {Stopwatch.GetElapsedTime(saveStart).TotalMilliseconds:F1} ms)");
+        }
+        if (options.TryGetValue("--load-scene", out var loadPath)) engine.LoadScene(loadPath);
 
         engine.Run();
     }

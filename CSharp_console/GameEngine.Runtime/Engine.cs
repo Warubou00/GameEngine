@@ -422,6 +422,27 @@ public sealed class Engine : IDisposable
         }
     }
 
+    // ---------- シーンの保存 / 読み込み (JSON。ED1) ----------
+
+    /// <summary>今の World の全部のエンティティを JSON のシーンに保存する</summary>
+    public void SaveScene(string path) => SceneSerializer.SaveFile(World, path);
+
+    /// <summary>
+    /// シーンを読み込む。additive = false なら今のエンティティを全部消してから読む
+    /// 読めなかった物 (知らない型 / 無いアセット) はコンソールに出して飛ばす。戻り値は作ったエンティティ
+    /// </summary>
+    public List<Entity> LoadScene(string path, bool additive = false)
+    {
+        var start = Stopwatch.GetTimestamp();
+        if (!additive) World.Clear();
+        var warnings = new List<string>();
+        var created = SceneSerializer.LoadFile(World, path, Assets, warnings);
+        foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");
+        Console.WriteLine($"[Scene] Loaded {path} : {created.Count} entities{(warnings.Count > 0 ? $", {warnings.Count} warnings" : "")}, " +
+                          $"{Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms");
+        return created;
+    }
+
     // GPU の処理 (描画 + 転送) が全て終わるまで待つ (読み込み時間の計測など)
     public void WaitForGpu() => NativeMethods.Renderer_WaitForGpu();
 
