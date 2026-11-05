@@ -57,6 +57,9 @@ internal sealed class GameBuilder
 {
     private readonly AssetDatabase _database;
     public string? PlayerProject { get; }   // GameEngine.Player.csproj (エンジンのリポジトリの中)
+    // ビルド済みの Player (ランチャーが入れた版のエディター : <版>/Editor の隣の <版>/Player。ED9)。リポジトリの外でも書き出せる
+    public string? PrebuiltPlayer { get; }
+    public bool    CanBuild => PlayerProject != null || PrebuiltPlayer != null;
     public string  GameProject  { get; }    // Project/Scripts/Game.csproj
 
     // エディターの物 (書き出したフォルダにあってはいけない名前)
@@ -72,6 +75,8 @@ internal sealed class GameBuilder
             var candidate = Path.Combine(dir.FullName, "CSharp_console", "GameEngine.Player", "GameEngine.Player.csproj");
             if (File.Exists(candidate)) { PlayerProject = candidate; break; }
         }
+        var prebuilt = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Player"));
+        if (PlayerProject == null && File.Exists(Path.Combine(prebuilt, "GameEngine.Player.exe"))) PrebuiltPlayer = prebuilt;
     }
 
     public string OutputFolderOf(BuildSettings settings) =>
@@ -98,7 +103,7 @@ internal sealed class GameBuilder
         if (settings.Scenes.Count == 0) return fail("No scenes to build (add at least one)");
         foreach (var scene in settings.Scenes)
             if (!File.Exists(_database.FullPath(scene))) return fail($"Scene not found : {scene}");
-        if (PlayerProject == null) return fail("GameEngine.Player.csproj not found (the editor must run from the engine repository)");
+        if (!CanBuild) return fail("GameEngine.Player not found (run the editor from the engine repository, or install it with the launcher)");
         var output = result.OutputFolder;
         var projectRoot = Path.GetFullPath(_database.ProjectRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if ((output + Path.DirectorySeparatorChar).StartsWith(Path.Combine(projectRoot, "Assets") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
@@ -108,9 +113,9 @@ internal sealed class GameBuilder
         // ---------- 2. ビルド (Release) ----------
         progress?.Invoke("Compiling Player...");
         var compile = Stopwatch.GetTimestamp();
-        var (ok, log) = dotnetBuild(PlayerProject);
+        var (ok, log) = PlayerProject != null ? dotnetBuild(PlayerProject) : (true, "");   // ビルド済みの Player はそのまま使う
         if (!ok) return fail("Player build failed :\n" + errorsOf(log));
-        var playerOutput = Path.Combine(Path.GetDirectoryName(PlayerProject)!, "bin", "Release", "net9.0-windows");
+        var playerOutput = PlayerProject != null ? Path.Combine(Path.GetDirectoryName(PlayerProject)!, "bin", "Release", "net9.0-windows") : PrebuiltPlayer!;
         string? gameOutput = null;
         if (File.Exists(GameProject))
         {

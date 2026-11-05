@@ -134,7 +134,7 @@ internal sealed class BuildWindow
 
         // ---------- ボタン ----------
         ImGui.Spacing();
-        ImGui.BeginDisabled(_task != null || Settings.Scenes.Count == 0 || _builder.PlayerProject == null);
+        ImGui.BeginDisabled(_task != null || Settings.Scenes.Count == 0 || !_builder.CanBuild);
         if (ImGui.Button("Build", new Vector2(120, 0))) StartBuild(run: false);
         ImGui.SameLine();
         if (ImGui.Button("Build and Run", new Vector2(120, 0))) StartBuild(run: true);
@@ -146,7 +146,7 @@ internal sealed class BuildWindow
             ImGui.SameLine();
             if (ImGui.Button("Open Folder")) Process.Start("explorer.exe", $"\"{LastResult.OutputFolder}\"");
         }
-        if (_builder.PlayerProject == null) ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), "GameEngine.Player.csproj not found");
+        if (!_builder.CanBuild) ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), "GameEngine.Player not found");
 
         // ---------- 状態 / 結果 ----------
         if (_task != null) ImGui.Text($"Building... {_progress}");

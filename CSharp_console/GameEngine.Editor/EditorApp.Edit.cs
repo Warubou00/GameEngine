@@ -134,6 +134,14 @@ internal sealed partial class EditorApp
 
     public ProjectSettingsWindow ProjectSettingsWindow => _projectSettings;
     public BuildWindow BuildWindow => _build;   // ED8 後半
+    public ScriptReference Reference => _reference;   // ED9
+
+    /// <summary>スクリプトリファレンスを開いて、その型を出す (ED9)</summary>
+    public bool OpenReference(Type type)
+    {
+        _showReference = true;
+        return _reference.Show(type);
+    }
     public ScriptHost Scripts => _scripts;
 
     // ---------------------------------------------------------------------

@@ -43,6 +43,8 @@ internal sealed partial class EditorApp
     private bool    _showProjectSettings;
     private readonly ProjectSettingsWindow _projectSettings;   // ED6
     private bool    _showBuild;
+    private bool    _showReference;
+    private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
     private bool    _resetLayout;
 
@@ -75,10 +77,12 @@ internal sealed partial class EditorApp
         _project = new ProjectPanel(engine, database, OpenScene);
         _project.PrefabChanged = SyncPrefab;   // ED8
         _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
+        _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
+        _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
         _build = new BuildWindow(database, () => (_scenePath != null ? _database.ToAssetPath(_scenePath) : null, IsDirty));
@@ -230,6 +234,7 @@ internal sealed partial class EditorApp
         drawExtensionWindows();
         _projectSettings.Draw(ref _showProjectSettings);
         _build.Draw(ref _showBuild);
+        _reference.Draw(ref _showReference);
         _shaders?.Update();
         _scripts.Update();
 
@@ -354,6 +359,14 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Reset Layout")) _resetLayout = true;
             ImGui.EndMenu();
         }
+        // ヘルプ (ED9)
+        if (ImGui.BeginMenu("Help"))
+        {
+            ImGui.MenuItem("Script Reference", "Ctrl+H", ref _showReference);
+            ImGui.Separator();
+            ImGui.TextDisabled($"GameEngine Editor {EditorVersion.Display}");
+            ImGui.EndMenu();
+        }
         ImGui.TextDisabled(_scenePath != null ? $"   {Path.GetFileName(_scenePath)}{(_undo.State != _savedState ? " *" : "")}" : "   (new scene)");
         // ゲームのコードの状態 (ED7)
         if (_scripts.IsBuilding) { ImGui.SameLine(); ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.3f, 1.0f), "   Compiling scripts..."); }
@@ -380,6 +393,7 @@ internal sealed partial class EditorApp
             if (ImGui.IsKeyPressed(ImGuiKey.D)) Duplicate();
             if (ImGui.IsKeyPressed(ImGuiKey.P)) TogglePlay();
             if (ImGui.IsKeyPressed(ImGuiKey.B)) _showBuild = !_showBuild;   // ED8 後半
+            if (ImGui.IsKeyPressed(ImGuiKey.H)) _showReference = !_showReference;   // ED9 (F1 は C++ のプロファイラーが使う)
             return;
         }
         if (ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected)) DeleteSelected();
