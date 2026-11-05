@@ -18,6 +18,8 @@ internal sealed class Inspector
 {
     private readonly Engine _engine;
     private readonly UndoStack _undo;
+    // 値を書いた時 (entity, 型, 前の JSON, 後の JSON)。エディターがプレハブの変えた値の印に使う (ED8)
+    public Action<Entity, Type, string?, string>? Written;
     private World World => _engine.World;
     private string _addFilter = "";
     private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)
@@ -56,7 +58,9 @@ internal sealed class Inspector
         before ??= World.GetPool(type).Has(entity.Id) ? SceneSerializer.SaveComponent(World, entity, type) : null;
         EditorWorld.WriteComponent(World, entity, type, boxed);
         var id = EditorWorld.IdOf(World, entity);
-        _undo.Record(new ComponentEdit(id, type, before, SceneSerializer.SaveComponent(World, entity, type)), (id, type));
+        var after = SceneSerializer.SaveComponent(World, entity, type);
+        _undo.Record(new ComponentEdit(id, type, before, after), (id, type));
+        Written?.Invoke(entity, type, before, after);   // プレハブの置いた物なら、変えた値の印を付ける (ED8)
     }
 
     public void Draw(Entity entity)
@@ -83,7 +87,7 @@ internal sealed class Inspector
         IComponentPool? remove = null;
         foreach (var pool in World.Pools.ToList())
         {
-            if (!pool.Has(entity.Id) || pool.ComponentType == typeof(EntityInfo)) continue;
+            if (!pool.Has(entity.Id) || pool.ComponentType == typeof(EntityInfo) || pool.ComponentType == typeof(PrefabLink)) continue;   // PrefabLink は上の見出しで (ED8)
             var type = ComponentRegistry.Get(pool.ComponentType);
             ImGui.PushID(type.TypeName);
             var open = ImGui.CollapsingHeader(type.DisplayName, ImGuiTreeNodeFlags.DefaultOpen);

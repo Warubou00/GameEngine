@@ -74,7 +74,9 @@ internal sealed partial class EditorApp
         var id = EditorWorld.IdOf(World, entity);
         var before = SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer));
         World.Get<MeshRenderer>(entity).Material = material;
-        _undo.Record(new ComponentEdit(id, typeof(MeshRenderer), before, SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer))));
+        var after = SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer));
+        _undo.Record(new ComponentEdit(id, typeof(MeshRenderer), before, after));
+        MarkOverrides(entity, typeof(MeshRenderer), before, after);
         Selected = entity;
         Console.WriteLine($"[Editor] {NameOf(World, entity)} uses {asset.Path}");
         return true;
@@ -155,7 +157,9 @@ internal sealed partial class EditorApp
         var id = EditorWorld.IdOf(World, entity);
         var before = SceneSerializer.SaveComponent(World, entity, typeof(T));
         EditorWorld.WriteComponent(World, entity, typeof(T), change(World.Get<T>(entity)));
-        _undo.Record(new ComponentEdit(id, typeof(T), before, SceneSerializer.SaveComponent(World, entity, typeof(T))));
+        var after = SceneSerializer.SaveComponent(World, entity, typeof(T));
+        _undo.Record(new ComponentEdit(id, typeof(T), before, after));
+        MarkOverrides(entity, typeof(T), before, after);
     }
 
     // ---------------------------------------------------------------------

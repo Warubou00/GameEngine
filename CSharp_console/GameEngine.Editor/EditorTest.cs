@@ -634,5 +634,95 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- ED8 : プレハブ ----------
+        var prefabFolder = database.FullPath("Assets/Prefabs");
+        var hadPrefabFolder = Directory.Exists(prefabFolder);
+        var countBeforePrefab = World.EntityCount;
+        var rootA = find("Hierarchy pivot");
+        var prefab = _app.CreatePrefab(rootA);
+        check(prefab != null && File.Exists(database.FullPath(prefab.Path)) && prefab.EntityIds.Count == 3 &&
+              EditorWorld.WithDescendants(World, rootA).All(e => World.Has<PrefabLink>(e)), "create a prefab from a subtree (3 entities)");
+        if (prefab == null) yield break;
+        var prefabAsset = database.Find(prefab.Path)!;
+        check(prefabAsset.Kind == AssetKind.Prefab && !prefab.Json.Contains("PrefabLink"), "prefab asset (no links inside)");
+
+        // 2 つ目を置く : 親子も繋がる、根はその場所
+        var rootB = _app.InstantiatePrefab(prefabAsset, new Vector3(6, 0, 0), Entity.Null);
+        yield return 0;
+        yield return 0;
+        var childA = Hierarchy.GetChildren(World, rootA)[0];
+        var childB = Hierarchy.GetChildren(World, rootB)[0];
+        var grandA = Hierarchy.GetChildren(World, childA)[0];
+        var grandB = Hierarchy.GetChildren(World, childB)[0];
+        check(World.EntityCount == countBeforePrefab + 3 && World.Get<Transform>(rootB).Position == new Vector3(6, 0, 0) &&
+              World.Get<EntityInfo>(childB).Name == "Hierarchy child" && World.Get<PrefabLink>(childB).Source == World.Get<PrefabLink>(childA).Source &&
+              World.Get<EntityInfo>(rootB).Id != World.Get<EntityInfo>(rootA).Id, "instantiate the prefab (children connected, new ids)");
+        check(_app.PrefabRootOf(grandB) == rootB && _app.PrefabRootOf(childA) == rootA, "find the instance root");
+
+        // A で変えた値は印が付く
+        var childT = World.Get<Transform>(childA);
+        _app.WriteTransform(childA, childT.Position, childT.Rotation, new Vector3(2));
+        undo.EndFrame(editing: false);
+        check(World.Get<PrefabLink>(childA).IsOverridden("GameEngine.Transform.Scale") && !World.Get<PrefabLink>(childA).IsOverridden("GameEngine.Transform.Position"),
+              "an edit is recorded as an override (only the changed field)");
+
+        // B で変えて Apply : プレハブが変わり、A は自分で変えた値 (Scale) を保つ / 変えていない値は受け取る
+        var childBT = World.Get<Transform>(childB);
+        _app.WriteTransform(childB, childBT.Position, childBT.Rotation, new Vector3(3));
+        var grandBT = World.Get<Transform>(grandB);
+        _app.WriteTransform(grandB, grandBT.Position + new Vector3(0, 1, 0), grandBT.Rotation, grandBT.Scale);
+        undo.EndFrame(editing: false);
+        check(_app.ApplyPrefab(childB), "apply");
+        yield return 0;
+        check(World.Get<Transform>(childA).Scale == new Vector3(2) && World.Get<Transform>(childB).Scale == new Vector3(3),
+              "apply : the other instance keeps its override");
+        check(MathF.Abs(World.Get<Transform>(grandA).Position.Y - World.Get<Transform>(grandB).Position.Y) < 1e-5f, "apply : the other instance receives non-overridden values");
+        check(World.Get<PrefabLink>(childB).Overrides.Length == 0 && World.Get<Transform>(rootB).Position == new Vector3(6, 0, 0) && World.Get<Transform>(rootA).Position != new Vector3(6, 0, 0),
+              "apply clears overrides, root positions stay");
+
+        // Revert : A の変えた値を捨てる
+        _app.RevertPrefab(childA);
+        check(World.Get<Transform>(childA).Scale == new Vector3(3) && World.Get<PrefabLink>(childA).Overrides.Length == 0, "revert");
+
+        // B に子を足して Apply → A にも増える
+        var countBeforeAdd = World.EntityCount;
+        var addedChild = _app.CreateEntity(childB);
+        World.Get<EntityInfo>(addedChild).Name = "Added child";
+        _app.ApplyPrefab(rootB);
+        yield return 0;
+        check(prefab.EntityIds.Count == 4 && World.EntityCount == countBeforeAdd + 2 &&
+              Hierarchy.GetChildren(World, childA).Any(e => World.Get<EntityInfo>(e).Name == "Added child"), "a child added and applied appears in the other instance");
+
+        // 保存して開き直す → 置いた物は繋がったまま / 閉じている間にプレハブを書き換えても、開くと効く
+        var prefabScene = Path.Combine(Path.GetTempPath(), "ge_editor_test_prefab.scene.json");
+        _app.SaveSceneTo(prefabScene);
+        var prefabFile = database.FullPath(prefab.Path);
+        File.WriteAllText(prefabFile, File.ReadAllText(prefabFile).Replace("\"Hierarchy grandchild\"", "\"Renamed grandchild\""));
+        _app.OpenScene(prefabScene);
+        yield return 0;
+        var renamed = World.Entities.Count(e => World.Get<EntityInfo>(e).Name == "Renamed grandchild");
+        check(World.Entities.Count(e => World.Has<PrefabLink>(e)) == 8 && renamed == 2, $"reopen : links kept and prefab changes applied ({renamed} renamed)");
+        File.Delete(prefabScene);
+
+        // 置くのを元に戻す / ゲームのコードから置く (Prefab.Instantiate)
+        var countBeforePlace = World.EntityCount;
+        _app.InstantiatePrefab(prefabAsset, new Vector3(-6, 0, 0), Entity.Null);
+        _app.Undo();
+        check(World.EntityCount == countBeforePlace, "undo instantiate");
+        var runtimeRoot = _app.Engine.Assets.LoadPrefab(prefabAsset.Guid)!.Instantiate(World, new Vector3(0, 0, 8));
+        check(!runtimeRoot.IsNull && World.Get<PrefabLink>(runtimeRoot).Source == prefab.RootId && World.EntityCount == countBeforePlace + 4, "Prefab.Instantiate from game code");
+
+        // Unpack : 繋がりを切る
+        var unpackRoot = World.Entities.First(e => World.Has<PrefabLink>(e) && World.Get<PrefabLink>(e).Source == prefab.RootId && e != runtimeRoot);
+        _app.UnpackPrefab(unpackRoot);
+        check(EditorWorld.WithDescendants(World, unpackRoot).All(e => !World.Has<PrefabLink>(e)), "unpack");
+
+        // 片付け
+        File.Delete(prefabFile);
+        File.Delete(prefabFile + ".meta");
+        if (!hadPrefabFolder) { Directory.Delete(prefabFolder, true); File.Delete(prefabFolder + ".meta"); }
+        database.Refresh();
+        yield return 0;
+
     }
 }

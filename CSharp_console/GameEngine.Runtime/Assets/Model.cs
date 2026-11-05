@@ -34,6 +34,7 @@ public sealed class AssetManager
     private readonly Dictionary<string, Sound> _sounds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<uint, CollisionMesh> _collisionMeshes = new();
     private readonly Dictionary<string, Material> _materials = new(StringComparer.OrdinalIgnoreCase);   // ED5
+    private readonly Dictionary<string, Prefab>   _prefabs   = new(StringComparer.OrdinalIgnoreCase);   // ED8
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
     internal bool PhysicsLoaded { get; set; }
@@ -159,6 +160,32 @@ public sealed class AssetManager
         material.Apply();
         _materials.Add(path, material);
         return material;
+    }
+
+    /// <summary>プレハブ (.prefab.json) を読み込む (ED8)。同じパスは同じ Prefab を返す</summary>
+    public Prefab LoadPrefab(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_prefabs.TryGetValue(path, out var cached)) return cached;
+        if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load prefab: {path}", path);
+        var prefab = new Prefab(path, _database?.Find(path)?.Guid ?? Guid.Empty, File.ReadAllText(file, System.Text.Encoding.UTF8), this);
+        _prefabs.Add(path, prefab);
+        return prefab;
+    }
+
+    /// <summary>Id からプレハブを探して読む (無ければ null)</summary>
+    public Prefab? LoadPrefab(Guid assetId) =>
+        _database?.Find(assetId) is { Kind: AssetKind.Prefab } entry ? LoadPrefab(entry.Path) : null;
+
+    /// <summary>プレハブのファイルが (外で) 変わった時 : 読み直す (置いた物を作り直すのはエディター)</summary>
+    public Prefab? ReloadPrefab(string path)
+    {
+        (path, var file) = resolve(path);
+        if (!_prefabs.TryGetValue(path, out var prefab)) return null;
+        prefab.SetJson(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        ReloadCount++;
+        AssetReloaded?.Invoke(path);
+        return prefab;
     }
 
     /// <summary>新しいマテリアルのファイルを作る (folder はアセットのパス)。戻り値 = 読み込んだ Material</summary>

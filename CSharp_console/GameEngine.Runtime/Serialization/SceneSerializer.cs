@@ -243,7 +243,8 @@ public static class SceneSerializer
     /// JSON のエンティティを World に足す (今ある物は消さない)。戻り値は作ったエンティティ (ファイルの順)
     /// 知らない型 / 読めない値は飛ばして warnings に入れる (読み込みは止めない)
     /// </summary>
-    public static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings = null)
+    // freshIds : 全部の物に新しい Id を付ける (プレハブを置く時。ED8)。中の参照は新しい物どうしに繋がる
+    public static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings = null, bool freshIds = false)
     {
         var context = new ReadContext(world, assets) { Existing = existingIds(world) };
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
@@ -259,7 +260,7 @@ public static class SceneSerializer
             var fileId = element.TryGetProperty("id", out var idElement) && Guid.TryParse(idElement.GetString(), out var parsed) ? parsed : Guid.NewGuid();
             var info = new EntityInfo
             {
-                Id     = existing.ContainsKey(fileId) && world.IsAlive(existing[fileId]) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
+                Id     = freshIds || (existing.ContainsKey(fileId) && world.IsAlive(existing[fileId])) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
                 Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                 Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
             };
