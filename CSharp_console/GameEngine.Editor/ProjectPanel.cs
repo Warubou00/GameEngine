@@ -72,6 +72,7 @@ internal sealed class ProjectPanel : IDisposable
     private void onChanged(string path)
     {
         if (path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".dds", StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(path)) _modified[path] = 0;   // 新しいファイルも取り込みの対象 (ED7 : AssetImporter)
         _changed = true;
     }
 
@@ -105,6 +106,12 @@ internal sealed class ProjectPanel : IDisposable
                     _ => 0,
                 };
                 if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); }   // サムネイルも作り直す
+                // 拡張の取り込み (ED7) : その拡張子の AssetImporter があれば呼ぶ
+                if (EditorExtensions.ImporterFor(path) is { } importer)
+                {
+                    importer.OnImport(path, file);
+                    Console.WriteLine($"[Assets] Imported {path} ({importer.GetType().Name})");
+                }
                 if (reloaded > 0) Console.WriteLine($"[Assets] Reloaded {path}{(entry.Kind == AssetKind.Texture ? $" ({reloaded} users)" : "")}");
             }
             catch (Exception ex)
@@ -255,6 +262,11 @@ internal sealed class ProjectPanel : IDisposable
         {
             if (entry.Kind == AssetKind.Folder) { _folder = entry.Path; _search = ""; }
             else if (entry.Kind == AssetKind.Scene) _openScene(_database.FullPath(entry.Path));
+            else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
+            {
+                try { importer.OnOpen(entry.Path, _database.FullPath(entry.Path)); }
+                catch (Exception ex) { Console.WriteLine($"[Assets] {importer.GetType().Name}.OnOpen : {ex.Message}"); }
+            }
         }
         if (hovered) ImGui.SetTooltip(entry.Path);
 
@@ -271,7 +283,10 @@ internal sealed class ProjectPanel : IDisposable
         ImGui.PopID();
     }
 
-    private static (string Label, uint Color) iconOf(AssetEntry entry) => entry.Kind switch
+    private static (string Label, uint Color) iconOf(AssetEntry entry) =>
+        entry.Kind != AssetKind.Folder && EditorExtensions.ImporterFor(entry.Path) is { } importer ? (importer.Label, importer.Color) : builtInIcon(entry);
+
+    private static (string Label, uint Color) builtInIcon(AssetEntry entry) => entry.Kind switch
     {
         AssetKind.Folder   => ("Folder", 0xFF3C8CC8u),
         AssetKind.Model    => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF8C5A3Cu),

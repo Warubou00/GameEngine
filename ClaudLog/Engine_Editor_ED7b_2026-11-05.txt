@@ -1,0 +1,57 @@
+﻿エディター ED7 (後半) : エディターの拡張 (独自のインスペクター / 窓 / メニュー / ギズモ / アセットの取り込み) 2026-11-05
+ブランチ : feature/editor-ed7b
+
+■ 仕組み (Unity の Editor フォルダと同じ形)
+  ゲームのエディター用のプロジェクト : CSharp_console/Project/Scripts/Editor/GameEditor.csproj (GameEditor.dll)
+    - Game.csproj と、動いているエディターの GameEngine.Editor.dll / ImGui.NET.dll を参照する (写さない)
+    - Game.csproj は Editor フォルダを入れない (Compile Remove)。ゲーム (と見本、ED8 の出来上がったゲーム) にはエディターの物が入らない
+  エディターは Editor/GameEditor.csproj があればそれをビルドし (Game も一緒にビルドされる)、Game.dll と GameEditor.dll を
+  同じ捨てられる AssemblyLoadContext に読む。.cs (Editor の中も) を保存すると両方を読み直す (ED7 前半と同じ)
+
+■ 拡張の API (GameEngine.Editor の EditorExtensions.cs。public)
+  [CustomEditor(typeof(T))] + ComponentEditor<T>
+    OnInspectorGUI(ref T) : インスペクターを自分で描く。変えたら true (エディターが書き戻し、元に戻せる)。DrawDefaultInspector で既定の物も描ける
+    OnDrawGizmos(Gizmos, T) : このコンポーネントを持つ全部の物で毎フレーム / OnDrawGizmosSelected : 選んだ物だけ
+  [EditorWindow("メニュー/名前")] + EditorWindow : OnGUI に ImGui で描く。メニューで開く / 閉じる
+  [MenuItem("メニュー/名前")] : 引数の無い static メソッド。メニューの一番上の名前が無ければ作る (Game など)
+  [AssetImporter(".拡張子")] + AssetImporter : Assets に置いた / 書き換えた時の OnImport、ダブルクリックの OnOpen、Project のタイルの文字と色
+  Gizmos : Line / Circle / WireSphere / WireBox / Label (ワールドの位置で。シーンビューに ImGui の線で描く)。Gizmos.Rgba で色
+  EditorApi : Engine / World / Assets / Selected / CameraPosition / CameraForward /
+              CreateEntity(name, position, setup) (元に戻せる) / Modify<T>(entity, change) (元に戻せる)
+  拡張の中の例外は止めて Console (とインスペクターの赤い字) に出す (エディターは止めない。同じ物は 1 回だけ)
+
+■ 見本の拡張 (Project/Scripts/Editor)
+  SpinEditor.cs : Spin のインスペクター (速さのスライダー / Reverse / Stop / 1 回りの時間)、選んだ物に回る向きの輪と矢印と文字
+                  OrbitMover : 全部の物の回る道 (水色の輪)
+  GameTools.cs : 窓 Game > Game Stats (ゲームのコンポーネントの数、全部の Spin を止める : 元に戻せる) /
+                 メニュー Game > Create Spinning Box (カメラの前に回る箱 : 元に戻せる) /
+                 取り込み .palette.txt (1 行に「名前 #RRGGBB」→ 同じフォルダに「名前.material.json」を作る / 直す)
+
+■ 途中で直したこと : 読み直すたびに古い Game.dll / GameEditor.dll が残り続けた
+  原因 : AssemblyLoadContext の子のクラスのフィールドに、読んだ Game.dll を持っていた (GameEditor.dll から Game を探すため)。
+         これで捨てた AssemblyLoadContext が解放されなかった (4 回読んで 4 つ残った)
+  直し方 : フィールドに持たず、Load の中で Assemblies (その中に読んだ物) から探す → 4 回読んで 1 つ (今の物) だけ
+  調べ方 : 一時的な調べ (拡張の機能を 1 つずつ止める / 前半のファイルに 1 つずつ戻す / 残っている Game.dll の数を数える) で絞った。調べのコードは消した
+  あわせて : 確認の側 (EditorTest) が古い型を持つと解放されないので手放す / 古い GameEditor.dll も型の一覧から外す (ComponentRegistry.Forget)
+  自動の確認に「何回読み直しても古い Game.dll が残り続けない」を足した
+
+■ 変更
+  エディター : EditorExtensions.cs (新規 : API と一覧) / ScriptHost.cs (GameEditor のビルドと読み込み、引数を 1 つずつ渡す) /
+    Inspector.cs (既定のインスペクターを drawDefault に分けた、独自のインスペクター) / EditorApp.cs (拡張のメニュー / 窓 / ギズモ) /
+    EditorApp.Edit.cs (EditorApi の中身) / ProjectPanel.cs (取り込み、タイル、ダブルクリック) / EditorTest.cs (後半の 9 項目)
+  ゲーム : Game.csproj (Editor を入れない) / Editor/GameEditor.csproj・SpinEditor.cs・GameTools.cs (新規)
+  ※C++ / ランタイムは変えていない
+
+■ 確認
+  自動 (--editor-test) : 97 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    後半 : 独自のインスペクターが読み直した後も読まれる / 窓・メニュー・取り込みが読まれる /
+      ギズモ (周回の輪 240 本 + 選んだ Spin の輪 51) / メニューで物ができる・元に戻せる / EditorApi.Modify が元に戻せる /
+      .palette.txt でマテリアルができる・書き換えると直る / 古い Game.dll が残り続けない (4 回読んで 1 つ)
+  見た目 : Spin の物を選ぶ → インスペクターにスライダーと Reverse / Stop、シーンに黄色の輪と文字、周回する物の水色の輪 /
+          Game メニュー → Game Stats の窓 (Spin 3 / OrbitMover 5 …)
+  見本 : Game.dll だけを使う (GameEditor.dll は入らない)。--hierarchy-test 18 / 0、--serialize-test 4 / 0。showcase の C# update 0.066 〜 0.067 ms
+
+■ 残り
+  - 拡張で開いた窓の開閉は、エディターを閉じると忘れる (読み直しでも閉じる)
+  - ギズモは線と文字だけ (つかんで動かすハンドルは無い)
+  - 次は ED8 (プレハブ / 出来上がったゲーム (Player))

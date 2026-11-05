@@ -11,11 +11,14 @@ namespace GameEngine.Editor;
 //     エンジン (GameEngine.Runtime) はエディターが読み込んだ物を使う (同じ型にするため)
 //   - 読み直し (EditorApp.ReloadScripts) : シーンを JSON にする → [GameSystem] を外す → 古い型の入れ物と型の情報を捨てる →
 //     古い DLL を捨てる → 新しい DLL を読み、[GameSystem] を作る → JSON からシーンを作り直す (値は型の名前で引き継ぐ)
+//   - エディターの拡張 (ED7 後半) : Scripts/Editor/GameEditor.csproj があれば、そちらをビルドし (Game も一緒にビルドされる)、
+//     Game.dll と GameEditor.dll を同じ AssemblyLoadContext に読む。GameEditor.dll の [CustomEditor] などを EditorExtensions に登録する
 // ==========================================================================
 internal sealed class ScriptHost : IDisposable
 {
     private readonly Engine _engine;
     private readonly string _project;          // Game.csproj
+    private readonly string _editorProject;    // Editor/GameEditor.csproj (無ければ Game だけ)
     private readonly string _folder;
     private readonly FileSystemWatcher? _watcher;
     private volatile bool _changed;
@@ -42,6 +45,7 @@ internal sealed class ScriptHost : IDisposable
         _engine  = engine;
         _project = Path.GetFullPath(project);
         _folder  = Path.GetDirectoryName(_project)!;
+        _editorProject = Path.Combine(_folder, "Editor", "GameEditor.csproj");
         if (!Directory.Exists(_folder)) return;
         try
         {
@@ -68,8 +72,12 @@ internal sealed class ScriptHost : IDisposable
     // ビルド
     // ---------------------------------------------------------------------
 
-    // 出来上がる DLL (dotnet build の既定の出力)
-    private string outputDll => Path.Combine(_folder, "bin", "Debug", "net9.0-windows", "Game.dll");
+    // 出来上がる DLL (dotnet build の既定の出力。エディターの拡張があれば、その出力に Game.dll も写される)
+    private bool   hasEditorProject => File.Exists(_editorProject);
+    private string outputFolder => hasEditorProject ? Path.Combine(_folder, "Editor", "bin", "Debug", "net9.0-windows") : Path.Combine(_folder, "bin", "Debug", "net9.0-windows");
+    private string outputDll => Path.Combine(outputFolder, "Game.dll");
+    private string editorDll => Path.Combine(outputFolder, "GameEditor.dll");
+    public Assembly? EditorAssembly { get; private set; }
 
     // 起動時 : ソースより新しい DLL が無ければビルドして待つ。読み込む
     public bool BuildAndLoadBlocking()
@@ -81,7 +89,8 @@ internal sealed class ScriptHost : IDisposable
             .Concat(Directory.EnumerateDirectories(_folder, "*", SearchOption.AllDirectories).Where(source).Select(Directory.GetLastWriteTimeUtc))
             .Append(Directory.GetLastWriteTimeUtc(_folder))
             .DefaultIfEmpty(DateTime.MinValue).Max();
-        if (!File.Exists(outputDll) || File.GetLastWriteTimeUtc(outputDll) < newest)
+        var built = hasEditorProject ? editorDll : outputDll;
+        if (!File.Exists(built) || !File.Exists(outputDll) || File.GetLastWriteTimeUtc(built) < newest)
         {
             var (ok, log, ms) = runBuild();
             LastBuildMs = ms;
@@ -121,11 +130,16 @@ internal sealed class ScriptHost : IDisposable
         var start = Stopwatch.GetTimestamp();
         try
         {
-            var info = new ProcessStartInfo("dotnet", $"build \"{_project}\" -c Debug -nologo -v q -clp:NoSummary")
+            // エディターの拡張は、今動いているエディターの GameEngine.Editor.dll / ImGui.NET.dll を参照してビルドする
+            var target = hasEditorProject ? _editorProject : _project;
+            var editorDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var info = new ProcessStartInfo("dotnet")
             {
                 RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
                 WorkingDirectory = _folder,
             };
+            foreach (var argument in new[] { "build", target, "-c", "Debug", "-nologo", "-v", "q", "-clp:NoSummary", $"-p:EditorAssemblyDir={editorDir}" })
+                info.ArgumentList.Add(argument);   // 引数は 1 つずつ渡す (空白や \ を含むパスでも引用符を気にしなくてよい)
             using var process = Process.Start(info)!;
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEnd();
@@ -161,6 +175,15 @@ internal sealed class ScriptHost : IDisposable
         Assembly = pdb != null ? _context.LoadFromStream(new MemoryStream(dll), new MemoryStream(pdb)) : _context.LoadFromStream(new MemoryStream(dll));
         ComponentRegistry.KnownComponents(rescan: true).ToList();   // 新しい型を探す
         _systems = _engine.AddGameSystems(Assembly);
+        // エディターの拡張 (ED7 後半)
+        if (hasEditorProject && File.Exists(editorDll))
+        {
+            var editorPdb = Path.ChangeExtension(editorDll, ".pdb");
+            EditorAssembly = File.Exists(editorPdb)
+                ? _context.LoadFromStream(new MemoryStream(File.ReadAllBytes(editorDll)), new MemoryStream(File.ReadAllBytes(editorPdb)))
+                : _context.LoadFromStream(new MemoryStream(File.ReadAllBytes(editorDll)));
+            EditorExtensions.Scan(EditorAssembly);
+        }
         LoadCount++;
         Console.WriteLine($"[Scripts] Loaded {Assembly.GetName().Name} #{LoadCount} : {Assembly.GetTypes().Count(t => typeof(IComponent).IsAssignableFrom(t))} components, {_systems.Count} systems");
     }
@@ -171,6 +194,9 @@ internal sealed class ScriptHost : IDisposable
     {
         if (Assembly == null) return;
         var old = Assembly;
+        EditorExtensions.Clear();   // 拡張 (古い型を持っている) を先に捨てる
+        if (EditorAssembly != null) ComponentRegistry.Forget(EditorAssembly);   // 型の一覧を作り直す時に、古い GameEditor.dll も見ないように
+        EditorAssembly = null;
         _engine.RemoveSystems(_systems);
         _systems.Clear();
         world.RemovePools(t => t.Assembly == old);
@@ -199,6 +225,10 @@ internal sealed class ScriptHost : IDisposable
     private sealed class GameLoadContext : AssemblyLoadContext
     {
         public GameLoadContext() : base("Game", isCollectible: true) { }
-        protected override Assembly? Load(AssemblyName name) => null;
+        // GameEditor.dll が参照する Game.dll は、この中に読んだ物を使う。
+        // 読んだアセンブリはフィールドに持たず、Assemblies から探す (以前はフィールドに持っていたので、
+        // 捨てた AssemblyLoadContext が解放されなかった : 読み直すたびに古い Game.dll / GameEditor.dll が残った)
+        protected override Assembly? Load(AssemblyName name) =>
+            name.Name == "Game" ? Assemblies.FirstOrDefault(a => a.GetName().Name == "Game") : null;
     }
 }
