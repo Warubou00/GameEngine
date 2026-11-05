@@ -507,6 +507,27 @@ internal sealed class EditorTest
               "audio listener / camera components are listed");
         yield return 0;
 
+        // ---------- ED9 : スクリプトリファレンス ----------
+        //   ゲームの型を出したまま、この後の ED7 の読み直しを通す (リファレンスがゲームの型を持ち続けると、古い Game.dll が解放されない)
+        var reference = _app.Reference;
+        var referenceEntries = reference.Entries.ToList();
+        check(referenceEntries.Any(e => e.Name == "Collider" && e.Group.StartsWith("Components/Engine")) && referenceEntries.Any(e => e.Name == "Spin" && e.Group == "Components/Game") &&
+              referenceEntries.Any(e => e.Name == "SpinSystem" && e.Group == "Systems/Game") && referenceEntries.Any(e => e.Name == "World" && e.Group == "Engine API") &&
+              referenceEntries.Any(e => e.Name == "ComponentEditor<T>" && e.Group == "Editor API"),
+              $"reference : engine / game components, systems, engine and editor API ({referenceEntries.Count} types)");
+        var colliderDoc = reference.DocFor(typeof(Collider));
+        var spinDoc = reference.DocFor(gameType("Spin"));
+        check(colliderDoc is { } cd && cd.Summary.Contains("コライダー") && !cd.Summary.Contains("====") && cd.Members >= 3 && spinDoc is { Summary.Length: > 0 },
+              $"reference : descriptions from the source comments (Collider : {colliderDoc?.Members} members, game : {(spinDoc?.Summary.Length > 0 ? "ok" : "none")})");
+        var colliderUsage = reference.usageOf(typeof(Collider));
+        check(colliderUsage.Contains("world.Add(entity, new Collider") && colliderUsage.Contains("Collider.Box(") && colliderUsage.Contains("world.ForEach") &&
+              reference.usageOf(typeof(ISystem)).Contains("[GameSystem]") && reference.usageOf(typeof(ComponentEditor<>)).Contains("override"),
+              "reference : usage examples (component / system / editor extension)");
+        check(ScriptReference.kindOf(typeof(Collider)) == "struct (component)" && ScriptReference.nameOf(typeof(ComponentEditor<>)) == "ComponentEditor<T>" &&
+              _app.OpenReference(gameType("Spin")) && reference.Selected == "G:GameEngine_console.Spin", "reference : open a game component from the inspector");
+        yield return 0;
+        yield return 0;
+
         // ---------- ED7 : ゲームのコード (Game.dll) / 読み直し ----------
         var scripts = _app.Scripts;
         check(scripts.Assembly != null && scripts.SystemCount >= 6 && known.Any(t => t.Type.FullName == "GameEngine_console.Spin"), $"game scripts are loaded ({scripts.SystemCount} systems)");

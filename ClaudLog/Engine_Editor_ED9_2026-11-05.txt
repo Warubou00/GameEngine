@@ -1,0 +1,88 @@
+﻿エディター ED9 : スクリプトリファレンス / ランチャー 2026-11-05
+ブランチ : feature/editor-ed9
+
+■ 頼まれたこと
+  1. スクリプトリファレンス : メニューから開き、今あるコンポーネントの型の継承元と使い方のヘルプを見られる
+  2. ランチャー : ランチャーから起動でき、エディターの版を選んで起動できる
+
+■ 1. スクリプトリファレンス (Help > Script Reference / Ctrl+H / インスペクターのコンポーネントの右クリック > Open Reference)
+  左 : 型の一覧と検索 (型の名前 / メンバーの名前)。172 個
+    Basics (IComponent / ISystem / IFixedSystem / GameSystemAttribute) / Components/Engine (Category ごと) / Components/Game /
+    Systems/Game / Game / Engine API / Editor API (ComponentEditor<T> / Gizmos / EditorApi ...) / Game (Editor)
+  右 : 選んだ型の
+    - 種類 (struct (component) / interface / abstract class ...) / 名前空間 / DLL
+    - 継承元 : object -> ValueType -> Collider のように並べる。実装しているインターフェイス / 付いている属性 (値も)
+    - 説明 : ソースの型の前のコメント (==== の線は除く)。メンバーの説明は行の後ろか上のコメント
+    - 使い方 : 型から作るコードの例 (Copy で写せる)
+        コンポーネント : 付ける (既定の値を入れた new T { ... } と、Collider.Box(...) などの作る関数) / ref で読む・書く / ForEach / 外す
+        System / IComponent / 属性 / 継いで使うクラス (ComponentEditor<T> など。上書きするメソッド) / static クラス
+    - フィールド (型 / 既定の値 / 説明 / [Range] / Tooltip / 保存されない物) / プロパティ / メソッド / enum の値
+    - この型を実装する・継ぐ型 / この属性を付けた型 (例 : IComponent → 26 個)。型の名前を押すとその型へ (< Back で戻る)
+    - 今のシーンで持っている物の数と Select (押すたびに次の物を選ぶ) / Open Source (ソースのファイルを開く)
+  説明の元 (SourceDocs.cs) :
+    エンジン (GameEngine.Runtime) とエディターのソースを、エディターの exe に埋め込んだ (EmbeddedResource)。ビルドした版の説明が出る。
+      リポジトリの外 (ランチャーで入れた版) でも読める。リポジトリがあれば Open Source でそのファイルを開く
+    ゲームのコード (Project/Scripts) はファイルから読む (ゲームの DLL を読み直すと読み直す)
+    C# を解析するのではなく、このエンジンの書き方 (1 行 1 宣言 / コメントは前か後ろ) を前提に行で読む。/// の XML の印は取る
+  ゲームの型は Type を持ち続けない (名前で覚えて毎フレーム引く)。持つと、ゲームの DLL を読み直した時に古い DLL が解放されない (ED7)
+    → 確認 : ゲームの型 (Spin) を出したまま ED7 の読み直しを通し、「古い Game.dll が残らない」(4 回読んで 1 個) のまま
+  ※途中の試し : 近道を Ctrl+F1 にしたが、F1 は C++ のプロファイラーも拾って一緒に開いた → Ctrl+H にした
+
+■ 2. ランチャー (新規 : CSharp_console/GameEngine.Launcher。WinForms。D3D12 は使わないのですぐ開く)
+  Projects : プロジェクトの一覧 (名前 / 前に開いた版 / 最後に開いた日時 / 場所)。下の「Editor :」で版を選んで Open (ダブルクリックでも)
+    前に開いた版と違う版で開く時は確かめる / Add... (フォルダを選ぶ。空のフォルダなら新しいプロジェクト。Assets はエディターが作る) /
+    Remove (一覧から外すだけ。ファイルは消さない) / Show in Explorer / Close after opening
+    版の選び方 : 前にそのプロジェクトで選んだ版 → プロジェクトを開いた版と同じ版 (入れた版を先に) → 一番新しい版
+  Installs : エディターの版の一覧 (新しい順)
+    Installed   : ランチャーで入れた版 (%LOCALAPPDATA%\GameEngine\Editors\<版>_<コミット>)。
+                  Install Current Build でリポジトリの Release のビルドを写す : Editor (エディター) / Shader / Player (ビルド済み)
+    Development : リポジトリのビルド (Release / Debug)。ビルドし直すと中身が変わる
+    Added       : Add Editor... で選んだ GameEngine.Editor.exe
+    Launch / Remove (入れた版は確かめてから消す。足した版は一覧から外すだけ。開発版は消さない) / Show in Explorer / Refresh
+  設定 : %LOCALAPPDATA%\GameEngine\launcher.json (プロジェクトの一覧 / 足した版)。初めての時はリポジトリの見本のプロジェクトを入れる
+  起動 : GameEngine.Editor.exe --project <フォルダ> (作業フォルダはエディターのフォルダ)
+  引数 : --data <フォルダ> (設定と入れた版の置き場) / --test (確認。--keep で入れた版を残す) / --tab installs
+
+■ エディターの版 (ED9)
+  GameEngine.Editor.csproj の <Version>0.9.0</Version>。コミットは SDK が InformationalVersion の "+" の後ろに付ける (EditorVersion.cs)
+  ランチャーは GameEngine.Editor.dll のファイルの版を読む。Help メニュー / 起動時のログに「GameEngine Editor 0.9.0 (85bda2d)」
+  プロジェクトを開くと、プロジェクトのフォルダに ProjectVersion.txt ("EditorVersion: 0.9.0") を書く (git に入れる。コミットは書かない / 同じなら書かない)
+  エディターに --quit-after N (N フレーム描いたら閉じる。ランチャーの確認用) を足した
+
+■ 入れた版のエディターがリポジトリの外で動くように
+  シェーダー : エディターはリポジトリが無いと作業フォルダ = exe のフォルダになり、../Shader を読む → 入れた版の Shader
+  ゲームの書き出し (ED8 後半) : 以前は GameEngine.Player.csproj (リポジトリ) が無いと書き出せなかった →
+    エディターの隣の ../Player にビルド済みの Player があれば、それを使う (GameBuilder.PrebuiltPlayer)
+
+■ 変更
+  エディター : ScriptReference.cs / SourceDocs.cs / EditorVersion.cs (新規) / EditorApp.cs (Help メニュー / Ctrl+H / 窓) /
+    EditorApp.Edit.cs (OpenReference) / Inspector.cs (Open Reference) / Program.cs (ProjectVersion.txt / --quit-after / 版のログ) /
+    GameBuilder.cs・BuildWindow.cs (ビルド済みの Player) / GameEngine.Editor.csproj (版 / ソースの埋め込み) / EditorTest.cs (4 項目)
+  ランチャー : GameEngine.Launcher/GameEngine.Launcher.csproj / Program.cs / LauncherForm.cs / EditorInstalls.cs / LauncherTest.cs (新規)
+  プロジェクト : Project/ProjectVersion.txt
+  ※ランタイム / C++ は変えていない
+
+■ 確認
+  エディター (--editor-test) : 128 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    リファレンスの 4 項目 : 一覧 (エンジン / ゲームのコンポーネント、System、エンジンとエディターの API。172 個) /
+      ソースのコメントから説明 (Collider : 型の説明と 8 個のメンバー。ゲームの Spin も) /
+      使い方の例 (コンポーネント / System / エディターの拡張) / インスペクターからゲームのコンポーネントを開く
+  ランチャー (--test --data <一時フォルダ>) : 8 / 0
+    開発版を見つける (0.9.0 (85bda2d)) / 入れる (エディター + シェーダー + Player、94 MB、3.5 秒) / 一覧に両方 (新しい順) /
+    入れた版 (リポジトリの外) で空のプロジェクトを開いて 120 フレーム描いて閉じる (2.6 秒、終了コード 0) /
+    プロジェクトに版が書かれる / ランチャーがプロジェクトと版を覚える / プロジェクトの版から選ぶ / 入れた版を消す
+  見た目 (窓だけを撮った。入力は PostMessage) :
+    エディター : Ctrl+H でリファレンス (IComponent : 説明 / 使い方 / 実装する 26 個の型) → Collider を押す (継承元 object -> ValueType -> Collider /
+      IComponent / シーンに 13 個 / 説明 / 使い方の例)
+    ランチャー : Projects (TestProject 0.9.0 / Project、Editor : 0.9.0 (85bda2d) Installed) / Installs (開発版 Debug・Release と入れた版)
+      撮った時は Debug の開発版が 1.0.0 と出た (<Version> を足す前のビルド。ビルドし直して 0.9.0)
+
+■ 途中で気付いたこと
+  Git Bash の sed -i は CR を消す (CRLF のファイルが LF になる)。EditorApp.cs / EditorTest.cs の改行を CRLF に戻した (git の中身は変わらない)
+
+■ 残り
+  - リポジトリの外のプロジェクトでは Game.csproj がエンジン (GameEngine.Runtime) を相対パスで参照しているので、ゲームのコードをビルドできない
+    (プロジェクトの雛形 / エンジンの DLL を参照する形は無い)。ランチャーに「新しいプロジェクトの雛形」は無い (空のフォルダを Add する)
+  - 版を上げる時は GameEngine.Editor.csproj の <Version> を手で変える
+  - リファレンスの説明は行で読むので、1 行に複数の宣言を書いた所などは拾えない。フォントに無い文字 (√ など) は ? になる
+  - ランチャー自身の更新 / エディターのダウンロード (ネットから) は無い (リポジトリのビルドを入れるだけ)

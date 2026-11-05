@@ -2,7 +2,8 @@
 
 // ==========================================================================
 // エディター (ED3)
-//   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--editor-test] [--resave-scenes]
+//   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--editor-test] [--resave-scenes] [--quit-after N]
+//     ランチャー (ED9) は --project で開くプロジェクトを渡す
 //     プロジェクト : 既定は CSharp_console/Project (中の Assets フォルダがアセットの置き場。ED5)
 //       最初の 1 回だけ、見本のモデル (見本の出力フォルダの Model) を Assets/Models へ写す (元のファイルは変えない)
 //     既定は Assets/Scenes/showcase.scene.json を開く (無ければ空のシーン)
@@ -38,6 +39,8 @@ internal static class Program
         var database = new AssetDatabase(projectRoot);
         if (workingDirectory != null) seedSampleAssets(Path.GetFullPath(Path.Combine(workingDirectory, "..", "Model")), Path.Combine(database.AssetsRoot, "Models"));
         var created = database.Refresh();
+        EditorVersion.WriteProjectVersion(database.ProjectRoot);   // どの版のエディターで開いたか (ED9。ランチャーが出す)
+        Console.WriteLine($"[Editor] GameEngine Editor {EditorVersion.Display}");
         Console.WriteLine($"[Assets] {database.AssetsRoot} : {database.Entries.Count()} assets{(created > 0 ? $" ({created} new .meta)" : "")}");
         var scenes = Path.Combine(database.AssetsRoot, "Scenes");
 
@@ -64,6 +67,12 @@ internal static class Program
         editor.WatchShaders(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "Shader")),
                             root != null ? Path.Combine(root.FullName, "RHI", "Source", "Shader") : null);
         if (args.Contains("--editor-test")) editor.FrameHook = new EditorTest(editor).Frame;   // 自動の確認 (ED4)
+        // --quit-after N : N フレーム描いたら閉じる (ランチャーの確認用。ED9)
+        if (options.TryGetValue("--quit-after", out var quitText) && int.TryParse(quitText, out var quitFrames))
+        {
+            var frames = 0;
+            engine.LateUpdate += () => { if (++frames == quitFrames) { Console.WriteLine($"[Editor] {frames} frames, quit"); engine.Quit(); } };
+        }
         var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");

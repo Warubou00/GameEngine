@@ -20,6 +20,8 @@ internal sealed class Inspector
     private readonly UndoStack _undo;
     // 値を書いた時 (entity, 型, 前の JSON, 後の JSON)。エディターがプレハブの変えた値の印に使う (ED8)
     public Action<Entity, Type, string?, string>? Written;
+    // コンポーネントの右クリック > Open Reference (ED9。スクリプトリファレンスで型を出す)
+    public Action<Type>? OpenReference;
     private World World => _engine.World;
     private string _addFilter = "";
     private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)
@@ -94,6 +96,7 @@ internal sealed class Inspector
             if (ImGui.BeginPopupContextItem("component"))
             {
                 if (ImGui.MenuItem("Remove Component")) remove = pool;
+                if (ImGui.MenuItem("Open Reference")) OpenReference?.Invoke(pool.ComponentType);   // ED9
                 ImGui.EndPopup();
             }
             if (open)

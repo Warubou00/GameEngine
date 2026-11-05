@@ -25,7 +25,21 @@
       TieredPGO=0 / TC_CallCounting=0 / TC_OnStackReplacement=0 では解放されない)。エディターだけの設定 (見本 / ゲームは既定のまま)
     -->
     <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+    <!--
+      エディターの版 (ED9)。ランチャーが GameEngine.Editor.dll の版を読んで一覧に出す / プロジェクトの ProjectVersion.txt に書く
+      上げる時はここを変える (git のコミットは .NET の SDK が InformationalVersion の "+" の後ろに付ける)
+    -->
+    <Version>0.9.0</Version>
   </PropertyGroup>
+
+  <!--
+    スクリプトリファレンス (ED9) : エンジンとエディターのソースを exe に埋め込む (コメントを型の説明として読む)
+    ビルドした版のソースなので、説明はいつもその版の物。リポジトリの外 (ランチャーで入れた版) でも読める
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\GameEngine.Runtime\**\*.cs" Exclude="..\GameEngine.Runtime\obj\**;..\GameEngine.Runtime\bin\**" LogicalName="RuntimeSource/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+    <EmbeddedResource Include="**\*.cs" Exclude="obj\**;bin\**" LogicalName="EditorSource/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
 
   <Import Project="..\NativeEngine.targets" />
 
