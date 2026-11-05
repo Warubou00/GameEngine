@@ -274,6 +274,66 @@ namespace Renderer
 		return static_cast<uint32_t>(_models.size() - 1);
 	}
 
+	// 頂点とインデックスの配列からモデルを作る (SH1)。ファイルを読まない以外は loadModelResource と同じ登録をする
+	uint32_t SceneRenderer::CreateMesh(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount, const std::wstring& name)
+	{
+		if (!IsInitialized() || !vertices || !indices || vertexCount == 0 || indexCount < 3 || name.empty()) return INVALID_HANDLE;
+		for (uint32_t i = 0; i < indexCount; ++i)
+		{
+			if (indices[i] >= vertexCount)
+			{
+				Core::Logger::Log("[SceneRenderer] CreateMesh : index out of range.");
+				return INVALID_HANDLE;
+			}
+		}
+		ModelResource model;
+		model.Vertices = _rhi->UploadVertices(vertices, vertexCount);
+		if (!model.Vertices.IsValid())
+		{
+			Core::Logger::Log("[SceneRenderer] CreateMesh : failed upload vertices.");
+			return INVALID_HANDLE;
+		}
+		const RHI::IndexRange range = _rhi->UploadIndices(indices, indexCount);
+		if (!range.IsValid())
+		{
+			releaseModelResource(model);
+			Core::Logger::Log("[SceneRenderer] CreateMesh : failed upload indices.");
+			return INVALID_HANDLE;
+		}
+		model.IndexRanges.push_back(range);
+
+		RHI::MaterialDesc desc;   // 白 / 不透明 / 片面
+		desc.Metallic  = 0.0f;
+		desc.Roughness = 0.6f;
+		RHI::DrawItem item;
+		item.BaseVertex = model.Vertices.BaseVertex;
+		item.FirstIndex = range.FirstIndex;
+		item.IndexCount = range.Count;
+		item.Material   = _rhi->CreateMaterial(desc);
+		model.Materials.push_back(item.Material);
+		model.SubMeshes.push_back(item);
+
+		model.Positions.reserve(static_cast<size_t>(vertexCount) * 3);
+		for (uint32_t i = 0; i < vertexCount; ++i)
+		{
+			model.Positions.push_back(vertices[i].Position._x);
+			model.Positions.push_back(vertices[i].Position._y);
+			model.Positions.push_back(vertices[i].Position._z);
+		}
+		model.Indices.assign(indices, indices + indexCount);
+		model.Path = name;   // 空でない = 使っている番号 (ファイルではないので ReloadModel は読めずに前のまま)
+
+		if (!_freeModels.empty())
+		{
+			const uint32_t handle = _freeModels.back();
+			_freeModels.pop_back();
+			_models[handle] = std::move(model);
+			return handle;
+		}
+		_models.push_back(std::move(model));
+		return static_cast<uint32_t>(_models.size() - 1);
+	}
+
 	// ==============================================================
 	// ED5 : 読み直し / 解放 / マテリアル
 	// ==============================================================

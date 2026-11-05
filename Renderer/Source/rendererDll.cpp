@@ -163,6 +163,13 @@ extern "C"
 		return desc;
 	}
 
+	// 頂点 (RHI::Vertex : 56byte) とインデックスの配列からモデルを作る (SH1 : プリミティブ)。サブメッシュは 1 つ
+	RENDERER_API uint32_t Renderer_CreateMesh(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount, const wchar_t* name)
+	{
+		if (!g_renderer || !name) return Renderer::INVALID_HANDLE;
+		return g_renderer->CreateMesh(vertices, vertexCount, indices, indexCount, name);
+	}
+
 	// 同じファイルを読み直す (番号は同じまま)。読めなければ前の物のまま (false)
 	RENDERER_API bool Renderer_ReloadModel(uint32_t model, uint32_t* outSubMeshCount)
 	{

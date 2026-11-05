@@ -39,6 +39,26 @@ internal sealed partial class EditorApp
         return entity;
     }
 
+    /// <summary>
+    /// プリミティブを置く (SH1。GameObject > 3D Object)。形に合うコライダーも付ける (円錐 / トーラスはメッシュ = 動かない物用)。元に戻せる
+    /// parent があればその子に (親の位置)、無ければエディターのカメラの 5 m 前
+    /// </summary>
+    public Entity CreatePrimitive(PrimitiveShape shape, Entity parent)
+    {
+        Model model;
+        try { model = _engine.Assets.LoadPrimitive(shape); }
+        catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return Entity.Null; }
+        var entity = World.CreateEntity(shape.ToString());
+        var hasParent = World.IsAlive(parent) && World.Has<Transform>(parent);
+        var transform = hasParent ? new Transform { Parent = parent } : new Transform(_cameraPosition + Vector3.Transform(Vector3.UnitZ, cameraRotation) * 5.0f);
+        World.Add(entity, transform);
+        World.Add(entity, new MeshRenderer(model));
+        if (Primitives.ColliderFor(shape, _engine.Assets, model) is { } collider) World.Add(entity, collider);
+        Selected = entity;
+        _undo.Record(new EntitiesEdit($"Create {shape}", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        return entity;
+    }
+
     // モデルのアセットを置く (ED5)。position はワールドの位置。parent があればその子に
     public Entity PlaceModel(AssetEntry asset, Vector3 position, Entity parent)
     {

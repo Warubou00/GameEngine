@@ -40,3 +40,5 @@ CSharp_console/Project/Assets/**/*.*
 CSharp_console/Project/Library/
 # 書き出したゲーム (ED8 後半。File > Build Game の既定の書き出し先)
 CSharp_console/Project/Build/
+# 雲の参考資料 (CEDEC の発表資料。大きく、他の方の物なので入れない。SH1 の時に決めた)
+CSharp_console/GameEngine.Editor/assets/*.pptx
