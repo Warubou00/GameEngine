@@ -1,0 +1,55 @@
+﻿エディター ED8 (前半) : プレハブ 2026-11-05
+ブランチ : feature/editor-ed8
+
+■ ED8 の分け方 (ロードマップの「ED8 2 回」)
+  前半 (今回) : プレハブ (エンティティの塊をアセットに。置いた物は元の変更を受け継ぎ、変えた所だけ持つ)
+  後半 (次回) : ゲームの書き出し (Player の exe + シーン + 使っているアセットだけ。エディターの物は入れない)
+
+■ プレハブのアセット : 「名前.prefab.json」(中身はシーンのファイルと同じ形。最初の物が根。PrefabLink は入れない)
+  ランタイム : Prefab (Assets/Prefab.cs) / AssetManager.LoadPrefab(パス or Id) / ReloadPrefab / AssetKind.Prefab
+    ゲームのコードから置ける : engine.Assets.LoadPrefab("Assets/Prefabs/X.prefab.json").Instantiate(world, position)
+  PrefabLink (コンポーネント。置いた物の全部に付く。コンポーネントを足すメニューには出さない)
+    Prefab = プレハブのアセットの Id / Source = プレハブの中のどの物か / Overrides = 自分で変えた値 ("型.フィールド")
+  SceneSerializer.Load(..., freshIds: true) : 全部に新しい Id を付けて読む (置く時。中の参照は新しい物どうしに繋がる)
+
+■ エディター (EditorApp.Prefab.cs)
+  作る : Hierarchy の右クリック > Create Prefab → Assets/Prefabs/名前.prefab.json。選んだ物 (子ごと) はそのプレハブの置いた物になる
+  置く : Project のプレハブをシーンビュー (マウスの下) / Hierarchy (その子として) へドラッグ (元に戻せる)
+  置いた物 : Hierarchy で青い名前。インスペクターの上に「Prefab : 名前 (変えた値の数)」と Apply / Revert / Unpack / Select Root
+            (右クリック > Prefab からも)
+  変えた値の印 : インスペクター / ギズモ / EditorApi.Modify / マテリアルのドロップで変えたフィールドを Overrides に足す (変わったフィールドだけ)
+  プレハブに合わせる (SyncPrefab) :
+    - Apply の後 / プレハブのファイルが外で書き換わった時 (見張り) / シーンを開いた時 (ファイルから読み直してから)
+    - 自分で変えた値と、根の Position / Rotation / Parent / 名前はそのまま。プレハブの中の参照 (親など) は置いた物どうしに繋ぎ直す
+    - プレハブに増えた物は作る / 無くなった物は消す。置いた物に自分で足したコンポーネントは残す
+  Apply : 置いた物の今の値をプレハブに書く (根の位置と回転はプレハブのまま)。自分で足した子もプレハブの物になる。他の置いた物にも効く
+  Revert : 自分で変えた値を捨ててプレハブに戻す / Unpack : 繋がりを切る (元に戻せる)
+  ※プレハブ (アセット) の変更 (作る / Apply / Revert) は元に戻せない。Revert は元に戻すの記録を消す
+
+■ 途中で直したこと
+  - シーンを開いた時に、覚えているプレハブの中身が古いまま合わせていた (ファイルの見張りが読み直す前に開いた時) → 開く時にファイルから読み直す
+
+■ 変更
+  ランタイム : Assets/Prefab.cs (新規 : Prefab / PrefabLink) / Assets/Model.cs (LoadPrefab / ReloadPrefab) /
+    Assets/AssetDatabase.cs (AssetKind.Prefab) / Serialization/SceneSerializer.cs (freshIds)
+  エディター : EditorApp.Prefab.cs (新規) / EditorApp.cs (ドロップ / Hierarchy の色と右クリック / インスペクターの見出し / 開く時に合わせる) /
+    EditorApp.Edit.cs (変えた値の印) / Inspector.cs (Written / PrefabLink を出さない) / ProjectPanel.cs (タイル / 書き換えで作り直す) /
+    EditorTest.cs (プレハブの 15 項目)
+  ※C++ は変えていない
+
+■ 確認
+  自動 (--editor-test) : 112 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    プレハブの 15 項目 : 子ごと作る (3 個) / アセットに繋がりの印が入らない / 2 つ目を置く (親子が繋がる、新しい Id) / 置いた物の根を探す /
+      変えたフィールドだけ印が付く / Apply / 他の置いた物は自分で変えた値を保つ / 変えていない値は受け取る /
+      Apply で印が消え根の位置はそのまま / Revert / 足した子を Apply すると他の置いた物にも増える /
+      保存して開き直すと繋がりはそのまま、閉じている間のプレハブの変更が効く (2 つとも名前が変わる) / 置くのを元に戻す /
+      ゲームのコードから Prefab.Instantiate / Unpack
+  見た目 (エディターの窓だけを撮った。入力は PostMessage) :
+    Hierarchy pivot を右クリック > Create Prefab → Project に Prefabs フォルダとタイル、元の物が青い名前に →
+    タイルをシーンビューへドラッグ → 子と孫ごと置かれ、インスペクターに Prefab の見出しと Apply / Revert / Unpack (確認後にプレハブは消した)
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0。showcase の C# update 0.057 〜 0.060 ms
+
+■ 残り
+  - 置いた物から消したコンポーネント / 子は覚えない (プレハブに合わせると戻る)
+  - プレハブの中にプレハブ (入れ子) / プレハブだけを開いて直す画面は無い (置いた物で直して Apply)
+  - 変えた値の印は、元に戻しても消えない (Revert で消える)

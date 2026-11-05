@@ -36,6 +36,8 @@ internal sealed class ProjectPanel : IDisposable
 
     // 選んだアセット (インスペクターがマテリアルを出すのに使う)。Version は選び直した回数
     public AssetEntry? Selected => _selected;
+    // プレハブのファイルが外で変わった時 (エディターが置いた物を作り直す。戻り値 = 置いた物の数。ED8)
+    public Func<Prefab, int>? PrefabChanged;
     public int SelectionVersion { get; private set; }
 
     private string  _folder = AssetDatabase.AssetsFolder;
@@ -103,6 +105,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Model    => _engine.Assets.ReloadModel(path) ? 1 : 0,
                     AssetKind.Texture  => _engine.Assets.ReloadTexture(path),
                     AssetKind.Material => _engine.Assets.ReloadMaterial(path) ? 1 : 0,
+                    AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     _ => 0,
                 };
                 if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); }   // サムネイルも作り直す
@@ -294,6 +297,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Sound    => ("WAV", 0xFF3CA05Au),
         AssetKind.Scene    => ("Scene", 0xFF8C3C8Cu),
         AssetKind.Material => ("Mat", 0xFF3CA0A0u),
+        AssetKind.Prefab   => ("Prefab", 0xFFE0A050u),
         _                  => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF404040u),
     };
 

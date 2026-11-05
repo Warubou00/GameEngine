@@ -71,10 +71,12 @@ internal sealed partial class EditorApp
         _scenesDirectory = scenesDirectory;
         Directory.CreateDirectory(scenesDirectory);
         _project = new ProjectPanel(engine, database, OpenScene);
+        _project.PrefabChanged = SyncPrefab;   // ED8
         _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
+        _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
         _picker = new Picker(engine);
@@ -117,6 +119,8 @@ internal sealed partial class EditorApp
         try
         {
             _engine.LoadScene(path);
+            var synced = SyncAllPrefabs();   // プレハブが変わっていれば置いた物に効かせる (ED8)
+            if (synced > 0) Console.WriteLine($"[Prefab] Synced {synced} prefab instances");
             _scenePath = path;
             Selected   = Entity.Null;
             _undo.Clear();
@@ -401,12 +405,13 @@ internal sealed partial class EditorApp
             // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
             if (ImGui.BeginDragDropTarget())
             {
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene, AssetKind.Material) is { } asset)
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene, AssetKind.Material, AssetKind.Prefab) is { } asset)
                 {
                     var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
                     var ray = view.RayDirection(ImGui.GetIO().MousePos);
                     if (asset.Kind == AssetKind.Scene) OpenScene(_database.FullPath(asset.Path));
                     else if (asset.Kind == AssetKind.Material) AssignMaterial(_picker.Pick(_cameraPosition, ray, out _), asset);   // マウスの下の物に付ける
+                    else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, dropPoint(ray), Entity.Null);              // ED8
                     else PlaceModel(asset, dropPoint(ray), Entity.Null);
                 }
                 ImGui.EndDragDropTarget();
@@ -568,7 +573,9 @@ internal sealed partial class EditorApp
         t.Rotation = rotation;
         t.Scale    = scale;
         t.MarkDirty();
-        _undo.Record(new ComponentEdit(id, typeof(Transform), before, SceneSerializer.SaveComponent(World, entity, typeof(Transform))), (id, typeof(Transform)));
+        var after = SceneSerializer.SaveComponent(World, entity, typeof(Transform));
+        _undo.Record(new ComponentEdit(id, typeof(Transform), before, after), (id, typeof(Transform)));
+        MarkOverrides(entity, typeof(Transform), before, after);
     }
 
     // 選んだ物が画面に収まる所へカメラを動かす
@@ -651,7 +658,11 @@ internal sealed partial class EditorApp
             if (ImGui.BeginDragDropTarget())
             {
                 if (acceptEntity()) SetParent(_dragged, Entity.Null);
-                if (ProjectPanel.AcceptDrop(AssetKind.Model) is { } asset) PlaceModel(asset, Vector3.Zero, Entity.Null);
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Prefab) is { } asset)
+                {
+                    if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Vector3.Zero, Entity.Null);
+                    else PlaceModel(asset, Vector3.Zero, Entity.Null);
+                }
                 ImGui.EndDragDropTarget();
             }
             if (ImGui.IsItemClicked()) Selected = Entity.Null;
@@ -667,9 +678,11 @@ internal sealed partial class EditorApp
         if (!hasChildren) flags |= ImGuiTreeNodeFlags.Leaf;
         if (entity == _selected) flags |= ImGuiTreeNodeFlags.Selected;
         var inactive = !World.IsActive(entity);
+        var prefab = World.Has<PrefabLink>(entity);   // プレハブの置いた物は青 (ED8)
         if (inactive) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
+        else if (prefab) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.75f, 1.0f, 1.0f));
         var open = ImGui.TreeNodeEx($"{NameOf(World, entity)}##{entity.Id}", flags);
-        if (inactive) ImGui.PopStyleColor();
+        if (inactive || prefab) ImGui.PopStyleColor();
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) Selected = entity;
         if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) { Selected = entity; FocusSelected(); }
 
@@ -685,9 +698,10 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
-            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Material) is { } asset)
+            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Material, AssetKind.Prefab) is { } asset)
             {
                 if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
+                else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として (ED8)
                 else PlaceModel(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として親の位置に
             }
             ImGui.EndDragDropTarget();
@@ -696,6 +710,18 @@ internal sealed partial class EditorApp
         {
             Selected = entity;
             if (ImGui.MenuItem("Create Child")) CreateEntity(entity);
+            // プレハブ (ED8)
+            if (PrefabRootOf(entity).IsNull)
+            {
+                if (ImGui.MenuItem("Create Prefab", null, false, !World.Has<PrefabLink>(entity))) CreatePrefab(entity);
+            }
+            else if (ImGui.BeginMenu("Prefab"))
+            {
+                if (ImGui.MenuItem("Apply")) ApplyPrefab(entity);
+                if (ImGui.MenuItem("Revert")) RevertPrefab(entity);
+                if (ImGui.MenuItem("Unpack")) UnpackPrefab(entity);
+                ImGui.EndMenu();
+            }
             if (ImGui.MenuItem("Duplicate")) Duplicate();
             if (ImGui.MenuItem("Delete")) DeleteSelected();
             ImGui.EndPopup();
@@ -734,6 +760,7 @@ internal sealed partial class EditorApp
             }
             else
             {
+                drawPrefabHeader();
                 _inspector.Draw(_selected);
             }
         }
@@ -830,6 +857,33 @@ internal sealed partial class EditorApp
             }
         }
         LastGizmoCount = gizmos.Count;
+    }
+
+    // 選んだ物がプレハブの置いた物なら、プレハブの名前と Apply / Revert / Unpack (ED8)
+    private void drawPrefabHeader()
+    {
+        if (!World.IsAlive(_selected) || !World.Has<PrefabLink>(_selected)) return;
+        var root = PrefabRootOf(_selected);
+        var link = World.Get<PrefabLink>(_selected);
+        var prefab = _engine.Assets.LoadPrefab(link.Prefab);
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.75f, 1.0f, 1.0f));
+        ImGui.Text($"Prefab : {(prefab != null ? Path.GetFileName(prefab.Path) : "(missing)")}");
+        ImGui.PopStyleColor();
+        var count = link.Overrides?.Length ?? 0;
+        ImGui.SameLine();
+        ImGui.TextDisabled(count > 0 ? $"({count} overrides)" : "(no overrides)");
+        if (count > 0 && ImGui.IsItemHovered()) ImGui.SetTooltip(string.Join("\n", link.Overrides!));
+        if (!root.IsNull)
+        {
+            if (ImGui.SmallButton("Apply")) ApplyPrefab(_selected);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Revert")) RevertPrefab(_selected);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Unpack")) UnpackPrefab(_selected);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Select Root")) Selected = root;
+        }
+        ImGui.Separator();
     }
 
     private void drawStats()
