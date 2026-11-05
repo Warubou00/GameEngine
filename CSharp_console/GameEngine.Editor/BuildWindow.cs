@@ -48,6 +48,16 @@ internal sealed class BuildWindow
         _previewVersion = -1;
     }
 
+    // アセットの名前が変わった時 (ED10) : 入れるシーンの並びのパスを付け替える
+    public void OnAssetRenamed(Func<string, string?> map)
+    {
+        var changed = false;
+        for (int i = 0; i < Settings.Scenes.Count; i++)
+            if (map(Settings.Scenes[i]) is { } moved) { Settings.Scenes[i] = moved; changed = true; }
+        if (changed && File.Exists(_settingsFile)) save();
+        _previewVersion = -1;
+    }
+
     // ---------------------------------------------------------------------
     // 書き出す (窓のボタン / テスト)
     // ---------------------------------------------------------------------

@@ -71,7 +71,7 @@ internal static class Program
         if (options.TryGetValue("--quit-after", out var quitText) && int.TryParse(quitText, out var quitFrames))
         {
             var frames = 0;
-            engine.LateUpdate += () => { if (++frames == quitFrames) { Console.WriteLine($"[Editor] {frames} frames, quit"); engine.Quit(); } };
+            engine.LateUpdate += () => { if (++frames == quitFrames) { Console.WriteLine($"[Editor] {frames} frames, quit"); editor.ForceQuit(); } };
         }
         var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);

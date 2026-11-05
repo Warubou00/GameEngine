@@ -18,7 +18,7 @@ public sealed class Material : IDisposable
     // 生きているマテリアルの数 (0 なら RenderSyncSystem は見回らない)
     public static int LiveCount { get; private set; }
 
-    public string  Path { get; }                       // アセットのパス ("Assets/..."。コードで作った物は "")
+    public string  Path { get; internal set; }         // アセットのパス ("Assets/..."。コードで作った物は "")。名前を変えると変わる (ED10)
     public Vector4 Color       = Vector4.One;          // テクスチャ × この色 (A は半透明の時の不透明度)
     public string? Texture;                            // テクスチャのアセットのパス (null = 白)
     public float   Metallic;                           // 0 = 非金属 / 1 = 金属

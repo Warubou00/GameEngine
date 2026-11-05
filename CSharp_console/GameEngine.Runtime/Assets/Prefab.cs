@@ -12,7 +12,7 @@ namespace GameEngine;
 // ==========================================================================
 public sealed class Prefab
 {
-    public string Path { get; }                     // アセットのパス ("Assets/...")
+    public string Path { get; internal set; }       // アセットのパス ("Assets/...")。名前を変えると変わる (ED10)
     public Guid   AssetId { get; }                  // アセットの Id (.meta の guid。PrefabLink.Prefab に入れる)
     public string Json { get; private set; } = "";
     public IReadOnlyList<Guid> EntityIds => _ids;   // ファイルの中のエンティティの Id (ファイルの順。0 番が根)

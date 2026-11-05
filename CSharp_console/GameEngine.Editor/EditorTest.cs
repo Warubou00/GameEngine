@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json;
+using ImGuiNET;
 
 namespace GameEngine.Editor;
 
@@ -31,7 +32,7 @@ internal sealed class EditorTest
         check(alive == 1, $"old Game.dll copies do not pile up ({alive} alive after {_app.Scripts.LoadCount} loads)");
         Console.WriteLine($"[Test] editor : pass {_pass} / fail {_fail}");
         _app.FrameHook = null;
-        _app.Engine.Quit();
+        _app.ForceQuit();   // 確認で変えたシーンは保存しない (ED10 : 聞く窓を出さない)
     }
 
     private void check(bool ok, string name)
@@ -808,12 +809,143 @@ internal sealed class EditorTest
             _app.TogglePlay();
             Time.CaptureDeltaTime = 0;
             var differences = new List<string>();
-            var (differenceCount, maxError) = SceneState.Compare(editorDump, playerDump, 1e-4f, differences);
-            foreach (var difference in differences) Console.WriteLine($"[Test]   {difference}");
+            var (differenceCount, maxError) = SceneState.Compare(editorDump, playerDump, 1e-4f, differences);            foreach (var difference in differences) Console.WriteLine($"[Test]   {difference}");
             check(differenceCount == 0, $"the built game moves the same as play in the editor : {Path.GetFileName(compareScene)} ({World.EntityCount} entities, max error {maxError:G3})");
             File.Delete(dumpFile);
         }
         Directory.Delete(buildFolder, true);
 
+        // ---------- ED10 : 名前を変える ----------
+        var io = ImGui.GetIO();
+        // 入力の欄に文字を打って Enter / Esc を押す (ImGui の入力の列に積む。本当の窓の入力と同じ道)
+        IEnumerable<int> typeAndPress(string text, ImGuiKey key)
+        {
+            yield return 0;   // 欄にフォーカスが入る
+            yield return 0;
+            io.AddInputCharactersUTF8(text);   // 全部選ばれているので置き換わる
+            yield return 0;
+            io.AddKeyEvent(key, true);
+            yield return 0;
+            io.AddKeyEvent(key, false);
+            yield return 0;
+        }
+        _app.OpenScene(database.FullPath("Assets/Scenes/showcase.scene.json"));
+        yield return 0;
+        var renameTarget = _app.CreateEntity(Entity.Null);
+        var originalName = World.Get<EntityInfo>(renameTarget).Name;
+        _app.RenameEntity(renameTarget, "Renamed Entity");
+        var renamedOk = World.Get<EntityInfo>(renameTarget).Name == "Renamed Entity";
+        _app.Undo();
+        var undone = World.Get<EntityInfo>(renameTarget).Name == originalName;
+        _app.Redo();
+        check(renamedOk && undone && World.Get<EntityInfo>(renameTarget).Name == "Renamed Entity", "rename an entity (undo / redo)");
+
+        // Hierarchy で F2 と同じ : 欄に打って Enter / Esc
+        ImGui.SetWindowFocus("Hierarchy");
+        _app.BeginRename(renameTarget);
+        foreach (var _ in typeAndPress("Typed Name", ImGuiKey.Enter)) yield return 0;
+        check(!_app.IsRenaming && World.Get<EntityInfo>(renameTarget).Name == "Typed Name", "rename in the hierarchy : type and Enter");
+        _app.BeginRename(renameTarget);
+        foreach (var _ in typeAndPress("Cancelled", ImGuiKey.Escape)) yield return 0;
+        check(!_app.IsRenaming && World.Get<EntityInfo>(renameTarget).Name == "Typed Name", "rename in the hierarchy : Esc cancels");
+
+        // アセット : マテリアル → 名前を変える (.meta ごと。Id は同じ。読み込んだ物のパスも変わる)
+        var renameFolder = "Assets/_EditorTestRename";
+        Directory.CreateDirectory(database.FullPath(renameFolder));
+        database.Refresh();
+        var renameMaterial = _app.Engine.Assets.CreateMaterialAsset(renameFolder, "Rock Paint");
+        var materialGuid = database.Find(renameMaterial.Path)!.Guid;
+        var oldMaterialPath = renameMaterial.Path;
+        var newMaterialPath = _app.Project.Rename(oldMaterialPath, "Stone Paint");
+        check(newMaterialPath == $"{renameFolder}/Stone Paint.material.json" && File.Exists(database.FullPath(newMaterialPath)) &&
+              File.Exists(database.FullPath(newMaterialPath) + ".meta") && !File.Exists(database.FullPath(oldMaterialPath)) &&
+              database.Find(newMaterialPath)?.Guid == materialGuid && renameMaterial.Path == newMaterialPath,
+              "rename an asset (.meta moves, same id, the loaded material follows)");
+        check(database.Find(oldMaterialPath)?.Path == newMaterialPath && database.ToAssetPath(oldMaterialPath) == newMaterialPath, "the old path still finds the renamed asset");
+        check(_app.Project.Rename(newMaterialPath!, "bad/name") == null && _app.Project.Rename(newMaterialPath!, "  ") == null && File.Exists(database.FullPath(newMaterialPath!)),
+              "invalid names are refused");
+
+        // マテリアルを付けたシーンを保存 → フォルダの名前を変える → 開き直しても繋がっている (Id で探す)
+        var painted = World.Entities.First(e => World.Has<MeshRenderer>(e));
+        var paintedId = World.Get<EntityInfo>(painted).Id;
+        _app.AssignMaterial(painted, database.Find(newMaterialPath!)!);
+        var renameScene = $"{renameFolder}/Rename Test.scene.json";
+        _app.SaveSceneTo(database.FullPath(renameScene));
+        database.Refresh();
+        var newFolder = _app.Project.Rename(renameFolder, "_EditorTestRenamed");
+        var movedScene = $"{newFolder}/Rename Test.scene.json";
+        check(newFolder == "Assets/_EditorTestRenamed" && renameMaterial.Path == $"{newFolder}/Stone Paint.material.json" &&
+              _app.ScenePath == database.FullPath(movedScene) && !Directory.Exists(database.FullPath(renameFolder)),
+              "rename a folder (children, the loaded material and the open scene follow)");
+        _app.Project.Rename(movedScene, "Renamed Scene");
+        var renamedScene = $"{newFolder}/Renamed Scene.scene.json";
+        _app.SaveSceneTo(_app.ScenePath!);
+        _app.OpenScene(database.FullPath(renamedScene));
+        yield return 0;
+        var repainted = SceneSerializer.FindEntity(World, paintedId);
+        check(_app.ScenePath == database.FullPath(renamedScene) && World.IsAlive(repainted) &&
+              World.Get<MeshRenderer>(repainted).Material?.Path == $"{newFolder}/Stone Paint.material.json",
+              "rename the open scene; the saved scene still finds the renamed material");
+
+        // Project で F2 と同じ : タイルの欄に打って Enter
+        ImGui.SetWindowFocus("Project");   // 下のタブの中で前に出す
+        _app.Project.BeginRename(database.Find(renamedScene)!);
+        foreach (var _ in typeAndPress("Typed Scene", ImGuiKey.Enter)) yield return 0;
+        check(!_app.Project.IsRenaming && File.Exists(database.FullPath($"{newFolder}/Typed Scene.scene.json")) && _app.ScenePath!.EndsWith("Typed Scene.scene.json"),
+              "rename in the project panel : type and Enter (the extension is kept)");
+
+        // ---------- ED10 : 保存していない変更を聞く ----------
+        var promptScene = _app.ScenePath!;
+        var otherScene = database.FullPath("Assets/Scenes/physics.scene.json");
+        check(!_app.IsDirty, "saved scene is not dirty");
+        _app.RequestOpenScene(otherScene);   // 変更が無ければ聞かない
+        yield return 0;
+        check(_app.PendingPrompt == null && _app.ScenePath == otherScene, "no prompt when there are no changes");
+        _app.OpenScene(promptScene);
+        yield return 0;
+        var promptEntity = World.Entities.First(e => World.Get<EntityInfo>(e).Name == "Typed Name");
+        _app.RenameEntity(promptEntity, "Unsaved Name");
+
+        // 新しいシーン → 聞く → Cancel : 何もしない
+        _app.RequestNewScene();
+        yield return 0;
+        check(_app.PendingPrompt == "creating a new scene" && ImGui.IsPopupOpen("Unsaved Changes") && _app.ScenePath == promptScene, "changing scenes with changes shows the prompt");
+        _app.ResolvePrompt(UnsavedChoice.Cancel);
+        yield return 0;
+        check(_app.PendingPrompt == null && _app.IsDirty && _app.ScenePath == promptScene && World.IsAlive(promptEntity), "Cancel keeps the scene and the changes");
+
+        // 開く → Don't Save : 保存せずに開く
+        _app.RequestOpenScene(otherScene);
+        _app.ResolvePrompt(UnsavedChoice.DontSave);
+        yield return 0;
+        check(_app.ScenePath == otherScene && !_app.IsDirty && !File.ReadAllText(promptScene).Contains("Unsaved Name"), "Don't Save opens the other scene without saving");
+
+        // 新しいシーン → Save : 保存してから
+        _app.OpenScene(promptScene);
+        yield return 0;
+        _app.RenameEntity(World.Entities.First(e => World.Get<EntityInfo>(e).Name == "Typed Name"), "Saved Name");
+        _app.RequestNewScene();
+        _app.ResolvePrompt(UnsavedChoice.Save);
+        yield return 0;
+        check(_app.ScenePath == null && File.ReadAllText(promptScene).Contains("Saved Name"), "Save saves, then creates the new scene");
+
+        // 窓の × : 変更があれば閉じずに聞く
+        _app.OpenScene(promptScene);
+        yield return 0;
+        _app.RenameEntity(World.Entities.First(e => World.Get<EntityInfo>(e).Name == "Saved Name"), "Close Test");
+        _app.Engine.Window.Close();
+        yield return 0;
+        check(!_app.Engine.Window.IsDisposed && _app.Engine.Window.Visible && _app.PendingPrompt == "closing the editor", "closing the window with changes shows the prompt");
+        _app.ResolvePrompt(UnsavedChoice.Cancel);
+        yield return 0;
+        check(!_app.Engine.Window.IsDisposed && _app.IsDirty, "Cancel keeps the editor open");
+
+        // 片付け
+        _app.OpenScene(database.FullPath("Assets/Scenes/showcase.scene.json"));
+        yield return 0;
+        Directory.Delete(database.FullPath(newFolder!), true);
+        File.Delete(database.FullPath(newFolder!) + ".meta");
+        database.Refresh();
+        yield return 0;
     }
 }

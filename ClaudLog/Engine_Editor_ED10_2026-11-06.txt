@@ -1,0 +1,67 @@
+﻿エディター ED10 : 名前を変える (F2) / 保存していない変更を聞く 2026-11-06
+ブランチ : feature/editor-ed10
+
+■ 頼まれたこと
+  1. Hierarchy / Project で、右クリックか選んで F2 で名前を変える
+  2. シーンの物に変更がある時、エディターを閉じる / シーンを替える時に保存するかを聞く窓
+
+■ 1. 名前を変える
+  Hierarchy (EditorApp.Rename.cs) :
+    物を選んで F2 (Hierarchy にフォーカスがある時) / 右クリック > Rename → その行が入力の欄になる (名前は全部選ばれている)
+    Enter か外をクリックで決める / Esc でやめる / 空の名前は前のまま。元に戻せる (Ctrl+Z)。プレハブの置いた物なら「変えた値」の印も付く
+  Project (ProjectPanel.cs) :
+    タイル / 左のフォルダの木で F2 / 右クリック > Rename (Show in Explorer も足した)。書くのは拡張子を除いた名前 (拡張子はそのまま。
+    ".scene.json" / ".material.json" / ".prefab.json" も)。名前を書き始めると、そのアセットのフォルダを出す (タイルが見えるように)
+    使えない文字 / 空 / 同じ名前がある時は変えない (Console に理由)。大文字 / 小文字だけ変える時も動く
+  ランタイム (AssetDatabase.Rename) :
+    .meta も一緒に動かすので Id は変わらない (シーン / プレハブ / マテリアルは Id で探すので繋がったまま)。
+    フォルダなら中の全部のパスが変わる。テクスチャの DDS のキャッシュも一緒に動かす
+    前のパスは覚えておき、Find / ToAssetPath で今のパスに読み替える
+      (読み込んだ Model / Sound は struct で前のパスを持ったまま。保存するとその Id で書かれ、次に開くと新しいパスで読む)
+    AssetManager は覚えている物 (Model / Sound / Material / Prefab) を新しいパスに付け替え、Material / Prefab の Path も変える
+      (以前の作りのままだと、名前を変えたマテリアルを保存すると前のパスに新しいファイルを作ってしまう)
+    エディター : 開いているシーン (かそれを含むフォルダ) の名前が変わると保存先を付け替える。Build Game のシーンの並びも付け替える
+
+■ 2. 保存していない変更を聞く (EditorApp.Unsaved.cs)
+  聞く時 : 窓の × / Alt+F4 / File > Exit / File > New Scene / Open Scene (Ctrl+O) / Project のシーンをダブルクリック / シーンをシーンビューへドロップ
+  窓 : 「<シーン> has unsaved changes. Save them before ...?」 Save / Don't Save / Cancel (Enter = Save、Esc = Cancel)
+    Save : 保存してから続ける (名前の無い新しいシーンは名前を付ける窓。そこでやめると何もしない)
+    再生中なら止めてから保存する (再生の前の状態。再生中の変更は元々保存されない)
+  変更が無ければ聞かずにすぐ。Windows の終了 / タスクマネージャーからの終了は止めない
+  コード / 確認から呼ぶ OpenScene / ForceQuit は聞かない (--editor-test / --quit-after は ForceQuit で閉じる)
+  ※途中で気付いたこと : 外から WM_CLOSE だけを送ると WinForms は「タスクマネージャーから」(TaskManagerClosing) とみなす。
+    本当の × は WM_SYSCOMMAND (SC_CLOSE) なので、見た目の確認はそちらで送った
+
+■ 確認
+  自動 (--editor-test) : 145 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)。ED10 の 17 項目 :
+    物の名前を変える (元に戻す / やり直す) / Hierarchy の欄に打って Enter / Esc でやめる
+      (ImGui の入力の列に文字と Enter / Esc を積む。本当の窓の入力と同じ道)
+    アセットの名前を変える (.meta も動く、Id は同じ、読み込んだマテリアルのパスも変わる) / 前のパスでも見つかる / 使えない名前は断る
+    フォルダの名前を変える (中の物 / 読み込んだマテリアル / 開いているシーンが付いていく) /
+    開いているシーンの名前を変えて保存し開き直すと、名前を変えたマテリアルが付いたまま / Project のタイルの欄に打って Enter (拡張子はそのまま)
+    変更が無いシーンは聞かない / 変更があると聞く窓が出る / Cancel は何もしない / Don't Save は保存せずに開く /
+    Save は保存してから新しいシーン / 窓の × で聞く / Cancel で開いたまま
+  見た目 (エディターの窓だけを撮った。入力は PostMessage) :
+    Entity 1 を選んで F2 → Hierarchy のその行が入力の欄に /
+    Ctrl+D で変更 → 窓の × (SC_CLOSE) → 「showcase.scene.json has unsaved changes. Save them before closing the editor?」 (閉じない) /
+    Project の Scenes のタイルを右クリック → Rename (F2) / Show in Explorer
+
+■ 確認の時に見つけたこと (直していない)
+  リポジトリの showcase.scene.json がコミットしていない変更になっていた (2026-11-05 23:58。Entity 0 の Static を Rigidbody にして
+  高さ 1.74 に。Assets/New Folder も)。ユーザーの試しの変更なので、戻さず、このブランチのコミットにも入れない
+  このシーンだと「書き出したゲームとエディターの再生が同じ動き」(ED8 後半) が 1 cm ずれて失敗した :
+    落ちた箱が、Transform を毎フレーム書いて動かす OrbitMover の物に押される (接触が続くので小さな違いが大きくなる)。
+    エディターは前のシーンで使った物の番号 / 物理の体の番号を使い回すが、書き出したゲームは新しく始めるので、体を作る順が違うためと見ている
+    → 確認は、ユーザーのファイルを一時フォルダに写し、コミットした showcase に戻して実行し、終わった後にユーザーのファイルを戻した (ハッシュが同じことを確かめた)
+
+■ 変更
+  ランタイム : Assets/AssetDatabase.cs (Rename / SplitName / Renamed / 前のパスの読み替え) / Assets/Model.cs (付け替え) /
+    Assets/Material.cs・Prefab.cs (Path を変えられるように)
+  エディター : EditorApp.Rename.cs / EditorApp.Unsaved.cs (新規) / EditorApp.cs (Hierarchy の欄と F2・右クリック / UI から聞く道 / × を聞く) /
+    EditorApp.Edit.cs (ScenePath) / ProjectPanel.cs (名前を変える / 右クリック) / BuildWindow.cs (シーンの並びの付け替え) /
+    Program.cs (--quit-after は ForceQuit) / EditorTest.cs (17 項目)
+
+■ 残り
+  - アセットの名前を変えても、コードの中の "Assets/..." の文字列は変わらない (このエディターの中では前のパスで読めるが、次に起動すると読めない)
+  - 名前を変えるのは元に戻せない (ファイルの操作なので)。複数を選んでまとめて変えることはできない
+  - 上の、Rigidbody を足した showcase での再生と書き出したゲームのずれ (物理の体を作る順をシーンの Id の順にそろえる必要がある)
