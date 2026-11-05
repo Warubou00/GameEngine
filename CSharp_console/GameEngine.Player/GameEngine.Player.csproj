@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    Player (ED8 後半)。書き出したゲームを動かす exe
+      - エディターの File > Build Game が、この exe + エンジンの DLL + ゲームのコード (Game.dll) + 使っているアセットだけをまとめる
+      - エディターの物 (ImGui / GameEngine.Editor / GameEditor.dll) は参照しない・入れない
+      - ゲームのコード (Game.dll) は参照しない。起動した時に exe の隣の Game.dll を読む (どのゲームでも同じ Player を使う)
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <!-- ゲームなのでコンソールの窓は出さない (ログは exe の隣の Player.log) -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>AnyCPU;x64</Platforms>
+    <RootNamespace>GameEngine.Player</RootNamespace>
+    <AssemblyName>GameEngine.Player</AssemblyName>
+  </PropertyGroup>
+
+  <!-- C++ 側の DLL とシェーダーを出力フォルダへ (見本 / エディターと共通) -->
+  <Import Project="..\NativeEngine.targets" />
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine.Runtime\GameEngine.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

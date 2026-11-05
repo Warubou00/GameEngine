@@ -1,0 +1,102 @@
+﻿エディター ED8 (後半) : ゲームの書き出し (Player) 2026-11-05
+ブランチ : feature/editor-ed8b
+
+■ ロードマップ
+  「ゲームの書き出し : Player の exe + シーン + 使っているアセットだけをまとめる (エディターの物は入れない)」
+  「確認 : 書き出したゲームが、エディターの再生と同じ動き」
+
+■ Player (新規 : CSharp_console/GameEngine.Player)
+  書き出したゲームを動かす exe (WinExe。コンソールの窓は出さない。ログは exe の隣の Player.log。落ちた時は箱で知らせる)
+  参照するのはエンジン (GameEngine.Runtime) だけ。ゲームのコード (Game.dll) は参照せず、起動時に exe の隣の物を読む (どのゲームでも同じ Player)
+  起動の順 (エディターの再生と同じ) : Data/player.json → ProjectSettings.json → Game.dll の型と [GameSystem] → 最初のシーン → engine.BeginPlay()
+  作業フォルダ = Data (アセットのパス "Assets/..." と、シェーダーの ../Shader の起点。C++ のシェーダーのパスは変えていない)
+  確かめる時用の引数 : --scene / --capture-dt / --frames N / --dump (シーンの様子を書いて終わる) / --data / --log
+
+■ 書き出したフォルダ
+  <ゲームの名前>.exe (GameEngine.Player.exe の名前を変えた物) / GameEngine.Player.dll / GameEngine.Runtime.dll / Game.dll / C++ の DLL / dxcompiler・dxil
+  Shader/ : シェーダー
+  Data/   : player.json (名前 / 大きさ / VSync / シーンの並び) / ProjectSettings.json (あれば) /
+            Assets (使っている物だけ + その .meta + 親のフォルダの .meta) / テクスチャの DDS のキャッシュ / ShaderCache (コンパイル済みのシェーダー)
+  入れない物 : GameEngine.Editor / ImGui.NET・cimgui / GameEditor.dll (Scripts/Editor) / .pdb (選べる) → 書き出しの最後に名前で確かめ、あれば失敗にする
+
+■ 使っているアセットを探す (エディター : AssetDependencies.cs)
+  シーン / プレハブ / マテリアル (JSON) : 中の {guid, path} と "Assets/..." の文字を全部辿る (中のプレハブ / マテリアルも辿る)
+  モデル : .obj → mtllib の .mtl → map_Kd のテクスチャ / .pmx → テクスチャの表 (C++ の PmxLoader と同じ順に読み飛ばす)
+    テクスチャが無い時は、C++ と同じく拡張子の違う同じ名前の物を探す (見本の rock.mtl は .png と .jpg が逆に書かれている)
+  ゲームのコード : Scripts の .cs の "Assets/..." / "../Model/..." の文字 (例 : PhysicsGame の LoadModel("../Model/obj/box.obj"))。Editor フォルダは見ない
+  Resources という名前のフォルダは、いつも全部入れる (コードで名前を組み立てて読む物の置き場)
+  見本の 3 シーン : 31 個のうち 28 個 (入らない物 : ReadMe.txt / Tomimi.vmd / Tomimi.png)
+
+■ エディター : File > Build Game... (Ctrl+B。BuildWindow.cs / GameBuilder.cs)
+  ゲームの名前 / 解像度 / VSync / プロファイラー / .pdb / 入れるシーン (チェックと ▲▼ の順番。0 番が最初のシーン) / 書き出し先 (既定は Project/Build)
+  入れるアセットの一覧 (何から使われているかをマウスで) と注意 (無いアセットなど) を、ビルドの前に出す
+  Build / Build and Run / Run / Open Folder。ビルドは別のスレッド (エディターは止まらない)。結果 : 数 / 大きさ / 時間 / 注意
+  設定は Project/BuildSettings.json に覚える。開いているシーンを保存していない時は注意を出す (書き出すのはファイルの方)
+  手順 : 使っているアセットを探す (メインのスレッド) → Player と Game を Release で dotnet build → 書き出し先を空にして写す → エディターの物が無いか確かめる
+  書き出し先を消すのは、前に書き出したフォルダ (Data/player.json がある) か空のフォルダだけ。Assets の中 / プロジェクトを含むフォルダは断る
+
+■ エディターの再生を書き出したゲームと同じにした (比べて見つかった違い)
+  1. 時間 : Time.FixedTime が起動から数えられていて、エディターではそれまでの編集 / 再生の時間が入っていた
+     → physics の動く床 (FixedTime の sin) の位置がずれ、箱 3 つが 8 m 違った
+     直し : Engine.BeginPlay() を足した (再生の時間を 0 に戻す)。エディターの再生ボタンと Player が呼ぶ (一時停止からの再開 / 1 フレーム進める では呼ばない)
+       Time.FixedTime : 以前は起動からの秒 → 再生を始めてからの秒
+       Time.PlayTime (新規) : 再生を始めてからの秒 (止めている間は進まない)。ParticleGame の FlyerSystem は TotalTime → PlayTime にした
+       Time.TotalTime はそのまま (起動からの秒。エディターの見張りの時間などに使っている)
+     物理の固定の刻みの余り (_accumulator) も 0 に戻す (以前は前の再生の余りが残り、最初の刻みのフレームがずれることがあった)
+  2. System の中の値 : 以前はエディターを起動した時に作った [GameSystem] を使い続け、2 回目からの再生は前の再生の値
+     (FireworkSystem の乱数 / LaserDemoSystem の角度など) を持ち越していた
+     直し : 再生ボタンで [GameSystem] を作り直す (ScriptHost.RecreateSystems)。書き出したゲームは毎回新しい System で始まるので同じになる
+  ※途中の試し : 物理の余りを「simulate が false → true になった時」に戻していたが、一時停止 / 1 フレーム進める でも戻ってしまうのでやめ、BeginPlay にした
+
+■ 決まった時間刻み (Time.CaptureDeltaTime。新規)
+  0 より大きいと、DeltaTime はいつもその値、TotalTime / PlayTime もその値ずつ進む (PC の速さに関係なく同じ動き)
+  書き出したゲームとエディターの再生を比べる時に使う (動画を撮る時にも使える)
+
+■ シーンの様子の比べ方 (SceneState.cs。ランタイム)
+  Dump : エンティティの数とコンポーネントの型ごとの数 + 1 物 1 行 (Id / 名前 / 有効か / ワールドの位置・回転・大きさ。float は "R" で全部の桁)
+  Compare : シーンのファイルの物は Id で、ゲームのコードが作った物 (Id が毎回違う) は名前と位置の順で組にして比べる。回転は q と -q を同じに
+
+■ コンパイル済みのシェーダーも入れる
+  無いと書き出したゲームの初めの起動でシェーダーを全部コンパイルする (計測 : Pipeline 2295 ms、起動 5.0 秒)
+  エディターの ShaderCache から、今のシェーダーのソースの物だけを写す (42 個)。キャッシュの名前のハッシュを C++ と同じ計算 (FNV-1a 64bit :
+  ソース → 入り口 → 版 → "DXC" / "FXC" → "release" と終わりの 0) で確かめる。Debug のエディターの時は Release の見本の出力のキャッシュを見る
+  ※途中の試し : 「シェーダーごとに一番新しいファイル」を写していたが、エディターの確認がシェーダーの読み直しを試した後は古いソースの物を選び、
+    初めの起動でコンパイルしていた (確認の項目で見つかった) → ハッシュを計算する方法にした
+  PSO のキャッシュ (pipeline.cache) は GPU / ドライバーごとなので入れない (初めの起動で作る)
+
+■ 途中で気付いて直したこと
+  .gitignore : Assets の *.prefab.json が git に入らなかった (ED8 前半のプレハブ) → 入れるようにした。Project/Build (書き出し先) は入れない
+
+■ 変更
+  ランタイム : Time.cs (CaptureDeltaTime / PlayTime / FixedTime を再生から) / Engine.cs (BeginPlay / PlayTime を進める) /
+    Systems/CollisionSystem.Rigidbody.cs (ResetAccumulator) / Serialization/SceneState.cs (新規) / PlayerSettings.cs (新規)
+  Player : GameEngine.Player/GameEngine.Player.csproj / Program.cs (新規)
+  エディター : AssetDependencies.cs / GameBuilder.cs / BuildWindow.cs (新規) / EditorApp.cs (File メニュー / Ctrl+B / 窓) /
+    EditorApp.Edit.cs (再生で System を作り直して BeginPlay) / ScriptHost.cs (RecreateSystems) / EditorTest.cs (12 項目)
+  ゲーム : Project/Scripts/ParticleGame.cs (PlayTime) / プロジェクト : Project/BuildSettings.json (既定の設定)
+  ※C++ は変えていない
+
+■ 確認
+  自動 (--editor-test) : 124 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    書き出しの 12 項目 : 使っているアセット (モデル / .mtl / pmx のテクスチャ。28 個) / 使っていない物 (ReadMe / .vmd) は入らない /
+      書き出し (139 ファイル、101.8 MB、compile 5.0 秒 + copy 0.3 秒) / Player・エンジン・Game.dll・シェーダーがあり、エディターの物と .pdb が無い /
+      使っている物だけで全部に .meta がある / 初めの起動でもシェーダーはキャッシュから /
+      3 つのシーンで、書き出した exe を決まった刻みで 120 フレーム動かした様子 = エディターで同じだけ再生した様子
+        showcase 19 物 / physics 79 物 (剛体 / ジョイント / 動く床) / particles 13 物 : 全部ずれ 0 (位置・回転・大きさが同じ値)
+      (直す前は physics の 3 物が 8.6 m ずれて失敗した → 上の「時間」の直し)
+  Debug の Player (Debug の C++、D3D12 の検証あり) で 3 つのシーンを 300 フレーム : エラー / 警告なし
+  見た目 (エディターと書き出したゲームの窓だけを撮った。入力は PostMessage) :
+    Ctrl+B で Build Game の窓 (3 シーン、28 / 31 アセット、28.4 MB) → Build and Run → 「Built Game.exe」と数 / 時間 →
+    Game.exe の窓 (1280x720) にシーンのカメラで showcase (モデル / テクスチャ / 影 / レーザー) が出た
+  時間 (showcase、RTX 2070) :
+    Player の C# update : VSync あり (143 FPS) 0.103 〜 0.105 ms / VSync なし (570 〜 740 FPS) 0.047 ms
+      見本 (VSync なし 570 FPS) 0.060 ms。VSync ありで増えるのは C++ の record scene も同じく倍 (0.069 → 0.14 ms) なので、
+      フレームの間が空いて CPU が遅くなる / キャッシュが冷えるため (C# の違いではない)
+    起動 : シェーダーのキャッシュ無し 5.0 秒 → 入れた後 2.1 〜 2.7 秒 (シーン 0.8 秒、デバイスとスワップチェーン 0.9 秒を含む)
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0
+
+■ 残り
+  - .NET のランタイムは入れていない (相手の PC に .NET 9 が要る)。自己完結 (self-contained) / 1 ファイルの exe は無い
+  - ゲームのコードが組み立てたパスで読むアセットは探せない (Resources フォルダに置く)
+  - ParticleSystem (GPU パーティクルの見た目) は TotalTime のまま (見た目だけ。様子の比べには入らない)
+  - 書き出し先の Player.log / ShaderCache は、書き出したフォルダに書く (書けない場所 (Program Files) ではログを書かない / キャッシュを作れない)

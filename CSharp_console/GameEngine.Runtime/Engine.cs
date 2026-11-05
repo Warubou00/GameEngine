@@ -419,6 +419,18 @@ public sealed class Engine : IDisposable
     /// </summary>
     public bool IsPlaying { get; set; } = true;
 
+    /// <summary>
+    /// 再生を始める (ED8 後半)。再生の時間 (Time.PlayTime / FixedTime) と物理の刻みの余りを 0 に戻す
+    /// エディターは再生ボタンで、Player は最初のシーンを読んだ後に呼ぶ (一時停止からの再開では呼ばない)
+    /// 以前は時間が起動から数えられ、エディターで再生した時と書き出したゲームで、時間で動く物の位置が違った
+    /// </summary>
+    public void BeginPlay()
+    {
+        Time.ResetPlayTime();
+        _collisionSystem.ResetAccumulator();
+        IsPlaying = true;
+    }
+
     /// <summary>System と物理の後、カメラと描画への反映の前に毎フレーム呼ばれる (エディターの GUI はここで作る)</summary>
     public event Action? LateUpdate;
 
@@ -510,6 +522,7 @@ public sealed class Engine : IDisposable
             // ゲームパッドはフレームの頭で 1 回、全パッド分をまとめて読む (System の中ではこの値を見る)
             Gamepad.Update();
 
+            if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
             if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
             _transformSystem.Update(World);
             _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く

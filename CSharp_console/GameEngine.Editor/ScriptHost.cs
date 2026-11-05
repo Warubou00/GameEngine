@@ -188,6 +188,16 @@ internal sealed class ScriptHost : IDisposable
         Console.WriteLine($"[Scripts] Loaded {Assembly.GetName().Name} #{LoadCount} : {Assembly.GetTypes().Count(t => typeof(IComponent).IsAssignableFrom(t))} components, {_systems.Count} systems");
     }
 
+    // 再生を始める時 : [GameSystem] を作り直す (ED8 後半)
+    //   前の再生で System の中に残った値 (乱数 / 角度 / フラグなど) を持ち越さない。書き出したゲームは毎回新しい System で始まるので、同じにする
+    //   (以前は エディターを起動した時に作った System を使い続け、2 回目からの再生が書き出したゲームと違う動きになることがあった)
+    public void RecreateSystems()
+    {
+        if (Assembly == null) return;
+        _engine.RemoveSystems(_systems);
+        _systems = _engine.AddGameSystems(Assembly);
+    }
+
     // 今の DLL を捨てる : System を外し、World から古い型の入れ物を外し、型の情報を忘れ、AssemblyLoadContext を捨てる
     // (World のエンティティはそのまま。呼ぶ側が先に World.Clear しておくこと)
     public void Unload(World world)

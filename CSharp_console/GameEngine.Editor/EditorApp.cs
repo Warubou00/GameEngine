@@ -42,6 +42,8 @@ internal sealed partial class EditorApp
     private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true, _showProject = true;
     private bool    _showProjectSettings;
     private readonly ProjectSettingsWindow _projectSettings;   // ED6
+    private bool    _showBuild;
+    private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
     private bool    _resetLayout;
 
     // エディターのカメラ (シーンのカメラとは別。シーンには保存しない)
@@ -79,6 +81,7 @@ internal sealed partial class EditorApp
         _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
+        _build = new BuildWindow(database, () => (_scenePath != null ? _database.ToAssetPath(_scenePath) : null, IsDirty));
         _picker = new Picker(engine);
         engine.LateUpdate += update;
     }
@@ -226,6 +229,7 @@ internal sealed partial class EditorApp
         if (_showProject)   _project.Draw(ref _showProject);
         drawExtensionWindows();
         _projectSettings.Draw(ref _showProjectSettings);
+        _build.Draw(ref _showBuild);
         _shaders?.Update();
         _scripts.Update();
 
@@ -272,6 +276,8 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Open Scene...", "Ctrl+O")) openSceneDialog();
             if (ImGui.MenuItem("Save Scene", "Ctrl+S", false, !_playing)) saveScene(false);
             if (ImGui.MenuItem("Save Scene As...", null, false, !_playing)) saveScene(true);
+            ImGui.Separator();
+            ImGui.MenuItem("Build Game...", "Ctrl+B", ref _showBuild);   // ED8 後半
             ImGui.Separator();
             if (ImGui.MenuItem("Exit")) _engine.Quit();
             ImGui.EndMenu();
@@ -373,6 +379,7 @@ internal sealed partial class EditorApp
             if (ImGui.IsKeyPressed(ImGuiKey.Y)) Redo();
             if (ImGui.IsKeyPressed(ImGuiKey.D)) Duplicate();
             if (ImGui.IsKeyPressed(ImGuiKey.P)) TogglePlay();
+            if (ImGui.IsKeyPressed(ImGuiKey.B)) _showBuild = !_showBuild;   // ED8 後半
             return;
         }
         if (ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected)) DeleteSelected();

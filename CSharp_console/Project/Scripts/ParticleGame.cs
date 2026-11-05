@@ -61,7 +61,7 @@ public sealed class FlyerSystem : ISystem
 {
     public void Update(World world)
     {
-        var t = (float)Time.TotalTime;
+        var t = (float)Time.PlayTime;   // 再生を始めてからの時間 (ED8 後半。以前は TotalTime で、エディターの時間も入っていた)
         world.ForEach((Entity _, ref Transform transform, ref Flyer flyer) =>
         {
             var angle = t * flyer.Speed;

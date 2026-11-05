@@ -35,4 +35,8 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.meta
 !CSharp_console/Project/Assets/**/*.scene.json
 !CSharp_console/Project/Assets/**/*.material.json
+# プレハブも入れる (ED8 後半で気付いた。以前は *.prefab.json が上の行で外れ、git に入らなかった)
+!CSharp_console/Project/Assets/**/*.prefab.json
 CSharp_console/Project/Library/
+# 書き出したゲーム (ED8 後半。File > Build Game の既定の書き出し先)
+CSharp_console/Project/Build/

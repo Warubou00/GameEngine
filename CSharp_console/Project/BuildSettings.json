@@ -1,0 +1,14 @@
+{
+  "ProductName": "Game",
+  "Width": 1280,
+  "Height": 720,
+  "VSync": true,
+  "ShowProfiler": false,
+  "Scenes": [
+    "Assets/Scenes/showcase.scene.json",
+    "Assets/Scenes/particles.scene.json",
+    "Assets/Scenes/physics.scene.json"
+  ],
+  "OutputFolder": "Build",
+  "DebugSymbols": false
+}
