@@ -50,6 +50,9 @@ namespace Physics
 	{
 	public:
 		PhysicsWorld();
+		// 体 / 組 / 接触 / ジョイント / 眠り / 木 を全部消して、作った直後と同じにする (設定 / スレッド / メッシュは残す)
+		// 再生を始める時に呼ぶ。体の番号 / 木の形 / 組の順は前に作って消した物で変わり、接触を解く順が変わって動きがずれるため
+		void     ResetBodies();
 		uint32_t CreateBody(const BodyDesc& desc);
 		void     DestroyBody(uint32_t handle);
 		void     SetTransforms(const BodyTransform* items, uint32_t count);

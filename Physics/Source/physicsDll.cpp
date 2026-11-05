@@ -41,6 +41,12 @@ extern "C"
 		g_world = nullptr;
 	}
 
+	// 体 / ジョイントを全部消して、作った直後と同じにする (設定とメッシュは残す。再生を始める時)
+	PHYSICS_API void Physics_ResetBodies()
+	{
+		if (g_world) g_world->ResetBodies();
+	}
+
 	// 体を作る。戻り値はハンドル (失敗時 INVALID_HANDLE : 体の数が 65535 を超えた)
 	PHYSICS_API uint32_t Physics_CreateBody(const Physics::BodyDesc* desc)
 	{

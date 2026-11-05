@@ -61,6 +61,61 @@ namespace Physics
 		_solver.SleepAngularVelocity   = 2.0f;   // 角速度の上限 (小さな物が速く回っている時は眠らない)
 	}
 
+	// 作った直後と同じにする (残す物 : 調べ方 / レイヤーの表 / 切り替え / 解き方の設定 / スレッド / メッシュ)
+	//   以前は消した体の番号 (_freeBodies) / 木の節の空き / 組の表が残り、同じシーンでも前に何をしたかで
+	//   体の番号と組の順が変わった。接触を解く順が変わると結果が少し変わり、押し合いが続く所では大きくずれた
+	//   (エディターで別のシーンを開いた後の再生と、書き出したゲームで 1 cm 違った)
+	void PhysicsWorld::ResetBodies()
+	{
+		_bodies.clear();
+		_freeBodies.clear();
+		_moved.clear();
+		_enlarged.clear();
+		_staticTree  = DynamicTree();
+		_dynamicTree = DynamicTree();
+		_stepIndex    = 1;
+		_dynamicCount = 0;
+		_forceFull    = true;
+		_previousBoxes.clear();
+
+		_pairs.clear();
+		_pairImpulses.clear();
+		_pairMap = PairMap();
+		_touchingCount = 0;
+		_enterEvents.clear();
+		_events.clear();
+		_pendingEvents.clear();
+		_stats  = {};
+		_syncMs = 0.0f;
+		_grid.clear();
+
+		_rigidBodies.clear();
+		_rigidData.clear();
+		_solverBodies.clear();
+		_contacts.clear();
+		_coloredContacts.clear();
+		_colorBits.clear();
+		_contactColor.clear();
+		std::fill(std::begin(_colorStart), std::end(_colorStart), 0u);
+		_poseBuffer.clear();
+		_joints.clear();
+		_jointVersions.clear();
+		_freeJoints.clear();
+		_noCollidePairs.clear();
+		_activeJoints = 0;
+		_activeJointList.clear();
+
+		_awakeSlots.clear();
+		_sleepGroups.clear();
+		_nextSleepGroup = 1;
+		_justSlept.clear();
+		_movedOthers.clear();
+		_moverStamp.clear();
+		_moverMark = 0;
+		_islandParent.clear();
+		_islandSleep.clear();
+	}
+
 	PhysicsWorld::Body* PhysicsWorld::find(uint32_t handle)
 	{
 		const uint32_t index = handle & 0xFFFFu;
