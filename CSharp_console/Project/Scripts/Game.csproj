@@ -19,6 +19,12 @@
     <RootNamespace>GameEngine_console</RootNamespace>
   </PropertyGroup>
 
+  <!-- エディターの拡張 (Editor フォルダ) はゲームに入れない (別のプロジェクト GameEditor.csproj。ED7) -->
+  <ItemGroup>
+    <Compile Remove="Editor\**" />
+    <None Remove="Editor\**" />
+  </ItemGroup>
+
   <!-- エンジンは参照するだけ (写さない : エディター / 見本が読み込んだ物を使う) -->
   <ItemGroup>
     <ProjectReference Include="..\..\GameEngine.Runtime\GameEngine.Runtime.csproj" Private="false" />

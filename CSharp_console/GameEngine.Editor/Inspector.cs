@@ -26,6 +26,28 @@ internal sealed class Inspector
     {
         _engine = engine;
         _undo   = undo;
+        // 拡張 (ComponentEditor.DrawDefaultInspector) から既定のインスペクターを描けるように (ED7)
+        EditorExtensions.DrawDefault = (ref object component, Entity owner) => drawDefault(ref component, ComponentRegistry.Get(component.GetType()), owner);
+    }
+
+    // 既定のインスペクター : 全部のフィールド (以前は Draw の中に書いていた。拡張からも使うので分けた。ED7)
+    private bool drawDefault(ref object boxed, ComponentType type, Entity entity)
+    {
+        var changed = false;
+        foreach (var field in type.Fields)
+        {
+            if (field.HideInInspector) continue;
+            if (field.Header != null) ImGui.SeparatorText(field.Header);
+            var value = field.GetValue(boxed);
+            if (drawValue(field.Name, field.FieldType, ref value, field.Range, entity, field))
+            {
+                field.SetValue(boxed, value);
+                changed = true;
+            }
+            if (field.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(field.Tooltip);
+        }
+        if (type.Fields.Count == 0) ImGui.TextDisabled("(no values)");
+        return changed;
     }
 
     // コンポーネントの値を書いて、元に戻す記録を積む (before は書く前に取っておいた値)
@@ -73,20 +95,18 @@ internal sealed class Inspector
             if (open)
             {
                 var boxed = pool.GetBoxed(entity.Id);
-                var changed = false;
-                foreach (var field in type.Fields)
+                bool changed;
+                if (EditorExtensions.EditorFor(pool.ComponentType) is { } custom)
                 {
-                    if (field.HideInInspector) continue;
-                    if (field.Header != null) ImGui.SeparatorText(field.Header);
-                    var value = field.GetValue(boxed);
-                    if (drawValue(field.Name, field.FieldType, ref value, field.Range, entity, field))
-                    {
-                        field.SetValue(boxed, value);
-                        changed = true;
-                    }
-                    if (field.Tooltip != null && ImGui.IsItemHovered()) ImGui.SetTooltip(field.Tooltip);
+                    // 独自のインスペクター (ED7)。例外はここで止めて、赤い字で出す (エディターは止めない)
+                    custom.Entity = entity;
+                    try { changed = custom.OnInspectorGUI(ref boxed); }
+                    catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), $"{custom.GetType().Name} : {ex.Message}"); changed = false; }
                 }
-                if (type.Fields.Count == 0) ImGui.TextDisabled("(no values)");
+                else
+                {
+                    changed = drawDefault(ref boxed, type, entity);
+                }
                 if (changed) write(entity, pool.ComponentType, boxed, null);   // 以前は pool.SetBoxed (元に戻せず、Static な物の行列も作り直されなかった)
             }
             ImGui.PopID();

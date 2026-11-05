@@ -25,6 +25,10 @@ internal sealed class EditorTest
     public void Frame(EditorApp _)
     {
         if (_steps.MoveNext()) return;
+        // 何回読み直しても、古い Game.dll が残り続けない (今の 1 つだけ)
+        for (int i = 0; i < 10; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); }
+        var alive = AppDomain.CurrentDomain.GetAssemblies().Count(a => a.GetName().Name == "Game");
+        check(alive == 1, $"old Game.dll copies do not pile up ({alive} alive after {_app.Scripts.LoadCount} loads)");
         Console.WriteLine($"[Test] editor : pass {_pass} / fail {_fail}");
         _app.FrameHook = null;
         _app.Engine.Quit();
@@ -529,7 +533,11 @@ internal sealed class EditorTest
         var waitStart = Time.TotalTime;
         while (scripts.LoadCount == loads && Time.TotalTime - waitStart < 90) yield return 0;
         check(scripts.LoadCount == loads + 1 && ComponentRegistry.Find("GameEngine_console.TestBouncer") != null, $"new component is usable after saving the file ({scripts.LastBuildMs:F0} ms build)");
-        check(scripts.PreviousUnloaded() == true, "the previous Game.dll is unloaded (collectible)");
+        // 捨てた AssemblyLoadContext の解放は非同期 (すぐには終わらないことがある) ので、フレームを進めながら 3 秒まで待つ
+        var unloaded = false;
+        waitStart = Time.TotalTime;
+        while (!(unloaded = scripts.PreviousUnloaded() == true) && Time.TotalTime - waitStart < 3.0) yield return 0;
+        check(unloaded, $"the previous Game.dll is unloaded (collectible, {Time.TotalTime - waitStart:F2} s)");
         bouncerHost = SceneSerializer.FindEntity(World, hostId);
         var bouncerType = gameType("TestBouncer");
         World.GetPool(bouncerType).SetBoxed(bouncerHost, bouncerType.GetConstructor(Type.EmptyTypes)?.Invoke(null) ?? Activator.CreateInstance(bouncerType)!);
@@ -545,6 +553,7 @@ internal sealed class EditorTest
         check(scripts.LoadCount == loads + 1 && World.EntityCount == countBeforeReload && has(bouncerHost, "TestBouncer") && getField(bouncerHost, "TestBouncer", "Speed") == 3.0f,
               "values are kept across a reload");
         check(gameType("TestBouncer").GetField("Extra") != null && gameType("TestBouncer") != bouncerType, "the new type is used after the reload");
+        bouncerType = null!;   // 古い DLL の型を手放す (確認の側が持つと解放されない)
         check(_app.Selected == SceneSerializer.FindEntity(World, _app.SelectedId) , "selection is kept across a reload");
 
         // 3. 再生すると新しい System が動く
@@ -571,5 +580,59 @@ internal sealed class EditorTest
         while (scripts.LoadCount == loads && Time.TotalTime - waitStart < 90) yield return 0;
         check(scripts.LoadCount == loads + 1 && scripts.LastError == null && ComponentRegistry.Find("GameEngine_console.TestBouncer") == null, "removing the file removes the type");
         yield return 0;
+
+        // ---------- ED7 後半 : エディターの拡張 (GameEditor.dll) ----------
+        check(scripts.EditorAssembly != null && EditorExtensions.EditorFor(gameType("Spin")) != null && EditorExtensions.EditorFor(gameType("OrbitMover")) != null,
+              "custom inspectors are loaded (after reloads too)");
+        check(EditorExtensions.Windows.Any(w => w.Path == "Game/Game Stats") && EditorExtensions.MenuItems.Any(m => m.Path == "Game/Create Spinning Box") &&
+              EditorExtensions.ImporterFor("Assets/x/colors.palette.txt") != null, "custom window / menu item / importer are loaded");
+
+        // ギズモ : 見本の周回する物の道 (全部) + 選んだ回る物の輪
+        _app.SetEditorCamera(new Vector3(0, 6, -12), 0.0f, 20.0f);
+        _app.Selected = Entity.Null;
+        yield return 0;
+        yield return 0;
+        var orbitGizmos = _app.LastGizmoCount;
+        _app.Selected = World.Entities.First(e => has(e, "Spin") && World.Has<Transform>(e));
+        yield return 0;
+        yield return 0;
+        check(orbitGizmos > 0 && _app.LastGizmoCount > orbitGizmos, $"gizmos are drawn (orbits {orbitGizmos}, + selected spin {_app.LastGizmoCount - orbitGizmos})");
+
+        // メニューの項目 : カメラの前に回る箱 → 元に戻す
+        var countBeforeMenu = World.EntityCount;
+        EditorExtensions.MenuItems.First(m => m.Path == "Game/Create Spinning Box").Method.Invoke(null, null);
+        var spinningBox = _app.Selected;
+        check(World.EntityCount == countBeforeMenu + 1 && World.Get<EntityInfo>(spinningBox).Name == "Spinning Box" && has(spinningBox, "Spin") &&
+              getField(spinningBox, "Spin", "DegreesPerSecond") == 90.0f && World.Has<MeshRenderer>(spinningBox), "menu item creates an entity");
+        _app.Undo();
+        check(World.EntityCount == countBeforeMenu, "undo the menu item");
+
+        // EditorApi.Modify : 元に戻せる値の変更
+        var modified = find("Hierarchy pivot");
+        var oldPosition = World.Get<Transform>(modified).Position;
+        EditorApi.Modify<Transform>(modified, t => t with { Position = t.Position + new Vector3(0, 5, 0) });
+        var movedY = World.Get<Transform>(modified).Position.Y;
+        _app.Undo();
+        check(movedY == oldPosition.Y + 5 && World.Get<Transform>(find("Hierarchy pivot")).Position == oldPosition, "EditorApi.Modify is undoable");
+
+        // 独自の取り込み : .palette.txt を置くと、同じフォルダにマテリアルができる / 書き換えると直る
+        var paletteFolder = database.FullPath("Assets/_EditorTest3");
+        if (Directory.Exists(paletteFolder)) Directory.Delete(paletteFolder, true);
+        Directory.CreateDirectory(paletteFolder);
+        File.WriteAllText(Path.Combine(paletteFolder, "colors.palette.txt"), "Red #FF0000\nSky #3399FF\n");
+        waitStart = Time.TotalTime;
+        while ((database.Find("Assets/_EditorTest3/Sky.material.json") == null) && Time.TotalTime - waitStart < 20) yield return 0;
+        var sky = database.Find("Assets/_EditorTest3/Sky.material.json") != null ? _app.Engine.Assets.LoadMaterial("Assets/_EditorTest3/Sky.material.json") : null;
+        check(sky != null && MathF.Abs(sky.Color.Y - 0.6f) < 0.01f && database.Find("Assets/_EditorTest3/Red.material.json") != null, "palette importer creates materials");
+        File.WriteAllText(Path.Combine(paletteFolder, "colors.palette.txt"), "Red #FF0000\nSky #00FF00\n");
+        waitStart = Time.TotalTime;
+        while (sky != null && sky.Color.Y < 0.99f && Time.TotalTime - waitStart < 20) yield return 0;
+        check(sky != null && sky.Color.Y > 0.99f && sky.Color.Z < 0.01f, "changing the palette updates the material");
+        _app.Engine.Assets.UnloadUnused(World);
+        Directory.Delete(paletteFolder, true);
+        File.Delete(paletteFolder + ".meta");
+        database.Refresh();
+        yield return 0;
+
     }
 }

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    ゲームのエディターの拡張 (ED7 後半。Unity の Editor フォルダに当たる)
+      - [CustomEditor] / [EditorWindow] / [MenuItem] / [AssetImporter] をここに書く (GameEngine.Editor の EditorExtensions.cs)
+      - エディターは Game.csproj の代わりにこのプロジェクトをビルドし (Game も一緒にビルドされる)、GameEditor.dll も読み込む
+      - ゲーム (Game.dll) はこのプロジェクトを参照しない (出来上がったゲームにエディターの物が入らないように)
+      - EditorAssemblyDir : 参照するエディターの GameEngine.Editor.dll / ImGui.NET.dll の場所 (エディターがビルドする時に渡す。
+        IDE で開いた時は既定の Release の出力)
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>AnyCPU;x64</Platforms>
+    <AssemblyName>GameEditor</AssemblyName>
+    <RootNamespace>GameEngine_console.Editor</RootNamespace>
+    <EditorAssemblyDir Condition="'$(EditorAssemblyDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\GameEngine.Editor\bin\x64\Release\net9.0-windows\</EditorAssemblyDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Game.csproj" />
+    <ProjectReference Include="..\..\..\GameEngine.Runtime\GameEngine.Runtime.csproj" Private="false" />
+    <Reference Include="GameEngine.Editor">
+      <HintPath>$(EditorAssemblyDir)GameEngine.Editor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ImGui.NET">
+      <HintPath>$(EditorAssemblyDir)ImGui.NET.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

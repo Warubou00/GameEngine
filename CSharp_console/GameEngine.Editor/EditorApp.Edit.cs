@@ -134,6 +134,31 @@ internal sealed partial class EditorApp
     public ScriptHost Scripts => _scripts;
 
     // ---------------------------------------------------------------------
+    // EditorApi (拡張から使う操作。ED7)
+    // ---------------------------------------------------------------------
+    public Vector3 EditorCameraPosition => _cameraPosition;
+    public Vector3 EditorCameraForward  => Vector3.Transform(Vector3.UnitZ, cameraRotation);
+
+    public Entity CreateEntityWith(string name, Vector3 position, Action<Entity>? setup)
+    {
+        var entity = World.CreateEntity(name);
+        World.Add(entity, new Transform(position));
+        setup?.Invoke(entity);
+        Selected = entity;
+        _undo.Record(new EntitiesEdit($"Create {name}", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        return entity;
+    }
+
+    public void ModifyComponent<T>(Entity entity, Func<T, T> change) where T : struct
+    {
+        if (!World.Has<T>(entity)) return;
+        var id = EditorWorld.IdOf(World, entity);
+        var before = SceneSerializer.SaveComponent(World, entity, typeof(T));
+        EditorWorld.WriteComponent(World, entity, typeof(T), change(World.Get<T>(entity)));
+        _undo.Record(new ComponentEdit(id, typeof(T), before, SceneSerializer.SaveComponent(World, entity, typeof(T))));
+    }
+
+    // ---------------------------------------------------------------------
     // ゲームのコード (ED7)
     // ---------------------------------------------------------------------
 

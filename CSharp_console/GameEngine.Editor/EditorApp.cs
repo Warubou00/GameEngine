@@ -75,6 +75,7 @@ internal sealed partial class EditorApp
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
+        EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
         _picker = new Picker(engine);
         engine.LateUpdate += update;
@@ -219,6 +220,7 @@ internal sealed partial class EditorApp
         if (_showConsole)   _log.Draw(ref _showConsole);
         if (_showStats)     drawStats();
         if (_showProject)   _project.Draw(ref _showProject);
+        drawExtensionWindows();
         _projectSettings.Draw(ref _showProjectSettings);
         _shaders?.Update();
         _scripts.Update();
@@ -309,6 +311,7 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Unload Unused Assets")) UnloadUnused();
             ImGui.EndMenu();
         }
+        drawExtensionMenus();
         if (ImGui.BeginMenu("View"))
         {
             ImGui.MenuItem("Hierarchy", null, ref _showHierarchy);
@@ -417,6 +420,7 @@ internal sealed partial class EditorApp
                 var camera = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, min, new Vector2(width, height));
                 drawSelection(camera, draw);
                 drawVolume(camera, draw);
+                drawExtensionGizmos(camera, draw);
                 updateGizmo(camera, draw);
                 // クリックで選ぶ (ギズモを掴んだ時 / カメラを回している時は選ばない)
                 if (_sceneHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_gizmo.Dragging && !_flying)
@@ -734,6 +738,98 @@ internal sealed partial class EditorApp
             }
         }
         ImGui.End();
+    }
+
+    // ---------------------------------------------------------------------
+    // 拡張 (ED7) : メニュー / 窓 / ギズモ。拡張の中の例外は止めて Console に出す (エディターは止めない)
+    // ---------------------------------------------------------------------
+
+    private readonly HashSet<string> _reportedErrors = new();
+
+    private void reportOnce(string where, Exception ex)
+    {
+        if (_reportedErrors.Add($"{where}:{ex.Message}")) Console.WriteLine($"[Editor] {where} : {(ex.InnerException ?? ex).Message}");
+    }
+
+    // メニューの道 ("Game/Tools/Do") を順に開く。最後の名前を返す (開けなければ null)
+    private static string? openMenuPath(string path, out int opened)
+    {
+        var parts = path.Split('/');
+        opened = 0;
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            if (!ImGui.BeginMenu(parts[i])) return null;
+            opened++;
+        }
+        return parts[^1];
+    }
+
+    private static void closeMenus(int opened)
+    {
+        for (int i = 0; i < opened; i++) ImGui.EndMenu();
+    }
+
+    private void drawExtensionMenus()
+    {
+        foreach (var (path, method) in EditorExtensions.MenuItems.ToList())
+        {
+            var leaf = openMenuPath(path, out var opened);
+            if (leaf != null && ImGui.MenuItem(leaf))
+            {
+                try { method.Invoke(null, null); }
+                catch (Exception ex) { reportOnce(path, ex); }
+            }
+            closeMenus(opened);
+        }
+        foreach (var (path, window) in EditorExtensions.Windows)
+        {
+            var leaf = openMenuPath(path, out var opened);
+            if (leaf != null && ImGui.MenuItem(leaf, null, window.IsOpen)) window.IsOpen = !window.IsOpen;
+            closeMenus(opened);
+        }
+    }
+
+    private void drawExtensionWindows()
+    {
+        foreach (var (path, window) in EditorExtensions.Windows)
+        {
+            if (!window.IsOpen) continue;
+            var open = true;
+            ImGui.SetNextWindowSize(new Vector2(360, 300), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin($"{window.Title}##{path}", ref open))
+            {
+                try { window.OnGUI(); }
+                catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); reportOnce(path, ex); }
+            }
+            ImGui.End();
+            window.IsOpen = open;
+        }
+    }
+
+    public int LastGizmoCount { get; private set; }   // 拡張が描いたギズモの数 (確認用)
+
+    private void drawExtensionGizmos(SceneCamera camera, ImDrawListPtr draw)
+    {
+        if (EditorExtensions.Editors.Count == 0) { LastGizmoCount = 0; return; }
+        var gizmos = new Gizmos(camera, draw);
+        foreach (var (type, editor) in EditorExtensions.Editors)
+        {
+            var pool = World.GetPool(type);
+            if (pool.Count == 0) continue;
+            foreach (var entity in World.Entities)
+            {
+                if (!pool.Has(entity.Id) || !World.IsActive(entity)) continue;
+                editor.Entity = entity;
+                try
+                {
+                    var component = pool.GetBoxed(entity.Id);
+                    editor.OnDrawGizmos(gizmos, component);
+                    if (entity == _selected) editor.OnDrawGizmosSelected(gizmos, component);
+                }
+                catch (Exception ex) { reportOnce($"{editor.GetType().Name}.OnDrawGizmos", ex); }
+            }
+        }
+        LastGizmoCount = gizmos.Count;
     }
 
     private void drawStats()
