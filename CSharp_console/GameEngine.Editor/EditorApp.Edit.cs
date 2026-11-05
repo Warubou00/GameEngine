@@ -131,6 +131,48 @@ internal sealed partial class EditorApp
     }
 
     public ProjectSettingsWindow ProjectSettingsWindow => _projectSettings;
+    public ScriptHost Scripts => _scripts;
+
+    // ---------------------------------------------------------------------
+    // ゲームのコード (ED7)
+    // ---------------------------------------------------------------------
+
+    // 起動時 : ビルドして (要る時だけ) 読み込む
+    public void LoadScripts()
+    {
+        try { _scripts.BuildAndLoadBlocking(); }
+        catch (Exception ex) { Console.WriteLine($"[Scripts] Failed to load Game.dll : {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// ビルドし直した Game.dll に読み替える。シーンは JSON にして、読み替えた後に作り直す (値は型の名前とフィールドの名前で引き継ぐ)
+    /// 再生中なら止めてから。元に戻すの記録は消す (古い型を持っているので)
+    /// </summary>
+    public void ReloadScripts()
+    {
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_playing) stop();
+        var dirty = _undo.State != _savedState;
+        var json = SceneSerializer.Save(World);
+        World.Clear();
+        _scripts.Unload(World);
+        try
+        {
+            _scripts.Load();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Scripts] Failed to load the new Game.dll : {ex.Message}");
+        }
+        var warnings = new List<string>();
+        SceneSerializer.Load(World, json, _engine.Assets, warnings);
+        foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");
+        reselect();
+        _undo.Clear();
+        _savedState = dirty ? (null, -1) : _undo.State;   // 保存していない変更があった時は * のまま
+        _picker.Clear();
+        Console.WriteLine($"[Scripts] Reloaded : {World.EntityCount} entities kept, {System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms");
+    }
 
     // エディターのカメラを動かす (自動の確認用)
     public void SetEditorCamera(Vector3 position, float yawDegrees = 0.0f, float pitchDegrees = 0.0f)

@@ -20,3 +20,15 @@ public interface IFixedSystem
 {
     void FixedUpdate(World world);
 }
+
+// ==========================================================================
+// ゲームの System の印 (ED7)。付けると、エディター (と Engine.AddGameSystems) が自動で作って登録する
+//   作り方 : public な (Engine engine) か () のコンストラクター
+//   Order の小さい順に登録する (同じなら型の名前の順)。ゲームの DLL を読み直すと、作り直される
+//   ※どのシーンでも動くので、自分の物が無いシーンでは何もしないように書く (例 : 自分のコンポーネントの数が 0 なら戻る)
+// ==========================================================================
+[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+public sealed class GameSystemAttribute : Attribute
+{
+    public int Order { get; init; }
+}

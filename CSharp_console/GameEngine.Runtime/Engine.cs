@@ -435,6 +435,54 @@ public sealed class Engine : IDisposable
         if (system is IFixedSystem fixedSystem) _fixedSystems.Add(fixedSystem);
     }
 
+    /// <summary>
+    /// アセンブリの [GameSystem] の付いた System を作って登録する (ED7)。戻り値 = 作った物 (RemoveSystems で外す)
+    /// コンストラクターは (Engine) か ()。作れなかった物は Console に出して飛ばす
+    /// </summary>
+    public List<object> AddGameSystems(System.Reflection.Assembly assembly)
+    {
+        var created = new List<object>();
+        var types = assembly.GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false } && t.IsDefined(typeof(GameSystemAttribute), false) &&
+                        (typeof(ISystem).IsAssignableFrom(t) || typeof(IFixedSystem).IsAssignableFrom(t)))
+            .OrderBy(t => t.GetCustomAttributes(typeof(GameSystemAttribute), false).Cast<GameSystemAttribute>().First().Order)
+            .ThenBy(t => t.FullName, StringComparer.Ordinal);
+        foreach (var type in types)
+        {
+            try
+            {
+                var system = type.GetConstructor(new[] { typeof(Engine) }) is { } withEngine ? withEngine.Invoke(new object[] { this })
+                           : Activator.CreateInstance(type)!;
+                if (system is ISystem s) AddSystem(s);
+                else AddFixedSystem((IFixedSystem)system);
+                created.Add(system);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Engine] Cannot create {type.FullName} : {(ex.InnerException ?? ex).Message}");
+            }
+        }
+        return created;
+    }
+
+    // 登録した System を順に回す (ED7 : 別のメソッドにした。Run の中に書くと、Debug のビルドでは
+    //  foreach の変数 (最後のゲームの System) が Run が終わるまで残り、読み直した古いゲームの DLL が解放されなかった)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void updateSystems()
+    {
+        foreach (var system in _systems) system.Update(World);
+    }
+
+    /// <summary>System を外す (ED7 : ゲームの DLL を読み直す前)</summary>
+    public void RemoveSystems(IEnumerable<object> systems)
+    {
+        foreach (var system in systems)
+        {
+            if (system is ISystem s) _systems.Remove(s);
+            if (system is IFixedSystem f) _fixedSystems.Remove(f);
+        }
+    }
+
     // 固定の刻み (Time.FixedDeltaTime) で呼ばれる System を足す (物理の前。剛体に力をかけるのはここ)
     public void AddFixedSystem(IFixedSystem system)
     {
@@ -462,7 +510,7 @@ public sealed class Engine : IDisposable
             // ゲームパッドはフレームの頭で 1 回、全パッド分をまとめて読む (System の中ではこの値を見る)
             Gamepad.Update();
 
-            if (IsPlaying) foreach (var system in _systems) system.Update(World);   // 編集中 (ED3) は止める
+            if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
             _transformSystem.Update(World);
             _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;

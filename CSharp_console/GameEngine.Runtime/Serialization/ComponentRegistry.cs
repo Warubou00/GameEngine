@@ -66,6 +66,15 @@ public sealed class ComponentType
 
     private static readonly Dictionary<Type, IReadOnlyList<ComponentField>> _fieldCache = new();
 
+    // そのアセンブリの型のフィールドの情報を捨てる (ED7)
+    internal static void ForgetFields(Assembly assembly)
+    {
+        lock (_fieldCache)
+        {
+            foreach (var type in _fieldCache.Keys.Where(t => t.Assembly == assembly).ToList()) _fieldCache.Remove(type);
+        }
+    }
+
     // 保存するフィールド (宣言の順。入れ子の struct にも使う。型ごとに 1 回だけ作る)
     public static IReadOnlyList<ComponentField> SerializedFields(Type type)
     {
@@ -101,6 +110,33 @@ public static class ComponentRegistry
     private static readonly Dictionary<Type, ComponentType>   _byType = new();
     private static readonly Dictionary<string, ComponentType> _byName = new(StringComparer.Ordinal);
     private static Dictionary<string, Type>? _knownTypes;   // 名前 → struct の型 (読み込み済みのアセンブリから)
+    // 捨てたアセンブリ (ED7 : 読み直した古いゲームの DLL。解放されるまで GetAssemblies に残るので、見ないようにする)
+    // 弱い参照で持つ (強く持つと解放されない)
+    private static readonly List<WeakReference<Assembly>> _retired = new();
+
+    /// <summary>
+    /// アセンブリの型を忘れる (ED7 : ゲームの DLL を読み直す前)。型の情報 / 名前の表 / フィールドの情報から外し、以後は探さない
+    /// </summary>
+    public static void Forget(Assembly assembly)
+    {
+        lock (_lock)
+        {
+            foreach (var type in _byType.Keys.Where(t => t.Assembly == assembly).ToList())
+            {
+                _byName.Remove(_byType[type].TypeName);
+                _byType.Remove(type);
+            }
+            _retired.Add(new WeakReference<Assembly>(assembly));
+            _knownTypes = null;
+        }
+        ComponentType.ForgetFields(assembly);
+    }
+
+    private static bool isRetired(Assembly assembly)
+    {
+        foreach (var weak in _retired) if (weak.TryGetTarget(out var retired) && retired == assembly) return true;
+        return false;
+    }
     private static readonly object _lock = new();
 
     public static ComponentType Get(Type type)
@@ -151,8 +187,9 @@ public static class ComponentRegistry
             var map = new Dictionary<string, Type>(StringComparer.Ordinal);
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                // エンジンと、エンジンを参照するアセンブリ (ゲームのコード) だけを見る
+                // エンジンと、エンジンを参照するアセンブリ (ゲームのコード) だけを見る。捨てたアセンブリは見ない (ED7)
                 if (assembly != runtime && !assembly.GetReferencedAssemblies().Any(r => r.Name == runtime.GetName().Name)) continue;
+                if (isRetired(assembly)) continue;
                 Type[] types;
                 try { types = assembly.GetTypes(); }
                 catch (ReflectionTypeLoadException e) { types = e.Types.Where(t => t != null).ToArray()!; }

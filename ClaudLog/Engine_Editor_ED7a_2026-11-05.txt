@@ -1,0 +1,73 @@
+﻿エディター ED7 (前半) : ゲームのコードを別の DLL に / エディターがビルドして読み直す (ホットリロード) / [GameSystem] 2026-11-05
+ブランチ : feature/editor-ed7
+
+■ ED7 の分け方 (ロードマップの「ED7 2 回」)
+  前半 (今回) : ゲームのプロジェクト (Game.dll) / ビルドと読み直し (シーンの値を引き継ぐ) / 属性で System を登録
+  後半 (次回) : 独自のインスペクター ([CustomEditor]) / 独自のウィンドウとメニュー / シーンビューのギズモ (OnDrawGizmos) / 独自のアセットの取り込み
+
+■ ゲームのプロジェクト : CSharp_console/Project/Scripts/Game.csproj (Game.dll)
+  見本のゲームのコード (シーンが使うコンポーネントと、それを動かす System) を GameEngine_console から移した
+    Spin.cs (Spin / SpinSystem) / CollisionGame.cs (OrbitMover / OrbitMoverSystem / LaserDemoSystem) /
+    PhysicsGame.cs (PhysicsDemo の置く関数 / StackBlock / MovingPlatform / TriggerZone / PhysicsDemoSystem) /
+    ParticleGame.cs (Firework / FireworkSystem / Flyer / FlyerSystem / Fountain)
+  名前空間は GameEngine_console のまま (シーンのファイルの型の名前を変えないため。シーンのファイルはそのまま読める)
+  見本 (GameEngine_console) は Game.csproj を参照する (計測 / テスト / 見本の置き方 / キーの System は見本に残した)
+  エディターは Game.csproj を参照しない (自分でビルドして読み込む)。エンジンは参照するだけ (Private=false : 写さない)
+
+■ [GameSystem] (エンジン。Ecs/ISystem.cs)
+  付けた System は、エディターが自動で作って登録する (コンストラクターは (Engine) か ())。Order の順
+  どのシーンでも動くので、自分の物の無いシーンでは何もしないように書く :
+    LaserDemoSystem は OrbitMover のあるシーンだけ / PhysicsDemoSystem は StackBlock か MovingPlatform のあるシーンだけ
+  → エディターの再生で、物理の見本の Space (球を撃つ) / R (作り直す) / 動く床 / レーザーも動くようになった
+    (以前はエディターの Program で Spin などを 1 つずつ登録していた)
+  Engine.AddGameSystems(assembly) / Engine.RemoveSystems(systems)
+
+■ エディターのビルドと読み直し (ScriptHost.cs)
+  - 起動時 : ソース (とフォルダ) より新しい Game.dll が無ければ dotnet build して待つ → 読み込む → シーンを開く
+    (フォルダの日時も見る : .cs を消しただけの時も作り直す。最初は .cs の日時だけで、消した型が残った)
+  - Project/Scripts の .cs を保存 → 0.5 秒後に dotnet build (別のスレッド。メニューの横に Compiling scripts...)
+    → 成功 : 読み直す / 失敗 : エラーを Console に出し、前の Game.dll のまま (メニューの横に Script errors。マウスを乗せると 1 つ目のエラー)
+  - 読み直し (EditorApp.ReloadScripts) : 再生中なら止める → シーンを JSON に → World を空に → [GameSystem] を外す →
+    古い型の入れ物 (World.RemovePools) と型の情報 (ComponentRegistry.Forget) を捨てる → AssemblyLoadContext を捨てる →
+    新しい Game.dll を読み、[GameSystem] を作る → JSON からシーンを作り直す (値は型の名前とフィールドの名前で引き継ぐ。足したフィールドは既定の値)
+    選んでいる物はそのまま。元に戻すの記録は消す (古い型を持っているので)。保存していない変更の印 (*) はそのまま
+  - Game.dll はファイルではなくバイト列で読む (ファイルを掴まないので、ビルドし直せる)。捨てられる AssemblyLoadContext
+  - Scripts メニュー : Rebuild / Open Scripts Folder / 読み込んだ回数・System の数・ビルドの時間
+
+■ 古い Game.dll を本当に解放する (メモリが読み直すたびに増えないように) : 3 つ直した
+  1. World.GetPool(Type) : 以前は GetPool<T> を MakeGenericMethod で呼んでいた → World の型のリフレクションの覚えにゲームの型が残った。
+     入れ物の型を MakeGenericType で作って直接作るようにした
+  2. エディターの .NET の設定 TieredCompilationQuickJitForLoops = false (エディターだけ)。
+     既定ではループのあるメソッドを軽い JIT で始めて後で JIT し直すが、そうするとエンジンのジェネリックなメソッドを
+     ゲームの型で使った物 (World.ForEach<Transform, Spin> など) を再生で動かした後、古い DLL がいつまでも解放されなかった。
+     調べた結果 : TieredCompilation=0 / TC_QuickJitForLoops=0 なら解放、TieredPGO=0 / TC_CallCounting=0 / TC_OnStackReplacement=0 では解放されない
+     速さ : エディターの C# update 0.139 〜 0.140 ms (この設定) / 0.149 ms (既定)。遅くならない
+  3. Engine.Run の中の foreach (System を回す) を別のメソッドに。Debug のビルドでは foreach の変数 (最後のゲームの System) が
+     Run が終わるまで残り、解放されなかった (Release では 1 と 2 だけで解放された)
+  調べ方 : 一時的な調べ (Debug の段階を足しながら、読み込み → 捨てる → GC → WeakReference を見る) で原因を絞った。調べのコードは消した
+
+■ 変更
+  ランタイム : Ecs/ISystem.cs ([GameSystem]) / Engine.cs (AddGameSystems / RemoveSystems / updateSystems) / Ecs/World.cs (RemovePools / GetPool(Type)) /
+    Serialization/ComponentRegistry.cs (Forget : 型の情報を忘れる、捨てたアセンブリを探さない)
+  エディター : ScriptHost.cs (新規) / EditorApp.cs (Scripts メニュー、状態) / EditorApp.Edit.cs (LoadScripts / ReloadScripts) /
+    Program.cs (見本の DLL を読む所と System の登録をやめ、ゲームのコードを読み込む) / GameEngine.Editor.csproj (見本を参照しない、JIT の設定) /
+    EditorTest.cs (ゲームの型を名前で引く、ED7 の 9 項目)
+  見本 : GameEngine_console.csproj (Game.csproj を参照) / Samples (移した物を消した)
+  ゲーム : Project/Scripts (新規 : Game.csproj と 4 つの .cs)
+  ※C++ は変えていない
+
+■ 確認
+  自動 (--editor-test) : 88 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    ED7 の 9 項目 : ゲームのコードが読み込まれる (6 System) /
+      新しいコンポーネントの .cs を書いて保存 → エディターを閉じずに使える (ビルド 約 3 秒) / 古い Game.dll が解放される /
+      コードを書き換えて (フィールドを足して) 読み直しても値が残る / 新しい型を使う / 選択が残る /
+      再生すると新しい System が動く / ビルドのエラーでは前の Game.dll のまま / ファイルを消すと型も消える
+  見た目 : エディターを動かしたまま Project/Scripts に Wobble.cs を書いた → Compiling... → Built Game.dll (2887 ms) →
+    Loaded Game #2 : 9 components, 7 systems → Reloaded : 19 entities kept, 137.7 ms (確認後に Wobble.cs は消し、起動時に作り直されることも確かめた)
+  見本 : 既定 / physics / particles とも Game.dll の型でシーンのファイルを読める (知らない型の警告なし)。--hierarchy-test 18 / 0、--serialize-test 4 / 0
+  速さ : 見本 showcase の C# update 0.058 〜 0.077 ms (前と同じ範囲) / 読み直し 56 〜 138 ms (ビルドの 3 秒は別のスレッド)
+
+■ 残り (後半へ)
+  - 独自のインスペクター / ウィンドウ / メニュー / ギズモ / アセットの取り込み
+  - ゲームの型の値の変換 (RegisterConverter) を使った時、読み直しで外していない
+  - 型の名前を変えると値は引き継げない (Unity の FormerlySerializedAs に当たる物は無い)

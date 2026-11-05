@@ -41,24 +41,16 @@ internal static class Program
         Console.WriteLine($"[Assets] {database.AssetsRoot} : {database.Entries.Count()} assets{(created > 0 ? $" ({created} new .meta)" : "")}");
         var scenes = Path.Combine(database.AssetsRoot, "Scenes");
 
-        // 見本のコンポーネント (Spin など) の入った DLL を読み込んでおく (シーンの読み込み / コンポーネントを足すメニュー用。ED7 でゲームの DLL に)
-        // (以前は typeof(Spin) を捨てる式で読ませていたが、Release ではその式ごと消えて読み込まれなかった)
-        try { System.Reflection.Assembly.Load("GameEngine_console"); }
-        catch (Exception ex) { Console.WriteLine($"[Editor] Game assembly not loaded : {ex.Message}"); }
-
         using var engine = new Engine(new EngineSettings { Title = "GameEngine Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory });
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
         engine.Assets.Database = database;
 
-        // 再生中に動かすゲームの System (見本の物。ED7 でゲームの DLL から自動で登録する)。編集中は Engine が止めている
-        engine.AddSystem(new GameEngine_console.SpinSystem());
-        engine.AddSystem(new GameEngine_console.OrbitMoverSystem());
-        engine.AddSystem(new GameEngine_console.FireworkSystem());   // パーティクルの見本 (ED6)
-        engine.AddSystem(new GameEngine_console.FlyerSystem());
-
         using var imgui = new ImGuiBackend(engine, Path.Combine(exeDirectory, "imgui.ini"));
         var editor = new EditorApp(engine, imgui, log, database, scenes);
+        // ゲームのコード (ED7) : Project/Scripts/Game.csproj をビルドして読み込む (コンポーネントの型と [GameSystem])。シーンを開く前に
+        //   (以前は見本 (GameEngine_console) を参照して型を読み、System をここで 1 つずつ登録していた)
+        editor.LoadScripts();
         if (args.Contains("--resave-scenes"))
         {
             foreach (var entry in database.Entries.Where(e => e.Kind == AssetKind.Scene).ToList())

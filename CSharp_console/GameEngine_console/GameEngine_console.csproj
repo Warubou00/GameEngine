@@ -15,6 +15,8 @@
   <!-- エンジン本体 (ECS / 入力 / カメラ / アセット / C++ の呼び出し)。以前はこのプロジェクトの RHI.cs に全部入っていた -->
   <ItemGroup>
     <ProjectReference Include="..\GameEngine.Runtime\GameEngine.Runtime.csproj" />
+    <!-- ゲームのコード (見本のコンポーネントと System。ED7 で Project/Scripts へ移した) -->
+    <ProjectReference Include="..\Project\Scripts\Game.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    ゲームのコード (ED7)。自分のコンポーネント (IComponent の struct) と System ([GameSystem]) をここに書く
+      - エディターはこのプロジェクトをビルドし (dotnet build)、できた Game.dll を読み込む。
+        .cs を保存すると、ビルドし直して読み直す (エディターを閉じなくてよい。シーンの値は引き継ぐ)
+      - 見本 (GameEngine_console) もこのプロジェクトを参照して、同じコードで動く
+      - 名前空間は GameEngine_console のまま (シーンのファイルの型の名前を変えないため)
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>AnyCPU;x64</Platforms>
+    <AssemblyName>Game</AssemblyName>
+    <RootNamespace>GameEngine_console</RootNamespace>
+  </PropertyGroup>
+
+  <!-- エンジンは参照するだけ (写さない : エディター / 見本が読み込んだ物を使う) -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\GameEngine.Runtime\GameEngine.Runtime.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>
