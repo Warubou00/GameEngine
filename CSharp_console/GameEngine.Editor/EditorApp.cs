@@ -308,6 +308,13 @@ internal sealed partial class EditorApp
         {
             if (ImGui.MenuItem("Create Empty")) CreateEntity(Entity.Null);
             if (ImGui.MenuItem("Create Empty Child", null, false, World.IsAlive(_selected))) CreateEntity(_selected);
+            // プリミティブ (SH1)。Shift を押しながら選ぶと、選んでいる物の子にする
+            if (ImGui.BeginMenu("3D Object"))
+            {
+                foreach (var shape in Enum.GetValues<PrimitiveShape>())
+                    if (ImGui.MenuItem(shape.ToString())) CreatePrimitive(shape, ImGui.GetIO().KeyShift ? _selected : Entity.Null);
+                ImGui.EndMenu();
+            }
             ImGui.Separator();
             if (ImGui.MenuItem("Render Settings")) SelectRenderSettings();
             if (ImGui.MenuItem("Volume (Box)"))    CreateVolume(VolumeShape.Box);
@@ -747,6 +754,12 @@ internal sealed partial class EditorApp
             Selected = entity;
             if (ImGui.MenuItem("Rename", "F2")) BeginRename(entity);   // ED10
             if (ImGui.MenuItem("Create Child")) CreateEntity(entity);
+            if (ImGui.BeginMenu("Create 3D Object Child"))   // SH1
+            {
+                foreach (var shape in Enum.GetValues<PrimitiveShape>())
+                    if (ImGui.MenuItem(shape.ToString())) CreatePrimitive(shape, entity);
+                ImGui.EndMenu();
+            }
             // プレハブ (ED8)
             if (PrefabRootOf(entity).IsNull)
             {

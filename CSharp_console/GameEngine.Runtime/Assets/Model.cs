@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Numerics;
+using System.Text.Json;
 using GameEngine.Native;
 
 namespace GameEngine;
@@ -315,6 +316,8 @@ public sealed class AssetManager
     /// </summary>
     public Model LoadModel(string path)
     {
+        // プリミティブ (SH1) : "builtin:Cube" など。ファイルを読まずにコードで作る
+        if (Primitives.IsPrimitive(path)) return loadPrimitive(path);
         (path, var file) = resolve(path);
         if (_models.TryGetValue(path, out var cached)) return cached;
 
@@ -325,6 +328,28 @@ public sealed class AssetManager
         }
 
         var model = new Model(handle, (int)subMeshCount, path);
+        _models.Add(path, model);
+        return model;
+    }
+
+    /// <summary>プリミティブのモデル (SH1)。同じ形と分割数は同じ Model を返す</summary>
+    public Model LoadPrimitive(PrimitiveShape shape, int segments = 0) => loadPrimitive(Primitives.PathOf(shape, segments));
+
+    private unsafe Model loadPrimitive(string path)
+    {
+        if (_models.TryGetValue(path, out var cached)) return cached;
+        if (!Primitives.TryParse(path, out var shape, out var segments)) throw new ArgumentException($"Unknown primitive : {path} (builtin:Cube / Sphere / Capsule / Cylinder / Cone / Torus / Plane / Quad[:segments])");
+        var mesh = Primitives.Build(shape, segments);
+        var vertices = new Primitives.NativeVertex[mesh.Positions.Count];
+        for (int i = 0; i < vertices.Length; i++)
+            vertices[i] = new Primitives.NativeVertex { Position = mesh.Positions[i], Normal = mesh.Normals[i], Color = Vector4.One, UV = mesh.UVs[i] };
+        var indices = mesh.Indices.ToArray();
+        uint handle;
+        fixed (Primitives.NativeVertex* v = vertices)
+        fixed (uint* i = indices)
+            handle = NativeMethods.Renderer_CreateMesh(v, (uint)vertices.Length, i, (uint)indices.Length, path);
+        if (handle == NativeMethods.InvalidHandle) throw new InvalidOperationException($"Failed to create the primitive : {path}");
+        var model = new Model(handle, 1, path);
         _models.Add(path, model);
         return model;
     }

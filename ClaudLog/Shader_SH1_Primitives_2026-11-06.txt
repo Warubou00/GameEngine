@@ -1,0 +1,45 @@
+﻿シェーダー SH1 : プリミティブ 2026-11-06
+ブランチ : feature/shader-sh1
+ロードマップ : ClaudLog/Engine_Roadmap_Shader_2026-11-06.txt (SH1 → SH5。ユーザーがこの順で了承。pptx は git に入れない)
+
+■ 作った物
+  プリミティブ 8 種 : Cube / Sphere / Capsule / Cylinder / Cone / Torus / Plane / Quad
+    大きさは Unity と同じ : 立方体 1 / 球 直径 1 / カプセル・円柱 直径 1 × 高さ 2 / 円錐 直径 1 × 高さ 1 / トーラス 外径 1 (輪 0.35 + 管 0.15) /
+    平面 10 × 10 (上向き、10 分割) / クアッド 1 × 1 (-Z 向き)。どれも原点が中心。UV / 法線付き (立方体と円柱のふたは角で法線を分ける)
+  モデルのパス : "builtin:Cube" / 分割数を指定 "builtin:Sphere:64" (3〜256)。ファイルは作らない
+    engine.Assets.LoadModel("builtin:Torus") / engine.Assets.LoadPrimitive(PrimitiveShape.Torus) で読める。同じパスは同じ Model
+    シーンにはこのパスで保存 (Id 無し)。書き出したゲームも同じ形をその場で作る (書き出しの依存の探索は注意を出さない)
+  エディター : GameObject > 3D Object > 8 種 (カメラの 5 m 前。Shift を押しながら選ぶと選んでいる物の子) /
+    Hierarchy の右クリック > Create 3D Object Child。元に戻せる
+    形に合うコライダーも付ける : 立方体 Box / 球 Sphere / カプセル・円柱 Capsule (Unity と同じ) / 平面・クアッド 薄い Box /
+    円錐・トーラス Mesh (メッシュのコライダーは動かない物用)
+  SH3 の雲は、この Cube に雲のマテリアルを付けて描く
+
+■ 仕組み
+  C++ (Renderer) : SceneRenderer::CreateMesh / Renderer_CreateMesh (新規)
+    頂点 (RHI::Vertex 56 byte) とインデックスの配列 → メガバッファに登録、白い不透明のマテリアル、サブメッシュ 1 つ。
+    衝突判定のメッシュ用の形も残す。名前 (builtin:...) をモデルの Path にする (空でない = 使っている番号)。番号は LoadModel と同じく使い回す
+  C# : Assets/Primitives.cs (新規。形を作る / パスの読み書き / 形に合うコライダー) / AssetManager.LoadModel が builtin: を見て作る
+  面の向き : このエンジンは画面で時計回りが表。三角形は、頂点の法線 (外向き) の側から見て時計回りになるよう、作る時に並びを直す
+    (左手系で cross(b - a, c - a) が外を向く)。見た目で 8 種とも表が外 (影 / ライティングが正しい) を確かめた
+
+■ 確認
+  エディター (--editor-test) : 156 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)。SH1 の 9 項目 :
+    8 種とも全部の三角形が外向き (Cube 24 頂点 / 12 三角形、Sphere 561 / 960、Capsule 594 / 1024、Cylinder 134 / 128、
+      Cone 100 / 64、Torus 561 / 1024、Plane 121 / 200、Quad 4 / 2) /
+    3D Object で 8 種を作り形に合うコライダーが付く / 同じ形は同じ Model、分割数で別のメッシュ / 知らない形は断る / 元に戻す /
+    保存して開き直す / 書き出しの依存で注意が出ない / 書き出したゲームでプリミティブのシーンが動き、エディターの再生と同じ (ずれ 0)
+  見た目 (エディターの窓だけを撮った。入力は PostMessage) :
+    8 種を並べたシーン (形 / 陰影 / 影が正しい) / GameObject > 3D Object のメニュー / メニューから Torus を作る
+    (カメラの前に置かれ、Mesh のコライダーと builtin:Torus の MeshRenderer)
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0
+
+■ 変更
+  C++ : Renderer/Source/sceneRenderer.h・.cpp (CreateMesh) / rendererDll.cpp (Renderer_CreateMesh)
+  ランタイム : Assets/Primitives.cs (新規) / Assets/Model.cs (builtin: / LoadPrimitive) / Native/NativeMethods.cs
+  エディター : EditorApp.cs (GameObject > 3D Object / Hierarchy の右クリック) / EditorApp.Edit.cs (CreatePrimitive) / EditorTest.cs
+  .gitignore : GameEngine.Editor/assets/*.pptx を入れない (hlsl とノイズのテクスチャは SH3 でプロジェクトのアセットにする)
+
+■ 残り
+  - インスペクターでプリミティブの分割数を選ぶ欄は無い (コード / シーンのファイルでは "builtin:Sphere:64" のように指定できる)
+  - 円錐 / トーラスのコライダーはメッシュ (動く剛体には使えない)

@@ -765,13 +765,70 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- SH1 : プリミティブ ----------
+        var shapes = Enum.GetValues<PrimitiveShape>();
+        var primitivesOk = true;
+        var primitiveReport = new List<string>();
+        foreach (var shape in shapes)
+        {
+            // 面の向き : 三角形の表 (cross(b - a, c - a)) が外を向いている (凸の形は中心から外 / トーラスは管の中心から外 / 平面は上 / クアッドは -Z)
+            var mesh = Primitives.Build(shape);
+            var outward = 0;
+            for (int t = 0; t < mesh.Indices.Count; t += 3)
+            {
+                var p0 = mesh.Positions[(int)mesh.Indices[t]]; var p1 = mesh.Positions[(int)mesh.Indices[t + 1]]; var p2 = mesh.Positions[(int)mesh.Indices[t + 2]];
+                var face = Vector3.Cross(p1 - p0, p2 - p0);
+                var center = (p0 + p1 + p2) / 3;
+                var expected = shape switch
+                {
+                    PrimitiveShape.Plane => Vector3.UnitY,
+                    PrimitiveShape.Quad  => -Vector3.UnitZ,
+                    PrimitiveShape.Torus => center - Vector3.Normalize(new Vector3(center.X, 0, center.Z)) * 0.35f,
+                    _ => center,
+                };
+                if (Vector3.Dot(face, expected) > 0) outward++;
+            }
+            var triangles = mesh.Indices.Count / 3;
+            primitiveReport.Add($"{shape} {mesh.Positions.Count}v/{triangles}t");
+            if (outward != triangles || triangles == 0) { primitivesOk = false; Console.WriteLine($"[Test]   {shape} : {triangles - outward} triangles face inward"); }
+        }
+        check(primitivesOk, $"primitive meshes face outward ({string.Join(", ", primitiveReport)})");
+
+        var primitiveCount = World.EntityCount;
+        var createdPrimitives = shapes.Select(shape => _app.CreatePrimitive(shape, Entity.Null)).ToList();
+        var renderers = createdPrimitives.Select(e => World.Get<MeshRenderer>(e)).ToList();
+        check(World.EntityCount == primitiveCount + shapes.Length && renderers.All(r => r.Model.IsValid && r.Model.Path.StartsWith("builtin:")) &&
+              World.Get<Collider>(createdPrimitives[0]).Shape == ColliderShape.Box && World.Get<Collider>(createdPrimitives[1]).Shape == ColliderShape.Sphere &&
+              World.Get<Collider>(createdPrimitives[(int)PrimitiveShape.Torus]).Shape == ColliderShape.Mesh,
+              "GameObject > 3D Object creates every primitive with a fitting collider");
+        check(_app.Engine.Assets.LoadModel("builtin:Cube").Equals(renderers[0].Model) && _app.Engine.Assets.LoadModel("builtin:Sphere:8").Path == "builtin:Sphere:8" &&
+              Primitives.Build(PrimitiveShape.Sphere, 8).Positions.Count < Primitives.Build(PrimitiveShape.Sphere).Positions.Count,
+              "the same primitive is shared; a segment count makes a different mesh");
+        var unknownRejected = false;
+        try { _app.Engine.Assets.LoadModel("builtin:Teapot"); } catch (ArgumentException) { unknownRejected = true; }
+        check(unknownRejected, "an unknown primitive is refused");
+        _app.Undo();
+        check(World.EntityCount == primitiveCount + shapes.Length - 1, "undo create primitive");
+        _app.Redo();
+
+        // 保存して開き直す : パスだけ (ファイルの Id は無い) / 書き出し (下) でも同じ形を作る
+        var primitiveScene = $"{determinismFolder}/primitives.scene.json";
+        _app.SaveSceneTo(database.FullPath(primitiveScene));
+        var primitiveJson = File.ReadAllText(database.FullPath(primitiveScene));
+        _app.OpenScene(database.FullPath(primitiveScene));
+        yield return 0;
+        check(primitiveJson.Contains("\"path\": \"builtin:Torus\"") && World.Entities.Count(e => World.Has<MeshRenderer>(e) && World.Get<MeshRenderer>(e).Model.Path.StartsWith("builtin:")) == shapes.Length,
+              "a scene with primitives saves and reopens");
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -779,6 +836,7 @@ internal sealed class EditorTest
               included.Any(a => a.EndsWith("Tomimi.pmx")) && included.Any(a => a.EndsWith("/tex/face.png")),
               $"dependencies : models, .mtl and pmx textures ({included.Count} assets)");
         check(!included.Any(a => a.EndsWith("ReadMe.txt") || a.EndsWith(".vmd")), "dependencies : unused assets are not included");
+        check(!dependencies.Warnings.Any(w => w.Contains("builtin:")), "dependencies : primitives need no files (no warnings)");   // SH1
         var buildTask = Task.Run(() => builder.Build(buildSettings, dependencies));
         while (!buildTask.IsCompleted) yield return 0;
         var build = buildTask.Result;

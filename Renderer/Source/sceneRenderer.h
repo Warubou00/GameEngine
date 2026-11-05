@@ -91,6 +91,13 @@ namespace Renderer
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)。outSubMeshCount にサブメッシュの数
 		 ************************************************************************************/
 		uint32_t LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount);
+		/***********************************************************************************
+		 * @brief 頂点とインデックスの配列からモデルを作る (SH1 : プリミティブ / コードで作る形)
+		 * @details サブメッシュ 1 つ、白い不透明のマテリアル。name はモデルの名前 ("builtin:Sphere" など。空にしない)
+		 *          衝突判定のメッシュ用の形も残す (LoadModel と同じ)。読み直し (ReloadModel) はできない
+		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)
+		 ************************************************************************************/
+		uint32_t CreateMesh(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount, const std::wstring& name);
 		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)
 		bool GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
 		                      uint32_t* outVertexCount, uint32_t* outIndexCount) const;

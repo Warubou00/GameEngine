@@ -254,6 +254,11 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_LoadModel([MarshalAs(UnmanagedType.LPWStr)] string filePath, out uint subMeshCount);
 
+    // 頂点 (56 byte) とインデックスの配列からモデルを作る (SH1 : プリミティブ)。name はモデルの名前 ("builtin:Cube" など)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateMesh(Primitives.NativeVertex* vertices, uint vertexCount, uint* indices, uint indexCount,
+                                                  [MarshalAs(UnmanagedType.LPWStr)] string name);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_CreateRenderObjects(uint model, uint count, uint* outHandles);
 
