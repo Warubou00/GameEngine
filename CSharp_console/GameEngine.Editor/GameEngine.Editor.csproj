@@ -5,7 +5,7 @@
     エディター (ED3)。GUI でシーン / エンティティ / コンポーネントを操作する
       - GUI は ImGui (ImGui.NET。docking 版)。描画はエンジンの RHI (Renderer.dll の UI の描画) で行う
       - シーンは編集中は動かさない (物理 / 音 / ゲームの System は再生 (ED4) の時だけ)
-      - ゲームのコード (見本のコンポーネント) は、今は GameEngine_console を参照して型を読む (ED7 で別の DLL に)
+      - ゲームのコード (Project/Scripts の Game.csproj) は参照しない。エディターがビルドして読み込み、読み直す (ED7)
     ==========================================================================
   -->
   <PropertyGroup>
@@ -17,6 +17,14 @@
     <Platforms>AnyCPU;x64</Platforms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>GameEngine.Editor</RootNamespace>
+    <!--
+      ED7 : ゲームの DLL を読み直した時に、古い DLL が解放されるように、ループのあるメソッドも最初から最適化して JIT する。
+      既定 (true) では、ループのあるメソッドを軽い JIT で始めて後から JIT し直すが、そうすると
+      エンジンのジェネリックなメソッドをゲームの型で使った物 (World.ForEach<Transform, Spin> など) を再生で動かした後、
+      古い DLL がいつまでも解放されなかった (調べた結果 : TieredCompilation=0 と TC_QuickJitForLoops=0 で解放、
+      TieredPGO=0 / TC_CallCounting=0 / TC_OnStackReplacement=0 では解放されない)。エディターだけの設定 (見本 / ゲームは既定のまま)
+    -->
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
   </PropertyGroup>
 
   <Import Project="..\NativeEngine.targets" />
@@ -27,7 +35,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GameEngine.Runtime\GameEngine.Runtime.csproj" />
-    <ProjectReference Include="..\GameEngine_console\GameEngine_console.csproj" />
   </ItemGroup>
 
 </Project>

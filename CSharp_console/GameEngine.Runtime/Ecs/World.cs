@@ -81,12 +81,33 @@ public sealed class World
     // 全ての型の入れ物 (保存 / エディター用)
     public IReadOnlyList<IComponentPool> Pools => _poolList;
 
+    /// <summary>
+    /// 型の入れ物を捨てる (ED7 : ゲームの DLL を読み直す前に、古い DLL の型の物を外す)。中のコンポーネントも消える
+    /// エンジンの型 (System が入れ物を覚えている物) には使わないこと
+    /// </summary>
+    public int RemovePools(Func<Type, bool> match)
+    {
+        var removed = 0;
+        foreach (var pool in _poolList.Where(p => match(p.ComponentType)).ToList())
+        {
+            foreach (var entity in Entities.ToList()) pool.Remove(entity.Id);
+            _pools.Remove(pool.ComponentType);
+            _poolList.Remove(pool);
+            removed++;
+        }
+        return removed;
+    }
+
     // 型を知らずに入れ物を取る (無ければ作る。保存 / エディター用)
     public IComponentPool GetPool(Type type)
     {
         if (_pools.TryGetValue(type, out var pool)) return pool;
-        var method = typeof(World).GetMethod(nameof(GetPool), 1, Type.EmptyTypes)!.MakeGenericMethod(type);
-        return (IComponentPool)method.Invoke(this, null)!;
+        // 入れ物の型を作って直接作る (ED7)。以前は GetPool<T> を MakeGenericMethod で呼んでいたので、
+        // World の型のリフレクションの覚えにゲームの型が残り、読み直した古いゲームの DLL が解放されなかった
+        var created = (IComponentPool)Activator.CreateInstance(typeof(ComponentPool<>).MakeGenericType(type), nonPublic: true)!;
+        _pools.Add(type, created);
+        _poolList.Add(created);
+        return created;
     }
 
     // 全てのエンティティを削除する (シーンを読み込み直す前など)

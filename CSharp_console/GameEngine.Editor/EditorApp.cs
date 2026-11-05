@@ -30,6 +30,7 @@ internal sealed partial class EditorApp
     private readonly AssetDatabase _database;
     private readonly ProjectPanel _project;
     private ShaderHotReload? _shaders;
+    private readonly ScriptHost _scripts;   // ゲームのコード (ED7)
     private bool _inspectAsset;          // インスペクターに Project で選んだアセット (マテリアル) を出す
     private int  _seenAssetSelection;
     private World World => _engine.World;
@@ -70,6 +71,8 @@ internal sealed partial class EditorApp
         _scenesDirectory = scenesDirectory;
         Directory.CreateDirectory(scenesDirectory);
         _project = new ProjectPanel(engine, database, OpenScene);
+        _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
+        _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
@@ -97,6 +100,8 @@ internal sealed partial class EditorApp
             _selectedId = _selected.IsNull ? Guid.Empty : EditorWorld.IdOf(World, _selected);
         }
     }
+
+    public Guid SelectedId => _selectedId;
 
     private void reselect() =>
         _selected = _selectedId == Guid.Empty ? Entity.Null : SceneSerializer.FindEntity(World, _selectedId);
@@ -216,6 +221,7 @@ internal sealed partial class EditorApp
         if (_showProject)   _project.Draw(ref _showProject);
         _projectSettings.Draw(ref _showProjectSettings);
         _shaders?.Update();
+        _scripts.Update();
 
         handleShortcuts();
         updateCamera();
@@ -288,6 +294,14 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Volume (Global)")) CreateVolume(VolumeShape.Global);
             ImGui.EndMenu();
         }
+        if (ImGui.BeginMenu("Scripts"))
+        {
+            if (ImGui.MenuItem("Rebuild", null, false, !_scripts.IsBuilding)) _scripts.RequestBuild();
+            if (ImGui.MenuItem("Open Scripts Folder")) System.Diagnostics.Process.Start("explorer.exe", $"\"{Path.Combine(_database.ProjectRoot, "Scripts")}\"");
+            ImGui.Separator();
+            ImGui.TextDisabled($"Game.dll #{_scripts.LoadCount}, {_scripts.SystemCount} systems, last build {_scripts.LastBuildMs:F0} ms");
+            ImGui.EndMenu();
+        }
         if (ImGui.BeginMenu("Assets"))
         {
             if (ImGui.MenuItem("Create Material")) _project.CreateMaterial();
@@ -328,6 +342,14 @@ internal sealed partial class EditorApp
             ImGui.EndMenu();
         }
         ImGui.TextDisabled(_scenePath != null ? $"   {Path.GetFileName(_scenePath)}{(_undo.State != _savedState ? " *" : "")}" : "   (new scene)");
+        // ゲームのコードの状態 (ED7)
+        if (_scripts.IsBuilding) { ImGui.SameLine(); ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.3f, 1.0f), "   Compiling scripts..."); }
+        else if (_scripts.LastError != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(1.0f, 0.45f, 0.4f, 1.0f), "   Script errors (see Console)");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(_scripts.LastError);
+        }
         ImGui.EndMainMenuBar();
     }
 

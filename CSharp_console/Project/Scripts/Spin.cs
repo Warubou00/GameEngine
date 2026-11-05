@@ -12,6 +12,7 @@ public struct Spin : IComponent
     public float DegreesPerSecond;
 }
 
+[GameSystem]
 public sealed class SpinSystem : ISystem
 {
     public void Update(World world)

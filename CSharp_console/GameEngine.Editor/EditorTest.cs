@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Text.Json;
-using GameEngine_console;
 
 namespace GameEngine.Editor;
 
@@ -36,6 +35,23 @@ internal sealed class EditorTest
         if (ok) _pass++; else _fail++;
         Console.WriteLine($"[Test] {(ok ? "PASS" : "FAIL")} {name}");
     }
+
+    // ゲームの DLL の型 (ED7 : エディターはゲームのコードを参照しないので、名前で引く)
+    private Type gameType(string name) => ComponentRegistry.Find($"GameEngine_console.{name}")?.Type ?? throw new InvalidOperationException($"No game type {name}");
+    private float getField(Entity e, string type, string field)
+    {
+        var t = gameType(type);
+        return Convert.ToSingle(t.GetField(field)!.GetValue(World.GetPool(t).GetBoxed(e.Id)));
+    }
+    private void setField(Entity e, string type, string field, object value)
+    {
+        var t = gameType(type);
+        var pool = World.GetPool(t);
+        var boxed = pool.GetBoxed(e.Id);
+        t.GetField(field)!.SetValue(boxed, value);
+        pool.SetBoxed(e, boxed);
+    }
+    private bool has(Entity e, string type) => World.IsAlive(e) && World.GetPool(gameType(type)).Has(e.Id);
 
     private Entity find(string name) => World.Entities.FirstOrDefault(e => World.Has<EntityInfo>(e) && World.Get<EntityInfo>(e).Name == name);
 
@@ -171,13 +187,14 @@ internal sealed class EditorTest
         _app.Redo();
         check(World.Has<AudioSource>(find("Hierarchy grandchild")), "redo add component");
         _app.Undo();
-        var spinBefore = SceneSerializer.SaveComponent(World, spinTarget, typeof(Spin));
-        World.Get<Spin>(spinTarget).DegreesPerSecond = 999.0f;
-        undo.Record(new ComponentEdit(targetId, typeof(Spin), spinBefore, SceneSerializer.SaveComponent(World, spinTarget, typeof(Spin))));
+        var spinType = gameType("Spin");
+        var spinBefore = SceneSerializer.SaveComponent(World, spinTarget, spinType);
+        setField(spinTarget, "Spin", "DegreesPerSecond", 999.0f);
+        undo.Record(new ComponentEdit(targetId, spinType, spinBefore, SceneSerializer.SaveComponent(World, spinTarget, spinType)));
         _app.Undo();
-        var spinValue = World.Get<Spin>(spinTarget).DegreesPerSecond;
+        var spinValue = getField(find("Hierarchy grandchild"), "Spin", "DegreesPerSecond");
         _app.Redo();
-        check(spinValue != 999.0f && World.Get<Spin>(spinTarget).DegreesPerSecond == 999.0f, "undo / redo component value");
+        check(spinValue != 999.0f && getField(find("Hierarchy grandchild"), "Spin", "DegreesPerSecond") == 999.0f, "undo / redo component value");
         _app.Undo();
         yield return 0;
 
@@ -185,7 +202,7 @@ internal sealed class EditorTest
         check(sameScene(original, SceneSerializer.Save(World), out var detail), $"after undo everything, scene equals original ({detail})");
 
         // ---------- 再生して止めると元に戻る ----------
-        var spinning = World.Entities.First(e => World.Has<Spin>(e) && World.Has<Transform>(e) && World.Get<Spin>(e).DegreesPerSecond != 0.0f);
+        var spinning = World.Entities.First(e => has(e, "Spin") && World.Has<Transform>(e) && getField(e, "Spin", "DegreesPerSecond") != 0.0f);
         var spinningId = World.Get<EntityInfo>(spinning).Id;
         var rotation = World.Get<Transform>(spinning).Rotation;
         _app.Selected = spinning;
@@ -484,6 +501,75 @@ internal sealed class EditorTest
         var known = ComponentRegistry.KnownComponents().ToList();
         check(known.Any(t => t.Type == typeof(AudioListener) && t.Category == "Audio") && known.Any(t => t.Type == typeof(FreeCamera) && t.Category == "Camera"),
               "audio listener / camera components are listed");
+        yield return 0;
+
+        // ---------- ED7 : ゲームのコード (Game.dll) / 読み直し ----------
+        var scripts = _app.Scripts;
+        check(scripts.Assembly != null && scripts.SystemCount >= 6 && known.Any(t => t.Type.FullName == "GameEngine_console.Spin"), $"game scripts are loaded ({scripts.SystemCount} systems)");
+        var scriptFile = Path.Combine(database.ProjectRoot, "Scripts", "_EditorTestBouncer.cs");
+        const string bouncerV1 = """
+            using System.Numerics;
+            using GameEngine;
+            namespace GameEngine_console;
+            public struct TestBouncer : IComponent { public float Speed; }
+            [GameSystem]
+            public sealed class TestBouncerSystem : ISystem
+            {
+                public void Update(World world) => world.ForEach((Entity _, ref Transform t, ref TestBouncer b) => t.Position += new Vector3(0, b.Speed * Time.DeltaTime, 0));
+            }
+            """;
+        // 1. 新しいコンポーネントを書いて保存 → ビルド → 読み直し (エディターを閉じない)
+        // 確認の側が古い DLL の型を持っていると解放されないので、手放しておく
+        known = null!;
+        spinType = null!;
+        var loads = scripts.LoadCount;
+        var bouncerHost = find("Hierarchy pivot");
+        var hostId = World.Get<EntityInfo>(bouncerHost).Id;
+        File.WriteAllText(scriptFile, bouncerV1);
+        var waitStart = Time.TotalTime;
+        while (scripts.LoadCount == loads && Time.TotalTime - waitStart < 90) yield return 0;
+        check(scripts.LoadCount == loads + 1 && ComponentRegistry.Find("GameEngine_console.TestBouncer") != null, $"new component is usable after saving the file ({scripts.LastBuildMs:F0} ms build)");
+        check(scripts.PreviousUnloaded() == true, "the previous Game.dll is unloaded (collectible)");
+        bouncerHost = SceneSerializer.FindEntity(World, hostId);
+        var bouncerType = gameType("TestBouncer");
+        World.GetPool(bouncerType).SetBoxed(bouncerHost, bouncerType.GetConstructor(Type.EmptyTypes)?.Invoke(null) ?? Activator.CreateInstance(bouncerType)!);
+        setField(bouncerHost, "TestBouncer", "Speed", 3.0f);
+        var countBeforeReload = World.EntityCount;
+
+        // 2. コードを書き換える (フィールドを足す) → 読み直しても値は引き継ぐ
+        loads = scripts.LoadCount;
+        File.WriteAllText(scriptFile, bouncerV1.Replace("public float Speed; }", "public float Speed; public float Extra; }"));
+        waitStart = Time.TotalTime;
+        while (scripts.LoadCount == loads && Time.TotalTime - waitStart < 90) yield return 0;
+        bouncerHost = SceneSerializer.FindEntity(World, hostId);
+        check(scripts.LoadCount == loads + 1 && World.EntityCount == countBeforeReload && has(bouncerHost, "TestBouncer") && getField(bouncerHost, "TestBouncer", "Speed") == 3.0f,
+              "values are kept across a reload");
+        check(gameType("TestBouncer").GetField("Extra") != null && gameType("TestBouncer") != bouncerType, "the new type is used after the reload");
+        check(_app.Selected == SceneSerializer.FindEntity(World, _app.SelectedId) , "selection is kept across a reload");
+
+        // 3. 再生すると新しい System が動く
+        var y0 = World.Get<Transform>(bouncerHost).Position.Y;
+        _app.TogglePlay();
+        for (int i = 0; i < 20; i++) yield return 0;
+        var y1 = World.Get<Transform>(SceneSerializer.FindEntity(World, hostId)).Position.Y;
+        _app.TogglePlay();
+        check(y1 > y0 + 0.01f, $"the new game system runs while playing ({y0:F3} -> {y1:F3})");
+        yield return 0;
+
+        // 4. ビルドのエラー : 前の Game.dll のまま
+        loads = scripts.LoadCount;
+        File.WriteAllText(scriptFile, bouncerV1 + "\nthis is not C#");
+        waitStart = Time.TotalTime;
+        while (scripts.LastError == null && Time.TotalTime - waitStart < 90) yield return 0;
+        check(scripts.LastError != null && scripts.LoadCount == loads && ComponentRegistry.Find("GameEngine_console.TestBouncer") != null, "build errors keep the previous Game.dll");
+
+        // 5. 片付け : コンポーネントを外してファイルを消す → 読み直し
+        bouncerHost = SceneSerializer.FindEntity(World, hostId);
+        World.GetPool(gameType("TestBouncer")).Remove(bouncerHost.Id);
+        File.Delete(scriptFile);
+        waitStart = Time.TotalTime;
+        while (scripts.LoadCount == loads && Time.TotalTime - waitStart < 90) yield return 0;
+        check(scripts.LoadCount == loads + 1 && scripts.LastError == null && ComponentRegistry.Find("GameEngine_console.TestBouncer") == null, "removing the file removes the type");
         yield return 0;
     }
 }
