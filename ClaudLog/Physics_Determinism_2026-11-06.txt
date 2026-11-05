@@ -1,0 +1,46 @@
+﻿物理の決まった動き : 再生を始める時に物理の世界を作り直す 2026-11-06
+ブランチ : feature/physics-determinism
+
+■ 頼まれたこと
+  ED10 の確認で見つけた「Rigidbody を足した showcase で、エディターの再生と書き出したゲームの動きが 1 cm ずれる」を直す
+
+■ 原因 (確かめた)
+  Player に --warmup-scene を足して、エディターと同じ「前に別のシーンを使った後に再生」を Player だけで作れるようにした
+    新しく始めた Player : Entity 0 = (-0.2846312, ..., -0.18141618)
+    physics のシーンを 60 フレーム動かした後の Player : (-0.27502024, ..., -0.19138673) ← エディターの再生と同じ値 (1 桁目まで全部)
+  → エディターかどうかではなく、物理の世界 (Physics.dll) が前に何をしたかで結果が変わっていた
+    消した体の番号 (_freeBodies) / 木の節の空き / 組の表が残り、同じシーンでも体の番号と組の順が変わる →
+    接触を解く順が変わり、結果が少し変わる。落ちた箱が回る物 (OrbitMover。Transform を毎フレーム書く) に押され続けるので、小さな違いが育った
+  (ED10 の時の見立て「体を作る順」は半分正しかった : C# は同じ順で作っていたが、C++ が渡す番号が違った)
+
+■ 直し
+  Physics.dll : PhysicsWorld::ResetBodies / Physics_ResetBodies (新規)
+    体 / 組 / 接触 / ジョイント / 眠りと島 / 2 つの木 / 作業用の配列を全部消して、作った直後と同じにする
+    残す物 : 調べ方 (BVH など) / レイヤーの表 / 切り替え / 解き方の設定 / スレッド / メッシュ (CollisionMesh は共有のアセット)
+  C# : CollisionSystem.ResetForPlay (以前の ResetAccumulator を置き換え)
+    固定の刻みの余りを 0 に + Physics_ResetBodies + 体 / 剛体 / ジョイントの覚えを全部消す → 次の Update で、コライダーの並びの順に全部作り直す
+  Engine.BeginPlay (エディターの再生ボタン / Player の始め) がこれを呼ぶ。一時停止からの再開 / 1 フレーム進める では呼ばない
+  ※体は次の Update (System の後) で作るので、再生の最初のフレームの System からのレイキャストには当たらない
+    (書き出したゲームは以前からこの動き。エディターの再生も同じになった)
+  ※見本 (GameEngine_console) は BeginPlay を呼ばないので変わらない
+
+■ 確認
+  Player だけ : 新しく始めた時 と physics を 60 フレーム動かした後 の様子 (120 フレーム) が、全部の値で同じ (ファイルが同じ)
+  エディター (--editor-test) : 147 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告なし)
+    書き出しの比べに、確認用のシーンを足した : showcase の Entity 0 を、高さ 1.74 から落ちて押され続ける剛体にした物
+      (Assets/_DeterminismTest に作り、確認の後で消す。名前に "Editor" を入れると「書き出しにエディターの物が無い」の確認に引っかかった)
+    Release : showcase / physics / particles / showcase_rigid の 4 つ全部ずれ 0
+      (作業フォルダにあるユーザーの showcase (Entity 0 を Rigidbody にした物) のままで実行して、それも 0。以前は 0.00997 で失敗)
+    Debug : 全部 1e-4 以内 (1.2e-6 〜 1.8e-5。エディターは Debug の Physics.dll、書き出したゲームは Release なので小数の誤差)
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0。physics のシーンの C# update 0.120 ms (79 物、944 FPS)
+
+■ 変更
+  C++ : Physics/Source/physicsWorld.h・physicsWorld.cpp (ResetBodies) / physicsDll.cpp (Physics_ResetBodies)
+  ランタイム : Engine.cs (BeginPlay) / Systems/CollisionSystem.Rigidbody.cs (ResetForPlay) / Native/PhysicsNativeMethods.cs
+  Player : Program.cs (--warmup-scene / --warmup-frames)
+  エディター : EditorTest.cs (落ちる剛体のシーンを書き出しの比べに足した)
+
+■ 残り
+  - 同じ再生の中で体を作ったり消したりすると (弾を撃つなど)、その後の番号は「何をしたか」で変わる。
+    同じ操作をすれば同じになるが、ネットワークで同期するような厳密さ (順に依らない解き方) ではない
+  - Debug と Release の Physics.dll では小数の誤差で結果が少し違う (押し合いが続くと育つ)

@@ -749,13 +749,29 @@ internal sealed class EditorTest
         // ---------- ED8 後半 : ゲームの書き出し ----------
         //   一時フォルダへ書き出す (プロジェクトの BuildSettings.json は変えない) → 入っている物を確かめる →
         //   書き出した exe を決まった時間刻みで N フレーム動かした様子と、エディターで同じだけ再生した様子を比べる
+        // 物理の世界のやり直し (BeginPlay) の確認用のシーン : showcase の Entity 0 を、落ちて回る物に押され続ける剛体にした物
+        //   以前は、エディターで前に別のシーンを使った後だと物理の体の番号が変わり、書き出したゲームと 1 cm ずれた
+        var determinismFolder = "Assets/_DeterminismTest";   // 名前に "Editor" を入れない (書き出しに「エディターの物」が無いかの確認が名前で見るため)
+        Directory.CreateDirectory(database.FullPath(determinismFolder));
+        _app.OpenScene(database.FullPath("Assets/Scenes/showcase.scene.json"));
+        yield return 0;
+        var faller = World.Entities.First(e => World.Get<EntityInfo>(e).Name == "Entity 0");
+        if (World.Has<Static>(faller)) World.Remove<Static>(faller);
+        World.Set(faller, new Rigidbody());
+        World.Get<Transform>(faller).Position = new Vector3(0, 1.74f, 0);
+        World.Get<Transform>(faller).MarkDirty();
+        var rigidScene = $"{determinismFolder}/showcase_rigid.scene.json";
+        _app.SaveSceneTo(database.FullPath(rigidScene));
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json" },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -814,6 +830,12 @@ internal sealed class EditorTest
             File.Delete(dumpFile);
         }
         Directory.Delete(buildFolder, true);
+        _app.OpenScene(database.FullPath("Assets/Scenes/showcase.scene.json"));
+        yield return 0;
+        Directory.Delete(database.FullPath(determinismFolder), true);
+        File.Delete(database.FullPath(determinismFolder) + ".meta");
+        database.Refresh();
+        yield return 0;
 
         // ---------- ED10 : 名前を変える ----------
         var io = ImGui.GetIO();

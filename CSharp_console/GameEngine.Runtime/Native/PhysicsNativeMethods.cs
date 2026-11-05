@@ -244,6 +244,10 @@ internal static unsafe class PhysicsNativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Physics_DestroyBody(uint body);
 
+    // 体 / ジョイントを全部消して、作った直後と同じにする (設定とメッシュは残す。Engine.BeginPlay)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_ResetBodies();
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Physics_SetTransforms(BodyTransform* items, uint count);
 

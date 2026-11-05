@@ -52,9 +52,26 @@ internal sealed unsafe partial class CollisionSystem
     private PhysicsNativeMethods.BodyState[]   _bodyStates = new PhysicsNativeMethods.BodyState[64];
     private float _accumulator;
 
-    // 再生を始める時 (Engine.BeginPlay) : 固定の刻みの余りを 0 から数える (ED8 後半。以前は前の再生の余りが残り、
-    //  エディターの再生と書き出したゲームで、最初の刻みのフレームがずれることがあった)
-    internal void ResetAccumulator() => _accumulator = 0;
+    // 再生を始める時 (Engine.BeginPlay)
+    //   - 固定の刻みの余りを 0 から数える (ED8 後半。以前は前の再生の余りが残り、最初の刻みのフレームがずれることがあった)
+    //   - 物理の世界を作った直後と同じにして、体とジョイントを次の Update で全部作り直す (コライダーの並びの順。どこから始めても同じ番号)
+    //     以前は、前に開いたシーン / 前の再生で作って消した体の番号や木の形が残り、エディターの再生と書き出したゲームで
+    //     接触を解く順が違った (Rigidbody を足した showcase で、押され続ける箱が 120 フレームで 1 cm ずれた)
+    //   ※体は次の Update (System の後) で作るので、再生の最初のフレームの System からのレイキャストには当たらない (書き出したゲームも同じ)
+    internal void ResetForPlay()
+    {
+        _accumulator = 0;
+        if (!_enabled) return;
+        PhysicsNativeMethods.Physics_ResetBodies();
+        Array.Clear(_states);
+        Array.Clear(_rigidStates);
+        Array.Clear(_bodyEntities);
+        Array.Clear(_bodyHandles);
+        Array.Clear(_jointRecords);
+        _pendingDestroy.Clear();        // 消すはずだった体も、もう無い
+        _pendingJointDestroy.Clear();
+        _commandList.Clear();           // 前の体に向けた力
+    }
 
     private void initializeRigidbodies(World world)
     {

@@ -423,11 +423,12 @@ public sealed class Engine : IDisposable
     /// 再生を始める (ED8 後半)。再生の時間 (Time.PlayTime / FixedTime) と物理の刻みの余りを 0 に戻す
     /// エディターは再生ボタンで、Player は最初のシーンを読んだ後に呼ぶ (一時停止からの再開では呼ばない)
     /// 以前は時間が起動から数えられ、エディターで再生した時と書き出したゲームで、時間で動く物の位置が違った
+    /// 物理の世界も作った直後と同じにして、体を次のフレームで作り直す (前に開いたシーンで体の番号が変わり、動きがずれたため)
     /// </summary>
     public void BeginPlay()
     {
         Time.ResetPlayTime();
-        _collisionSystem.ResetAccumulator();
+        _collisionSystem.ResetForPlay();
         IsPlaying = true;
     }
 

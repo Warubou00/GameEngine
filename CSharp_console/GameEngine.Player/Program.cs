@@ -20,6 +20,8 @@ namespace GameEngine.Player;
 //   --frames N          : N フレーム進めたら終わる (--dump があれば、その時のシーンの様子を書く)
 //   --dump <file>       : SceneState.Dump の結果を書く (エディターの再生と比べる)
 //   --log <file>        : ログの書き先 (既定は exe の隣の Player.log)
+//   --warmup-scene <path> --warmup-frames N : 先に別のシーンを N フレーム動かしてから最初のシーンを開いて再生する
+//                         (エディターで前に別のシーンを使った後の再生と同じ状態。物理の決まった動きの確認用)
 // ==========================================================================
 internal static class Program
 {
@@ -95,8 +97,30 @@ internal static class Program
         if (string.IsNullOrEmpty(scene)) throw new InvalidOperationException("No start scene (player.json)");
         var scenePath = database.FullPath(scene);
         if (!File.Exists(scenePath)) throw new FileNotFoundException($"Scene not found : {scene}", scenePath);
-        engine.LoadScene(scenePath);
-        engine.BeginPlay();   // 再生の時間を 0 から (エディターの再生ボタンと同じ)
+        // --warmup-scene <path> --warmup-frames N (確かめる時用) : 先に別のシーンを N フレーム動かしてから、最初のシーンを開いて
+        //   2 フレーム止めたまま描き (エディターの編集中と同じ)、再生を始める。エディターのように「前のシーンを使った後」の状態を作る
+        var warmup = options.GetValueOrDefault("--warmup-scene");
+        var warmupFrames = int.TryParse(options.GetValueOrDefault("--warmup-frames", "60"), out var w) ? w : 60;
+        var warming = warmup != null;
+        var skipStartFrame = false;   // 再生を始めたフレーム (LateUpdate の中) はまだ 1 フレームも進んでいないので数えない
+        if (warmup != null)
+        {
+            engine.LoadScene(database.FullPath(warmup));
+            engine.BeginPlay();
+            var warmed = 0;
+            engine.LateUpdate += () =>
+            {
+                if (!warming) return;
+                ++warmed;
+                if (warmed == warmupFrames) { engine.LoadScene(scenePath); engine.IsPlaying = false; }
+                else if (warmed == warmupFrames + 2) { engine.BeginPlay(); warming = false; skipStartFrame = true; }
+            };
+        }
+        else
+        {
+            engine.LoadScene(scenePath);
+            engine.BeginPlay();   // 再生の時間を 0 から (エディターの再生ボタンと同じ)
+        }
         Console.WriteLine($"[Player] Started in {Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms");
 
         // 確かめる時用 : 決まった刻みで N フレーム進めて、様子を書いて終わる
@@ -108,6 +132,8 @@ internal static class Program
             var count = 0;
             engine.LateUpdate += () =>
             {
+                if (warming) return;   // 数えるのは最初のシーンの再生から
+                if (skipStartFrame) { skipStartFrame = false; return; }
                 if (++count != frames) return;
                 if (dump != null) File.WriteAllText(dump, SceneState.Dump(engine.World), new UTF8Encoding(false));
                 Console.WriteLine($"[Player] {frames} frames done{(dump != null ? $" (dump : {dump})" : "")}");
