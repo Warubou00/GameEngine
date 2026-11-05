@@ -417,6 +417,42 @@ internal sealed class Inspector
         ImGui.TextDisabled(material.Path);
         ImGui.Separator();
         var changed = false;
+
+        // ---------- 自分のシェーダー (SH2) ----------
+        var shaderPath = material.Shader ?? "";
+        var shaderEntered = ImGui.InputText("Shader", ref shaderPath, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+        if (ImGui.BeginDragDropTarget())
+        {
+            if (ProjectPanel.AcceptDrop(AssetKind.Shader) is { } asset) { shaderPath = asset.Path; shaderEntered = true; }
+            ImGui.EndDragDropTarget();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drop a shader (.hlsl) from Project (empty = the standard lit shader)");
+        if (!string.IsNullOrEmpty(material.Shader))
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("x##shader")) { shaderPath = ""; shaderEntered = true; }
+        }
+        if (shaderEntered) { material.Shader = string.IsNullOrWhiteSpace(shaderPath) ? null : shaderPath; changed = true; }
+        if (material.ShaderAsset is { } shader)
+        {
+            if (shader.Error != null)
+            {
+                ImGui.PushTextWrapPos();
+                ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.45f, 0.4f, 1.0f), shader.IsValid ? "Compile error (the previous version is used) :" : "Compile error :");
+                ImGui.TextUnformatted(firstErrors(shader.Error));
+                ImGui.PopTextWrapPos();
+            }
+            ImGui.TextDisabled($"{(shader.Transparent ? "transparent" : "opaque")} / blend {shader.Blend} / cull {shader.Cull} / zwrite {(shader.DepthWrite ? "on" : "off")}");
+            changed |= drawShaderValues(material, shader);
+            if (changed)
+            {
+                material.Apply();
+                _materialDirty = true;
+            }
+            if (_materialDirty && !ImGui.IsAnyItemActive()) saveMaterial();
+            return;   // シェーダーが色を決めるので、共通のシェーダーの値は出さない
+        }
+        ImGui.Separator();
         var color = material.Color;
         if (ImGui.ColorEdit4("Color", ref color, ImGuiColorEditFlags.Float | ImGuiColorEditFlags.AlphaBar)) { material.Color = color; changed = true; }
         var texture = material.Texture ?? "";
@@ -444,6 +480,102 @@ internal sealed class Inspector
         if (_materialDirty && !ImGui.IsAnyItemActive()) saveMaterial();
         ImGui.Spacing();
         ImGui.TextDisabled("Drag this material from Project onto an object (Scene / Hierarchy) to use it.");
+    }
+
+    // シェーダーのパラメーター (SH2)。値を変えたら true。既定の値に戻すのは右クリック
+    private static bool drawShaderValues(Material material, ShaderAsset shader)
+    {
+        var changed = false;
+        if (shader.Parameters.Count > 0) ImGui.SeparatorText("Parameters");
+        foreach (var p in shader.Parameters)
+        {
+            ImGui.PushID(p.Name);
+            material.ShaderValues.TryGetValue(p.Name, out var value);
+            switch (p.Type)
+            {
+            case ShaderParamType.Float:
+            {
+                var f = value is float v ? v : p.DefaultValue.X;
+                var edited = p.Range is { } r ? ImGui.SliderFloat(p.Name, ref f, r.X, r.Y) : ImGui.DragFloat(p.Name, ref f, 0.01f);
+                if (edited) { material.ShaderValues[p.Name] = f; changed = true; }
+                break;
+            }
+            case ShaderParamType.Color:
+            {
+                var c = value is System.Numerics.Vector4 v ? v : p.DefaultValue;
+                if (ImGui.ColorEdit4(p.Name, ref c, ImGuiColorEditFlags.Float | ImGuiColorEditFlags.HDR | ImGuiColorEditFlags.AlphaBar)) { material.ShaderValues[p.Name] = c; changed = true; }
+                break;
+            }
+            case ShaderParamType.Vector:
+            {
+                var c = value is System.Numerics.Vector4 v ? v : p.DefaultValue;
+                if (ImGui.DragFloat4(p.Name, ref c, 0.01f)) { material.ShaderValues[p.Name] = c; changed = true; }
+                break;
+            }
+            default:
+            {
+                var path = value as string ?? p.DefaultTexture ?? "";
+                var entered = ImGui.InputText(p.Name, ref path, 512, ImGuiInputTextFlags.EnterReturnsTrue);
+                if (p.Type == ShaderParamType.Texture && ImGui.BeginDragDropTarget())
+                {
+                    if (ProjectPanel.AcceptDrop(AssetKind.Texture) is { } asset) { path = asset.Path; entered = true; }
+                    ImGui.EndDragDropTarget();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(p.Type == ShaderParamType.Texture ? "Drop a texture (white = none)" : $"3D texture : builtin:{string.Join(" / builtin:", Noise3D.Kinds)} [:size]");
+                if (entered) { material.ShaderValues[p.Name] = path; changed = true; }
+                break;
+            }
+            }
+            if (ImGui.BeginPopupContextItem("reset"))
+            {
+                if (ImGui.MenuItem("Reset to default")) { material.ShaderValues.Remove(p.Name); changed = true; }
+                ImGui.EndPopup();
+            }
+            ImGui.PopID();
+        }
+        return changed;
+    }
+
+    // コンパイラーの文から、エラーの行を最大 6 行
+    internal static string firstErrors(string error) =>
+        string.Join("\n", error.Split('\n').Select(l => l.Trim()).Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) || l.Contains(".hlsl")).Take(6)) is { Length: > 0 } lines ? lines : error;
+
+    /// <summary>シェーダーのアセット (SH2。Project で .hlsl を選んだ時) : 設定 / パラメーター / エラー</summary>
+    public void DrawShader(ShaderAsset shader)
+    {
+        ImGui.Text(Path.GetFileName(shader.Path));
+        ImGui.TextDisabled(shader.Path);
+        ImGui.Separator();
+        if (shader.Error != null)
+        {
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.45f, 0.4f, 1.0f), shader.IsValid ? "Compile error (the previous version is used) :" : "Compile error :");
+            ImGui.TextUnformatted(firstErrors(shader.Error));
+            ImGui.PopTextWrapPos();
+        }
+        else ImGui.TextColored(new System.Numerics.Vector4(0.5f, 1.0f, 0.5f, 1.0f), $"Compiled (version {shader.Version})");
+        ImGui.Text($"Queue : {(shader.Transparent ? "transparent" : "opaque")}   Blend : {shader.Blend}   Cull : {shader.Cull}   ZWrite : {(shader.DepthWrite ? "on" : "off")}");
+        if (shader.Parameters.Count > 0 && ImGui.BeginTable("##params", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Name");
+            ImGui.TableSetupColumn("Type");
+            ImGui.TableSetupColumn("Default");
+            ImGui.TableHeadersRow();
+            foreach (var p in shader.Parameters)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(p.Name);
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(p.Type.ToString());
+                ImGui.TableNextColumn();
+                ImGui.TextDisabled(p.IsTexture ? p.DefaultTexture ?? "" : p.Type == ShaderParamType.Float ? $"{p.DefaultValue.X:G4}" + (p.Range is { } r ? $"  [{r.X:G4} .. {r.Y:G4}]" : "")
+                                   : $"({p.DefaultValue.X:G3}, {p.DefaultValue.Y:G3}, {p.DefaultValue.Z:G3}, {p.DefaultValue.W:G3})");
+            }
+            ImGui.EndTable();
+        }
+        ImGui.Spacing();
+        ImGui.TextDisabled("Edit the file and save : it recompiles. Drop it onto a material's Shader slot to use it.");
+        if (ImGui.Button("Open in Editor")) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(EditorApi.Assets.FullPath(shader.Path)) { UseShellExecute = true });
     }
 
     private void saveMaterial()

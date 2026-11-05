@@ -136,6 +136,16 @@ namespace RHI
                 RHI::DirectX12::UploadManager* uploadManager,
                 const ::DirectX::Image& image);
 
+            /***********************************************************************************
+             * @brief 3D テクスチャをメモリの値から作る (SH2 : 雲のノイズなど)
+             * @details ミップマップ無し。data は x → y → z の順に詰めた 1 ボクセル bytesPerPixel バイト
+             *          (z 枚目の y 行目 x 列 = data[((z * height + y) * width + x) * bytesPerPixel])
+             ************************************************************************************/
+            std::unique_ptr<ResourceBuffer> CreateTexture3D(
+                RHI::DirectX12::Device* device,
+                RHI::DirectX12::UploadManager* uploadManager,
+                uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t bytesPerPixel, const uint8_t* data);
+
         private:
             // mips[0] が最上段 (原寸)。mipCount 段分をまとめてアップロードする
             std::unique_ptr<ResourceBuffer> createTexture(

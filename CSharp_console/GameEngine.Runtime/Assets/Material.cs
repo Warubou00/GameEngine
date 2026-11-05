@@ -25,6 +25,12 @@ public sealed class Material : IDisposable
     public float   Roughness   = 0.6f;                 // 0 = つるつる / 1 = ざらざら
     public bool    Transparent;                        // 半透明として描く (不透明な物の後に、ブレンドして)
     public bool    DoubleSided;                        // 裏面も描く
+    // 自分のシェーダー (SH2)。.hlsl のアセットのパス (null = シーンの共通のシェーダー)。付けると色 / テクスチャ / 粗さなどは使わず、シェーダーが色を決める
+    public string? Shader;
+    // シェーダーのパラメーターの値 (名前 → float / Vector4 / テクスチャのパス string)。無い物はシェーダーに書いた既定の値
+    public Dictionary<string, object> ShaderValues { get; } = new(StringComparer.Ordinal);
+    /// <summary>今使っているシェーダー (Apply の後。読めない / コンパイルできない時は Error を見る)</summary>
+    public ShaderAsset? ShaderAsset => _shader;
 
     internal uint Handle { get; private set; } = NativeMethods.InvalidHandle;
     public bool IsValid => Handle != NativeMethods.InvalidHandle;
@@ -33,6 +39,9 @@ public sealed class Material : IDisposable
     private uint    _textureHandle;      // C++ のテクスチャ (0 = 白)
     private string? _loadedTexture;      // _textureHandle を読んだパス
     private bool    _disposed;
+    private ShaderAsset? _shader;        // SH2
+    private bool    _shaderApplied;      // C++ のマテリアルに自分のシェーダーを付けているか
+    private readonly Dictionary<string, (string Path, uint Handle)> _paramTextures = new(StringComparer.Ordinal);   // パラメーターの 2D テクスチャ
 
     // コードで作るマテリアル (ファイルに書かない。Apply で C++ へ送る。要らなくなったら Dispose)
     public Material() : this("", null) { }
@@ -58,6 +67,47 @@ public sealed class Material : IDisposable
         };
         if (!IsValid) Handle = NativeMethods.Renderer_CreateMaterial(desc);
         else          NativeMethods.Renderer_UpdateMaterial(Handle, desc);
+        applyShader();
+    }
+
+    // 自分のシェーダー (SH2) : パラメーターを float4 の並びにして、シェーダーと一緒に C++ のマテリアルに付ける
+    private unsafe void applyShader()
+    {
+        _shader = null;
+        if (!string.IsNullOrEmpty(Shader) && _assets != null)
+        {
+            try { _shader = _assets.LoadShader(Shader); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.WriteLine($"[Material] {ex.Message} ({Path})"); }
+        }
+        if (_shader is not { IsValid: true } shader)
+        {
+            if (_shaderApplied) NativeMethods.Renderer_SetMaterialShader(Handle, 0, null, 0);
+            _shaderApplied = false;
+            return;
+        }
+        var data = shader.Pack(ShaderValues, textureFor);
+        fixed (float* p = data) NativeMethods.Renderer_SetMaterialShader(Handle, shader.Id, p, (uint)(data.Length / 4));
+        _shaderApplied = true;
+    }
+
+    // パラメーターのテクスチャ : 2D はマテリアルごとに読む (white = 0 = 白) / 3D は AssetManager が作って共有する
+    private uint textureFor(ShaderParam param, string? path)
+    {
+        if (string.IsNullOrEmpty(path) || path.Equals("white", StringComparison.OrdinalIgnoreCase)) { releaseParamTexture(param.Name); return 0; }
+        if (param.Type == ShaderParamType.Texture3D) return _assets?.LoadTexture3D(path) ?? 0;
+        if (_paramTextures.TryGetValue(param.Name, out var loaded) && loaded.Path == path) return loaded.Handle;
+        releaseParamTexture(param.Name);
+        var file = _assets?.Database?.ToAssetPath(path) is { } assetPath ? _assets.Database.FullPath(assetPath) : path;
+        var handle = NativeMethods.Renderer_LoadTexture(file);
+        if (handle == 0) Console.WriteLine($"[Material] Texture not loaded : {path} ({Path} / {param.Name})");
+        _paramTextures[param.Name] = (path, handle);
+        return handle;
+    }
+
+    private void releaseParamTexture(string name)
+    {
+        if (!_paramTextures.Remove(name, out var old)) return;
+        if (old.Handle != 0) NativeMethods.Renderer_ReleaseTexture(old.Handle);
     }
 
     // テクスチャのファイルが変わった時 (エディター) : 読み直して送る
@@ -82,6 +132,7 @@ public sealed class Material : IDisposable
     public void Dispose()
     {
         if (_textureHandle != 0) NativeMethods.Renderer_ReleaseTexture(_textureHandle);
+        foreach (var name in _paramTextures.Keys.ToList()) releaseParamTexture(name);   // SH2
         if (IsValid) NativeMethods.Renderer_DestroyMaterial(Handle);
         _textureHandle = 0;
         _loadedTexture = null;
@@ -118,6 +169,35 @@ public sealed class Material : IDisposable
             w.WriteNumber("roughness", Roughness);
             w.WriteBoolean("transparent", Transparent);
             w.WriteBoolean("doubleSided", DoubleSided);
+            // 自分のシェーダー (SH2) : シェーダーの Id とパス / パラメーターの値 (テクスチャはアセットなら Id も)
+            if (!string.IsNullOrEmpty(Shader))
+            {
+                w.WriteStartObject("shader");
+                if (AssetDatabase.Current?.Find(Shader) is { } shaderEntry) w.WriteString("guid", shaderEntry.Guid.ToString());
+                w.WriteString("path", Shader);
+                w.WriteEndObject();
+                w.WriteStartObject("values");
+                foreach (var (name, value) in ShaderValues.OrderBy(p => p.Key, StringComparer.Ordinal))
+                {
+                    switch (value)
+                    {
+                    case float f: w.WriteNumber(name, f); break;
+                    case Vector4 v:
+                        w.WriteStartArray(name);
+                        w.WriteNumberValue(v.X); w.WriteNumberValue(v.Y); w.WriteNumberValue(v.Z); w.WriteNumberValue(v.W);
+                        w.WriteEndArray();
+                        break;
+                    case string s when AssetDatabase.Current?.Find(s) is { } entry:
+                        w.WriteStartObject(name);
+                        w.WriteString("guid", entry.Guid.ToString());
+                        w.WriteString("path", s);
+                        w.WriteEndObject();
+                        break;
+                    case string s: w.WriteString(name, s); break;   // white / builtin:...
+                    }
+                }
+                w.WriteEndObject();
+            }
             w.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
@@ -145,6 +225,36 @@ public sealed class Material : IDisposable
         if (root.TryGetProperty("roughness", out var r))    Roughness   = r.GetSingle();
         if (root.TryGetProperty("transparent", out var tr)) Transparent = tr.GetBoolean();
         if (root.TryGetProperty("doubleSided", out var ds)) DoubleSided = ds.GetBoolean();
+        // SH2 : 自分のシェーダー (無ければ共通のシェーダー)
+        Shader = null;
+        if (root.TryGetProperty("shader", out var sh) && sh.ValueKind == JsonValueKind.Object)
+        {
+            Shader = sh.TryGetProperty("path", out var sp) ? sp.GetString() : null;
+            if (sh.TryGetProperty("guid", out var sg) && Guid.TryParse(sg.GetString(), out var shaderGuid) && AssetDatabase.Current?.Find(shaderGuid) is { } shaderEntry) Shader = shaderEntry.Path;
+        }
+        ShaderValues.Clear();
+        if (root.TryGetProperty("values", out var values) && values.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in values.EnumerateObject())
+            {
+                var v = property.Value;
+                switch (v.ValueKind)
+                {
+                case JsonValueKind.Number: ShaderValues[property.Name] = v.GetSingle(); break;
+                case JsonValueKind.Array:
+                    var n = new float[4];
+                    for (int i = 0; i < Math.Min(4, v.GetArrayLength()); i++) n[i] = v[i].GetSingle();
+                    ShaderValues[property.Name] = new Vector4(n[0], n[1], n[2], n[3]);
+                    break;
+                case JsonValueKind.String: ShaderValues[property.Name] = v.GetString() ?? ""; break;
+                case JsonValueKind.Object:
+                    var texture = v.TryGetProperty("path", out var tp) ? tp.GetString() : null;
+                    if (v.TryGetProperty("guid", out var tg) && Guid.TryParse(tg.GetString(), out var textureGuid) && AssetDatabase.Current?.Find(textureGuid) is { } textureEntry) texture = textureEntry.Path;
+                    if (texture != null) ShaderValues[property.Name] = texture;
+                    break;
+                }
+            }
+        }
     }
 
     // ファイルに書く (アセットのパスが無い物は書けない)

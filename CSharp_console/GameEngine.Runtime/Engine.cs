@@ -195,6 +195,9 @@ public sealed class GraphicsSettings
     public int LoadedModelCount => (int)NativeMethods.Renderer_GetLoadedModelCount();
 
     /// <summary>C++ のプロファイラー (F1) を出すか</summary>
+    /// <summary>最後のフレームで自分のシェーダー (SH2) で描いた物の数 (確認用)</summary>
+    public int CustomDrawCount => (int)NativeMethods.Renderer_GetCustomDrawCount();
+
     public bool ProfilerVisible
     {
         get => NativeMethods.Renderer_IsProfilerVisible();

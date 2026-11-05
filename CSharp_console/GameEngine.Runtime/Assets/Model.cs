@@ -36,6 +36,8 @@ public sealed class AssetManager
     private readonly Dictionary<uint, CollisionMesh> _collisionMeshes = new();
     private readonly Dictionary<string, Material> _materials = new(StringComparer.OrdinalIgnoreCase);   // ED5
     private readonly Dictionary<string, Prefab>   _prefabs   = new(StringComparer.OrdinalIgnoreCase);   // ED8
+    private readonly Dictionary<string, ShaderAsset> _shaders = new(StringComparer.OrdinalIgnoreCase);   // SH2
+    private readonly Dictionary<string, uint>     _textures3D = new(StringComparer.OrdinalIgnoreCase);   // SH2 : builtin: の 3D テクスチャ
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
     internal bool PhysicsLoaded { get; set; }
@@ -85,6 +87,7 @@ public sealed class AssetManager
         rekey(_sounds);
         rekey(_materials, (material, path) => material.Path = path);
         rekey(_prefabs, (prefab, path) => prefab.Path = path);
+        rekey(_shaders, (shader, path) => shader.Path = path);   // SH2 (#line のファイル名は次のコンパイルから)
     }
 
     // パス → (覚える名前, 読むファイル)
@@ -330,6 +333,56 @@ public sealed class AssetManager
         var model = new Model(handle, (int)subMeshCount, path);
         _models.Add(path, model);
         return model;
+    }
+
+    // ---------------------------------------------------------------------
+    // 自分のシェーダー / 3D テクスチャ (SH2)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// シェーダー (.hlsl) を読んでコンパイルする。同じパスは同じ ShaderAsset を返す
+    /// コンパイルできなくても ShaderAsset は返す (Error に理由。IsValid = false。マテリアルは共通のシェーダーで描く)
+    /// </summary>
+    public ShaderAsset LoadShader(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_shaders.TryGetValue(path, out var cached)) return cached;
+        if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load shader: {path}", path);
+        var shader = new ShaderAsset(path);
+        shader.Compile(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        _shaders.Add(path, shader);
+        return shader;
+    }
+
+    /// <summary>シェーダーのファイルが変わった時 : コンパイルし直し、使っているマテリアルが値を送り直す。失敗したら前の物のまま</summary>
+    public bool ReloadShader(string path)
+    {
+        (path, var file) = resolve(path);
+        if (!_shaders.TryGetValue(path, out var shader)) return false;
+        var ok = shader.Compile(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        foreach (var material in _materials.Values.Where(m => m.ShaderAsset == shader)) material.Apply();
+        ReloadCount++;
+        AssetReloaded?.Invoke(path);
+        if (ok) Console.WriteLine($"[Shader] Reloaded {path}");
+        return ok;
+    }
+
+    /// <summary>3D テクスチャ (今は "builtin:ValueNoise3D[:大きさ]" だけ)。戻り値 = C++ のテクスチャの番号 (読めなければ 0 = 白)</summary>
+    public unsafe uint LoadTexture3D(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) return 0;
+        if (_textures3D.TryGetValue(path, out var cached)) return cached;
+        uint handle = 0;
+        if (Noise3D.TryParse(path, out var kind, out var size))
+        {
+            var start = System.Diagnostics.Stopwatch.GetTimestamp();
+            var data = Noise3D.Generate(kind, size);
+            fixed (byte* d = data) handle = NativeMethods.Renderer_CreateTexture3D((uint)size, (uint)size, (uint)size, 1, d);
+            Console.WriteLine($"[Texture3D] {path} : {size}^3 ({System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms)");
+        }
+        else Console.WriteLine($"[Texture3D] Unknown 3D texture : {path} (builtin:{string.Join(" / builtin:", Noise3D.Kinds)})");
+        _textures3D[path] = handle;
+        return handle;
     }
 
     /// <summary>プリミティブのモデル (SH1)。同じ形と分割数は同じ Model を返す</summary>

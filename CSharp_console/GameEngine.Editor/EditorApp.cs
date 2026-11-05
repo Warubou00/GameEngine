@@ -799,11 +799,16 @@ internal sealed partial class EditorApp
         if (_project.SelectionVersion != _seenAssetSelection)
         {
             _seenAssetSelection = _project.SelectionVersion;
-            _inspectAsset = _project.Selected?.Kind == AssetKind.Material;
+            _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader;   // SH2 : シェーダーも
         }
         if (ImGui.Begin("Inspector", ref _showInspector))
         {
-            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Material } entry)
+            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Shader } shaderEntry)
+            {
+                try { _inspector.DrawShader(_engine.Assets.LoadShader(shaderEntry.Path)); }
+                catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }
+            }
+            else if (_inspectAsset && _project.Selected is { Kind: AssetKind.Material } entry)
             {
                 try { _inspector.DrawMaterial(_engine.Assets.LoadMaterial(entry.Path)); }
                 catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }

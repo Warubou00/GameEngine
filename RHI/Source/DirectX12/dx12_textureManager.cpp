@@ -26,6 +26,7 @@
 #include "dx12_uploadManager.h"
 
 #include <chrono>
+#include <cstring>
 #include <cwchar>
 
 #include "../../Core/Source/Log/logger.h"
@@ -275,6 +276,76 @@ namespace RHI
             const ::DirectX::Image& img)
         {
             return createTexture(device, uploadManager, &img, 1);
+        }
+
+        std::unique_ptr<ResourceBuffer> Texture::CreateTexture3D(
+            RHI::DirectX12::Device* device,
+            RHI::DirectX12::UploadManager* uploadManager,
+            uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t bytesPerPixel, const uint8_t* data)
+        {
+            if (!device || !uploadManager || !data || width == 0 || height == 0 || depth == 0 || bytesPerPixel == 0) return nullptr;
+            if (width > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION || height > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION ||
+                depth > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) return nullptr;
+
+            // 1. リソース (DEFAULT ヒープ / COMMON。COPY キューで書いた後、描画キューで読む時に暗黙で昇格する。2D と同じ)
+            D3D12_RESOURCE_DESC desc = {};
+            desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+            desc.Width            = width;
+            desc.Height           = height;
+            desc.DepthOrArraySize = static_cast<UINT16>(depth);
+            desc.MipLevels        = 1;
+            desc.Format           = format;
+            desc.SampleDesc.Count = 1;
+            desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+            D3D12_HEAP_PROPERTIES heap = {};
+            heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+            Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+            HRESULT hr = device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
+            if (FAILED(hr))
+            {
+                Core::Logger::Log("[Texture] Failed create 3D texture.");
+                return nullptr;
+            }
+            resource->SetName(L"Texture3D");
+
+            // 2. アップロード (1 つのサブリソース。行の間隔と 1 枚の間隔は GPU の決めた物に合わせる)
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+            UINT   numRows = 0;
+            UINT64 rowSize = 0, total = 0;
+            device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &numRows, &rowSize, &total);
+            UploadManager::Allocation allocation;
+            if (!uploadManager->Allocate(total, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, allocation))
+            {
+                Core::Logger::Log("[Texture] Failed allocate upload memory (3D texture).");
+                return nullptr;
+            }
+            auto cmdList = uploadManager->GetCommandList();
+            if (!cmdList) return nullptr;
+            const size_t srcRow   = static_cast<size_t>(width) * bytesPerPixel;
+            const size_t dstSlice = static_cast<size_t>(footprint.Footprint.RowPitch) * numRows;
+            for (uint32_t z = 0; z < depth; ++z)
+            {
+                for (uint32_t y = 0; y < height; ++y)
+                {
+                    std::memcpy(allocation.Cpu + footprint.Offset + z * dstSlice + static_cast<size_t>(y) * footprint.Footprint.RowPitch,
+                                data + (static_cast<size_t>(z) * height + y) * srcRow, srcRow);
+                }
+            }
+            D3D12_TEXTURE_COPY_LOCATION dst = {};
+            dst.pResource        = resource.Get();
+            dst.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            dst.SubresourceIndex = 0;
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT placed = footprint;
+            placed.Offset += allocation.Offset;
+            D3D12_TEXTURE_COPY_LOCATION src = {};
+            src.pResource       = allocation.Resource;
+            src.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            src.PlacedFootprint = placed;
+            cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+            auto texture = std::make_unique<ResourceBuffer>();
+            texture->Regist(resource.Get());
+            return texture;
         }
 
         std::unique_ptr<ResourceBuffer> Texture::createTexture(

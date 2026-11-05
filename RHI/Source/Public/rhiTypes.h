@@ -113,7 +113,34 @@ namespace RHI
 		// 裏面も描く (葉や布など厚みの無い物)。false なら不透明な物は裏面を描かない (裏面カリング)
 		// 半透明は描く順番を崩せないので、この値に関係なく両面を描く
 		bool          DoubleSided = false;
+		// ※自分のシェーダー (SH2) はここに入れない (色などを UpdateMaterial で送り直すたびに外れないよう、SetMaterialShader で別に持つ)
 	};
+
+	// ==========================================================================
+	// 自分のシェーダー (SH2)。マテリアルに付けると、その物はまとめて描く道 (GPU カリング + ExecuteIndirect) から外れ、
+	// DrawCustom でこのシェーダーで 1 個ずつ描く。頂点シェーダーはシーンと同じ (VSMain)、ピクセルシェーダーだけ自分の物
+	//   ソースはシーンのシェーダー (hlslTemplate.shader) の後ろに付けてコンパイルする (同じ構造体 / 関数 / バインドが使える)
+	//   エントリーは PSCustom。値 (パラメーター) は g_CustomData[] (float4) から読む (C# の生成するコードが読み方を書く)
+	// ==========================================================================
+	enum class CustomBlend : uint32_t
+	{
+		Opaque        = 0,   // 上書き
+		Alpha         = 1,   // アルファブレンド (色 × α + 下 × (1 - α))
+		Additive      = 2,   // 足す (色 × α + 下)
+		Premultiplied = 3,   // 乗算済み (色 + 下 × (1 - α))
+	};
+	enum class CustomCull : uint32_t { Back = 0, Front = 1, None = 2 };
+
+	struct CustomShaderSettings
+	{
+		CustomBlend Blend       = CustomBlend::Opaque;
+		CustomCull  Cull        = CustomCull::Back;
+		uint32_t    DepthWrite  = 1;   // 深度を書くか (半透明の雲などは 0)
+		uint32_t    Transparent = 0;   // 1 : 半透明の列 (不透明の後に、遠い順に描く)
+	};
+	static_assert(sizeof(CustomShaderSettings) == 16, "CustomShaderSettings must be 16 bytes (same as C#)");
+
+	constexpr uint32_t MAX_CUSTOM_PARAMS = 64;   // マテリアル 1 つのパラメーター (float4) の数の上限
 
 	struct MaterialHandle
 	{
@@ -227,6 +254,7 @@ namespace RHI
 		DrawFullscreen   = 4,   // Arg0 = シェーダー / Arg1 = ブレンド (0 なし / 1 加算 / 2 アルファ) / Inputs / Params
 		UpdateParticles  = 5,   // GPU パーティクルの発生 / 更新 (/ ソート)。不透明の後に置く (衝突でシーンの深度を読む)。1 フレームに 1 回
 		DrawParticles    = 6,   // GPU パーティクルを今の描画先へ描く (深度はシェーダーがシーンの深度を読んで比べる。描画先に深度は付けない)
+		DrawCustom       = 7,   // 自分のシェーダーのマテリアルの物を今の描画先へ描く (SH2)。Arg1 = RenderQueue / Params[0] = 時間 (秒)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;

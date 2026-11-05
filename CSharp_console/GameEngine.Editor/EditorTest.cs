@@ -822,13 +822,106 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- SH2 : 自分のシェーダー ----------
+        var opaqueShaderPath = $"{determinismFolder}/Bands.hlsl";
+        File.WriteAllText(database.FullPath(opaqueShaderPath), string.Join("\n",
+            "// @param color     Tint   (1, 0.5, 0.25, 1)",
+            "// @param float     Bands  4 range(1, 16)",
+            "// @param texture   Mask   white",
+            "// @param texture3d Volume builtin:ValueNoise3D:16",
+            "float4 Surface(SurfaceInput IN)",
+            "{",
+            "    float stripe = step(0.5f, frac(IN.LocalPosition.y * Bands));",
+            "    float noise  = Volume.Sample(g_Sampler, IN.LocalPosition + 0.5f).r;",
+            "    float3 albedo = ToLinear(Tint.rgb) * Mask.Sample(g_Sampler, IN.UV).rgb * (0.5f + 0.5f * stripe) * (0.5f + noise);",
+            "    return float4(Lit(albedo, IN.Normal, IN.WorldPosition, 0.0f, 0.6f), 1.0f);",
+            "}"));
+        var glassShaderPath = $"{determinismFolder}/Glass.hlsl";
+        File.WriteAllText(database.FullPath(glassShaderPath), string.Join("\n",
+            "// @queue transparent",
+            "// @cull none",
+            "// @param color Tint (0.3, 0.7, 1, 0.4)",
+            "float4 Surface(SurfaceInput IN) { return float4(ToLinear(Tint.rgb) * (0.6f + 0.4f * abs(IN.Normal.y)), Tint.a); }"));
+        database.Refresh();
+        var bands = _app.Engine.Assets.LoadShader(opaqueShaderPath);
+        var glass = _app.Engine.Assets.LoadShader(glassShaderPath);
+        check(bands.IsValid && bands.Error == null && bands.Parameters.Count == 4 && bands.Parameters[1].Range == new Vector2(1, 16) &&
+              bands.Parameters[0].DefaultValue == new System.Numerics.Vector4(1, 0.5f, 0.25f, 1) && bands.Parameters[3].Type == ShaderParamType.Texture3D &&
+              glass.IsValid && glass.Transparent && glass.Blend == ShaderBlend.Alpha && !glass.DepthWrite && glass.Cull == ShaderCull.None,
+              $"shaders compile and their parameters / settings are read ({string.Join(", ", bands.Parameters.Select(p => $"{p.Name}:{p.Type}"))})");
+
+        // マテリアル : シェーダーと値 (ファイルに書いて読み直しても同じ)
+        var bandsMaterial = _app.Engine.Assets.CreateMaterialAsset(determinismFolder, "Bands");
+        bandsMaterial.Shader = opaqueShaderPath;
+        bandsMaterial.ShaderValues["Bands"] = 6.0f;
+        bandsMaterial.ShaderValues["Tint"] = new System.Numerics.Vector4(0.2f, 0.8f, 0.4f, 1);
+        bandsMaterial.Apply();
+        bandsMaterial.Save();
+        var glassMaterial = _app.Engine.Assets.CreateMaterialAsset(determinismFolder, "Glass");
+        glassMaterial.Shader = glassShaderPath;
+        glassMaterial.Apply();
+        glassMaterial.Save();
+        var rereadMaterial = new Material();
+        rereadMaterial.FromJson(File.ReadAllText(database.FullPath(bandsMaterial.Path)));
+        check(rereadMaterial.Shader == opaqueShaderPath && rereadMaterial.ShaderValues["Bands"] is float b6 && b6 == 6.0f &&
+              rereadMaterial.ShaderValues["Tint"] is System.Numerics.Vector4 tint && tint.Y == 0.8f && bandsMaterial.ShaderAsset == bands,
+              "a material keeps its shader and values (save / load)");
+        rereadMaterial.Dispose();
+
+        // シーン : 自分のシェーダーの立方体 2 個 + 半透明の球 1 個 → 3 個を自分のシェーダーで描く
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        var customCubeA = _app.CreatePrimitive(PrimitiveShape.Cube, Entity.Null);
+        var customCubeB = _app.CreatePrimitive(PrimitiveShape.Cube, Entity.Null);
+        var customSphere = _app.CreatePrimitive(PrimitiveShape.Sphere, Entity.Null);
+        World.Get<Transform>(customCubeA).Position = new Vector3(-1.5f, 0.5f, 0);
+        World.Get<Transform>(customCubeB).Position = new Vector3(0, 0.5f, 0);
+        World.Get<Transform>(customSphere).Position = new Vector3(1.5f, 0.5f, 0);
+        foreach (var e in new[] { customCubeA, customCubeB, customSphere }) World.Get<Transform>(e).MarkDirty();
+        _app.AssignMaterial(customCubeA, database.Find(bandsMaterial.Path)!);
+        _app.AssignMaterial(customCubeB, database.Find(bandsMaterial.Path)!);
+        _app.AssignMaterial(customSphere, database.Find(glassMaterial.Path)!);
+        for (int i = 0; i < 3; i++) yield return 0;
+        var customDraws = _app.Engine.Graphics.CustomDrawCount;
+        check(customDraws == 3 && _app.Engine.Assets.LoadTexture3D("builtin:ValueNoise3D:16") != 0 && _app.Engine.Assets.LoadTexture3D("builtin:Nothing3D") == 0,
+              $"objects with shader materials are drawn by their shaders (opaque + transparent : {customDraws}), 3D noise texture");
+
+        // コンパイルのエラー : ファイルの行番号が出る / 前の物で描き続ける / 直すと戻る
+        var goodSource = File.ReadAllText(database.FullPath(opaqueShaderPath));
+        File.WriteAllText(database.FullPath(opaqueShaderPath), goodSource.Replace("float stripe", "float stripe = undefinedThing;\n    float stripe2"));
+        var reloadFailed = !_app.Engine.Assets.ReloadShader(opaqueShaderPath);
+        for (int i = 0; i < 2; i++) yield return 0;
+        var errorText = bands.Error ?? "";
+        check(reloadFailed && bands.IsValid && errorText.Contains("Bands.hlsl:7:") && errorText.Contains("undefinedThing") && _app.Engine.Graphics.CustomDrawCount == 3,
+              $"a compile error names the file and line, and the previous version keeps drawing ({Inspector.firstErrors(errorText).Split('\n')[0]})");
+        var versionBefore = bands.Version;
+        File.WriteAllText(database.FullPath(opaqueShaderPath), goodSource.Replace("// @param float     Bands  4 range(1, 16)", "// @param float     Bands  4 range(1, 16)\n// @param float     Glow   0.5"));
+        check(_app.Engine.Assets.ReloadShader(opaqueShaderPath) && bands.Error == null && bands.Version == versionBefore + 1 && bands.Parameters.Count == 5,
+              "fixing the file recompiles it (a new parameter appears)");
+
+        // シェーダーを外すと共通のシェーダーに戻る
+        glassMaterial.Shader = null;
+        glassMaterial.Apply();
+        for (int i = 0; i < 2; i++) yield return 0;
+        check(_app.Engine.Graphics.CustomDrawCount == 2, "removing the shader returns the object to the standard path");
+        glassMaterial.Shader = glassShaderPath;
+        glassMaterial.Apply();
+        glassMaterial.Save();
+        var customScene = $"{determinismFolder}/custom.scene.json";
+        _app.SaveSceneTo(database.FullPath(customScene));
+        var customDependencies = _app.BuildWindow.Builder.CollectAssets(new BuildSettings { Scenes = { customScene } });
+        check(customDependencies.Assets.Contains(opaqueShaderPath) && customDependencies.Assets.Contains(glassShaderPath) && customDependencies.Assets.Contains(bandsMaterial.Path),
+              "the build includes the shaders that the scene's materials use");
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -868,6 +961,8 @@ internal sealed class EditorTest
             check(player.ExitCode == 0 && playerDump.Length > 0 && playerLog.Contains($"{_app.Scripts.SystemCount} systems"),
                   $"the built game runs {Path.GetFileName(compareScene)} ({System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalSeconds:F1} s, exit {player.ExitCode})");
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
+            if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
+                check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
             // 初めての起動でも、シェーダーは入れたキャッシュから (コンパイルしない)
             if (compareScene == buildSettings.Scenes[0])
                 check(build.ShaderCacheFiles > 0 && playerLog.Contains("shader from cache") && !playerLog.Contains("shader compiled"),

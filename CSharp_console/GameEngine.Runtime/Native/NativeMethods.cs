@@ -379,6 +379,39 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_CreateMaterial(in MaterialDesc desc);
 
+    // ---------- SH2 : 自分のシェーダー / 3D テクスチャ ----------
+
+    // C++ の RHI::CustomShaderSettings と同じ並び (16 byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CustomShaderSettings
+    {
+        public uint Blend;         // 0 不透明 / 1 アルファ / 2 加算 / 3 乗算済み
+        public uint Cull;          // 0 裏 / 1 表 / 2 なし
+        public uint DepthWrite;
+        public uint Transparent;   // 1 : 半透明の列
+    }
+
+    // source は UTF-8 の 0 終わり。error は 0 終わりの UTF-8 が入る
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateCustomShader(byte* source, in CustomShaderSettings settings, byte* error, uint errorCapacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_UpdateCustomShader(uint shader, byte* source, in CustomShaderSettings settings, byte* error, uint errorCapacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_DestroyCustomShader(uint shader);
+
+    // params : float4 × paramCount (shader = 0 で外す)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetMaterialShader(uint material, uint shader, float* parameters, uint paramCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateTexture3D(uint width, uint height, uint depth, uint channels, byte* data);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetCustomDrawCount();
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_UpdateMaterial(uint material, in MaterialDesc desc);
 

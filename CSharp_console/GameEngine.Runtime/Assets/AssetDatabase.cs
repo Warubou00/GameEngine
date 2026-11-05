@@ -13,7 +13,7 @@ namespace GameEngine;
 //   - 以前のパス (見本の "../Model/...") は Assets/Models/... に同じファイルがあればそちらに読み替える
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab }
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader }
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -56,6 +56,7 @@ public sealed class AssetDatabase
             ".obj" or ".pmx" or ".pmd"                    => AssetKind.Model,
             ".png" or ".jpg" or ".jpeg" or ".bmp" or ".tga" or ".dds" => AssetKind.Texture,
             ".wav"                                        => AssetKind.Sound,
+            ".hlsl"                                       => AssetKind.Shader,   // 自分のシェーダー (SH2)
             ".txt" or ".mtl" or ".json" or ".md"          => AssetKind.Text,
             _                                             => AssetKind.Other,
         };

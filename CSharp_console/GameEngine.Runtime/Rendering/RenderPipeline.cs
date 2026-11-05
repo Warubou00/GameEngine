@@ -205,6 +205,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             cmd.ClearDepth();
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
+            cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2。環境光の RT には書かない = 遮蔽を掛けない)
             UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (不透明の深度で跳ね返る)
 
             ao = Ssao.Render(cmd, settings.Ssao, normal: null);   // 法線は深度から作る
@@ -212,6 +213,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             // 半透明 (遮蔽は掛けない)。環境光の RT も一緒に描画先にして、覆った分だけ減らす
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
+            cmd.DrawCustom(RenderQueue.Transparent);   // SH2
             DrawParticles(cmd, hdr, settings);   // 光る物は遮蔽を掛けない (環境光の RT には書かない)
             Tonemap(cmd, hdr, settings, ao, _ambient);
             return;
@@ -221,10 +223,12 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         cmd.ClearColor(hdr.ClearColor);
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+        cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2)
         UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (C++ が深度を付け直すので、続けて半透明を描ける)
 
         // 半透明
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+        cmd.DrawCustom(RenderQueue.Transparent);   // SH2 (遠い順)
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings);
@@ -295,8 +299,11 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         }
 
         // 4. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)
+        //    自分のシェーダー (SH2) は G-Buffer に書かないので、ライティングの後にフォワードで描く (不透明 → 半透明)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+        cmd.DrawCustom(RenderQueue.Opaque);
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+        cmd.DrawCustom(RenderQueue.Transparent);
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings, ao);

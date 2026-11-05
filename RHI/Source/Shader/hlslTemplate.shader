@@ -123,6 +123,12 @@ Texture2D g_Textures[4096] : register(t0, space1);
 // 同じ配列を 1 成分の深度の配列として読む (カスケードのシャドーマップを比較サンプラーで読むため。Pipeline.cpp で範囲を重ねている)
 // (S1 は Texture2D<float> だった。シャドーマップを Texture2DArray (カスケードごとに 1 枚) にした)
 Texture2DArray<float> g_DepthArrays[4096] : register(t0, space3);
+// 同じ配列を 3D テクスチャとして読む (SH2 : 自分のシェーダー。雲のノイズなど。番号は 2D と同じ数え方)
+Texture3D g_Textures3D[4096] : register(t0, space4);
+
+// [ROOT_PARAM_CUSTOM_DATA_SRV]: 自分のシェーダーのパラメーター (SH2。float4 の並び。マテリアルごとの先頭は g_Inputs[0].x)
+//   シーンの共通のシェーダーは使わない (宣言だけ。自分のシェーダーはこのファイルの後ろに付けてコンパイルされる)
+StructuredBuffer<float4> g_CustomData : register(t5);
 
 // (Root Signature の StaticSampler)
 SamplerState g_Sampler      : register(s0);   // 線形・繰り返し (モデルのテクスチャ)

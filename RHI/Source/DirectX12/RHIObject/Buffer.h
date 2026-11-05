@@ -225,6 +225,26 @@ namespace RHI
                 return material < _materialDoubleSided.size() && _materialDoubleSided[material] != 0;
             }
 
+            // ---------- 自分のシェーダー (SH2) ----------
+            // マテリアルに自分のシェーダーとパラメーター (float4 × count) を付ける (shader = 0 で外す)
+            // シェーダーが付いた / 外れた時は描画のまとまりが変わる (まとめて描く道から外れる)
+            void SetMaterialShader(RHI::MaterialHandle material, uint32_t shader, const float* params, uint32_t paramCount);
+            uint32_t GetMaterialShader(uint32_t material)const
+            {
+                return material < _materialShader.size() ? _materialShader[material] : 0;
+            }
+            // マテリアルのパラメーター (float4 の並び。無ければ空)
+            const std::vector<float>& GetMaterialParams(uint32_t material)const
+            {
+                static const std::vector<float> empty;
+                return material < _materialParams.size() ? _materialParams[material] : empty;
+            }
+            // オブジェクトのワールドの位置 (半透明の自分のシェーダーの物を遠い順に並べる)
+            ::DirectX::XMFLOAT3 GetObjectPosition(uint32_t object)const;
+            const float* GetCameraPosition()const { return _cameraPosition; }
+            // オブジェクトの定数 (シェーダー用に転置済みの行列。SH2 : 自分のシェーダーに渡す)。無ければ nullptr
+            const RHI::ObjectConstants* GetObjectConstants(uint32_t object)const;
+
             /***********************************************************************************
              * @brief マテリアルをこのフレームの領域へ書いて VRAM へ写し、その先頭アドレスを返す
              * @details 増えた / 変わった時だけ書く (止まっているシーンでは何もしない)
@@ -398,6 +418,8 @@ namespace RHI
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
             std::vector<MaterialData>                       _materials;
             std::vector<uint8_t>                          _materialDoubleSided;   // マテリアルごとの両面 (_materials と同じ並び)
+            std::vector<uint32_t>                         _materialShader;        // マテリアルごとの自分のシェーダー (SH2。0 = 無し。_materials と同じ並び)
+            std::vector<std::vector<float>>               _materialParams;        // そのパラメーター (float4 の並び)
             uint64_t                                        _materialsVersion = 1;
             uint64_t                                        _materialsWritten[CommandContext::FRAME_COUNT] = {};
             std::unique_ptr<RHI::DirectX12::ResourceBuffer> _materialUpload;    // [フレーム][MAX_MATERIALS]

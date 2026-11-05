@@ -123,6 +123,19 @@ public sealed unsafe class RenderCommandBuffer
     /// <summary>GPU パーティクルを今の描画先へ描く (色の描画先だけを付けておく。深度はシェーダーがシーンの深度を読む)</summary>
     public void DrawParticles() => Add(6);
 
+    // ---------- 自分のシェーダー (SH2) ----------
+
+    /// <summary>
+    /// 自分のシェーダーのマテリアルの物を、今の描画先へ描く (queue : 不透明 / 半透明。半透明は遠い順)
+    /// DrawScene は描かない (まとめて描く道から外れている)。色の描画先 1 枚目に描く (2 枚目からは書かない)
+    /// </summary>
+    public void DrawCustom(RenderQueue queue)
+    {
+        ref var command = ref Add(7);
+        command.Arg1 = (uint)queue;
+        command.Params[0] = (float)Time.TotalTime;   // シェーダーの SurfaceInput.Time (エディターの編集中も進む。パーティクルと同じ)
+    }
+
     // 1 フレーム分を C++ へ渡して描く
     internal void Submit()
     {

@@ -145,6 +145,21 @@ namespace RHI
 		// UI のテクスチャ (RGBA8。フォントなど)。戻り値はテクスチャの番号 (失敗時 0xFFFFFFFF)
 		virtual uint32_t CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba) = 0;
 
+		// ---------- SH2 : 自分のシェーダー / 3D テクスチャ ----------
+		// 自分のシェーダーを作る (source はシーンのシェーダーの後ろに付けてコンパイルされる。エントリーは PSCustom)
+		// 戻り値は番号 (失敗時 0。error にコンパイラーの文を入れる (errorCapacity バイトまで。終わりは 0))
+		virtual uint32_t CreateCustomShader(const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity) = 0;
+		// 同じ番号のまま中身を替える (失敗したら前の物のまま false)
+		virtual bool     UpdateCustomShader(uint32_t shader, const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity) = 0;
+		// 消す (GPU を待つ。使っているマテリアルは先に外すこと)
+		virtual void     DestroyCustomShader(uint32_t shader) = 0;
+		// マテリアルに自分のシェーダーとパラメーター (float4 × paramCount) を付ける。shader = 0 で外す (共通のシェーダーに戻る)
+		virtual void     SetMaterialShader(MaterialHandle material, uint32_t shader, const float* params, uint32_t paramCount) = 0;
+		// 3D テクスチャ (channels 1 = R8 / 4 = RGBA8。data は x → y → z の順)。返すのは ReleaseResources (2D と同じ)。失敗時 DEFAULT
+		virtual TextureHandle CreateTexture3D(uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data) = 0;
+		// 最後のフレームで自分のシェーダーで描いた数 (確認用)
+		virtual uint32_t GetCustomDrawCount()const = 0;
+
 		/***********************************************************************************
 		 * @brief 1 フレーム分の描画 (開始 → 描画パスの命令を順に実行 → UI → 表示)。GPU の完了は待たない
 		 * @details items は描くシーン (DrawScene で使う)。commands は C# が組み立てた描画パス

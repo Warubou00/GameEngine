@@ -264,6 +264,24 @@ namespace RHI
             _loadedBuffers.erase(found);
         }
 
+        uint32_t Texture::CreateTexture3D(
+            RHI::ObjectInterface::IDevice* iDevice,
+            RHI::ObjectInterface::ICommandContext* iCommandContext,
+            RHI::ObjectInterface::IBuffer* iBuffer,
+            uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data)
+        {
+            if (!iDevice || !iCommandContext || !iBuffer || !data || (channels != 1 && channels != 4)) return 0;
+            auto device         = static_cast<RHI::ObjectInterface::Device*>(iDevice);
+            auto commandContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
+            auto buffer         = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
+            const DXGI_FORMAT format = channels == 1 ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
+            auto texture = getTextureManager()->CreateTexture3D(device->GetDevice(), commandContext->GetUploadManager(), width, height, depth, format, channels, data);
+            if (!texture) return 0;
+            uint32_t textureID = 0;
+            if (!registerTexture(device, buffer, std::move(texture), &textureID)) return 0;
+            return textureID;
+        }
+
         bool Texture::createShaderResourceView(
             RHI::ObjectInterface::Device* device,
             RHI::ObjectInterface::Buffer* buffer,
@@ -294,9 +312,18 @@ namespace RHI
             srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             // 渡されたバッファからフォーマットを取得する
             srvDesc.Format = targetBuffer->Get()->GetDesc().Format;
-            srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-            // ミップマップは全段使う (以前は 1 段固定。ミップマップがあると遠くの描画が速く、ちらつきも減る)
-            srvDesc.Texture2D.MipLevels = targetBuffer->Get()->GetDesc().MipLevels;
+            if (targetBuffer->Get()->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
+            {
+                // 3D テクスチャ (SH2) : 同じ配列の番号を、シェーダーは g_Textures3D[] (Texture3D の範囲を重ねてある) で読む
+                srvDesc.ViewDimension       = D3D12_SRV_DIMENSION_TEXTURE3D;
+                srvDesc.Texture3D.MipLevels = targetBuffer->Get()->GetDesc().MipLevels;
+            }
+            else
+            {
+                srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                // ミップマップは全段使う (以前は 1 段固定。ミップマップがあると遠くの描画が速く、ちらつきも減る)
+                srvDesc.Texture2D.MipLevels = targetBuffer->Get()->GetDesc().MipLevels;
+            }
 
             device->GetDevice()->GetDevice()->CreateShaderResourceView(
                 targetBuffer->Get(),

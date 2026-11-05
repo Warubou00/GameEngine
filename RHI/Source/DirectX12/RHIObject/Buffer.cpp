@@ -432,10 +432,39 @@ namespace RHI
 			_materialsVersion++;   // 全部のフレームの領域に書き直す
 		}
 
+		void Buffer::SetMaterialShader(RHI::MaterialHandle material, uint32_t shader, const float* params, uint32_t paramCount)
+		{
+			if (material.Index >= _materials.size()) return;
+			if (_materialShader.size() < _materials.size())
+			{
+				_materialShader.resize(_materials.size(), 0);
+				_materialParams.resize(_materials.size());
+			}
+			if (_materialShader[material.Index] != shader) _drawLayoutVersion++;   // まとめて描く / 自分のシェーダーで描く が変わる
+			_materialShader[material.Index] = shader;
+			paramCount = (std::min)(paramCount, RHI::MAX_CUSTOM_PARAMS);
+			auto& values = _materialParams[material.Index];
+			if (shader == 0 || !params || paramCount == 0) values.clear();
+			else values.assign(params, params + static_cast<size_t>(paramCount) * 4);
+		}
+
+		const RHI::ObjectConstants* Buffer::GetObjectConstants(uint32_t object)const
+		{
+			return object < _objects.size() ? &_objects[object] : nullptr;
+		}
+
+		::DirectX::XMFLOAT3 Buffer::GetObjectPosition(uint32_t object)const
+		{
+			if (object >= _objects.size()) return { 0.0f, 0.0f, 0.0f };
+			const auto& world = _objects[object].World;   // シェーダー用に転置済み (移動は 4 列目)
+			return { world._14, world._24, world._34 };
+		}
+
 		void Buffer::DestroyMaterial(RHI::MaterialHandle material)
 		{
 			if (material.Index == RHI::MaterialHandle::DEFAULT || material.Index >= _materials.size()) return;
 			if (std::find(_freeMaterials.begin(), _freeMaterials.end(), material.Index) != _freeMaterials.end()) return;   // 2 回返さない
+			SetMaterialShader(material, 0, nullptr, 0);   // 自分のシェーダーも外す (SH2)
 			UpdateMaterial(material, RHI::MaterialDesc());   // 白に戻しておく (間違って使われても目立たない)
 			_freeMaterials.push_back(material.Index);
 		}

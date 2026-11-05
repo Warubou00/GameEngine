@@ -109,6 +109,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Model    => _engine.Assets.ReloadModel(path) ? 1 : 0,
                     AssetKind.Texture  => _engine.Assets.ReloadTexture(path),
                     AssetKind.Material => _engine.Assets.ReloadMaterial(path) ? 1 : 0,
+                    AssetKind.Shader   => _engine.Assets.ReloadShader(path) ? 1 : 0,   // SH2 : コンパイルし直す (失敗したら前の物のまま。理由は Console)
                     AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     _ => 0,
                 };
@@ -180,6 +181,8 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.Button("New Folder")) newFolder();
         ImGui.SameLine();
         if (ImGui.Button("Create Material")) CreateMaterial();
+        ImGui.SameLine();
+        if (ImGui.Button("Create Shader")) CreateShader();   // SH2
         ImGui.SameLine();
         if (ImGui.Button("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(_selected?.Path ?? _folder)}\"");
         ImGui.SameLine();
@@ -335,6 +338,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Scene    => ("Scene", 0xFF8C3C8Cu),
         AssetKind.Material => ("Mat", 0xFF3CA0A0u),
         AssetKind.Prefab   => ("Prefab", 0xFFE0A050u),
+        AssetKind.Shader   => ("HLSL", 0xFF6040B0u),   // SH2
         _                  => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF404040u),
     };
 
@@ -475,6 +479,49 @@ internal sealed class ProjectPanel : IDisposable
         _selected = entry;
         SelectionVersion++;
     }
+
+    // 今のフォルダにシェーダー (.hlsl) の雛形を作って選ぶ (SH2)。書き方の例が入っている
+    public string? CreateShader(string name = "New Shader")
+    {
+        try
+        {
+            var path = $"{_folder}/{name}.hlsl";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}.hlsl";
+            File.WriteAllText(_database.FullPath(path), ShaderTemplate, new System.Text.UTF8Encoding(false));
+            _database.Refresh();
+            Select(_database.Find(path));
+            Console.WriteLine($"[Assets] Created {path}");
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Failed to create a shader : {ex.Message}");
+            return null;
+        }
+    }
+
+    public const string ShaderTemplate = """
+        // ==========================================================================
+        // 自分のシェーダー (マテリアルの Shader に入れて使う。保存するとコンパイルし直す)
+        //   @queue opaque | transparent / @blend opaque | alpha | additive | premultiplied / @cull back | front | none / @zwrite on | off
+        //   @param float | color | vector | texture | texture3d  名前  既定の値  range(最小, 最大)
+        //   IN : WorldPosition / LocalPosition / Normal / ViewDirection / CameraPosition / UV / Color / ScreenUV / Time / LocalToWorld / WorldToLocal
+        //   Lit(albedo, normal, position, metallic, roughness) : シーンと同じライティング (戻り値は線形の色)
+        // ==========================================================================
+        // @queue opaque
+        // @param color   BaseColor  (0.8, 0.5, 0.3, 1)
+        // @param texture MainTexture white
+        // @param float   Roughness  0.6 range(0.02, 1)
+        // @param float   Pulse      0   range(0, 2)
+        float4 Surface(SurfaceInput IN)
+        {
+            float4 texel  = MainTexture.Sample(g_Sampler, IN.UV);
+            float3 albedo = ToLinear(BaseColor.rgb * texel.rgb);
+            float3 color  = Lit(albedo, IN.Normal, IN.WorldPosition, 0.0f, Roughness);
+            color += albedo * Pulse * (0.5f + 0.5f * sin(IN.Time * 3.0f));   // 光る (放射)
+            return float4(color, 1.0f);
+        }
+        """;
 
     // 今のフォルダにマテリアルを作って選ぶ
     public Material? CreateMaterial()
