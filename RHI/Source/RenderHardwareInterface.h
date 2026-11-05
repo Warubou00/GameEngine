@@ -91,6 +91,12 @@ namespace RHI
         void                   SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
                                              const UIDrawCommand* commands, uint32_t commandCount)override;
         uint32_t               CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)override;
+        uint32_t               CreateCustomShader(const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity)override;
+        bool                   UpdateCustomShader(uint32_t shader, const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity)override;
+        void                   DestroyCustomShader(uint32_t shader)override;
+        void                   SetMaterialShader(MaterialHandle material, uint32_t shader, const float* params, uint32_t paramCount)override;
+        TextureHandle          CreateTexture3D(uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data)override;
+        uint32_t               GetCustomDrawCount()const override;
         void                   SetParticleCapacity(uint32_t capacity)override;
         void                   SetParticleEmitters(const ParticleEmitterData* emitters, uint32_t count, const ParticleFrameSettings& settings)override;
         ParticleStats          GetParticleStats()const override;

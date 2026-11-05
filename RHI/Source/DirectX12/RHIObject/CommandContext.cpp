@@ -528,6 +528,8 @@ namespace RHI
 
 			auto cmdList = _frameCommandList->GetCmdList();
 			DrawFrame& frame = _draws[_frameIndex];
+			frame.CustomUploadUsed = 0;   // 自分のシェーダーのパラメーターは、このフレームの領域の先頭から書く (SH2)
+			_customDrawCount = 0;
 
 			// オブジェクトの定数を、このフレーム用の領域に書いてからその先頭を Root SRV に設定する
 			// (変わったオブジェクトだけ書く。GPU が前のフレームで読んでいる領域には触らない)
@@ -612,6 +614,10 @@ namespace RHI
 
 				case RHI::RenderCommandType::DrawParticles:
 					drawParticles(buffer);
+					break;
+
+				case RHI::RenderCommandType::DrawCustom:
+					drawCustom(buffer, command.Arg1, command.Params[0]);   // SH2 : Arg1 = 列 (不透明 / 半透明) / Params[0] = 時間
 					break;
 				}
 			}
@@ -1075,6 +1081,18 @@ namespace RHI
 					}
 					if (opaque) drawOpaque(drawCulled);
 					else        drawCulled(GROUP_ALPHA);
+				}
+				// 自分のシェーダー (SH2) の不透明で深度を書く物も影を落とす。深度だけなので、シーンの影の PSO (ピクセルシェーダー無し) で描く
+				// (カリングはしない。数個の物を想定。半透明 / 深度を書かない物 (雲など) は落とさない)
+				if (opaque && !frame.Custom.empty() && setPso(GROUP_DOUBLE))
+				{
+					cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, frame.Gpu->Get()->GetGPUVirtualAddress());
+					for (const auto& draw : frame.Custom)
+					{
+						const auto* settings = _currentPipeline->GetCustomShaderSettings(buffer->GetMaterialShader(draw.Material));
+						if (!settings || settings->Transparent || !settings->DepthWrite) continue;
+						cmdList->DrawIndexedInstanced(draw.IndexCount, 1, draw.FirstIndex, 0, draw.Slot);
+					}
 				}
 				cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->GetViewConstants(_frameIndex, 0));
 				return;
@@ -1661,19 +1679,138 @@ namespace RHI
 			// VRAM 側へコピーする (書き直した時だけ。使った分だけ)
 			//   バッファは毎フレーム COMMON に戻る (ExecuteCommandLists の完了で減衰する) ので、
 			//   コピーでは COMMON → COPY_DEST に暗黙で昇格する。コピー後はシェーダーと ExecuteIndirect が読む状態へ明示的に移す
-			if (written > 0)
+			// 自分のシェーダーの物 (SH2) の DrawData は Instances の後ろにあるので、その分も写す (全部が自分のシェーダーの時も)
+			const uint32_t customCount = static_cast<uint32_t>(frame.Custom.size());
+			if (written > 0 || customCount > 0)
 			{
 				auto cmdList = _frameCommandList->GetCmdList();
-				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * instances);
-				cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
-					sizeof(IndirectDrawCommand) * written);
-				cmdList->CopyBufferRegion(frame.Gpu->Get(), CULL_DATA_OFFSET, frame.Staging->Get(), CULL_DATA_OFFSET,
-					sizeof(CullInstance) * instances);
+				cmdList->CopyBufferRegion(frame.Gpu->Get(), 0, frame.Staging->Get(), 0, sizeof(DrawData) * (instances + customCount));
+				if (written > 0)
+				{
+					cmdList->CopyBufferRegion(frame.Gpu->Get(), DRAW_ARGS_OFFSET, frame.Staging->Get(), DRAW_ARGS_OFFSET,
+						sizeof(IndirectDrawCommand) * written);
+				}
+				if (instances > 0)
+				{
+					cmdList->CopyBufferRegion(frame.Gpu->Get(), CULL_DATA_OFFSET, frame.Staging->Get(), CULL_DATA_OFFSET,
+						sizeof(CullInstance) * instances);
+				}
 				const auto toRead = makeTransitionBarrier(frame.Gpu->Get(), D3D12_RESOURCE_STATE_COPY_DEST,
 					D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 				cmdList->ResourceBarrier(1, &toRead);
 			}
 			return false;
+		}
+
+		void CommandContext::drawCustom(Buffer* buffer, uint32_t queue, float time)
+		{
+			// ==============================================================
+			// 自分のシェーダー (SH2) の物を今の描画先へ描く
+			//   不透明 / 半透明 の列が合う物だけ。半透明はカメラから遠い順 (後ろから重ねる)
+			//   1. マテリアルのパラメーター (float4) を、このフレームの UPLOAD のバッファにマテリアルごとに 1 回書く
+			//   2. 1 個ずつ描く : PSO (シェーダー × 描画先の形式)、ルート定数 = パラメーターの先頭 / オブジェクト / 時間
+			//      頂点シェーダーはシーンと同じ (StartInstanceLocation = DrawData の番号。カリングしていない元の DrawData を読む)
+			//   シーンの描画 (DrawScene) とは別の命令なので、オクルージョンカリングはしない (数個の物を想定)
+			// ==============================================================
+			if (!_scene.Valid || !_currentPipeline || _boundColorCount == 0) return;
+			DrawFrame& frame = _draws[_frameIndex];
+			if (frame.Custom.empty() || !frame.Gpu) return;
+			const bool transparentQueue = queue == static_cast<uint32_t>(RHI::RenderQueue::Transparent);
+
+			_customOrder.clear();
+			for (uint32_t i = 0; i < frame.Custom.size(); ++i)
+			{
+				const auto* settings = _currentPipeline->GetCustomShaderSettings(buffer->GetMaterialShader(frame.Custom[i].Material));
+				if (settings && (settings->Transparent != 0) == transparentQueue) _customOrder.push_back(i);
+			}
+			if (_customOrder.empty()) return;
+			if (transparentQueue)
+			{
+				const float* camera = buffer->GetCameraPosition();
+				auto distance = [&](uint32_t index)
+				{
+					const auto p = buffer->GetObjectPosition(frame.Custom[index].Object);
+					const float dx = p.x - camera[0], dy = p.y - camera[1], dz = p.z - camera[2];
+					return dx * dx + dy * dy + dz * dz;
+				};
+				std::stable_sort(_customOrder.begin(), _customOrder.end(), [&](uint32_t a, uint32_t b) { return distance(a) > distance(b); });
+			}
+
+			// 1. パラメーター (このフレームで前に書いた続きに書く。UPLOAD のバッファは GPU が直接読む)
+			_customParamBase.assign(_customParamBase.size(), -1);
+			UINT64 needed = frame.CustomUploadUsed + 16;
+			for (uint32_t index : _customOrder) needed += buffer->GetMaterialParams(frame.Custom[index].Material).size() * sizeof(float) + sizeof(RHI::ObjectConstants);
+			if (!frame.CustomUpload || frame.CustomUploadSize < needed)
+			{
+				// 作り直す (前に書いた分は捨てる。このフレームの前の DrawCustom は、まだ GPU が読んでいない古いバッファを指している
+				//  → 古いバッファは GPU を待たずに消すと壊れるので、作り直しは最初の DrawCustom の時だけにする)
+				if (frame.CustomUploadUsed > 0 && frame.CustomUpload) needed = frame.CustomUploadSize;   // 足りない分は描かない (下で確かめる)
+				else
+				{
+					const UINT64 size = (std::max)(needed * 2, UINT64(64) * 1024);
+					auto upload = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+					if (FAILED(upload->Create(_device->GetDevice()->GetDevice(), size, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(upload->Map()))
+					{
+						Core::Logger::Log("[CommandContext] Failed create custom shader parameter buffer.");
+						return;
+					}
+					frame.CustomUpload     = std::move(upload);
+					frame.CustomUploadSize = size;
+				}
+			}
+			auto* mapped = static_cast<uint8_t*>(frame.CustomUpload->GetMappedData());
+			auto cmdList = _frameCommandList->GetCmdList();
+			const UINT64 base = frame.CustomUploadUsed;   // この呼び出しの先頭 (float4 の境界)
+			UINT64 cursor = base;
+			// 何も無いマテリアルでも 1 個は読める所を指す (シェーダーが読んでも範囲の外にならないように)
+			std::memset(mapped + cursor, 0, 16);
+			cursor += 16;
+			uint32_t maxMaterial = 0;
+			for (uint32_t index : _customOrder) maxMaterial = (std::max)(maxMaterial, frame.Custom[index].Material);
+			if (_customParamBase.size() <= maxMaterial) _customParamBase.resize(maxMaterial + 1, -1);
+			for (uint32_t index : _customOrder)
+			{
+				const uint32_t material = frame.Custom[index].Material;
+				if (_customParamBase[material] >= 0) continue;
+				const auto& params = buffer->GetMaterialParams(material);
+				const UINT64 bytes = params.size() * sizeof(float);
+				if (cursor + bytes > frame.CustomUploadSize) { _customParamBase[material] = static_cast<int64_t>((base) / 16); continue; }
+				if (bytes > 0) std::memcpy(mapped + cursor, params.data(), static_cast<size_t>(bytes));
+				_customParamBase[material] = static_cast<int64_t>(cursor / 16);
+				cursor += bytes;
+			}
+			// ワールド行列 (描く物ごとに float4 × 4)。g_Objects はピクセルシェーダーから見えないので、ここに写して渡す
+			//   (Buffer の控えはシェーダー用に転置済み = g_Objects と同じ並び)
+			std::vector<uint32_t> worldBase(_customOrder.size(), static_cast<uint32_t>(base / 16));
+			for (size_t i = 0; i < _customOrder.size(); ++i)
+			{
+				const RHI::ObjectConstants* object = buffer->GetObjectConstants(frame.Custom[_customOrder[i]].Object);
+				if (!object || cursor + sizeof(RHI::ObjectConstants) > frame.CustomUploadSize) continue;
+				std::memcpy(mapped + cursor, object, sizeof(RHI::ObjectConstants));
+				worldBase[i] = static_cast<uint32_t>(cursor / 16);
+				cursor += sizeof(RHI::ObjectConstants);
+			}
+			frame.CustomUploadUsed = cursor;
+
+			// 2. 描く
+			const DXGI_FORMAT dsvFormat = _boundDepth != RHI::RenderTargetHandle::INVALID ? DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, frame.Gpu->Get()->GetGPUVirtualAddress());
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_CUSTOM_DATA_SRV, frame.CustomUpload->Get()->GetGPUVirtualAddress());
+			ID3D12PipelineState* current = nullptr;
+			for (size_t order = 0; order < _customOrder.size(); ++order)
+			{
+				const auto& draw = frame.Custom[_customOrder[order]];
+				ID3D12PipelineState* pso = _currentPipeline->GetCustomPso(buffer->GetMaterialShader(draw.Material), _boundFormats, _boundColorCount, dsvFormat, _boundSamples);
+				if (!pso) continue;
+				if (pso != current) { cmdList->SetPipelineState(pso); current = pso; }
+				uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
+				constants[0] = static_cast<uint32_t>(_customParamBase[draw.Material]);   // g_Inputs[0].x : パラメーターの先頭 (float4 の番号)
+				constants[1] = worldBase[order];                                        // g_Inputs[0].y : ワールド行列の先頭 (float4 の番号。4 個)
+				std::memcpy(&constants[8], &time, sizeof(float));                       // g_Params[0].x : 時間 (秒)
+				cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
+				cmdList->DrawIndexedInstanced(draw.IndexCount, 1, draw.FirstIndex, 0, draw.Slot);
+				_customDrawCount++;
+			}
 		}
 
 		uint32_t CommandContext::writeDraws(DrawFrame& frame, Buffer* buffer, const RHI::DrawItem* items, uint32_t count, uint32_t batchSize)
@@ -1697,12 +1834,15 @@ namespace RHI
 			_openBatch.clear();
 			_batches.clear();
 			_itemBatch.resize(count);
+			frame.Custom.clear();
+			constexpr uint32_t CUSTOM_ITEM = UINT32_MAX - 1;   // 自分のシェーダーの物 (SH2。まとまりに入れない)
 
 			// 1. まとまりに分ける
 			for (uint32_t i = 0; i < count; ++i)
 			{
 				const RHI::DrawItem& item = items[i];
 				if (!item.Object.IsValid() || item.IndexCount == 0) { _itemBatch[i] = UINT32_MAX; continue; }
+				if (buffer->GetMaterialShader(item.Material.Index) != 0) { _itemBatch[i] = CUSTOM_ITEM; continue; }
 
 				uint32_t group = Pipeline::PIPELINE_OPAQUE;
 				if (buffer->GetMaterialBlend(item.Material.Index) == RHI::BlendMode::AlphaBlend) group = Pipeline::PIPELINE_ALPHA_BLEND;
@@ -1771,10 +1911,20 @@ namespace RHI
 			}
 
 			// 4. DrawData と GPU カリング用のデータを書く
+			//    自分のシェーダーの物 (SH2) は、まとまりの範囲の後ろ (slot から) に 1 個ずつ置く (カリング用のデータは書かない)
 			auto* drawData = reinterpret_cast<DrawData*>(frame.Cpu);
 			auto* cullData = reinterpret_cast<CullInstance*>(frame.Cpu + CULL_DATA_OFFSET);
+			uint32_t customSlot = slot;
 			for (uint32_t i = 0; i < count; ++i)
 			{
+				if (_itemBatch[i] == CUSTOM_ITEM)
+				{
+					if (customSlot >= MAX_DRAWS) { warnTooManyDraws(); continue; }
+					drawData[customSlot] = { items[i].Object.Index, items[i].BaseVertex, items[i].Material.Index, 0 };
+					frame.Custom.push_back({ customSlot, items[i].IndexCount, items[i].FirstIndex, items[i].Material.Index, items[i].Object.Index });
+					customSlot++;
+					continue;
+				}
 				if (_itemBatch[i] == UINT32_MAX) continue;
 				InstanceBatch& batch = _batches[_itemBatch[i]];
 				if (batch.Cursor >= batch.Start + batch.Count) continue;   // 入りきらなかった分

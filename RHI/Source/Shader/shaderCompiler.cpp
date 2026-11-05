@@ -211,7 +211,35 @@ namespace RHI
 			return true;
 		}
 
-		bool ShaderCompiler::compileWithDxc(const std::string& source, const std::wstring& path, const std::string& entry, const std::string& target, std::vector<uint8_t>& out)
+		bool ShaderCompiler::CompileSource(const std::string& source, const std::wstring& name, const std::string& entry, Stage stage, CompiledShader& out, std::string* error)
+		{
+			out = CompiledShader();
+			out.Target = targetFor(stage);
+			if (!IsDxcAvailable())
+			{
+				if (error) *error = "Custom shaders need DXC (dxcompiler.dll)";
+				return false;
+			}
+			// キャッシュのキー (Compile と同じ作り方。ファイルの代わりにソースの文字列)
+			uint64_t hash = fnv1a(source.data(), source.size());
+			hash = fnv1a(entry.data(), entry.size(), hash);
+			hash = fnv1a(out.Target.data(), out.Target.size(), hash);
+			hash = fnv1a(GetBackendName(), strlen(GetBackendName()), hash);
+			hash = fnv1a(BUILD_TAG, sizeof(BUILD_TAG), hash);
+			wchar_t cachePath[MAX_PATH] = {};
+			swprintf_s(cachePath, L"%s\\custom_%s_%s_%016llx.bin", CACHE_DIR, toWide(entry).c_str(), toWide(out.Target).c_str(), hash);
+			if (readBinary(cachePath, out.Bytecode))
+			{
+				out.FromCache = true;
+				return true;
+			}
+			if (!compileWithDxc(source, name, entry, out.Target, out.Bytecode, error)) return false;
+			writeBinary(cachePath, out.Bytecode);
+			return true;
+		}
+
+		bool ShaderCompiler::compileWithDxc(const std::string& source, const std::wstring& path, const std::string& entry, const std::string& target, std::vector<uint8_t>& out,
+		                                    std::string* error)
 		{
 			const std::wstring wEntry  = toWide(entry);
 			const std::wstring wTarget = toWide(target);
@@ -245,6 +273,7 @@ namespace RHI
 			if (FAILED(hr))
 			{
 				logError("DXC", entry, target, errorText);
+				if (error) *error = errorText[0] ? errorText : "DXC failed";
 				return false;
 			}
 			if (errorText[0]) Core::Logger::Log(errorText);   // 成功時の警告

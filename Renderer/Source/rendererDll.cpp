@@ -205,6 +205,55 @@ extern "C"
 		if (g_renderer) g_renderer->ReleaseTexture(texture);
 	}
 
+	// ==============================================================
+	// SH2 : 自分のシェーダー / 3D テクスチャ (C# の ShaderAsset / Material / NoiseTextures が使う)
+	// ==============================================================
+
+	// 自分のシェーダーを作る。戻り値 = 番号 (失敗時 0。error にコンパイラーの文)
+	RENDERER_API uint32_t Renderer_CreateCustomShader(const char* source, const RHI::CustomShaderSettings* settings, char* error, uint32_t errorCapacity)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		if (!rhi || !source || !settings) return 0;
+		return rhi->CreateCustomShader(source, *settings, error, errorCapacity);
+	}
+
+	// 同じ番号のまま中身を替える (失敗したら前の物のまま)
+	RENDERER_API bool Renderer_UpdateCustomShader(uint32_t shader, const char* source, const RHI::CustomShaderSettings* settings, char* error, uint32_t errorCapacity)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi && source && settings && rhi->UpdateCustomShader(shader, source, *settings, error, errorCapacity);
+	}
+
+	RENDERER_API void Renderer_DestroyCustomShader(uint32_t shader)
+	{
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->DestroyCustomShader(shader);
+	}
+
+	// マテリアルに自分のシェーダーとパラメーター (float4 × count) を付ける (shader = 0 で外す)
+	RENDERER_API void Renderer_SetMaterialShader(uint32_t material, uint32_t shader, const float* params, uint32_t paramCount)
+	{
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr)
+		{
+			RHI::MaterialHandle handle;
+			handle.Index = material;
+			rhi->SetMaterialShader(handle, shader, params, paramCount);
+		}
+	}
+
+	// 3D テクスチャ (channels 1 = R8 / 4 = RGBA8)。戻り値 = テクスチャの番号 (失敗時 0)。返すのは Renderer_ReleaseTexture
+	RENDERER_API uint32_t Renderer_CreateTexture3D(uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi && data ? rhi->CreateTexture3D(width, height, depth, channels, data).Index : 0;
+	}
+
+	// 最後のフレームで自分のシェーダーで描いた数 (確認用)
+	RENDERER_API uint32_t Renderer_GetCustomDrawCount()
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi ? rhi->GetCustomDrawCount() : 0;
+	}
+
 	RENDERER_API uint32_t Renderer_CreateMaterial(const RendererMaterialDesc* desc)
 	{
 		return g_renderer && desc ? g_renderer->CreateMaterial(toMaterialDesc(*desc)) : 0;

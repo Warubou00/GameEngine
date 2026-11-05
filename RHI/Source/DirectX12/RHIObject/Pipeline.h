@@ -29,6 +29,7 @@
 #include <wrl/client.h>
 
 #include "../../RHIObject/IPipeline.h"
+#include "../../Public/rhiTypes.h"   // CustomShaderSettings (SH2)
 
 /******************************************************************
 * Macro Definitions
@@ -105,6 +106,7 @@ namespace RHI
                 ROOT_PARAM_MATERIAL_SRV        = 5,  // t3        : マテリアル (Root SRV)
                 ROOT_PARAM_LIGHT_SRV           = 6,  // t4        : ライト (Root SRV)
                 ROOT_PARAM_PASS_CONSTANTS      = 7,  // b1        : パスごとの値 (ルート定数 16 個 : 読むテクスチャの番号 8 + 値 8)
+                ROOT_PARAM_CUSTOM_DATA_SRV     = 8,  // t5        : 自分のシェーダーのパラメーター (Root SRV。StructuredBuffer<float4>。SH2)
                 ROOT_PARAM_COUNT
             };
             static constexpr uint32_t PASS_CONSTANT_COUNT = 16;
@@ -306,6 +308,17 @@ namespace RHI
             // 描く PSO (乗算済みアルファのブレンド・深度なし。描画先の形式ごとに初めて使う時に作る)
             ID3D12PipelineState*    GetParticleDrawPso(const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount);
 
+            // ---------- 自分のシェーダー (SH2) ----------
+            // ソースはシーンのシェーダー (hlslTemplate.shader) の後ろに付けてコンパイルする (エントリーは PSCustom)。番号は 1〜 (0 = 無し)
+            // 失敗時は 0 / false で、error にコンパイラーの文
+            uint32_t CreateCustomShader(const std::string& source, const RHI::CustomShaderSettings& settings, std::string& error);
+            // 同じ番号のまま中身を替える (失敗したら前の物のまま)
+            bool     UpdateCustomShader(uint32_t shader, const std::string& source, const RHI::CustomShaderSettings& settings, std::string& error);
+            void     DestroyCustomShader(uint32_t shader);
+            const RHI::CustomShaderSettings* GetCustomShaderSettings(uint32_t shader)const;   // 無ければ nullptr
+            // 頂点シェーダーはシーンの VSMain。描画先の形式ごとに初めて使う時に作る
+            ID3D12PipelineState* GetCustomPso(uint32_t shader, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount);
+
             // プロファイラー表示用 : 例 "DXC / SM 6_6 / PSO from cache"
             const std::string& GetDescription()const { return _description; }
 
@@ -341,6 +354,9 @@ namespace RHI
             struct ParticleDrawShaders;
             std::unique_ptr<ParticleDrawShaders>         _particleDrawShaders;     // particleDraw.shader (初めて描く時にコンパイル)
             bool                                         _particleDrawFailed = false;
+            struct CustomShader;
+            std::vector<std::unique_ptr<CustomShader>>   _customShaders;           // 番号 - 1 の場所 (消した所は nullptr)
+            bool compileCustomShader(const std::string& source, CustomShader& shader, std::string& error);
             std::unique_ptr<Shader::ShaderCompiler>      _shaderCompiler;          // DXC (無ければ FXC) + ディスクキャッシュ
             std::unique_ptr<DirectX12::PipelineCache>    _pipelineCache;           // PSO のディスクキャッシュ
             std::vector<CustomPipeline>                  _customPipeline;

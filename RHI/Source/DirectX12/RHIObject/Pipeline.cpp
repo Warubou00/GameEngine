@@ -47,6 +47,8 @@
 
 #include <wrl.h>
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 
 /******************************************************************
 * Macro Definitions
@@ -102,6 +104,15 @@ namespace RHI
             Shader::CompiledShader PsForwardSplit;   // PSForwardSplit : ライトの光と環境光を分けて書く (Forward + SSAO)
             Shader::CompiledShader PsForwardAlphaSplit;   // PSForwardAlphaSplit : 半透明 (Forward + SSAO)。環境光を覆った分だけ減らす
             Shader::CompiledShader PsShadowAlpha;    // PSShadowAlpha : シャドーマップ (半透明をアルファテストで描く。不透明はピクセルシェーダー無し)
+        };
+
+        // 自分のシェーダー (SH2)。PS だけ持つ (VS はシーンの VSMain)。Version は中身を替えるたびに増やす (PSO の鍵に入れる)
+        struct Pipeline::CustomShader
+        {
+            std::string               Source;
+            RHI::CustomShaderSettings Settings;
+            Shader::CompiledShader    Ps;
+            uint32_t                  Version = 0;
         };
 
         // 全画面のシェーダー (ファイルの VSFullscreen + entry)
@@ -314,7 +325,8 @@ namespace RHI
             //   (Texture2D の配列から MSAA のテクスチャは読めない。種類の違う SRV を同じ添え字で読むため)
             //   t0, space3 : 同じ配列を Texture2DArray<float> として読む (カスケードのシャドーマップを比較サンプラー (SampleCmp) で読むため)
             //                (S1 は Texture2D<float> だった。シャドーマップの SRV を配列にした)
-            D3D12_DESCRIPTOR_RANGE1 texRanges[3]           = { srvRangeTex, srvRangeTex, srvRangeTex };
+            //   t0, space4 : 同じ配列を Texture3D として読む (SH2 : 自分のシェーダーの 3D テクスチャ。雲のノイズなど)
+            D3D12_DESCRIPTOR_RANGE1 texRanges[4]           = { srvRangeTex, srvRangeTex, srvRangeTex, srvRangeTex };
             texRanges[0].OffsetInDescriptorsFromTableStart = 0;
             texRanges[1].NumDescriptors                    = MSAA_TEXTURE_COUNT;
             texRanges[1].RegisterSpace                     = 2;
@@ -322,6 +334,9 @@ namespace RHI
             texRanges[2].NumDescriptors                    = MSAA_TEXTURE_COUNT;
             texRanges[2].RegisterSpace                     = 3;
             texRanges[2].OffsetInDescriptorsFromTableStart = 0;
+            texRanges[3].NumDescriptors                    = MSAA_TEXTURE_COUNT;
+            texRanges[3].RegisterSpace                     = 4;
+            texRanges[3].OffsetInDescriptorsFromTableStart = 0;
 
             // パラメータの設定 (番号は Pipeline.h の RootParameterIndex を参照)
             D3D12_ROOT_PARAMETER1 rootParams[ROOT_PARAM_COUNT] = {};
@@ -360,6 +375,8 @@ namespace RHI
             objectData.Descriptor.ShaderRegister           = 2;
             objectData.Descriptor.RegisterSpace            = 0;
             objectData.Descriptor.Flags                    = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            // (自分のシェーダー (SH2) はワールド行列を g_CustomData で受け取るので、ここは VERTEX のまま。
+            //  ALL にすると、ここに付け替えるパーティクルのバッファも PIXEL_SHADER_RESOURCE の状態が要る)
             objectData.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_VERTEX;
 
             // [4]: テクスチャ配列のSRV (t1) - Descriptor Table
@@ -395,6 +412,15 @@ namespace RHI
             passConstants.Constants.RegisterSpace          = 0;
             passConstants.Constants.Num32BitValues         = PASS_CONSTANT_COUNT;
             passConstants.ShaderVisibility                 = D3D12_SHADER_VISIBILITY_ALL;
+
+            // [8]: 自分のシェーダーのパラメーター (t5) - Root SRV (StructuredBuffer<float4>。SH2)
+            //      DrawCustom の前に、そのフレームの UPLOAD の領域に書いてから設定する。マテリアルの値の先頭はルート定数 (g_Inputs[0].x) で渡す
+            auto& customData = rootParams[ROOT_PARAM_CUSTOM_DATA_SRV];
+            customData.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            customData.Descriptor.ShaderRegister           = 5;
+            customData.Descriptor.RegisterSpace            = 0;
+            customData.Descriptor.Flags                    = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            customData.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
             // 静的サンプラーの設定 (s0)
             D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
@@ -583,6 +609,25 @@ namespace RHI
                 }
             }
 
+            // 自分のシェーダー (SH2) : シーンのシェーダーを前に付けてコンパイルしているので、一緒にコンパイルし直す
+            for (auto& custom : _customShaders)
+            {
+                if (!custom) continue;
+                std::string error;
+                CustomShader fresh;
+                fresh.Version = custom->Version;
+                if (compileCustomShader(custom->Source, fresh, error))
+                {
+                    custom->Ps      = std::move(fresh.Ps);
+                    custom->Version = fresh.Version;
+                }
+                else
+                {
+                    Core::Logger::Log("[Pipeline] Custom shader has errors after reload. Keep the previous one.");
+                    ok = false;
+                }
+            }
+
             // 作った PSO を捨てる (次に使う時に新しいシェーダーで作る)。後から作る物も作り直させる
             _psoMap.clear();
             _debugLinePso.Reset();
@@ -691,6 +736,130 @@ namespace RHI
             desc.SampleDesc.Count = (std::max)(1u, sampleCount);
 
             return createPso(key, shadow ? L"SceneShadow" : gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
+        }
+
+        // ==============================================================
+        // 自分のシェーダー (SH2)
+        // ==============================================================
+
+        bool Pipeline::compileCustomShader(const std::string& source, CustomShader& shader, std::string& error)
+        {
+            if (!_shaderCompiler) { error = "Pipeline is not initialized"; return false; }
+            // シーンのシェーダーのソースを前に付ける (構造体 / バインド / ライティングの関数を使えるように)
+            // 毎回ファイルから読む (シーンのシェーダーを書き換えて読み直した時も合うように)
+            std::ifstream file(DEFAULT_SHADER_PATH, std::ios::binary);
+            if (!file) { error = "Scene shader (hlslTemplate.shader) not found"; return false; }
+            std::string full((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+            full += "\n";
+            full += source;
+            Shader::CompiledShader ps;
+            if (!_shaderCompiler->CompileSource(full, L"CustomShader", "PSCustom", Shader::Stage::Pixel, ps, &error)) return false;
+            shader.Ps = std::move(ps);
+            shader.Source = source;
+            shader.Version++;
+            return true;
+        }
+
+        uint32_t Pipeline::CreateCustomShader(const std::string& source, const RHI::CustomShaderSettings& settings, std::string& error)
+        {
+            auto shader = std::make_unique<CustomShader>();
+            shader->Settings = settings;
+            if (!compileCustomShader(source, *shader, error)) return 0;
+            for (size_t i = 0; i < _customShaders.size(); ++i)
+            {
+                if (_customShaders[i]) continue;
+                _customShaders[i] = std::move(shader);
+                return static_cast<uint32_t>(i + 1);
+            }
+            _customShaders.push_back(std::move(shader));
+            return static_cast<uint32_t>(_customShaders.size());
+        }
+
+        bool Pipeline::UpdateCustomShader(uint32_t shader, const std::string& source, const RHI::CustomShaderSettings& settings, std::string& error)
+        {
+            if (shader == 0 || shader > _customShaders.size() || !_customShaders[shader - 1]) { error = "Unknown custom shader"; return false; }
+            CustomShader& target = *_customShaders[shader - 1];
+            CustomShader fresh;
+            fresh.Version = target.Version;
+            if (!compileCustomShader(source, fresh, error)) return false;   // 失敗したら前の物のまま
+            target.Ps       = std::move(fresh.Ps);
+            target.Source   = std::move(fresh.Source);
+            target.Settings = settings;
+            target.Version  = fresh.Version;
+            return true;
+        }
+
+        void Pipeline::DestroyCustomShader(uint32_t shader)
+        {
+            if (shader == 0 || shader > _customShaders.size()) return;
+            // PSO は _psoMap に残る (鍵に番号と版が入る。番号を使い回すと版が 1 から数え直すので、ここで古い PSO を消す)
+            _customShaders[shader - 1].reset();
+            _psoMap.clear();
+        }
+
+        const RHI::CustomShaderSettings* Pipeline::GetCustomShaderSettings(uint32_t shader)const
+        {
+            if (shader == 0 || shader > _customShaders.size() || !_customShaders[shader - 1]) return nullptr;
+            return &_customShaders[shader - 1]->Settings;
+        }
+
+        ID3D12PipelineState* Pipeline::GetCustomPso(uint32_t shader, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount)
+        {
+            if (!_sceneShaders || shader == 0 || shader > _customShaders.size() || !_customShaders[shader - 1] ||
+                rtvCount == 0 || rtvCount > RHI::MAX_PASS_COLOR_TARGETS) return nullptr;
+            const CustomShader& custom = *_customShaders[shader - 1];
+
+            uint64_t key = fnv1a(&shader, sizeof(shader), 0xC057011ull);
+            key = fnv1a(&custom.Version, sizeof(custom.Version), key);
+            key = fnv1a(&custom.Settings, sizeof(custom.Settings), key);
+            key = fnv1a(&sampleCount, sizeof(sampleCount), key);
+            key = hashFormats(key, rtvFormats, rtvCount, dsvFormat);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = _sceneShaders->Vs.View();
+            desc.PS = custom.Ps.View();
+            static const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "DRAWID", 0, DXGI_FORMAT_R32_UINT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+            };
+            desc.InputLayout = { inputElements, _countof(inputElements) };
+            switch (custom.Settings.Cull)
+            {
+            case RHI::CustomCull::Back:  desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;  break;
+            case RHI::CustomCull::Front: desc.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT; break;
+            default:                     desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;  break;
+            }
+            auto& blend = desc.BlendState.RenderTarget[0];
+            switch (custom.Settings.Blend)
+            {
+            case RHI::CustomBlend::Alpha:
+                setAlphaBlend(blend);
+                break;
+            case RHI::CustomBlend::Additive:
+                blend.BlendEnable = TRUE;
+                blend.SrcBlend = D3D12_BLEND_SRC_ALPHA; blend.DestBlend = D3D12_BLEND_ONE; blend.BlendOp = D3D12_BLEND_OP_ADD;
+                blend.SrcBlendAlpha = D3D12_BLEND_ZERO; blend.DestBlendAlpha = D3D12_BLEND_ONE; blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+                break;
+            case RHI::CustomBlend::Premultiplied:
+                blend.BlendEnable = TRUE;
+                blend.SrcBlend = D3D12_BLEND_ONE; blend.DestBlend = D3D12_BLEND_INV_SRC_ALPHA; blend.BlendOp = D3D12_BLEND_OP_ADD;
+                blend.SrcBlendAlpha = D3D12_BLEND_ONE; blend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA; blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+                break;
+            default:
+                break;
+            }
+            // 2 枚目からの描画先 (SSAO の環境光など) には書かない
+            for (uint32_t i = 1; i < rtvCount; ++i) desc.BlendState.RenderTarget[i].RenderTargetWriteMask = 0;
+            if (rtvCount > 1) desc.BlendState.IndependentBlendEnable = TRUE;
+            if (!custom.Settings.DepthWrite) desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+            desc.NumRenderTargets = rtvCount;
+            for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
+            desc.DSVFormat = dsvFormat;
+            if (dsvFormat == DXGI_FORMAT_UNKNOWN) desc.DepthStencilState.DepthEnable = FALSE;
+            desc.SampleDesc.Count = (std::max)(1u, sampleCount);
+            return createPso(key, L"Custom", desc);
         }
 
         ID3D12PipelineState* Pipeline::GetFullscreenPso(uint32_t shader, uint32_t blend, const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, uint32_t sampleCount)

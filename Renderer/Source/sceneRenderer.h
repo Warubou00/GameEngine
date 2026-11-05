@@ -98,6 +98,8 @@ namespace Renderer
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)
 		 ************************************************************************************/
 		uint32_t CreateMesh(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount, const std::wstring& name);
+		// RHI をそのまま使う機能 (SH2 : 自分のシェーダー / 3D テクスチャ)。初期化前は nullptr
+		RHI::IRenderHardwareInterface* GetRHI()const { return IsInitialized() ? _rhi : nullptr; }
 		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)
 		bool GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
 		                      uint32_t* outVertexCount, uint32_t* outIndexCount) const;

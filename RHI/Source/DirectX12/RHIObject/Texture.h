@@ -126,6 +126,17 @@ namespace RHI
              *          ※GPU が使い終わってから呼ぶこと (RHI が GPU を待ってから呼ぶ)
              ************************************************************************************/
             void ReleaseTexture(RHI::ObjectInterface::IBuffer* iBuffer, uint32_t textureID);
+
+            /***********************************************************************************
+             * @brief 3D テクスチャをメモリの値から作る (SH2)。channels = 1 (R8) / 4 (RGBA8)
+             * @details シェーダーは g_Textures3D[番号] で読む (2D と同じ番号の数え方。同じ配列に入る)。返すのは ReleaseTexture
+             * @return uint32_t テクスチャの番号 (失敗時 0)
+             ************************************************************************************/
+            uint32_t CreateTexture3D(
+                RHI::ObjectInterface::IDevice* iDevice,
+                RHI::ObjectInterface::ICommandContext* iCommandContext,
+                RHI::ObjectInterface::IBuffer* iBuffer,
+                uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data);
             size_t GetLoadedCount()const { return _loadedBuffers.size(); }
 
         public:          /*---アクセッサー関数群---*/

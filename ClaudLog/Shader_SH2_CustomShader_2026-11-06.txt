@@ -1,0 +1,76 @@
+﻿シェーダー SH2 : 自分のシェーダーを持つマテリアル 2026-11-06
+ブランチ : feature/shader-sh2
+ロードマップ : ClaudLog/Engine_Roadmap_Shader_2026-11-06.txt (SH1 → SH5)
+
+■ できること
+  Assets に「名前.hlsl」を置き (Project の Create Shader で雛形)、マテリアルの Shader の欄に落とすと、そのマテリアルの物をそのシェーダーで描く
+  書き方 (ファイルの頭の印 + Surface 関数) :
+    // @queue opaque | transparent        (transparent は不透明の後に、カメラから遠い順に描く)
+    // @blend opaque | alpha | additive | premultiplied   (transparent の既定は alpha)
+    // @cull back | front | none
+    // @zwrite on | off                   (既定 : opaque は on / transparent は off)
+    // @param float     名前 既定 range(最小, 最大)  / color / vector / texture (2D) / texture3d
+    float4 Surface(SurfaceInput IN) { ... return 色 (線形の HDR) と不透明度; }
+  IN : WorldPosition / LocalPosition / Normal (カメラ側) / ViewDirection / CameraPosition / UV / Color / ScreenUV / Time / LocalToWorld / WorldToLocal
+  便利な物 : Lit(albedo, normal, position, metallic, roughness) (シーンと同じライトと影) / ToLinear / シーンのシェーダーの関数とサンプラー
+  パラメーターは名前のまま使える (値 = static の変数、テクスチャ = Texture2D / Texture3D)
+  3D テクスチャ : "builtin:ValueNoise3D[:大きさ]" (エンジンが作る。端が繋がる。SH3 で雲のノイズを足す)
+  エディター :
+    マテリアル : Shader の欄 (.hlsl を落とす / x で外す) と、パラメーターの欄 (float はスライダー / 色 / ベクトル / テクスチャを落とす)。右クリックで既定に戻す
+    シェーダー (Project で .hlsl を選ぶ) : コンパイルできたか / エラー / 設定 / パラメーターの表 / Open in Editor
+    ファイルを保存すると、コンパイルし直して使っているマテリアルが送り直す。エラーなら前の物で描き続け、「ファイル:行:列」を Console とインスペクターに出す
+      例 : Assets/_DeterminismTest/Bands.hlsl:7:20: error: use of undeclared identifier 'undefinedThing'
+  不透明で深度を書く物は影を落とす (半透明 / 深度を書かない物 (雲など) は落とさない)
+  書き出したゲームも同じ (シェーダーのファイルを依存として入れ、起動時にコンパイル。DXC も入っている)
+
+■ 仕組み
+  C++ (RHI)
+    Pipeline : CreateCustomShader / UpdateCustomShader / DestroyCustomShader / GetCustomPso
+      ソースはシーンのシェーダー (hlslTemplate.shader) の後ろに付けてコンパイル (エントリー PSCustom。DXC)。頂点シェーダーはシーンの VSMain
+      PSO は シェーダー × 版 × 描画先の形式 で、初めて使う時に作る (ブレンド / カリング / 深度の書き込みはシェーダーの印から)
+      ShaderCompiler::CompileSource (文字列のソース。キャッシュはソースのハッシュ。エラーの文を返す)
+      ルートシグネチャ : [8] t5 = 自分のシェーダーのデータ (Root SRV) / テクスチャの表に Texture3D の範囲 (t0, space4) を重ねた
+    Buffer : マテリアルごとの自分のシェーダーとパラメーター (SetMaterialShader。色などの UpdateMaterial では外れない)
+    CommandContext :
+      描画の並べ方 (writeDraws) で、自分のシェーダーの物はまとまり (GPU カリング / ExecuteIndirect) から外し、DrawData を後ろに置く
+      DrawCustom (新しい命令 7) : 列 (不透明 / 半透明) の合う物を 1 個ずつ描く (半透明は遠い順)。パラメーターとワールド行列を
+        そのフレームの UPLOAD のバッファに書き、ルート定数で先頭を渡す (b1 : パラメーター / 行列 / 時間)
+      影の視点 : 不透明で深度を書く物を、シーンの影の PSO (深度だけ) で描く
+    Texture : 3D テクスチャ (CreateTexture3D。R8 / RGBA8。2D と同じ番号の数え方で、シェーダーは g_Textures3D[] で読む)
+  C# : ShaderAsset (読む / HLSL を作る / コンパイル / パラメーターを詰める) / Noise3D / Material.Shader・ShaderValues (JSON にも) /
+       AssetManager.LoadShader・ReloadShader・LoadTexture3D / AssetKind.Shader / RenderCommandBuffer.DrawCustom /
+       描画パイプライン (Forward / Forward + SSAO / Deferred) に DrawCustom を入れた / Graphics.CustomDrawCount (確認用)
+
+■ 途中で直したこと
+  - 最初は、自分のシェーダーのピクセルシェーダーがワールド行列を g_Objects から読めるよう、その Root SRV を ALL にした。
+    D3D12 の検証で「PIXEL_SHADER_RESOURCE が足りない」が出た (オブジェクトの定数と、同じ所に付け替えるパーティクルのバッファ)
+    → 元 (VERTEX だけ) に戻し、ワールド行列は描く物ごとに UPLOAD のバッファ (g_CustomData) に写して渡すようにした
+  - エディターの作業フォルダは見本の出力なので、シェーダー (../Shader) は見本をビルドし直した時に写される (エディターだけビルドしても古いまま)
+  - 逆行列 (_inverse) の最後の転置は要らなかった (式が転置で読んでいるので、そのまま行ベクトルの形の逆行列)。色をローカル座標で塗った
+    回転した立方体で確かめた (縞が立方体と一緒に傾く)
+
+■ 確認
+  自動 (--editor-test) : 166 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。SH2 の 10 項目 :
+    シェーダーがコンパイルされ、パラメーター (色 / float の範囲 / 2D / 3D) と設定 (半透明 / ブレンド / 深度 / カリング) が読める /
+    マテリアルがシェーダーと値を保存して読み直せる / 不透明 2 個 + 半透明 1 個が自分のシェーダーで描かれる (描いた数 3) と 3D ノイズ /
+    コンパイルのエラーがファイルと行を出し、前の物で描き続ける / 直すと新しいパラメーターが増える /
+    シェーダーを外すと共通のシェーダーに戻る (描いた数 2) / 書き出しにシェーダーが入る / 書き出したゲームが自分のシェーダーをコンパイルできる
+  見た目 (エディターの窓だけを撮った。入力は PostMessage) :
+    ローカル座標の色と縞の立方体 (回転) と球、半透明のガラスの球 (縁が明るい。後ろが透ける)、影 /
+    Project の HLSL のタイル / マテリアルのインスペクター (Shader と Tint / Bands) / シェーダーのインスペクター (Compiled / 設定 / 表)
+  時間 (見本の showcase、自分のシェーダーの物は無し。コミットした showcase で 2 回) :
+    C# update 0.059 / 0.065 ms、GPU 0.687 / 0.604 ms (前と同じ : 0.060 ms / 0.687 ms)
+  見本 : --hierarchy-test 18 / 0、--serialize-test 4 / 0
+
+■ 変更
+  C++ : RHI (rhi.h / rhiTypes.h / RenderHardwareInterface / Pipeline / Buffer / CommandContext / Texture / dx12_textureManager /
+        shaderCompiler / hlslTemplate.shader) / Renderer (rendererDll.cpp / sceneRenderer.h)
+  ランタイム : Assets/ShaderAsset.cs・Noise3D.cs (新規) / Assets/Material.cs / Assets/Model.cs / Assets/AssetDatabase.cs / Engine.cs /
+    Native/NativeMethods.cs / Rendering/RenderCommandBuffer.cs・RenderPipeline.cs
+  エディター : Inspector.cs / ProjectPanel.cs / EditorApp.cs / EditorTest.cs
+
+■ 残り
+  - 自分のシェーダーの物は GPU カリングもインスタンシングもしない (1 個ずつ描く。数個〜数十個を想定)
+  - シーンの深度を読む口 (雲がシーンの物に埋まる所を正しくする) は無い。深度テストだけ (SH3 で要るか見る)
+  - 頂点シェーダーは変えられない (雲海の面の波 (ゲルストナー波) は SH3 で考える)
+  - 書き出したゲームは初めの起動で自分のシェーダーをコンパイルする (コンパイル済みのキャッシュは入れていない)

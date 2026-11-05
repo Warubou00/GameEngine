@@ -81,6 +81,13 @@ namespace RHI
 			 ************************************************************************************/
 			bool Compile(const std::wstring& path, const std::string& entry, Stage stage, CompiledShader& out);
 
+			/***********************************************************************************
+			 * @brief 文字列のソースをコンパイルする (SH2 : 自分のシェーダー。キャッシュはソースのハッシュで引く)
+			 * @details name はエラーの表示とキャッシュのファイル名に使う。DXC が無い時は失敗 (FXC の文字列のコンパイルは作っていない)
+			 *          失敗時は error にコンパイラーの文 (行番号付き) を入れる
+			 ************************************************************************************/
+			bool CompileSource(const std::string& source, const std::wstring& name, const std::string& entry, Stage stage, CompiledShader& out, std::string* error);
+
 			bool        IsDxcAvailable()const { return _compiler != nullptr; }
 			const char* GetBackendName()const { return IsDxcAvailable() ? "DXC" : "FXC"; }
 
@@ -89,7 +96,8 @@ namespace RHI
 
 		private:
 			std::string targetFor(Stage stage)const;
-			bool compileWithDxc(const std::string& source, const std::wstring& path, const std::string& entry, const std::string& target, std::vector<uint8_t>& out);
+			bool compileWithDxc(const std::string& source, const std::wstring& path, const std::string& entry, const std::string& target, std::vector<uint8_t>& out,
+			                    std::string* error = nullptr);
 			bool compileWithFxc(const std::wstring& path, const std::string& entry, const std::string& target, std::vector<uint8_t>& out);
 
 			HMODULE             _dxcModule = nullptr;

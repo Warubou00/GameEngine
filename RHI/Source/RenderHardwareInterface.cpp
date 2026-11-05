@@ -269,6 +269,65 @@ namespace RHI
         return _isInitialized ? _commandContext->CreateUITexture(_buffer.get(), width, height, rgba) : 0xFFFFFFFFu;
     }
 
+    // ==============================================================
+    // SH2 : 自分のシェーダー / 3D テクスチャ
+    // ==============================================================
+    namespace
+    {
+        void copyError(const std::string& text, char* error, uint32_t capacity)
+        {
+            if (!error || capacity == 0) return;
+            const size_t count = (std::min)(text.size(), static_cast<size_t>(capacity - 1));
+            std::memcpy(error, text.data(), count);
+            error[count] = 0;
+        }
+    }
+
+    uint32_t RenderHardwareInterface::CreateCustomShader(const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity)
+    {
+        if (!_isInitialized || !source) { copyError("Renderer is not initialized", error, errorCapacity); return 0; }
+        std::string message;
+        const uint32_t shader = _pipeline->CreateCustomShader(source, settings, message);
+        copyError(message, error, errorCapacity);
+        return shader;
+    }
+
+    bool RenderHardwareInterface::UpdateCustomShader(uint32_t shader, const char* source, const CustomShaderSettings& settings, char* error, uint32_t errorCapacity)
+    {
+        if (!_isInitialized || !source) { copyError("Renderer is not initialized", error, errorCapacity); return false; }
+        // 前の PSO を GPU が使っているかもしれないので待つ (保存した時だけ呼ばれる)
+        WaitForGpu();
+        std::string message;
+        const bool ok = _pipeline->UpdateCustomShader(shader, source, settings, message);
+        copyError(message, error, errorCapacity);
+        return ok;
+    }
+
+    void RenderHardwareInterface::DestroyCustomShader(uint32_t shader)
+    {
+        if (!_isInitialized) return;
+        WaitForGpu();
+        _pipeline->DestroyCustomShader(shader);
+    }
+
+    void RenderHardwareInterface::SetMaterialShader(MaterialHandle material, uint32_t shader, const float* params, uint32_t paramCount)
+    {
+        if (_isInitialized) _buffer->SetMaterialShader(material, shader, params, paramCount);
+    }
+
+    uint32_t RenderHardwareInterface::GetCustomDrawCount()const
+    {
+        return _isInitialized ? _commandContext->GetCustomDrawCount() : 0;
+    }
+
+    TextureHandle RenderHardwareInterface::CreateTexture3D(uint32_t width, uint32_t height, uint32_t depth, uint32_t channels, const uint8_t* data)
+    {
+        TextureHandle handle;
+        if (!_isInitialized) return handle;
+        handle.Index = _buffer->GetTexture()->CreateTexture3D(_device.get(), _commandContext.get(), _buffer.get(), width, height, depth, channels, data);
+        return handle;
+    }
+
     void RenderHardwareInterface::SetShadowSettings(const ShadowSettings& settings)
     {
         if (_isInitialized) _commandContext->SetShadowSettings(_buffer.get(), settings);

@@ -400,6 +400,21 @@ namespace RHI
                 bool                       Instanced = false;       // インスタンシングでまとめて書いたか
                 uint64_t                   Layout    = 0;           // 書いた時の Buffer::GetDrawLayoutVersion (ED5)
                 bool                       Valid     = false;
+                // 自分のシェーダー (SH2) の物 : まとめて描く道 (カリング / ExecuteIndirect) から外し、DrawCustom で 1 個ずつ描く
+                //   DrawData は Instances の後ろに置く (頂点シェーダーは同じ DRAWID の読み方で読める。カリングは Instances までしか見ない)
+                struct CustomDraw
+                {
+                    uint32_t Slot;         // DrawData の番号 (= StartInstanceLocation)
+                    uint32_t IndexCount;
+                    uint32_t FirstIndex;
+                    uint32_t Material;
+                    uint32_t Object;
+                };
+                std::vector<CustomDraw>    Custom;
+                // パラメーターを置く UPLOAD のバッファ (DrawCustom が毎回書く。足りなくなったら大きく作り直す)
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> CustomUpload;
+                UINT64                     CustomUploadSize = 0;
+                UINT64                     CustomUploadUsed = 0;    // このフレームで使った所まで (DrawCustom を 2 回呼ぶので続きに書く)
             };
             DrawFrame                                            _draws[FRAME_COUNT];
             // 描画番号バッファ (0, 1, 2, ... MAX_DRAWS-1)。インスタンス単位の入力 DRAWID として 1 回だけ設定する
@@ -651,6 +666,13 @@ namespace RHI
             void updateParticles(Buffer* buffer);       // 命令 UpdateParticles
             void sortParticles(uint32_t upperBound);    // 出力の生存リストを、入力のリストへ写しながら奥行きで並べる (UpdateParticles の中)
             void drawParticles(Buffer* buffer);         // 命令 DrawParticles
+            void drawCustom(Buffer* buffer, uint32_t queue, float time);   // 命令 DrawCustom (SH2)
+            std::vector<uint32_t>                                _customOrder;      // DrawCustom の作業用 (描く順)
+            std::vector<int64_t>                                 _customParamBase;  // DrawCustom の作業用 (マテリアル → パラメーターの先頭)
+            uint32_t                                             _customDrawCount = 0;   // このフレームで自分のシェーダーで描いた数 (確認用)
+        public:
+            uint32_t GetCustomDrawCount()const { return _customDrawCount; }
+        private:
             void finishParticleTimestamps();            // RenderEnd : タイムスタンプの欠けを埋める
 
             // GPU の時間の計測 (タイムスタンプ : 0 = 開始 / 1 = シーン終わり / 2 = フレーム終わり
