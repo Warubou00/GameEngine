@@ -74,7 +74,8 @@ internal sealed partial class EditorApp
         _database = database;
         _scenesDirectory = scenesDirectory;
         Directory.CreateDirectory(scenesDirectory);
-        _project = new ProjectPanel(engine, database, OpenScene);
+        _project = new ProjectPanel(engine, database, RequestOpenScene);   // 保存していない変更があれば先に聞く (ED10)
+        database.Renamed += onAssetRenamed;   // ED10
         _project.PrefabChanged = SyncPrefab;   // ED8
         _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
         _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
@@ -85,6 +86,7 @@ internal sealed partial class EditorApp
         _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
+        engine.Window.FormClosing += onWindowClosing;   // 窓の × / Alt+F4 : 保存していない変更があれば聞く (ED10)
         _build = new BuildWindow(database, () => (_scenePath != null ? _database.ToAssetPath(_scenePath) : null, IsDirty));
         _picker = new Picker(engine);
         engine.LateUpdate += update;
@@ -180,7 +182,7 @@ internal sealed partial class EditorApp
     private void openSceneDialog()
     {
         using var dialog = new OpenFileDialog { Filter = "Scene (*.scene.json)|*.scene.json|All files|*.*", InitialDirectory = _scenesDirectory };
-        if (dialog.ShowDialog(_engine.Window) == DialogResult.OK) OpenScene(dialog.FileName);
+        if (dialog.ShowDialog(_engine.Window) == DialogResult.OK) RequestOpenScene(dialog.FileName);   // 変更があれば聞く (ED10)
     }
 
     private void updateTitle()
@@ -234,6 +236,7 @@ internal sealed partial class EditorApp
         drawExtensionWindows();
         _projectSettings.Draw(ref _showProjectSettings);
         _build.Draw(ref _showBuild);
+        drawUnsavedPrompt();   // ED10
         _reference.Draw(ref _showReference);
         _shaders?.Update();
         _scripts.Update();
@@ -277,14 +280,14 @@ internal sealed partial class EditorApp
         if (!ImGui.BeginMainMenuBar()) return;
         if (ImGui.BeginMenu("File"))
         {
-            if (ImGui.MenuItem("New Scene")) newScene();
+            if (ImGui.MenuItem("New Scene")) RequestNewScene();   // 変更があれば聞く (ED10)
             if (ImGui.MenuItem("Open Scene...", "Ctrl+O")) openSceneDialog();
             if (ImGui.MenuItem("Save Scene", "Ctrl+S", false, !_playing)) saveScene(false);
             if (ImGui.MenuItem("Save Scene As...", null, false, !_playing)) saveScene(true);
             ImGui.Separator();
             ImGui.MenuItem("Build Game...", "Ctrl+B", ref _showBuild);   // ED8 後半
             ImGui.Separator();
-            if (ImGui.MenuItem("Exit")) _engine.Quit();
+            if (ImGui.MenuItem("Exit")) RequestQuit();
             ImGui.EndMenu();
         }
         if (ImGui.BeginMenu("Edit"))
@@ -430,7 +433,7 @@ internal sealed partial class EditorApp
                 {
                     var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
                     var ray = view.RayDirection(ImGui.GetIO().MousePos);
-                    if (asset.Kind == AssetKind.Scene) OpenScene(_database.FullPath(asset.Path));
+                    if (asset.Kind == AssetKind.Scene) RequestOpenScene(_database.FullPath(asset.Path));
                     else if (asset.Kind == AssetKind.Material) AssignMaterial(_picker.Pick(_cameraPosition, ray, out _), asset);   // マウスの下の物に付ける
                     else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, dropPoint(ray), Entity.Null);              // ED8
                     else PlaceModel(asset, dropPoint(ray), Entity.Null);
@@ -673,6 +676,11 @@ internal sealed partial class EditorApp
                 list.Add(e);
             }
             ImGui.BeginChild("tree");
+            // F2 : 選んでいる物の名前を書く (ED10。Hierarchy にフォーカスがある時)
+            if (!_renaming.IsNull && !World.IsAlive(_renaming)) _renaming = Entity.Null;
+            if (_renaming.IsNull && World.IsAlive(_selected) && ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) &&
+                !ImGui.GetIO().WantTextInput && ImGui.IsKeyPressed(ImGuiKey.F2, false))
+                BeginRename(_selected);
             foreach (var root in _roots) drawNode(root);
             // 何も無い所へ落とすと親を外す
             ImGui.Dummy(new Vector2(-1, Math.Max(20.0f, ImGui.GetContentRegionAvail().Y)));
@@ -702,8 +710,15 @@ internal sealed partial class EditorApp
         var prefab = World.Has<PrefabLink>(entity);   // プレハブの置いた物は青 (ED8)
         if (inactive) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
         else if (prefab) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.75f, 1.0f, 1.0f));
-        var open = ImGui.TreeNodeEx($"{NameOf(World, entity)}##{entity.Id}", flags);
+        // 名前を書いている物 (ED10) : 名前の代わりに入力の欄
+        var renaming = entity == _renaming;
+        var open = ImGui.TreeNodeEx(renaming ? $"##{entity.Id}" : $"{NameOf(World, entity)}##{entity.Id}", flags);
         if (inactive || prefab) ImGui.PopStyleColor();
+        if (renaming)
+        {
+            ImGui.SameLine();
+            drawRenameField(entity);
+        }
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) Selected = entity;
         if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) { Selected = entity; FocusSelected(); }
 
@@ -730,6 +745,7 @@ internal sealed partial class EditorApp
         if (ImGui.BeginPopupContextItem())
         {
             Selected = entity;
+            if (ImGui.MenuItem("Rename", "F2")) BeginRename(entity);   // ED10
             if (ImGui.MenuItem("Create Child")) CreateEntity(entity);
             // プレハブ (ED8)
             if (PrefabRootOf(entity).IsNull)

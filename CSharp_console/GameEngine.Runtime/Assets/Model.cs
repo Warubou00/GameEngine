@@ -51,9 +51,40 @@ public sealed class AssetManager
     public AssetDatabase? Database
     {
         get => _database;
-        set { _database = value; AssetDatabase.Current = value; }
+        set
+        {
+            if (_database != null) _database.Renamed -= onRenamed;
+            _database = value;
+            AssetDatabase.Current = value;
+            if (value != null) value.Renamed += onRenamed;
+        }
     }
     private AssetDatabase? _database;
+
+    // アセットの名前を変えた時 (ED10) : 読み込んだ物の覚え方を新しいパスに付け替える (同じ物をもう一度読まないように)
+    //   Material / Prefab のパスも変える (保存する時に前のパスへ書かないように)。Model / Sound は struct なので、
+    //   コンポーネントの中は前のパスのまま (AssetDatabase が前のパスを今のパスに読み替える)
+    private void onRenamed(string oldPath, string newPath)
+    {
+        string? map(string key) =>
+            key.Equals(oldPath, StringComparison.OrdinalIgnoreCase) ? newPath :
+            key.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase) ? newPath + key[oldPath.Length..] : null;
+        void rekey<T>(Dictionary<string, T> cache, Action<T, string>? update = null)
+        {
+            foreach (var key in cache.Keys.ToList())
+            {
+                if (map(key) is not { } moved) continue;
+                var value = cache[key];
+                cache.Remove(key);
+                cache[moved] = value;
+                update?.Invoke(value, moved);
+            }
+        }
+        rekey(_models);
+        rekey(_sounds);
+        rekey(_materials, (material, path) => material.Path = path);
+        rekey(_prefabs, (prefab, path) => prefab.Path = path);
+    }
 
     // パス → (覚える名前, 読むファイル)
     private (string Key, string File) resolve(string path)
