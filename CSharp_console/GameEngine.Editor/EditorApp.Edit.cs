@@ -133,6 +133,7 @@ internal sealed partial class EditorApp
     }
 
     public ProjectSettingsWindow ProjectSettingsWindow => _projectSettings;
+    public BuildWindow BuildWindow => _build;   // ED8 後半
     public ScriptHost Scripts => _scripts;
 
     // ---------------------------------------------------------------------
@@ -321,7 +322,8 @@ internal sealed partial class EditorApp
         _paused   = false;
         _gameView = true;
         _undo.Enabled = false;
-        _engine.IsPlaying = true;
+        _scripts.RecreateSystems();   // System も新しく (ED8 後半)
+        _engine.BeginPlay();   // 再生の時間を 0 から (ED8 後半。書き出したゲームと同じ)
         Console.WriteLine($"[Editor] Play (scene snapshot {_playSnapshot.Length / 1024} KB, {System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms)");
     }
 

@@ -724,5 +724,75 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- ED8 後半 : ゲームの書き出し ----------
+        //   一時フォルダへ書き出す (プロジェクトの BuildSettings.json は変えない) → 入っている物を確かめる →
+        //   書き出した exe を決まった時間刻みで N フレーム動かした様子と、エディターで同じだけ再生した様子を比べる
+        var builder = _app.BuildWindow.Builder;
+        var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
+        if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
+        var buildSettings = new BuildSettings
+        {
+            ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json" },
+        };
+        var dependencies = builder.CollectAssets(buildSettings);
+        var included = dependencies.Assets;
+        check(included.Contains("Assets/Models/obj/box.obj") && included.Contains("Assets/Models/obj/box.mtl") && included.Contains("Assets/Models/obj/rock.obj") &&
+              included.Any(a => a.EndsWith("Tomimi.pmx")) && included.Any(a => a.EndsWith("/tex/face.png")),
+              $"dependencies : models, .mtl and pmx textures ({included.Count} assets)");
+        check(!included.Any(a => a.EndsWith("ReadMe.txt") || a.EndsWith(".vmd")), "dependencies : unused assets are not included");
+        var buildTask = Task.Run(() => builder.Build(buildSettings, dependencies));
+        while (!buildTask.IsCompleted) yield return 0;
+        var build = buildTask.Result;
+        check(build.Ok && File.Exists(build.ExePath), $"build the game ({(build.Ok ? $"{build.FileCount} files, {build.Bytes / 1024 / 1024} MB, {build.TotalMs / 1000:F1} s" : build.Error)})");
+        if (!build.Ok) yield break;
+        var builtFiles = Directory.EnumerateFiles(buildFolder, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(buildFolder, f).Replace('\\', '/')).ToList();
+        check(!builtFiles.Any(f => f.Contains("Editor", StringComparison.OrdinalIgnoreCase) || f.Contains("ImGui", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pdb")) &&
+              builtFiles.Contains("Game.dll") && builtFiles.Contains("RHI.dll") && builtFiles.Contains("Shader/hlslTemplate.shader") && builtFiles.Contains("Data/player.json"),
+              "the build has the player, engine, game code and shaders, and no editor files");
+        var builtAssets = builtFiles.Where(f => f.StartsWith("Data/Assets/") && !f.EndsWith(".meta") && !f.EndsWith(".dds")).ToList();
+        check(builtAssets.Count == included.Count && builtAssets.All(f => builtFiles.Contains(f + ".meta")), $"only used assets, each with its .meta ({builtAssets.Count} of {database.Entries.Count(e => e.Kind != AssetKind.Folder)})");
+
+        // 書き出したゲームと、エディターの再生を比べる (決まった時間刻みで 120 フレーム)
+        const int compareFrames = 120;
+        var dt = Time.FixedDeltaTime;
+        foreach (var compareScene in buildSettings.Scenes)
+        {
+            var dumpFile = Path.Combine(buildFolder, "dump.txt");
+            var info = new System.Diagnostics.ProcessStartInfo(build.ExePath) { UseShellExecute = false };
+            foreach (var argument in new[] { "--scene", compareScene, "--capture-dt", dt.ToString("R", System.Globalization.CultureInfo.InvariantCulture),
+                                             "--frames", compareFrames.ToString(), "--dump", dumpFile })
+                info.ArgumentList.Add(argument);
+            var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+            var player = System.Diagnostics.Process.Start(info)!;
+            while (!player.HasExited && System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalSeconds < 60) yield return 0;
+            if (!player.HasExited) player.Kill();
+            var playerLog = File.Exists(Path.Combine(buildFolder, "Player.log")) ? File.ReadAllText(Path.Combine(buildFolder, "Player.log")) : "";
+            var playerDump = File.Exists(dumpFile) ? File.ReadAllText(dumpFile) : "";
+            check(player.ExitCode == 0 && playerDump.Length > 0 && playerLog.Contains($"{_app.Scripts.SystemCount} systems"),
+                  $"the built game runs {Path.GetFileName(compareScene)} ({System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalSeconds:F1} s, exit {player.ExitCode})");
+            if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
+            // 初めての起動でも、シェーダーは入れたキャッシュから (コンパイルしない)
+            if (compareScene == buildSettings.Scenes[0])
+                check(build.ShaderCacheFiles > 0 && playerLog.Contains("shader from cache") && !playerLog.Contains("shader compiled"),
+                      $"the first start of the built game uses the shipped compiled shaders ({build.ShaderCacheFiles} files)");
+
+            // エディター : 同じシーンを開いて、同じ刻みで同じフレーム数だけ再生する
+            _app.OpenScene(database.FullPath(compareScene));
+            yield return 0;
+            Time.CaptureDeltaTime = dt;
+            _app.TogglePlay();
+            for (int i = 0; i < compareFrames; i++) yield return 0;
+            var editorDump = SceneState.Dump(World);
+            _app.TogglePlay();
+            Time.CaptureDeltaTime = 0;
+            var differences = new List<string>();
+            var (differenceCount, maxError) = SceneState.Compare(editorDump, playerDump, 1e-4f, differences);
+            foreach (var difference in differences) Console.WriteLine($"[Test]   {difference}");
+            check(differenceCount == 0, $"the built game moves the same as play in the editor : {Path.GetFileName(compareScene)} ({World.EntityCount} entities, max error {maxError:G3})");
+            File.Delete(dumpFile);
+        }
+        Directory.Delete(buildFolder, true);
+
     }
 }

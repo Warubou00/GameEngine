@@ -52,6 +52,10 @@ internal sealed unsafe partial class CollisionSystem
     private PhysicsNativeMethods.BodyState[]   _bodyStates = new PhysicsNativeMethods.BodyState[64];
     private float _accumulator;
 
+    // 再生を始める時 (Engine.BeginPlay) : 固定の刻みの余りを 0 から数える (ED8 後半。以前は前の再生の余りが残り、
+    //  エディターの再生と書き出したゲームで、最初の刻みのフレームがずれることがあった)
+    internal void ResetAccumulator() => _accumulator = 0;
+
     private void initializeRigidbodies(World world)
     {
         world.GetPool<Joint>().Removed += (entity, _) =>
