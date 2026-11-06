@@ -38,6 +38,8 @@ internal sealed class ProjectPanel : IDisposable
     public AssetEntry? Selected => _selected;
     // プレハブのファイルが外で変わった時 (エディターが置いた物を作り直す。戻り値 = 置いた物の数。ED8)
     public Func<Prefab, int>? PrefabChanged;
+    // シェーダーグラフをダブルクリックした時 (グラフの窓で開く。SH4)
+    public Action<string>? OpenShaderGraph;
     public int SelectionVersion { get; private set; }
 
     private string  _folder = AssetDatabase.AssetsFolder;
@@ -110,6 +112,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Texture  => _engine.Assets.ReloadTexture(path),
                     AssetKind.Material => _engine.Assets.ReloadMaterial(path) ? 1 : 0,
                     AssetKind.Shader   => _engine.Assets.ReloadShader(path) ? 1 : 0,   // SH2 : コンパイルし直す (失敗したら前の物のまま。理由は Console)
+                    AssetKind.ShaderGraph => _engine.Assets.ReloadShader(path) ? 1 : 0,   // SH4 : 外で書き換えた時 (グラフの窓の保存は同じ中身なので何もしない)
                     AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     _ => 0,
                 };
@@ -183,6 +186,8 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.Button("Create Material")) CreateMaterial();
         ImGui.SameLine();
         if (ImGui.Button("Create Shader")) CreateShader();   // SH2
+        ImGui.SameLine();
+        if (ImGui.Button("Create Shader Graph") && CreateShaderGraph() is { } graphPath) OpenShaderGraph?.Invoke(graphPath);   // SH4
         ImGui.SameLine();
         if (ImGui.Button("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(_selected?.Path ?? _folder)}\"");
         ImGui.SameLine();
@@ -305,6 +310,7 @@ internal sealed class ProjectPanel : IDisposable
         {
             if (entry.Kind == AssetKind.Folder) { _folder = entry.Path; _search = ""; }
             else if (entry.Kind == AssetKind.Scene) _openScene(_database.FullPath(entry.Path));
+            else if (entry.Kind == AssetKind.ShaderGraph) OpenShaderGraph?.Invoke(entry.Path);   // SH4
             else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
             {
                 try { importer.OnOpen(entry.Path, _database.FullPath(entry.Path)); }
@@ -339,6 +345,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Material => ("Mat", 0xFF3CA0A0u),
         AssetKind.Prefab   => ("Prefab", 0xFFE0A050u),
         AssetKind.Shader   => ("HLSL", 0xFF6040B0u),   // SH2
+        AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
         _                  => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF404040u),
     };
 
@@ -496,6 +503,26 @@ internal sealed class ProjectPanel : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             Console.WriteLine($"[Assets] Failed to create a shader : {ex.Message}");
+            return null;
+        }
+    }
+
+    // 今のフォルダにシェーダーグラフ (.shadergraph.json) を作って選ぶ (SH4)。出力と色 / 粗さのパラメーターが繋がった物
+    public string? CreateShaderGraph(string name = "New Shader Graph")
+    {
+        try
+        {
+            var path = $"{_folder}/{name}{ShaderGraph.Extension}";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}{ShaderGraph.Extension}";
+            File.WriteAllText(_database.FullPath(path), ShaderGraph.CreateDefault().ToJson(), new System.Text.UTF8Encoding(false));
+            _database.Refresh();
+            Select(_database.Find(path));
+            Console.WriteLine($"[Assets] Created {path}");
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Failed to create a shader graph : {ex.Message}");
             return null;
         }
     }

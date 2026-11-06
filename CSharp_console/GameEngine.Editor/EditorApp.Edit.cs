@@ -156,6 +156,14 @@ internal sealed partial class EditorApp
     public ProjectSettingsWindow ProjectSettingsWindow => _projectSettings;
     public BuildWindow BuildWindow => _build;   // ED8 後半
     public ScriptReference Reference => _reference;   // ED9
+    public ShaderGraphWindow Graph => _graph;   // SH4
+
+    /// <summary>シェーダーグラフの窓で開く (SH4)</summary>
+    public bool OpenShaderGraph(string path)
+    {
+        _showGraph = true;
+        return _graph.Open(path);
+    }
 
     /// <summary>スクリプトリファレンスを開いて、その型を出す (ED9)</summary>
     public bool OpenReference(Type type)

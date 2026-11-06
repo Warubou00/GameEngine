@@ -349,7 +349,7 @@ public sealed class AssetManager
         if (_shaders.TryGetValue(path, out var cached)) return cached;
         if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load shader: {path}", path);
         var shader = new ShaderAsset(path);
-        shader.Compile(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        shader.CompileFile(File.ReadAllText(file, System.Text.Encoding.UTF8));   // .hlsl / .shadergraph.json (SH4)
         _shaders.Add(path, shader);
         return shader;
     }
@@ -359,7 +359,9 @@ public sealed class AssetManager
     {
         (path, var file) = resolve(path);
         if (!_shaders.TryGetValue(path, out var shader)) return false;
-        var ok = shader.Compile(File.ReadAllText(file, System.Text.Encoding.UTF8));
+        var text = File.ReadAllText(file, System.Text.Encoding.UTF8);
+        if (text == shader.SourceText) return shader.Error == null;   // 中身が同じ (グラフの窓が保存してコンパイル済み : 2 回しない。SH4)
+        var ok = shader.CompileFile(text);
         foreach (var material in _materials.Values.Where(m => m.ShaderAsset == shader)) material.Apply();
         ReloadCount++;
         AssetReloaded?.Invoke(path);

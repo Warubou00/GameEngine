@@ -13,7 +13,7 @@ namespace GameEngine;
 //   - 以前のパス (見本の "../Model/...") は Assets/Models/... に同じファイルがあればそちらに読み替える
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader }
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph }
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -51,6 +51,7 @@ public sealed class AssetDatabase
         if (name.EndsWith(".scene.json"))    return AssetKind.Scene;
         if (name.EndsWith(".material.json")) return AssetKind.Material;
         if (name.EndsWith(".prefab.json"))   return AssetKind.Prefab;   // ED8
+        if (name.EndsWith(".shadergraph.json")) return AssetKind.ShaderGraph;   // SH4
         return Path.GetExtension(name) switch
         {
             ".obj" or ".pmx" or ".pmd"                    => AssetKind.Model,
@@ -183,7 +184,7 @@ public sealed class AssetDatabase
     public static (string Stem, string Extension) SplitName(string fileName, bool isFolder)
     {
         if (isFolder) return (fileName, "");
-        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json" })
+        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json", ".shadergraph.json" })
             if (fileName.EndsWith(compound, StringComparison.OrdinalIgnoreCase)) return (fileName[..^compound.Length], fileName[^compound.Length..]);
         var extension = Path.GetExtension(fileName);
         return (fileName[..^extension.Length], extension);

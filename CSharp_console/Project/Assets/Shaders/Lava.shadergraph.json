@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "nextId": 13,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "Output",
+      "x": 1340,
+      "y": 40,
+      "values": {
+        "Roughness": "0.8"
+      }
+    },
+    {
+      "id": 2,
+      "type": "Panner",
+      "x": 0,
+      "y": 0,
+      "values": {
+        "Speed": "(0.05, 0.02)"
+      }
+    },
+    {
+      "id": 3,
+      "type": "GradientNoise",
+      "x": 230,
+      "y": 0,
+      "values": {
+        "Scale": "6"
+      }
+    },
+    {
+      "id": 4,
+      "type": "ColorParameter",
+      "x": 230,
+      "y": 130,
+      "values": {
+        "Default": "(0.12, 0.03, 0.02, 1)",
+        "Name": "RockColor"
+      }
+    },
+    {
+      "id": 5,
+      "type": "ColorParameter",
+      "x": 230,
+      "y": 250,
+      "values": {
+        "Default": "(1, 0.42, 0.05, 1)",
+        "Name": "HotColor"
+      }
+    },
+    {
+      "id": 6,
+      "type": "Lerp",
+      "x": 680,
+      "y": 60
+    },
+    {
+      "id": 7,
+      "type": "Power",
+      "x": 460,
+      "y": 0,
+      "values": {
+        "B": "3"
+      }
+    },
+    {
+      "id": 8,
+      "type": "Multiply",
+      "x": 900,
+      "y": 120
+    },
+    {
+      "id": 9,
+      "type": "FloatParameter",
+      "x": 680,
+      "y": 230,
+      "values": {
+        "Default": "4",
+        "Max": "10",
+        "Min": "0",
+        "Name": "Glow"
+      }
+    },
+    {
+      "id": 10,
+      "type": "Fresnel",
+      "x": 680,
+      "y": 360,
+      "values": {
+        "Power": "3"
+      }
+    },
+    {
+      "id": 11,
+      "type": "Multiply",
+      "x": 900,
+      "y": 330
+    },
+    {
+      "id": 12,
+      "type": "Add",
+      "x": 1120,
+      "y": 220
+    }
+  ],
+  "links": [
+    {
+      "from": 2,
+      "out": "UV",
+      "to": 3,
+      "in": "UV"
+    },
+    {
+      "from": 3,
+      "out": "Out",
+      "to": 7,
+      "in": "A"
+    },
+    {
+      "from": 4,
+      "out": "RGB",
+      "to": 6,
+      "in": "A"
+    },
+    {
+      "from": 5,
+      "out": "RGB",
+      "to": 6,
+      "in": "B"
+    },
+    {
+      "from": 7,
+      "out": "Out",
+      "to": 6,
+      "in": "T"
+    },
+    {
+      "from": 6,
+      "out": "Out",
+      "to": 8,
+      "in": "A"
+    },
+    {
+      "from": 9,
+      "out": "Value",
+      "to": 8,
+      "in": "B"
+    },
+    {
+      "from": 10,
+      "out": "Out",
+      "to": 11,
+      "in": "A"
+    },
+    {
+      "from": 5,
+      "out": "RGB",
+      "to": 11,
+      "in": "B"
+    },
+    {
+      "from": 8,
+      "out": "Out",
+      "to": 12,
+      "in": "A"
+    },
+    {
+      "from": 11,
+      "out": "Out",
+      "to": 12,
+      "in": "B"
+    },
+    {
+      "from": 4,
+      "out": "RGB",
+      "to": 1,
+      "in": "BaseColor"
+    },
+    {
+      "from": 12,
+      "out": "Out",
+      "to": 1,
+      "in": "Emission"
+    }
+  ]
+}

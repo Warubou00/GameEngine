@@ -959,13 +959,143 @@ internal sealed class EditorTest
         var cloudDraws = _app.Engine.Graphics.CustomDrawCount;
         check(cloudDraws == 3, $"the clouds scene draws the cloud cubes with the cloud shader ({cloudDraws})");
 
+        // ---------- SH4 : シェーダーグラフ ----------
+        // 全部の種類のノードを 1 つのグラフに置いて (数の出力を全部足して Emission へ)、1 回のコンパイルで全部の HLSL を確かめる
+        var allGraph = new ShaderGraph();
+        var allOutput = allGraph.Add("Output", new System.Numerics.Vector2(2000, 0));
+        var tex2D = allGraph.Add("Texture2DParameter", System.Numerics.Vector2.Zero);
+        var tex3D = allGraph.Add("Texture3DParameter", System.Numerics.Vector2.Zero);
+        tex3D.Values["Default"] = "builtin:ValueNoise3D:16";
+        var sums = new List<(int Node, string Port)>();
+        foreach (var def in ShaderGraph.Library.Values.Where(d => !d.IsOutput))
+        {
+            var node = def.Type switch { "Texture2DParameter" => tex2D, "Texture3DParameter" => tex3D, _ => allGraph.Add(def.Type, System.Numerics.Vector2.Zero) };
+            if (def.Type == "Noise3D") node.Values["Size"] = "16";
+            foreach (var input in def.Inputs.Where(p => p.Type == PortType.Texture2D)) allGraph.Connect(tex2D.Id, "Texture", node.Id, input.Name);
+            foreach (var input in def.Inputs.Where(p => p.Type == PortType.Texture3D)) allGraph.Connect(tex3D.Id, "Texture", node.Id, input.Name);
+            sums.AddRange(def.Outputs.Where(p => (int)p.Type < 16).Select(p => (node.Id, p.Name)));
+        }
+        var total = sums[0];
+        foreach (var next in sums.Skip(1))
+        {
+            var add = allGraph.Add("Add", System.Numerics.Vector2.Zero);
+            allGraph.Connect(total.Node, total.Port, add.Id, "A");
+            allGraph.Connect(next.Node, next.Port, add.Id, "B");
+            total = (add.Id, "Out");
+        }
+        var scaled = allGraph.Add("Multiply", System.Numerics.Vector2.Zero);
+        allGraph.Connect(total.Node, total.Port, scaled.Id, "A");
+        scaled.Values["B"] = "0.001";
+        allGraph.Connect(scaled.Id, "Out", allOutput.Id, "Emission");
+        var allGraphPath = $"{determinismFolder}/AllNodes{ShaderGraph.Extension}";
+        File.WriteAllText(database.FullPath(allGraphPath), allGraph.ToJson());
+        database.Refresh();
+        var allShader = _app.Engine.Assets.LoadShader(allGraphPath);
+        var allResult = allGraph.Generate();
+        check(allShader.IsValid && allShader.IsGraph && allShader.Error == null && allResult.Errors.Count == 0 && database.Find(allGraphPath)?.Kind == AssetKind.ShaderGraph,
+              $"every node type generates HLSL that compiles ({ShaderGraph.Library.Count} types, {allGraph.Nodes.Count} nodes : {Inspector.firstErrors(allShader.Error ?? string.Join("; ", allResult.Errors.Values)).Split('\n')[0]})");
+        var reparsed = ShaderGraph.FromJson(allGraph.ToJson());
+        check(reparsed.ToJson() == allGraph.ToJson() && reparsed.NextId == allGraph.NextId, "a graph saves and loads the same (.shadergraph.json)");
+
+        // Dynamic : float2 + float → float2 / 自動の型の変え方 / 輪は繋がない
+        var typeGraph = new ShaderGraph();
+        var uvNode = typeGraph.Add("UV", System.Numerics.Vector2.Zero);
+        var addA = typeGraph.Add("Add", System.Numerics.Vector2.Zero);
+        var addB = typeGraph.Add("Add", System.Numerics.Vector2.Zero);
+        typeGraph.Connect(uvNode.Id, "UV", addA.Id, "A");
+        typeGraph.Connect(addA.Id, "Out", addB.Id, "A");
+        var loopRefused = !typeGraph.Connect(addB.Id, "Out", addA.Id, "B");
+        var typeResult = typeGraph.Generate();
+        check(typeResult.OutputTypes[addA.Id][0] == 2 && typeResult.OutputTypes[addB.Id][0] == 2 && loopRefused && typeResult.Error != null && typeResult.Error.Contains("Output") &&
+              ShaderGraph.Cast("x", 1, 3) == "((float3)(x))" && ShaderGraph.Cast("x", 4, 2) == "(x).xy" && ShaderGraph.Cast("x", 3, 4) == "float4(x, 1.0f)",
+              "dynamic pins follow the connected size, sizes convert, loops and graphs without an Output are refused");
+
+        // 窓 : 開く → ノードを足して繋ぐ → 保存してコンパイル → マテリアル (立方体) がそのシェーダーで描く
+        var graphPath = $"{determinismFolder}/Graph{ShaderGraph.Extension}";
+        File.WriteAllText(database.FullPath(graphPath), ShaderGraph.CreateDefault().ToJson());
+        database.Refresh();
+        var window = _app.Graph;
+        check(_app.OpenShaderGraph(graphPath) && window.Graph != null && window.Graph.Nodes.Count == 3 && window.Shader is { IsValid: true, Parameters.Count: 2 },
+              $"the Shader Graph window opens a graph and compiles it ({window.Shader?.Error ?? $"{window.Shader?.Parameters.Count} parameters"})");
+        var outputId = window.Graph!.Nodes.First(n => n.Type == "Output").Id;
+        var noiseNode = window.AddNode("GradientNoise", new System.Numerics.Vector2(100, 380))!;
+        var speedNode = window.AddNode("FloatParameter", new System.Numerics.Vector2(-150, 380))!;
+        window.SetValue(speedNode.Id, "Name", "Speed");
+        var pannerNode = window.AddNode("Panner", new System.Numerics.Vector2(-150, 300))!;
+        window.Connect(speedNode.Id, "Value", pannerNode.Id, "Time");
+        window.Connect(pannerNode.Id, "UV", noiseNode.Id, "UV");
+        window.Connect(noiseNode.Id, "Out", outputId, "Emission");
+        var versionBeforeGraph = window.Shader!.Version;
+        window.Flush();
+        var graphShader = window.Shader!;
+        check(graphShader.Error == null && graphShader.Version == versionBeforeGraph + 1 && graphShader.Parameters.Any(p => p.Name == "Speed") && window.Errors.Count == 0 &&
+              ShaderGraph.FromJson(File.ReadAllText(database.FullPath(graphPath))).Links.Count == 5,
+              $"editing in the window saves and recompiles ({string.Join(", ", graphShader.Parameters.Select(p => p.Name))}, {window.LastCompileMs:F0} ms)");
+        var graphMaterial = _app.Engine.Assets.CreateMaterialAsset(determinismFolder, "GraphMaterial");
+        graphMaterial.Shader = graphPath;
+        graphMaterial.ShaderValues["Speed"] = 2.0f;
+        graphMaterial.Apply();
+        graphMaterial.Save();
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        var graphCube = _app.CreatePrimitive(PrimitiveShape.Cube, Entity.Null);
+        _app.AssignMaterial(graphCube, database.Find(graphMaterial.Path)!);
+        for (int i = 0; i < 3; i++) yield return 0;
+        check(_app.Engine.Graphics.CustomDrawCount == 1 && graphMaterial.ShaderAsset == graphShader, $"a material with the graph draws with it ({_app.Engine.Graphics.CustomDrawCount})");
+
+        // 元に戻す / やり直す / 消す / 複製 (グラフの窓の中だけ)
+        var nodesBefore = window.Graph!.Nodes.Count;
+        var linksBefore = window.Graph.Links.Count;
+        window.Selected.Clear();
+        window.Selected.Add(pannerNode.Id);
+        window.DeleteSelected();
+        var afterDelete = (window.Graph!.Nodes.Count, window.Graph.Links.Count);
+        window.Undo();
+        var afterUndo = (window.Graph!.Nodes.Count, window.Graph.Links.Count);
+        window.Redo();
+        var afterRedo = (window.Graph!.Nodes.Count, window.Graph.Links.Count);
+        window.Undo();
+        window.Selected.Clear();
+        window.Selected.Add(noiseNode.Id);
+        window.DuplicateSelected();
+        var afterDuplicate = window.Graph!.Nodes.Count;
+        window.Undo();
+        check(afterDelete == (nodesBefore - 1, linksBefore - 2) && afterUndo == (nodesBefore, linksBefore) && afterRedo == afterDelete && afterDuplicate == nodesBefore + 1 &&
+              window.Graph!.Nodes.Count == nodesBefore && window.Graph.Links.Count == linksBefore,
+              $"undo / redo / delete / duplicate in the graph ({afterDelete} → {afterUndo} → {afterRedo})");
+
+        // エラー : 名前が重なるパラメーター (グラフを作る時) → 2 個のノードが赤い。コンパイルのエラー → 行からノードに戻る。前の版で描き続ける
+        window.SetValue(speedNode.Id, "Name", "Roughness");
+        window.Flush();
+        var duplicateErrors = window.Errors.Keys.ToHashSet();
+        var roughnessId = window.Graph!.Nodes.First(n => n.Type == "FloatParameter" && n.Id != speedNode.Id).Id;
+        check(duplicateErrors.Contains(speedNode.Id) && duplicateErrors.Contains(roughnessId) && window.Shader!.Error != null && window.Shader.IsValid,
+              "nodes with errors are reported (a parameter name used twice) and the last good version keeps drawing");
+        window.SetValue(speedNode.Id, "Name", "lerp");   // HLSL の関数の名前 : グラフは通るが、コンパイルが Lerp のノードの行で失敗する
+        var lerpNode = window.AddNode("Lerp", new System.Numerics.Vector2(200, 500))!;
+        window.Connect(speedNode.Id, "Value", lerpNode.Id, "T");
+        window.Connect(lerpNode.Id, "Out", outputId, "Metallic");
+        window.Flush();
+        var compileErrors = ShaderGraph.ErrorsByNode(window.Shader!.Error);
+        check(window.Result?.Error == null && compileErrors.Count > 0 && compileErrors.Keys.All(id => window.Graph!.Find(id) != null) && window.Errors.Keys.Any(compileErrors.ContainsKey) && window.Shader.IsValid,
+              $"a compile error is traced back to its node ({string.Join(", ", compileErrors.Select(e => $"#{e.Key} {window.Graph!.Find(e.Key)?.Type}"))} : {Inspector.firstErrors(window.Shader.Error ?? "").Split('\n')[0]})");
+        window.SetValue(speedNode.Id, "Name", "Speed");
+        window.Flush();
+        check(window.Shader!.Error == null && window.Errors.Count == 0, "fixing the node recompiles the graph");
+        var graphScene = $"{determinismFolder}/graph.scene.json";
+        _app.SaveSceneTo(database.FullPath(graphScene));
+        var graphDependencies = _app.BuildWindow.Builder.CollectAssets(new BuildSettings { Scenes = { graphScene } });
+        check(graphDependencies.Assets.Contains(graphPath) && graphDependencies.Assets.Contains(graphMaterial.Path), "the build includes the shader graph that a material uses");
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -1007,6 +1137,8 @@ internal sealed class EditorTest
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
             if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
+            if (compareScene == graphScene)    // SH4 : シェーダーグラフも書き出したゲームで HLSL を作ってコンパイルする
+                check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the shader graph");
             if (compareScene == cloudScene)    // SH3 : 雲のシェーダーと、3D ノイズはキャッシュから (作り直さない)
                 check(!playerLog.Contains("compile failed") && playerLog.Contains("PerlinWorley3D:128 : 128^3 x4 from cache"),
                       "the built game draws the clouds (shader compiled, 3D noise from the shipped cache)");

@@ -2,7 +2,8 @@
 
 // ==========================================================================
 // エディター (ED3)
-//   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--editor-test] [--resave-scenes] [--quit-after N]
+//   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--open-graph <Assets/....shadergraph.json>] [--editor-test] [--resave-scenes] [--quit-after N]
+//     --open-graph : シェーダーグラフの窓でそのグラフを開いて始める (SH4)
 //     ランチャー (ED9) は --project で開くプロジェクトを渡す
 //     プロジェクト : 既定は CSharp_console/Project (中の Assets フォルダがアセットの置き場。ED5)
 //       最初の 1 回だけ、見本のモデル (見本の出力フォルダの Model) を Assets/Models へ写す (元のファイルは変えない)
@@ -76,6 +77,7 @@ internal static class Program
         var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
+        if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
 
         engine.Run();
     }
