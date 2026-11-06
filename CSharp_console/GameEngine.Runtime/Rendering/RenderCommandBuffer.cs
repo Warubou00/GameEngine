@@ -129,9 +129,14 @@ public sealed unsafe class RenderCommandBuffer
     /// 自分のシェーダーのマテリアルの物を、今の描画先へ描く (queue : 不透明 / 半透明。半透明は遠い順)
     /// DrawScene は描かない (まとめて描く道から外れている)。色の描画先 1 枚目に描く (2 枚目からは書かない)
     /// </summary>
-    public void DrawCustom(RenderQueue queue)
+    /// <param name="readDepth">
+    /// true : シーンの深度を読むシェーダー (@depth read。雲など) だけを描く (SH3)。深度は描画先から外れ、シェーダーがテクスチャとして読む
+    /// false : それ以外 (深度のテストをする)
+    /// </param>
+    public void DrawCustom(RenderQueue queue, bool readDepth = false)
     {
         ref var command = ref Add(7);
+        command.Arg0 = readDepth ? 1u : 0u;
         command.Arg1 = (uint)queue;
         command.Params[0] = (float)Time.TotalTime;   // シェーダーの SurfaceInput.Time (エディターの編集中も進む。パーティクルと同じ)
     }

@@ -1,0 +1,35 @@
+{
+  "format": "GameEngineMaterial",
+  "version": 1,
+  "color": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "texture": null,
+  "metallic": 0,
+  "roughness": 0.6,
+  "transparent": false,
+  "doubleSided": false,
+  "shader": {
+    "path": "Assets/Shaders/VolumetricCloud.hlsl"
+  },
+  "values": {
+    "MaxCloudHeight": 1.0,
+    "CloudDepth": 1.0,
+    "Correction": 0.4,
+    "Multiple": 2.5,
+    "Density": 1.2,
+    "NoiseScale": 0.02,
+    "EdgeFade": 0.3,
+    "LightStep": 2.5,
+    "BottomFade": 0.45,
+    "ShadowColor": [
+      0.38,
+      0.42,
+      0.52,
+      1
+    ]
+  }
+}

@@ -195,6 +195,13 @@ internal sealed class GameBuilder
         {
             if (_database.ToAssetPath(cache) is { } path) copyFile(cache, Path.Combine(data, path.Replace('/', Path.DirectorySeparatorChar)));
         }
+        // エンジンが作った 3D ノイズのキャッシュ (SH3。builtin:PerlinWorley3D など)。無いとゲームの初めの起動で作り直す (128^3 で約 2 秒)
+        var noiseCache = Path.Combine(_database.ProjectRoot, "Library", "Noise3D");
+        if (Directory.Exists(noiseCache))
+        {
+            foreach (var file in Directory.EnumerateFiles(noiseCache, "*.bin"))
+                copyFile(file, Path.Combine(data, "Library", "Noise3D", Path.GetFileName(file)));
+        }
         result.AssetCount = result.Assets.Count;
         result.CopyMs = Stopwatch.GetElapsedTime(copy).TotalMilliseconds;
 

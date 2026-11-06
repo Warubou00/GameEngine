@@ -666,7 +666,7 @@ namespace RHI
             void updateParticles(Buffer* buffer);       // 命令 UpdateParticles
             void sortParticles(uint32_t upperBound);    // 出力の生存リストを、入力のリストへ写しながら奥行きで並べる (UpdateParticles の中)
             void drawParticles(Buffer* buffer);         // 命令 DrawParticles
-            void drawCustom(Buffer* buffer, uint32_t queue, float time);   // 命令 DrawCustom (SH2)
+            void drawCustom(Buffer* buffer, uint32_t queue, float time, bool readDepth);   // 命令 DrawCustom (SH2。readDepth : SH3)
             std::vector<uint32_t>                                _customOrder;      // DrawCustom の作業用 (描く順)
             std::vector<int64_t>                                 _customParamBase;  // DrawCustom の作業用 (マテリアル → パラメーターの先頭)
             uint32_t                                             _customDrawCount = 0;   // このフレームで自分のシェーダーで描いた数 (確認用)

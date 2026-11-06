@@ -1,0 +1,59 @@
+﻿シェーダー SH3 : 雲 (立方体の中のレイマーチ) 2026-11-06
+ブランチ : feature/shader-sh3
+ロードマップ : ClaudLog/Engine_Roadmap_Shader_2026-11-06.txt (SH1 → SH5)
+
+■ できた物
+  雲のシェーダー : Project/Assets/Shaders/VolumetricCloud.hlsl (ユーザーの volumetricCloud2.hlsl を SH2 の形に移した物。元のファイルはそのまま)
+    立方体 (GameObject > 3D Object > Cube) にこのシェーダーのマテリアルを付けて大きさを変えると、箱の中に雲ができる
+    資料 (CEDEC 2019 ゼノブレイド2) / 元のシェーダーと同じ所 :
+      雲海の濃さ = clamp((雲海の最高点 - 高さ) / 雲海の深さ, 0, 1) / Perlin と Worley をそれぞれの強さで足してブレンド係数を掛ける /
+      透明度 = clamp((ノイズ × 濃さ - 補正値) × 乗算値, 0, 1) / 色 = 雲の色 と 影の色 を透明度で混ぜる (法線を使わない)
+    元のシェーダーから変えた所 :
+      - 透明度を各点で求めて前から重ねる (元は最後の 1 歩の値だけが残っていた)
+      - 箱とレイの交わる所を求めて、その間を同じ数の歩で進む (元はワールドの歩幅が箱に合っていなかった)。
+        裏の面で描く (@cull front) ので、カメラが箱の中でも描ける。歩の始めを少しずらして縞を消す
+      - シーンの深度を読んで、物 (山など) の手前で止める (山が雲海から突き出る)
+      - 渡された 2D のノイズ (valueNoise_x128.png) を、資料の「2D のテクスチャで作る値のノイズ」(z をずらした 2 回の読みを混ぜる) で
+        追加ノイズに使う。端が繋がらないテクスチャなので鏡の繰り返しで読む
+      - 太陽の方へワールドで数点 (LightStep m ずつ) 読んで自分の影を付ける。風で流れる (Wind)。箱の横と底で薄くする (EdgeFade / BottomFade)
+      - ゲルストナー波の頂点シェーダー (雲海の面) は移していない (自分のシェーダーで頂点シェーダーは変えられない)
+    パラメーター 22 個 (インスペクターで変えられる) : 強さ / 雲海の最高点 / 深さ / 補正値 / 乗算値 / 追加ノイズ / 濃さ / ノイズの大きさ / 風 /
+      雲の色 / 影の色 / 光の吸収 / 歩の数 など
+  3D ノイズ (Noise3D) : Perlin3D / Worley3D / PerlinWorley3D を足した (ValueNoise3D は SH2)。全部、端が繋がる
+    PerlinWorley3D (128^3、RGBA) : R = Perlin の fBm / G = Worley の fBm (反転) / B = Perlin-Worley / A = 細かい Worley
+    作るのに 128^3 で 1.8 秒 → プロジェクトの Library/Noise3D にキャッシュ (2 回目から 5〜200 ms で読む)。書き出したゲームにもキャッシュを入れる
+  ノイズのテクスチャ : Project/Assets/Textures/Noise に写した (git に入れる。.hlsl も git に入れるようにした)
+  見本のシーン : Assets/Scenes/clouds.scene.json (雲海の箱 260 × 12 × 220 / 突き出る山 (円錐) 4 個 / 浮かぶ雲 2 個 / 地面 / 太陽 / カメラ)
+    マテリアル : Assets/Materials/CloudSea / Cloud (同じシェーダーで値が違う) / Mountain
+
+■ 自分のシェーダーで足した物 (SH2 の続き)
+  // @depth read : シーンの深度をテクスチャとして読む (SceneDepth(screenUV) / SceneWorldPosition(screenUV))。半透明の列だけ
+    C++ : DrawCustom の Arg0 bit0 = 深度を読む物だけを描く。深度を描画先から外し (MSAA なら 1 サンプルへ解決)、読める状態にして
+          番号をルート定数 (g_Inputs[0].z) で渡す (全画面のパスが深度を読む時と同じ道)。CustomShaderSettings は 32 byte に
+    C# : 描画パイプライン (Forward / Forward + SSAO / Deferred) の半透明の後に DrawCustom(Transparent, readDepth: true)
+  MainLight(out 向き, out 色) : 一番目の平行光源
+
+■ 確認
+  自動 (--editor-test) : 174 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。SH3 の 8 項目 :
+    3D ノイズがいつも同じで端が繋がる (端をまたいだ差 / 中の差 : 13.7/14.2, 12.4/10.8, 9.3/9.7, 28.4/28.9) / ノイズのキャッシュ /
+    雲のシェーダーがコンパイルされる (22 個のパラメーター、深度を読む) / @depth read は不透明の列では断る /
+    雲のシーンで 3 個を雲のシェーダーで描く / 書き出したゲームが雲のシーンを動かす / 雲のシェーダーをコンパイルし、ノイズはキャッシュから /
+    エディターの再生と同じ動き
+  見た目 :
+    エディター (窓だけを撮った) : 雲海から山が突き出る / 浮かぶ雲 (底も横も丸い) / 影の色
+    ゲーム (見本の exe に --load-scene で読ませた) : Forward + SSAO / Deferred / Forward + MSAA 4x のどれでも同じに見える (MSAA の深度の解決も通る)
+  時間 (RTX 2070、1280x720、歩 48 / 光 2 点) : 雲の無い同じシーン GPU 0.295 / 0.292 ms → 雲あり 1.533 / 1.568 ms (雲で約 1.25 ms)
+    資料のように縮小したバッファで描くと減らせる (残りに書いた)
+
+■ 変更
+  C++ : RHI (rhiTypes.h / CommandContext.h・.cpp)
+  ランタイム : Assets/Noise3D.cs / Assets/ShaderAsset.cs (@depth read / SceneDepth / MainLight) / Assets/Model.cs (キャッシュ) /
+    Native/NativeMethods.cs / Rendering/RenderCommandBuffer.cs・RenderPipeline.cs
+  エディター : GameBuilder.cs (ノイズのキャッシュを書き出す) / EditorTest.cs
+  プロジェクト : Shaders/VolumetricCloud.hlsl / Materials (3) / Scenes/clouds.scene.json / Textures/Noise (7) / .gitignore
+
+■ 残り
+  - 雲は画面と同じ大きさで描く (資料の縮小バッファ : 横 1/4 縦 1/2 などは無い)。雲が画面を覆うと重い
+  - 雲どうし (浮かぶ雲と雲海) の重なりは描く順 (遠い順) で混ぜるだけ (互いの中は考えない。資料でも「複数のモデル雲の参照は断念」)
+  - 雲の影は地面に落ちない / 空雲 (SkyMap) は無い
+  - ゲルストナー波 (雲海の面の頂点を動かす) は無い (頂点シェーダーを変える仕組みが要る)

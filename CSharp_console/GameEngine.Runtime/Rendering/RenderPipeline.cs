@@ -214,6 +214,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
             cmd.DrawCustom(RenderQueue.Transparent);   // SH2
+            cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)。深度を描画先から外して読む
             DrawParticles(cmd, hdr, settings);   // 光る物は遮蔽を掛けない (環境光の RT には書かない)
             Tonemap(cmd, hdr, settings, ao, _ambient);
             return;
@@ -229,6 +230,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         // 半透明
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
         cmd.DrawCustom(RenderQueue.Transparent);   // SH2 (遠い順)
+        cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings);
@@ -304,6 +306,7 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         cmd.DrawCustom(RenderQueue.Opaque);
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
         cmd.DrawCustom(RenderQueue.Transparent);
+        cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings, ao);
