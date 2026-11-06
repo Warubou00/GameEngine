@@ -330,7 +330,8 @@ internal sealed class Inspector
         if (ImGui.BeginDragDropTarget())
         {
             var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material : AssetKind.Model;
-            if (ProjectPanel.AcceptDrop(kind) is { } asset) { edited = asset.Path; entered = true; }
+            var accepted = kind == AssetKind.Model ? ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel) : ProjectPanel.AcceptDrop(kind);   // AN2 : FBX のモデルも
+            if (accepted is { } asset) { edited = asset.Path; entered = true; }
             ImGui.EndDragDropTarget();
         }
         if (!entered || edited == path) return false;
@@ -572,6 +573,27 @@ internal sealed class Inspector
             ImGui.EndTable();
         }
         foreach (var warning in fbx.Warnings) ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.8f, 0.3f, 1.0f), "! " + warning);
+        // AN2 : モデルとして作った形 (置いた / 読んだ後)
+        if (fbx.Type == GameEngine.Fbx.FbxAssetType.Model && fbx.IsValid)
+        {
+            ImGui.SeparatorText("Model");
+            if (fbx.ModelData is { } model)
+            {
+                ImGui.Text($"{model.Positions.Count:N0} vertices / {model.TriangleCount:N0} triangles / {model.SubMeshes.Count} sub meshes  (made in {model.ImportMilliseconds:F1} ms)");
+                var size = model.BoundsMax - model.BoundsMin;
+                ImGui.Text($"Size {size.X:F2} x {size.Y:F2} x {size.Z:F2} m");
+                foreach (var sub in model.SubMeshes)
+                {
+                    var m = model.Materials[sub.Material];
+                    ImGui.ColorButton($"##mat{sub.Material}", m.Color, ImGuiColorEditFlags.NoTooltip, new System.Numerics.Vector2(14, 14));
+                    ImGui.SameLine();
+                    var texture = m.TexturePath != null ? $"  texture {Path.GetFileName(m.TexturePath)}{(m.TextureEmbedded ? " (in the FBX)" : "")}" : m.TextureName != null ? $"  texture {m.TextureName} (not found)" : "";
+                    ImGui.TextUnformatted($"{m.Name} : {sub.IndexCount / 3:N0} triangles{(m.Transparent ? "  transparent" : "")}  roughness {m.Roughness:F2}{texture}");
+                }
+                foreach (var warning in model.Warnings) ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.8f, 0.3f, 1.0f), "! " + warning);
+            }
+            else ImGui.TextDisabled("Drag it into the Scene or the Hierarchy to place it");
+        }
         if (fbx.Scene is { } scene && ImGui.CollapsingHeader($"Objects ({scene.Objects.Count})"))
         {
             foreach (var group in scene.Objects.Values.GroupBy(o => o.Kind).OrderBy(g => g.Key))

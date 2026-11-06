@@ -170,6 +170,18 @@ extern "C"
 		return g_renderer->CreateMesh(vertices, vertexCount, indices, indexCount, name);
 	}
 
+	// AN2 : 頂点 / インデックス / サブメッシュ (マテリアル付き) からモデルを作る (C# が FBX から作った形)
+	//   texturePaths : サブメッシュごとのテクスチャのパス (空なら無し)。replace : 有効な番号なら入れ替える (読み直し)
+	static_assert(sizeof(Renderer::SceneRenderer::ModelSubMeshDesc) == 40, "ModelSubMeshDesc must be 40 bytes (same as C#)");
+	RENDERER_API uint32_t Renderer_CreateModel(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
+	                                           const Renderer::SceneRenderer::ModelSubMeshDesc* subMeshes, uint32_t subMeshCount,
+	                                           const wchar_t* const* texturePaths, const wchar_t* name, uint32_t replace, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (!g_renderer || !name) return Renderer::INVALID_HANDLE;
+		return g_renderer->CreateModel(vertices, vertexCount, indices, indexCount, subMeshes, subMeshCount, texturePaths, name, replace, outSubMeshCount);
+	}
+
 	// 同じファイルを読み直す (番号は同じまま)。読めなければ前の物のまま (false)
 	RENDERER_API bool Renderer_ReloadModel(uint32_t model, uint32_t* outSubMeshCount)
 	{

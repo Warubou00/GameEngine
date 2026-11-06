@@ -119,9 +119,60 @@ public sealed class AssetManager
         (path, var file) = resolve(path);
         if (!_fbx.TryGetValue(path, out var asset)) return false;
         asset.Reload(file);
+        // AN2 : モデルとして置いてあれば、同じ番号のまま作り直す (置いた物も新しい形で描かれる)。読めなければ前の形のまま
+        if (asset.IsValid && asset.Type == Fbx.FbxAssetType.Model && _models.TryGetValue(path, out var model))
+        {
+            try { _models[path] = createFbxModel(path, file, asset, model.Handle); }
+            catch (InvalidDataException ex) { Console.WriteLine($"[FBX] {path} : {ex.Message} (the previous model is kept)"); }
+        }
         ReloadCount++;
         AssetReloaded?.Invoke(path);
         return asset.IsValid;
+    }
+
+    // AN2 : .mod.fbx → 頂点 / インデックス / マテリアル → C++ のモデル (replace が有効なら同じ番号で入れ替える)
+    private unsafe Model createFbxModel(string path, string file, Fbx.FbxAsset asset, uint replace)
+    {
+        if (!asset.IsValid || asset.Scene == null) throw new InvalidDataException($"{path} : {asset.Error}");
+        if (asset.Type != Fbx.FbxAssetType.Model) throw new InvalidDataException($"{path} : not a model (name it xxx.mod.fbx)");
+        var embedded = _database != null ? Path.Combine(_database.ProjectRoot, "Library", "FbxTextures") : null;
+        var data = Fbx.FbxModelImporter.Import(asset.Scene, file, findTextureByName, embedded);
+        foreach (var warning in data.Warnings) Console.WriteLine($"[FBX] {path} : warning : {warning}");
+        if (data.SubMeshes.Count == 0) throw new InvalidDataException($"{path} : no triangles");
+        var vertices = new Primitives.NativeVertex[data.Positions.Count];
+        for (int i = 0; i < vertices.Length; i++)
+            vertices[i] = new Primitives.NativeVertex { Position = data.Positions[i], Normal = data.Normals[i], Color = data.Colors[i], UV = data.UVs[i] };
+        var indices = data.Indices.ToArray();
+        var subMeshes = new NativeMethods.ModelSubMeshDesc[data.SubMeshes.Count];
+        var textures = new string?[data.SubMeshes.Count];
+        for (int s = 0; s < subMeshes.Length; s++)
+        {
+            var sub = data.SubMeshes[s];
+            var material = data.Materials[sub.Material];
+            subMeshes[s] = new NativeMethods.ModelSubMeshDesc
+            {
+                FirstIndex = (uint)sub.FirstIndex, IndexCount = (uint)sub.IndexCount, Color = material.Color,
+                Metallic = material.Metallic, Roughness = material.Roughness, Flags = material.Transparent ? 1u : 0u,
+            };
+            textures[s] = material.TexturePath;
+        }
+        uint handle, subMeshCount;
+        fixed (Primitives.NativeVertex* v = vertices)
+        fixed (uint* i = indices)
+        fixed (NativeMethods.ModelSubMeshDesc* s = subMeshes)
+            handle = NativeMethods.Renderer_CreateModel(v, (uint)vertices.Length, i, (uint)indices.Length, s, (uint)subMeshes.Length, textures, path, replace, out subMeshCount);
+        if (handle == NativeMethods.InvalidHandle) throw new InvalidDataException($"{path} : the renderer could not create the model");
+        asset.ModelData = data;
+        return new Model(handle, (int)subMeshCount, path);
+    }
+
+    // FBX に書いてあるテクスチャの名前で Assets の中を探す (FBX の隣に無い時)
+    private string? findTextureByName(string name)
+    {
+        if (_database == null || string.IsNullOrEmpty(name)) return null;
+        var entry = _database.Entries.FirstOrDefault(e => e.Kind == AssetKind.Texture && e.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                 ?? _database.Entries.FirstOrDefault(e => e.Kind == AssetKind.Texture && Path.GetFileNameWithoutExtension(e.Name).Equals(Path.GetFileNameWithoutExtension(name), StringComparison.OrdinalIgnoreCase));
+        return entry != null ? _database.FullPath(entry.Path) : null;
     }
 
     /// <summary>
@@ -281,6 +332,13 @@ public sealed class AssetManager
     {
         (path, var file) = resolve(path);
         var count = (int)NativeMethods.Renderer_ReloadModelsUsingTexture(Path.GetFullPath(file));
+        // AN2 : FBX のモデルは C++ がファイルから読み直せないので、テクスチャを使っている物を作り直す
+        var full = Path.GetFullPath(file);
+        foreach (var (fbxPath, fbx) in _fbx.ToList())
+        {
+            if (fbx.ModelData == null || !fbx.ModelData.Materials.Any(m => m.TexturePath != null && string.Equals(Path.GetFullPath(m.TexturePath), full, StringComparison.OrdinalIgnoreCase))) continue;
+            if (ReloadFbx(fbxPath)) count++;
+        }
         foreach (var material in _materials.Values)
         {
             if (material.Texture == null || !string.Equals(resolve(material.Texture).Key, path, StringComparison.OrdinalIgnoreCase)) continue;
@@ -350,6 +408,14 @@ public sealed class AssetManager
         if (Primitives.IsPrimitive(path)) return loadPrimitive(path);
         (path, var file) = resolve(path);
         if (_models.TryGetValue(path, out var cached)) return cached;
+        // AN2 : FBX のモデル (C# で読んで形を渡す)。読めない / 中身が足りない時は理由付きの例外
+        if (Fbx.FbxAsset.TypeOf(path) == Fbx.FbxAssetType.Model)
+        {
+            if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load model: {path}", path);
+            var fbxModel = createFbxModel(path, file, LoadFbx(path), NativeMethods.InvalidHandle);
+            _models.Add(path, fbxModel);
+            return fbxModel;
+        }
 
         var handle = NativeMethods.Renderer_LoadModel(file, out var subMeshCount);
         if (handle == NativeMethods.InvalidHandle)

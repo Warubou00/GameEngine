@@ -83,6 +83,7 @@ internal sealed class AssetDependencies
             if (name.EndsWith(".json")) walkJson(assetPath, file);   // シーン / プレハブ / マテリアル
             else if (name.EndsWith(".obj")) walkObj(assetPath, file);
             else if (name.EndsWith(".pmx")) walkPmx(assetPath, file);
+            else if (name.EndsWith(".mod.fbx")) walkFbx(assetPath, file);   // AN2
             if (AssetDatabase.KindOf(file) == AssetKind.Texture) addTextureCache(file);
         }
         catch (Exception ex) when (ex is IOException or JsonException or EndOfStreamException or ArgumentException)
@@ -119,6 +120,21 @@ internal sealed class AssetDependencies
                     add(path, assetPath);
                 break;
             }
+        }
+    }
+
+    // FBX のモデル → テクスチャ (ファイルの物だけ。FBX に入っている物は FBX と一緒に入る。AN2)
+    private void walkFbx(string assetPath, string file)
+    {
+        GameEngine.Fbx.FbxScene scene;
+        try { scene = new GameEngine.Fbx.FbxScene(GameEngine.Fbx.FbxDocument.Load(file)); }
+        catch (GameEngine.Fbx.FbxFormatException ex) { Warnings.Add($"{assetPath} : {ex.Message}"); return; }
+        foreach (var (name, texture, embedded) in GameEngine.Fbx.FbxModelImporter.TextureReferences(scene, file,
+                     n => _database.Entries.FirstOrDefault(e => e.Kind == AssetKind.Texture && e.Name.Equals(n, StringComparison.OrdinalIgnoreCase)) is { } entry ? _database.FullPath(entry.Path) : null))
+        {
+            if (embedded) continue;
+            if (texture != null && _database.ToAssetPath(texture) is { } texturePath) add(texturePath, assetPath);
+            else Warnings.Add($"{assetPath} : texture {name} not found");
         }
     }
 

@@ -1,0 +1,68 @@
+﻿アニメーション AN2 : FBX のモデル (.mod.fbx) を描く 2026-11-07
+ブランチ : feature/anim-an2
+ロードマップ : ClaudLog/Engine_Roadmap_Animation_2026-11-07.txt (AN1 → AN5)
+
+■ できた物
+  .mod.fbx をモデルとして使える : Project からシーン / Hierarchy へドラッグ、MeshRenderer の Model の欄、保存して開き直す、書き出したゲーム
+  読む所は全部 C# (Runtime/Assets/Fbx/FbxModelImporter.cs。外部のライブラリなし)
+    ノードの行列 : FBX の式 Global = Parent × T × Roff × Rp × Rpre × R × Rpost⁻¹ × Rp⁻¹ × Soff × Sp × S × Sp⁻¹ (回す順番 RotationOrder 6 通り)
+      と、メッシュだけに掛かる Geometric (T / R / S)。メッシュはその位置に焼き込んで 1 つのモデルにする (骨の子の部品も)
+    軸と単位 : GlobalSettings の 上 / 前 / 横 の軸と符号 → エンジン (左手系 / +Y 上 / +Z 奥)、UnitScaleFactor (cm) → m
+    層 : 法線 / UV / 頂点の色 / マテリアル。並び方 ByPolygonVertex / ByControlPoint (ByVertice) / ByPolygon / AllSame と、
+      引き方 Direct / IndexToDirect を全部。法線が無ければ点ごとに面の法線を足して作る。UV の V は DirectX 向きに反転
+    多角形 → 三角形 : 4 角以上は耳を切る方法 (凹んだ多角形も。壊れた多角形は扇に戻る)
+    頂点 : 同じ (点 / 法線 / UV / 色) の角は 1 つ。サブメッシュはマテリアルごと (メッシュをまたいでまとめる = 描く回数が減る)
+    面の向き : エンジンは cross(b − a, c − a) が外向き (Primitives と同じ)。右手系 → 左手系 (鏡) なら三角形の順を入れ替える
+      (負の大きさのノードも鏡として数える)
+    マテリアル : DiffuseColor × DiffuseFactor / 不透明度 (Opacity、無ければ 1 − TransparencyFactor × TransparentColor) /
+      粗さ (ShininessExponent → √(2 / (n + 2))、OBJ / PMX と同じ) / 色のテクスチャ (DiffuseColor に繋がった Texture)
+    テクスチャを探す順 : FBX に入っている物 (Video の Content → Library/FbxTextures に書き出す) → FBX からの相対パス → 書いてある絶対パス →
+      FBX の隣 → 名前で Assets から。無ければ色だけで描き、警告
+  C++ : Renderer_CreateModel (頂点 / インデックス / サブメッシュごとのマテリアルとテクスチャ。番号を指定すると入れ替え = 読み直し)。
+    テクスチャは C++ が持つ (OBJ / PMX と同じくまとめて読む)。ModelSubMeshDesc 40 byte (C# と static_assert)
+  読み直し : FBX のファイルを書き換えると、置いてある物の番号のまま作り直す (中身が壊れていれば前の形のまま)。
+    テクスチャを書き換えると、それを使う FBX のモデルを作り直す
+  書き出し : 依存の調べ (AssetDependencies) が FBX のモデルが使うテクスチャのファイルも入れる (FBX に入っている物は FBX と一緒)
+  エディター : Inspector の Model の欄 (頂点 / 三角形 / サブメッシュ / 作った時間 / 大きさ / マテリアルごとの色・三角形・粗さ・テクスチャ (FBX の中 / 見つからない))、
+    置いた物の名前は Arm.mod.fbx → Arm (以前は拡張子を 1 つだけ外して Arm.mod)
+  サンプル (Assets/Samples/Fbx に 2 個足して 9 個) :
+    Crate.mod.fbx : 上下はテクスチャ (相対パス ../../Textures/Noise/fbm.png)、横は色。マテリアルは多角形ごと、法線は IndexToDirect
+    Panel.mod.fbx : 星の板。Z 上 / m の FBX、凹んだ 10 角形、頂点の色、法線なし、FBX に入っているテクスチャ (自分で作った市松模様の BMP)、
+                    PreRotation / RotationPivot / GeometricTranslation
+  見本のシーン : Assets/Scenes/fbx.scene.json (Robot / Arm / Crate / Box / Panel)
+
+■ 確認
+  自動 (--editor-test) : 212 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。AN2 の 14 項目 :
+    頂点 / 三角形 / サブメッシュ と cm → m とノードの階層 (Box ±0.5 × 0〜1 m、Robot の足の下 0.050 m / 頭の上 2.110 m = 手で計算した値) /
+    マテリアル (多角形ごと、相対パスのテクスチャ、FBX に入っているテクスチャを Library に) / Z 上・m の FBX が寝る (0.52〜0.60 m)、PreRotation で星の先が −X、
+    凹んだ 10 角形が 36 三角形、頂点の色、作った法線の長さ / 全部の三角形の向きがエンジンと同じ (0 個違う) /
+    ノードの式 (回す中心 : (2,0,0) → (1,0,−1)、大きさの中心、回す順番 XYZ と ZYX で違う値) / 凹んだ L の形の面積が合う /
+    置く → 保存 → 開き直す (名前 Robot / Crate / Panel / Arm) / 書き換えると同じ番号で作り直す (1 → 2 サブメッシュ)、壊れた中身なら前のまま /
+    名前でテクスチャを探す・無ければ警告 / 書き出しに FBX とテクスチャ / 大きなモデルの時間 / 書き出したゲームが FBX を読み、エディターと同じ動き
+  見た目 (エディターの窓だけを撮った) : 5 個のモデルが影付きで正しい向きの面で描かれる (Robot の部品、腕の柱、Crate の上のテクスチャと青い横、赤い Box、
+    市松模様と頂点の色の星)。Robot.mod.fbx の Inspector (168 頂点 / 84 三角形 / 2 サブメッシュ / 0.84 × 2.06 × 0.30 m / マテリアル 2 つ)。
+    見本の exe (書き出したゲームと同じ読み方) でも同じ
+  時間 (Release、RTX 2070) :
+    9 万頂点の格子 (面ごとの法線なので 36 万頂点 / 18 万三角形) : 読む 83〜96 ms + 三角形と頂点にする 145〜169 ms = 251〜269 ms
+    サンプル 1 個を作る 0.8〜2 ms。毎フレームの仕事は増えない (FBX のモデルは OBJ と同じ GPU の選別 / まとめ描きの道)
+    見本のシーン (showcase) : C# 0.056〜0.057 ms / GPU 0.68 ms (前と同じ)。FBX のシーン : GPU 0.35 ms、8 回の描画
+
+■ 変更
+  C++ : Renderer/Source/sceneRenderer.h・.cpp (CreateModel) / rendererDll.cpp (Renderer_CreateModel)
+  ランタイム : Assets/Fbx/FbxModelImporter.cs (新しい) / Assets/Fbx/FbxAsset.cs (ModelData) / Assets/Model.cs (LoadModel / ReloadFbx / ReloadTexture) /
+    Native/NativeMethods.cs
+  エディター : EditorApp.cs (ドラッグで置く) / EditorApp.Edit.cs (名前) / Inspector.cs (Model の欄 / ドラッグ) / AssetDependencies.cs (テクスチャ) /
+    Fbx/FbxSamples.cs (Crate / Panel / 書き方の選び方) / EditorTest.cs
+  プロジェクト : Samples/Fbx/Crate・Panel.mod.fbx / Scenes/fbx.scene.json
+
+■ 気付いた事
+  - 最初は「鏡の変換で向きが逆に見えるので入れ替えない」と考えたが、エンジンの決まり (cross が外向き) では鏡の時に入れ替えが要る。
+    テストで全部の三角形の向きを法線と比べて確かめた
+  - サンプルを書く道具の record struct の既定 (new AxisSettings()) が全部 0 になり、UpAxis / 単位が 0 の FBX を書いていた。
+    読む側が 0 を既定に戻していたのでテストが通ってしまった。値を書いて渡すようにし、テストは書いた値そのものを確かめるようにした
+  - Panel のテクスチャが見えなかったのはサンプルの UV (cm 用に 0.01 倍) のせい。m の FBX は 1 倍にした
+
+■ 残り
+  - スキンの重みは AN4 で使う (Sources に頂点ごとの元の点を残してある)。今のスキン付きのモデルはバインドの形のまま描く
+  - マテリアルは色 / 不透明度 / 粗さ / 色のテクスチャだけ (法線マップ / 放射 / 金属のマップは無い)。両面かどうかは FBX から決めない
+  - 本物の DCC ツールの FBX での確認はまだ

@@ -1131,10 +1131,10 @@ internal sealed class EditorTest
         var fbxWritten = _app.Project.CreateFbxSamples();
         var fbxAssets = fbxWritten.ToDictionary(n => n, n => _app.Engine.Assets.LoadFbx($"{FbxSamples.Folder}/{n}"));
         string summary(string name, string label) => fbxAssets[name].Summary.FirstOrDefault(s => s.Label == label).Value ?? "";
-        check(fbxWritten.Count == 7 && fbxAssets.Values.All(a => a.IsValid) &&
+        check(fbxWritten.Count == 9 && fbxAssets.Values.All(a => a.IsValid) &&
               database.Find($"{FbxSamples.Folder}/Arm.mod.fbx")?.Kind == AssetKind.FbxModel && database.Find($"{FbxSamples.Folder}/Arm.skl.fbx")?.Kind == AssetKind.FbxSkeleton &&
               database.Find($"{FbxSamples.Folder}/Arm_Wave.anm.fbx")?.Kind == AssetKind.FbxAnimation,
-              $"the FBX samples are written and read as their kinds ({string.Join(", ", fbxAssets.Select(a => $"{a.Key} {a.Value.LoadMilliseconds:F1} ms"))}){string.Join("; ", fbxAssets.Values.Where(a => !a.IsValid).Select(a => a.Error))}");
+              $"the FBX samples (9 : AN1 7 + AN2 Crate / Panel) are written and read as their kinds ({string.Join(", ", fbxAssets.Select(a => $"{a.Key} {a.Value.LoadMilliseconds:F1} ms"))}){string.Join("; ", fbxAssets.Values.Where(a => !a.IsValid).Select(a => a.Error))}");
         check(summary("Arm.mod.fbx", "Vertices") == "84" && summary("Arm.mod.fbx", "Polygons") == "74 (164 triangles)" && summary("Arm.mod.fbx", "Skins").StartsWith("1 (3 bones") &&
               summary("Arm.skl.fbx", "Bones") == "4" && summary("Arm.skl.fbx", "Depth") == "4" &&
               summary("Arm_Wave.anm.fbx", "Length").StartsWith("2.000 s (60 frames") && summary("Arm_Wave.anm.fbx", "Curves") == "2 (10 keys)" &&
@@ -1157,7 +1157,8 @@ internal sealed class EditorTest
             for (int i = 0; i < idx.Length; i++) weightSums[idx[i]] += (float)w[i];
         }
         check(midBone.Parents.Any(p => p.Parent.Name == "Arm_Root") && midKeys != null && midKeys.SequenceEqual(new[] { 0f, 40f, 0f, -40f, 0f }) &&
-              weightSums.All(s => MathF.Abs(s - 1) < 1e-5f) && waveScene.FrameRate == 30 && armScene.UnitScaleFactor == 1,
+              weightSums.All(s => MathF.Abs(s - 1) < 1e-5f) && waveScene.FrameRate == 30 && armScene.UnitScaleFactor == 1 &&
+              armScene.GlobalSettings["UpAxis"].Number() == 1 && armScene.GlobalSettings["UnitScaleFactor"].Number() == 1 && armScene.GlobalSettings["FrontAxis"].Number() == 2,   // 書いた値そのもの (読む側の既定に頼らない)
               "objects and connections : curve → curve node → bone rotation, bone parents, skin weights add up to 1, frame rate and unit");
 
         // 種類に合わない中身はエラー (名前の決まり)
@@ -1214,13 +1215,138 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- AN2 : FBX のモデル (.mod.fbx) を描く ----------
+        // サンプルを読んでモデルにする : 頂点 / 三角形 / サブメッシュ / 大きさ (cm → m、ノードの階層) / マテリアルとテクスチャ
+        GameEngine.Fbx.FbxModelData modelData(string name)
+        {
+            var path = $"{FbxSamples.Folder}/{name}";
+            _app.Engine.Assets.LoadModel(path);
+            return _app.Engine.Assets.LoadFbx(path).ModelData!;
+        }
+        bool near(System.Numerics.Vector3 a, System.Numerics.Vector3 b, float eps = 1e-4f) => System.Numerics.Vector3.Distance(a, b) < eps;
+        var boxData = modelData("Box.mod.fbx");
+        var armData = modelData("Arm.mod.fbx");
+        var robotData = modelData("Robot.mod.fbx");
+        var crateData = modelData("Crate.mod.fbx");
+        var panelData = modelData("Panel.mod.fbx");
+        check(boxData.Positions.Count == 24 && boxData.TriangleCount == 12 && near(boxData.BoundsMin, new(-0.5f, 0, -0.5f)) && near(boxData.BoundsMax, new(0.5f, 1, 0.5f)) &&
+              armData.TriangleCount == 164 && near(armData.BoundsMax, new(0.2f, 3, 0.2f), 1e-3f) &&
+              robotData.SubMeshes.Count == 2 && robotData.MeshCount == 7 && MathF.Abs(robotData.BoundsMin.Y - 0.05f) < 1e-4f && MathF.Abs(robotData.BoundsMax.Y - 2.11f) < 1e-4f,
+              $"FBX models : vertices / triangles / sub meshes, cm → m and the node hierarchy (Robot parts under bones : {robotData.BoundsMin.Y:F3} .. {robotData.BoundsMax.Y:F3} m)");
+        var crateTop = crateData.Materials.First(m => m.Name == "Top");
+        var panelMaterial = panelData.Materials[0];
+        check(crateData.SubMeshes.Count == 2 && crateTop.TexturePath != null && crateTop.TexturePath.Replace('\\', '/').EndsWith("Assets/Textures/Noise/fbm.png") &&
+              crateData.Materials.First(m => m.Name == "Side").Color.Z > 0.7f &&
+              panelMaterial.TextureEmbedded && File.Exists(panelMaterial.TexturePath) && panelMaterial.TexturePath!.Contains(Path.Combine("Library", "FbxTextures")),
+              $"materials : per-polygon materials, a texture by relative path ({Path.GetFileName(crateTop.TexturePath)}), an embedded texture written to Library ({Path.GetFileName(panelMaterial.TexturePath)})");
+        // Z 上 / m の FBX が地面に寝る (厚みが Y)、凹んだ 10 角形、頂点の色、法線を作った
+        check(MathF.Abs(panelData.BoundsMin.Y - 0.52f) < 1e-3f && MathF.Abs(panelData.BoundsMax.Y - 0.60f) < 1e-3f && MathF.Abs(panelData.BoundsMin.X + 1.0f) < 1e-3f &&
+              panelData.TriangleCount == 36 && panelData.Colors.Select(c => c.X).Distinct().Count() >= 20 && panelData.Normals.All(n => MathF.Abs(n.Length() - 1) < 1e-3f),
+              $"a Z-up file in meters lies flat ({panelData.BoundsMin.Y:F2} .. {panelData.BoundsMax.Y:F2} m), PreRotation / Geometric, concave 10-gons (36 triangles), vertex colors, made normals");
+        // 面の向き : エンジンは cross(b - a, c - a) が頂点の法線の側 (Primitives と同じ)
+        var windingBad = 0;
+        foreach (var d in new[] { boxData, armData, robotData, crateData, panelData })
+            for (int t = 0; t < d.Indices.Count; t += 3)
+            {
+                var (pa, pb, pc) = (d.Positions[(int)d.Indices[t]], d.Positions[(int)d.Indices[t + 1]], d.Positions[(int)d.Indices[t + 2]]);
+                if (System.Numerics.Vector3.Dot(System.Numerics.Vector3.Cross(pb - pa, pc - pa), d.Normals[(int)d.Indices[t]] + d.Normals[(int)d.Indices[t + 1]] + d.Normals[(int)d.Indices[t + 2]]) <= 0) windingBad++;
+            }
+        check(windingBad == 0, $"every FBX triangle faces the same way as the engine's (right-handed FBX → left-handed engine), {windingBad} wrong");
+
+        // ノードの式 : 回す中心 (RotationPivot) / 大きさの中心 (ScalingPivot) / 回す順番 (RotationOrder)
+        GameEngine.Fbx.FbxObject transformNode(params GameEngine.Fbx.FbxNode[] properties)
+        {
+            var doc = FbxWriter.Write(new[] { FbxWriter.Node("Objects").With(FbxWriter.Object("Model", 1, "N", "Null", FbxWriter.Node("Properties70").With(properties))) });
+            return new GameEngine.Fbx.FbxScene(GameEngine.Fbx.FbxDocument.Read(doc)).Objects[1];
+        }
+        var pivoted = GameEngine.Fbx.FbxTransforms.Local(transformNode(FbxWriter.P3("Lcl Rotation", "Lcl Rotation", new(0, 90, 0)), FbxWriter.P3("RotationPivot", "Vector3D", new(1, 0, 0), "")));
+        var scaledNode = GameEngine.Fbx.FbxTransforms.Local(transformNode(FbxWriter.P3("Lcl Scaling", "Lcl Scaling", new(2, 2, 2)), FbxWriter.P3("ScalingPivot", "Vector3D", new(1, 0, 0), "")));
+        var xyz = GameEngine.Fbx.FbxTransforms.Local(transformNode(FbxWriter.P3("Lcl Rotation", "Lcl Rotation", new(90, 90, 0)), FbxWriter.P("RotationOrder", "enum", "", "", 0)));
+        var zyx = GameEngine.Fbx.FbxTransforms.Local(transformNode(FbxWriter.P3("Lcl Rotation", "Lcl Rotation", new(90, 90, 0)), FbxWriter.P("RotationOrder", "enum", "", "", 5)));
+        check(near(System.Numerics.Vector3.Transform(new(1, 0, 0), pivoted), new(1, 0, 0)) && near(System.Numerics.Vector3.Transform(new(2, 0, 0), pivoted), new(1, 0, -1)) &&
+              near(System.Numerics.Vector3.Transform(new(1, 0, 0), scaledNode), new(1, 0, 0)) && near(System.Numerics.Vector3.Transform(new(2, 0, 0), scaledNode), new(3, 0, 0)) &&
+              near(System.Numerics.Vector3.Transform(new(0, 1, 0), xyz), new(1, 0, 0)) && near(System.Numerics.Vector3.Transform(new(0, 1, 0), zyx), new(0, 0, 1)),
+              "the FBX node formula : rotation pivot, scaling pivot and rotation order (XYZ / ZYX)");
+        // 凹んだ多角形 (L の形) : 三角形の面積の合計 = 多角形の面積、外に出る三角形が無い
+        var lShape = new System.Numerics.Vector3[] { new(0, 0, 0), new(2, 0, 0), new(2, 1, 0), new(1, 1, 0), new(1, 2, 0), new(0, 2, 0) };
+        var lTriangles = new List<int>();
+        GameEngine.Fbx.FbxModelImporter.Triangulate(lShape, lTriangles);
+        var lArea = 0f;
+        for (int t = 0; t < lTriangles.Count; t += 3)
+            lArea += System.Numerics.Vector3.Cross(lShape[lTriangles[t + 1]] - lShape[lTriangles[t]], lShape[lTriangles[t + 2]] - lShape[lTriangles[t]]).Z / 2;
+        check(lTriangles.Count == 12 && MathF.Abs(lArea - 3) < 1e-5f, $"ear clipping a concave polygon : {lTriangles.Count / 3} triangles, area {lArea:F3} (3)");
+
+        // シーンに置く → 保存 → 開き直す (FBX のモデルが同じパスで読まれる)
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        var fbxPlaced = new[] { "Robot.mod.fbx", "Crate.mod.fbx", "Panel.mod.fbx", "Arm.mod.fbx" }
+            .Select((n, i) => _app.PlaceModel(database.Find($"{FbxSamples.Folder}/{n}")!, new System.Numerics.Vector3(-3 + i * 2, 0, 3), Entity.Null)).ToList();
+        for (int i = 0; i < 3; i++) yield return 0;
+        var fbxPlacedNames = fbxPlaced.Select(e => World.Get<EntityInfo>(e).Name).ToList();
+        var fbxScene = $"{determinismFolder}/fbx.scene.json";
+        _app.SaveSceneTo(database.FullPath(fbxScene));
+        _app.OpenScene(database.FullPath(fbxScene));
+        for (int i = 0; i < 2; i++) yield return 0;
+        var fbxReopened = World.Entities.Where(e => World.Has<MeshRenderer>(e)).Select(e => World.Get<MeshRenderer>(e).Model).ToList();
+        check(fbxPlaced.All(e => e != Entity.Null) && fbxPlacedNames.SequenceEqual(new[] { "Robot", "Crate", "Panel", "Arm" }) && fbxReopened.Count == 4 &&
+              fbxReopened.All(m => m.IsValid && m.Path.EndsWith(".mod.fbx")) && fbxReopened.First(m => m.Path.EndsWith("Robot.mod.fbx")).SubMeshCount == 2,
+              $"FBX models are placed (names {string.Join(", ", fbxPlacedNames)}), saved and reopened");
+
+        // 書き換え → 同じ番号のまま作り直す / 壊れた中身なら前の形のまま
+        var hotPath = $"{determinismFolder}/Hot.mod.fbx";
+        File.WriteAllBytes(database.FullPath(hotPath), FbxSamples.Box());
+        database.Refresh();
+        var hotEntity = _app.PlaceModel(database.Find(hotPath)!, System.Numerics.Vector3.Zero, Entity.Null);
+        yield return 0;
+        var hotBefore = _app.Engine.Assets.LoadModel(hotPath);
+        File.WriteAllBytes(database.FullPath(hotPath), FbxSamples.Crate());
+        var hotReloaded = _app.Engine.Assets.ReloadFbx(hotPath);
+        var hotAfter = _app.Engine.Assets.LoadModel(hotPath);
+        yield return 0;
+        File.WriteAllBytes(database.FullPath(hotPath), FbxSamples.Arm(FbxSamples.ArmPart.Skeleton));
+        var hotBroken = !_app.Engine.Assets.ReloadFbx(hotPath);
+        var hotKept = _app.Engine.Assets.LoadModel(hotPath);
+        yield return 0;
+        check(hotEntity != Entity.Null && hotReloaded && hotBefore.SubMeshCount == 1 && hotAfter.SubMeshCount == 2 && hotBroken && hotKept.SubMeshCount == 2 &&
+              hotAfter.Equals(hotKept) && new Model[] { hotBefore, hotAfter }.Select(m => m.ToString()).All(s => s.Contains("Hot.mod.fbx")),
+              "changing a placed FBX file rebuilds the model in place (1 → 2 sub meshes); broken content keeps the previous model");
+        // 見つからないテクスチャ : 名前で Assets から探す / 無ければ色だけ (警告)
+        var foundByName = $"{determinismFolder}/ByName.mod.fbx";
+        var missing = $"{determinismFolder}/Missing.mod.fbx";
+        File.WriteAllBytes(database.FullPath(foundByName), FbxSamples.Crate());   // 相対パスはここからだと無い → 名前 (fbm.png) で探す
+        File.WriteAllBytes(database.FullPath(missing), FbxSamples.Crate(texture: "nowhere/no_such_texture.png"));
+        database.Refresh();
+        var byNameTop = (_app.Engine.Assets.LoadModel(foundByName) is var _ ? _app.Engine.Assets.LoadFbx(foundByName).ModelData! : null)!.Materials.First(m => m.Name == "Top");
+        var missingData = _app.Engine.Assets.LoadModel(missing) is var _ ? _app.Engine.Assets.LoadFbx(missing).ModelData! : null;
+        check(byNameTop.TexturePath != null && byNameTop.TexturePath.Replace('\\', '/').EndsWith("Textures/Noise/fbm.png") &&
+              missingData!.Materials.First(m => m.Name == "Top").TexturePath == null && missingData.Warnings.Any(w => w.Contains("no_such_texture.png")),
+              "a texture is found by name in Assets when the path is wrong; a missing one draws the color and warns");
+        // 書き出し : FBX のモデルと、それが使うテクスチャ (ファイルの物) が入る
+        var fbxDependencies = _app.BuildWindow.Builder.CollectAssets(new BuildSettings { Scenes = { fbxScene } });
+        check(fbxDependencies.Assets.Contains($"{FbxSamples.Folder}/Crate.mod.fbx") && fbxDependencies.Assets.Contains("Assets/Textures/Noise/fbm.png") &&
+              fbxDependencies.Assets.Contains($"{FbxSamples.Folder}/Panel.mod.fbx") && !fbxDependencies.Warnings.Any(w => w.Contains("texture")),
+              "the build includes FBX models and the texture files they use");
+        // 時間 : 9 万頂点の格子 (面ごとの法線なので 36 万頂点になる) を読んでモデルにする
+        var gridModelPath = $"{determinismFolder}/GridModel.mod.fbx";
+        File.WriteAllBytes(database.FullPath(gridModelPath), FbxSamples.MeshModel("Grid", FbxSamples.Grid(300, 1000), System.Numerics.Vector3.Zero, "Ground", new(0.4f, 0.6f, 0.3f)));
+        database.Refresh();
+        var gridStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        _app.Engine.Assets.LoadModel(gridModelPath);
+        var gridTotal = System.Diagnostics.Stopwatch.GetElapsedTime(gridStart).TotalMilliseconds;
+        var gridFbx = _app.Engine.Assets.LoadFbx(gridModelPath);
+        check(gridFbx.ModelData!.TriangleCount == 180000,
+              $"a large FBX model : read {gridFbx.LoadMilliseconds:F0} ms + triangles / vertices {gridFbx.ModelData.ImportMilliseconds:F0} ms, {gridTotal:F0} ms in all ({gridFbx.ModelData.Positions.Count:N0} vertices, 180,000 triangles)");
+        _app.OpenScene(database.FullPath(fbxScene));
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -1262,6 +1388,8 @@ internal sealed class EditorTest
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
             if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
+            if (compareScene == fbxScene)      // AN2 : 書き出したゲームも FBX を読んでモデルを作る (テクスチャも入っている)
+                check(!playerLog.Contains("[FBX]") && !playerLog.Contains("Failed to load model"), "the built game reads the FBX models");
             if (compareScene == graphScene)    // SH4 : シェーダーグラフも書き出したゲームで HLSL を作ってコンパイルする
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the shader graph");
             if (compareScene == cloudScene)    // SH3 : 雲のシェーダーと、3D ノイズはキャッシュから (作り直さない)

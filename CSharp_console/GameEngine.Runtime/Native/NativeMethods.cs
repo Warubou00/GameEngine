@@ -259,6 +259,27 @@ internal static unsafe class NativeMethods
     public static extern uint Renderer_CreateMesh(Primitives.NativeVertex* vertices, uint vertexCount, uint* indices, uint indexCount,
                                                   [MarshalAs(UnmanagedType.LPWStr)] string name);
 
+    // AN2 : サブメッシュ 1 つ分 (C++ の SceneRenderer::ModelSubMeshDesc と同じ並び : 40 byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ModelSubMeshDesc
+    {
+        public uint    FirstIndex;
+        public uint    IndexCount;
+        public Vector4 Color;       // テクスチャがあれば掛ける色 (w = 不透明度)
+        public float   Metallic;
+        public float   Roughness;
+        public uint    Flags;       // bit0 : 半透明 / bit1 : 両面
+        public uint    Padding;
+    }
+
+    // AN2 : 頂点 / インデックス / サブメッシュ (マテリアル付き) からモデルを作る (FBX のモデル)。
+    //   texturePaths : サブメッシュごと (null なら無し)。replace : 入れ替える番号 (InvalidHandle なら新しく作る)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_CreateModel(Primitives.NativeVertex* vertices, uint vertexCount, uint* indices, uint indexCount,
+                                                   ModelSubMeshDesc* subMeshes, uint subMeshCount,
+                                                   [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr)] string?[] texturePaths,
+                                                   [MarshalAs(UnmanagedType.LPWStr)] string name, uint replace, out uint createdSubMeshCount);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_CreateRenderObjects(uint model, uint count, uint* outHandles);
 

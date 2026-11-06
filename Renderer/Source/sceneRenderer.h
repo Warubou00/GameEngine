@@ -98,6 +98,28 @@ namespace Renderer
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)
 		 ************************************************************************************/
 		uint32_t CreateMesh(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount, const std::wstring& name);
+
+		// AN2 : サブメッシュ 1 つ分 (C# の ModelSubMeshDesc と同じ並び : 40 byte)
+		struct ModelSubMeshDesc
+		{
+			uint32_t FirstIndex;   // indices の何番目から
+			uint32_t IndexCount;
+			float    Color[4];     // テクスチャがあれば掛ける色 (a = 不透明度)
+			float    Metallic;
+			float    Roughness;
+			uint32_t Flags;        // bit0 : 半透明 / bit1 : 両面
+			uint32_t Padding;
+		};
+		/***********************************************************************************
+		 * @brief 頂点 / インデックス / サブメッシュ (マテリアル付き) からモデルを作る (AN2 : FBX のモデル。C# が読んで作った形)
+		 * @details 頂点は全部で 1 回、サブメッシュごとにインデックスの範囲とマテリアル。texturePaths[i] はサブメッシュ i のテクスチャ
+		 *          (空 / nullptr なら無し。読み込みは LoadModel と同じくまとめて)。replace が有効な番号なら、その番号のまま入れ替える
+		 *          (置いてある物は次のフレームから新しい形。読み直しの代わり)。name は空にしない
+		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE。入れ替えに失敗した時は前の物のまま)
+		 ************************************************************************************/
+		uint32_t CreateModel(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
+		                     const ModelSubMeshDesc* subMeshes, uint32_t subMeshCount, const wchar_t* const* texturePaths,
+		                     const std::wstring& name, uint32_t replace, uint32_t* outSubMeshCount);
 		// RHI をそのまま使う機能 (SH2 : 自分のシェーダー / 3D テクスチャ)。初期化前は nullptr
 		RHI::IRenderHardwareInterface* GetRHI()const { return IsInitialized() ? _rhi : nullptr; }
 		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)

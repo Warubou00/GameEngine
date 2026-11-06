@@ -334,6 +334,126 @@ namespace Renderer
 		return static_cast<uint32_t>(_models.size() - 1);
 	}
 
+	// AN2 : C# が FBX から作った形 (サブメッシュとマテリアル付き) を登録する。loadModelResource と同じ並びで作る
+	uint32_t SceneRenderer::CreateModel(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
+	                                    const ModelSubMeshDesc* subMeshes, uint32_t subMeshCount, const wchar_t* const* texturePaths,
+	                                    const std::wstring& name, uint32_t replace, uint32_t* outSubMeshCount)
+	{
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (!IsInitialized() || !vertices || !indices || !subMeshes || vertexCount == 0 || indexCount < 3 || subMeshCount == 0 || name.empty()) return INVALID_HANDLE;
+		for (uint32_t i = 0; i < indexCount; ++i)
+		{
+			if (indices[i] >= vertexCount)
+			{
+				Core::Logger::Log("[SceneRenderer] CreateModel : index out of range.");
+				return INVALID_HANDLE;
+			}
+		}
+		for (uint32_t s = 0; s < subMeshCount; ++s)
+		{
+			if (subMeshes[s].FirstIndex + subMeshes[s].IndexCount > indexCount)
+			{
+				Core::Logger::Log("[SceneRenderer] CreateModel : sub mesh range out of range.");
+				return INVALID_HANDLE;
+			}
+		}
+		ModelResource model;
+		model.Vertices = _rhi->UploadVertices(vertices, vertexCount);
+		if (!model.Vertices.IsValid())
+		{
+			Core::Logger::Log("[SceneRenderer] CreateModel : failed upload vertices.");
+			return INVALID_HANDLE;
+		}
+		// テクスチャ : 同じパスは 1 回だけ (まとめて読む = RHI の中で並列にデコード)
+		std::vector<RHI::TextureHandle> subMeshTextures(subMeshCount);
+		if (texturePaths)
+		{
+			std::vector<std::wstring> paths;
+			std::vector<size_t> owners(subMeshCount, SIZE_MAX);
+			for (uint32_t s = 0; s < subMeshCount; ++s)
+			{
+				if (!texturePaths[s] || !texturePaths[s][0]) continue;
+				const std::wstring path = resolveTexturePath(texturePaths[s]);
+				auto found = std::find(paths.begin(), paths.end(), path);
+				if (found == paths.end()) { paths.push_back(path); found = paths.end() - 1; }
+				owners[s] = static_cast<size_t>(found - paths.begin());
+			}
+			if (!paths.empty())
+			{
+				std::vector<const wchar_t*> pointers;
+				for (const auto& path : paths) pointers.push_back(path.c_str());
+				std::vector<RHI::TextureHandle> loaded(paths.size());
+				_rhi->LoadTextures(pointers.data(), static_cast<uint32_t>(pointers.size()), loaded.data());
+				for (const auto& texture : loaded) if (texture.Index != RHI::TextureHandle::DEFAULT) model.Textures.push_back(texture);
+				model.TexturePaths = paths;
+				for (uint32_t s = 0; s < subMeshCount; ++s) if (owners[s] != SIZE_MAX) subMeshTextures[s] = loaded[owners[s]];
+			}
+		}
+		for (uint32_t s = 0; s < subMeshCount; ++s)
+		{
+			const ModelSubMeshDesc& sub = subMeshes[s];
+			if (sub.IndexCount == 0) continue;
+			const RHI::IndexRange range = _rhi->UploadIndices(indices + sub.FirstIndex, sub.IndexCount);
+			if (!range.IsValid())
+			{
+				Core::Logger::Log("[SceneRenderer] CreateModel : failed upload indices.");
+				continue;
+			}
+			model.IndexRanges.push_back(range);
+			RHI::MaterialDesc desc;
+			const bool textured = subMeshTextures[s].Index != RHI::TextureHandle::DEFAULT;
+			desc.Texture = textured ? subMeshTextures[s] : RHI::TextureHandle();
+			for (int c = 0; c < 4; ++c) desc.Color[c] = sub.Color[c];
+			desc.Metallic    = sub.Metallic;
+			desc.Roughness   = sub.Roughness;
+			desc.Blend       = (sub.Flags & 1u) ? RHI::BlendMode::AlphaBlend : RHI::BlendMode::Opaque;
+			desc.DoubleSided = (sub.Flags & 2u) != 0;
+			RHI::DrawItem item;
+			item.BaseVertex = model.Vertices.BaseVertex;
+			item.FirstIndex = range.FirstIndex;
+			item.IndexCount = range.Count;
+			item.Material   = _rhi->CreateMaterial(desc);
+			model.Materials.push_back(item.Material);
+			model.SubMeshes.push_back(item);
+		}
+		if (model.SubMeshes.empty())
+		{
+			releaseModelResource(model);
+			return INVALID_HANDLE;
+		}
+		model.Positions.reserve(static_cast<size_t>(vertexCount) * 3);
+		for (uint32_t i = 0; i < vertexCount; ++i)
+		{
+			model.Positions.push_back(vertices[i].Position._x);
+			model.Positions.push_back(vertices[i].Position._y);
+			model.Positions.push_back(vertices[i].Position._z);
+		}
+		model.Indices.assign(indices, indices + indexCount);
+		model.Path = name;
+		const uint32_t count = static_cast<uint32_t>(model.SubMeshes.size());
+
+		// 入れ替え (読み直し) : 同じ番号のまま、前の物を GPU を待ってから返す
+		if (replace != INVALID_HANDLE && replace < _models.size() && !_models[replace].Path.empty())
+		{
+			ModelResource old = std::move(_models[replace]);
+			_models[replace] = std::move(model);
+			releaseModelResource(old);
+			_drawListDirty = true;
+			if (outSubMeshCount) *outSubMeshCount = count;
+			return replace;
+		}
+		if (outSubMeshCount) *outSubMeshCount = count;
+		if (!_freeModels.empty())
+		{
+			const uint32_t handle = _freeModels.back();
+			_freeModels.pop_back();
+			_models[handle] = std::move(model);
+			return handle;
+		}
+		_models.push_back(std::move(model));
+		return static_cast<uint32_t>(_models.size() - 1);
+	}
+
 	// ==============================================================
 	// ED5 : 読み直し / 解放 / マテリアル
 	// ==============================================================
