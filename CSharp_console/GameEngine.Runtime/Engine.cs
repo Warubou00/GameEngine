@@ -308,6 +308,35 @@ public sealed class Engine : IDisposable
     private readonly RenderSettingsSystem _renderSettingsSystem = new();   // RenderSettings / Volume → Graphics (ED6)
     private readonly ParticleSystem   _particleSystem;
     private readonly AnimationSystem  _animationSystem = new();   // AN3
+    private readonly SkinningSystem   _skinningSystem = new();    // AN4
+
+    /// <summary>確認用 (AN4) : 曲げる物の GPU で曲げた頂点を読み戻す。Request の 2 フレーム以上後に Read (GPU を待つ。戻り値 = 位置と法線、まだなら空)</summary>
+    public void RequestSkinReadback(Entity entity)
+    {
+        if (World.IsAlive(entity) && World.Has<MeshRenderer>(entity) && World.Get<MeshRenderer>(entity).IsCreated)
+            NativeMethods.Renderer_RequestSkinReadback(World.Get<MeshRenderer>(entity).Handle);
+    }
+
+    public unsafe (Vector3 Position, Vector3 Normal)[] ReadSkinReadback(int maxCount)
+    {
+        var vertices = new Primitives.NativeVertex[Math.Max(0, maxCount)];
+        uint count;
+        fixed (Primitives.NativeVertex* v = vertices) count = NativeMethods.Renderer_ReadSkinReadback(v, (uint)vertices.Length);
+        return vertices.Take((int)count).Select(v => (v.Position, v.Normal)).ToArray();
+    }
+
+    /// <summary>GPU スキニング (AN4) : 曲げる物の数 / 骨の行列の数 / C# の時間 (ms) / 前のフレームで GPU が曲げた物と頂点の数 /
+    /// GPU の時間 (ms。数フレーム前の値。曲げなかったフレームは 0)</summary>
+    public (int Objects, int Matrices, double Milliseconds, int GpuInstances, int GpuVertices, double GpuMilliseconds) SkinningStats
+    {
+        get
+        {
+            uint instances = 0, vertices = 0;
+            float gpuMs = 0;
+            try { NativeMethods.Renderer_GetSkinStats(out instances, out vertices, out gpuMs); } catch (EntryPointNotFoundException) { }
+            return (_skinningSystem.ObjectCount, _skinningSystem.MatrixCount, _skinningSystem.LastMilliseconds, (int)instances, (int)vertices, gpuMs);
+        }
+    }
 
     /// <summary>アニメーション (AN3) : 動かした Animator の数 / このフレームで書いた骨の数 / かかった時間 (ms)</summary>
     public (int Animators, int BonesWritten, double Milliseconds) AnimationStats => (_animationSystem.AnimatorCount, _animationSystem.BonesWritten, _animationSystem.LastMilliseconds);
@@ -543,6 +572,7 @@ public sealed class Engine : IDisposable
             _cameraSystem.Update(World, Graphics.CameraOverride);
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)
             _renderSyncSystem.Update(World);
+            _skinningSystem.Update(World, Assets);   // AN4 : 曲げる物の骨の行列を C++ へ (描画オブジェクトができた後)
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)

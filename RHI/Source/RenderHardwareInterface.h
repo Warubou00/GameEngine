@@ -73,6 +73,17 @@ namespace RHI
                               const MaterialHandle* materials, uint32_t materialCount, const TextureHandle* textures, uint32_t textureCount)override;
         bool ReloadShaders()override;
         uint64_t GetMeshBytesUsed()const override;
+        // AN4 : GPU スキニング
+        SkinRange   UploadSkin(const SkinVertex* vertices, uint32_t count)override;
+        void        ReleaseSkin(SkinRange range)override;
+        SkinHandle  CreateSkinInstance(VertexRange source, SkinRange skin, uint32_t boneCount)override;
+        VertexRange GetSkinOutput(SkinHandle instance)const override;
+        void        SetSkinPose(SkinHandle instance, const float* matrices, uint32_t boneCount)override;
+        void        SetSkinBounds(SkinHandle instance, const float* sphere)override;
+        void        DestroySkinInstance(SkinHandle instance)override;
+        void        GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const override;
+        void        RequestSkinReadback(SkinHandle instance)override;
+        uint32_t    ReadSkinReadback(Vertex* outVertices, uint32_t maxCount)override;
         ObjectHandle CreateObject()override;
         void         DestroyObject(ObjectHandle object)override;
         void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;

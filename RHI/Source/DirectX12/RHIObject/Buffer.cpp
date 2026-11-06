@@ -469,6 +469,138 @@ namespace RHI
 			_freeMaterials.push_back(material.Index);
 		}
 
+		// ==============================================================
+		// AN4 : GPU スキニング
+		// ==============================================================
+
+		RHI::SkinRange Buffer::UploadSkinData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext,
+		                                      const RHI::SkinVertex* vertices, uint32_t count)
+		{
+			RHI::SkinRange range;
+			if (!iDevice || !iCommandContext || !vertices || count == 0 || !_skinAllocator) return range;
+			auto allocation = _skinAllocator->Allocate(count, sizeof(RHI::SkinVertex));
+			if (!allocation.IsValid)
+			{
+				Core::Logger::Log("[Buffer] Skin buffer is full.");
+				return range;
+			}
+			if (!uploadToDefaultBuffer(static_cast<RHI::ObjectInterface::Device*>(iDevice), static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext),
+			                           _skinBuffer.get(), allocation.ByteOffset, vertices, static_cast<uint64_t>(count) * sizeof(RHI::SkinVertex)))
+			{
+				_skinAllocator->Free(allocation, sizeof(RHI::SkinVertex));
+				return range;
+			}
+			range.Base  = allocation.StrideOffset;
+			range.Count = count;
+			return range;
+		}
+
+		void Buffer::FreeSkinData(const RHI::SkinRange& range)
+		{
+			if (!range.IsValid() || !_skinAllocator) return;
+			RHI::ResourceBufferAllocation allocation;
+			allocation.ByteOffset   = static_cast<uint64_t>(range.Base) * sizeof(RHI::SkinVertex);
+			allocation.StrideOffset = range.Base;
+			allocation.Count        = range.Count;
+			allocation.IsValid      = true;
+			_skinAllocator->Free(allocation, sizeof(RHI::SkinVertex));
+		}
+
+		RHI::SkinHandle Buffer::CreateSkinInstance(RHI::VertexRange source, RHI::SkinRange skin, uint32_t boneCount)
+		{
+			RHI::SkinHandle handle;
+			if (!source.IsValid() || !skin.IsValid() || skin.Count != source.Count || boneCount == 0 || boneCount > MAX_SKIN_MATRICES) return handle;
+			auto allocation = _sceneVBAllocator->Allocate(source.Count, sizeof(RHI::Vertex));
+			if (!allocation.IsValid)
+			{
+				Core::Logger::Log("[Buffer] Scene vertex buffer is full (skinned instance).");
+				return handle;
+			}
+			SkinInstance instance;
+			instance.Source           = source;
+			instance.Output.BaseVertex = allocation.StrideOffset;
+			instance.Output.Count     = source.Count;
+			instance.Skin             = skin;
+			instance.BoneCount        = boneCount;
+			instance.Alive            = true;
+			instance.Dirty            = true;   // 最初の描画の前に、単位行列で休みの姿勢を書く
+			instance.Matrices.assign(static_cast<size_t>(boneCount) * 12, 0.0f);
+			for (uint32_t b = 0; b < boneCount; ++b)
+			{
+				float* m = instance.Matrices.data() + static_cast<size_t>(b) * 12;
+				m[0] = 1.0f; m[5] = 1.0f; m[10] = 1.0f;   // 列 0 = (1,0,0,0) / 列 1 = (0,1,0,0) / 列 2 = (0,0,1,0)
+			}
+			// 境界球 : 休みの姿勢の球を少し大きく (曲げて少し出ても消えないように。出たら SetSkinBounds で広げる)
+			::DirectX::XMFLOAT4 bounds = GetVertexBounds(source.BaseVertex);
+			if (bounds.w >= 0.0f) bounds.w *= 1.5f;
+			_vertexBounds[instance.Output.BaseVertex] = bounds;
+			_drawLayoutVersion++;
+			if (!_freeSkinInstances.empty())
+			{
+				handle.Index = _freeSkinInstances.back();
+				_freeSkinInstances.pop_back();
+				_skinInstances[handle.Index] = std::move(instance);
+			}
+			else
+			{
+				handle.Index = static_cast<uint32_t>(_skinInstances.size());
+				_skinInstances.push_back(std::move(instance));
+			}
+			return handle;
+		}
+
+		RHI::VertexRange Buffer::GetSkinOutput(RHI::SkinHandle instance)const
+		{
+			return instance.Index < _skinInstances.size() && _skinInstances[instance.Index].Alive ? _skinInstances[instance.Index].Output : RHI::VertexRange();
+		}
+
+		void Buffer::SetSkinPose(RHI::SkinHandle instance, const float* matrices, uint32_t boneCount)
+		{
+			if (!matrices || instance.Index >= _skinInstances.size() || !_skinInstances[instance.Index].Alive) return;
+			SkinInstance& skin = _skinInstances[instance.Index];
+			const size_t count = static_cast<size_t>((std::min)(boneCount, skin.BoneCount)) * 12;
+			if (std::memcmp(skin.Matrices.data(), matrices, count * sizeof(float)) == 0) return;   // 同じ姿勢なら曲げ直さない
+			std::memcpy(skin.Matrices.data(), matrices, count * sizeof(float));
+			skin.Dirty = true;
+		}
+
+		void Buffer::SetSkinBounds(RHI::SkinHandle instance, const float* sphere)
+		{
+			if (!sphere || instance.Index >= _skinInstances.size() || !_skinInstances[instance.Index].Alive) return;
+			const uint32_t base = _skinInstances[instance.Index].Output.BaseVertex;
+			auto found = _vertexBounds.find(base);
+			if (found == _vertexBounds.end()) return;
+			::DirectX::XMFLOAT4& current = found->second;
+			const float dx = sphere[0] - current.x, dy = sphere[1] - current.y, dz = sphere[2] - current.z;
+			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+			if (current.w >= 0.0f && distance + sphere[3] <= current.w) return;   // 今の球に入っている
+			// 両方を含む球を、少し余裕を持って (広げる回数を減らす。描画の引数を作り直すので)
+			const float radius = (std::max)(sphere[3], distance + (std::max)(0.0f, current.w)) * 1.25f;
+			current = ::DirectX::XMFLOAT4(sphere[0], sphere[1], sphere[2], radius);
+			_drawLayoutVersion++;
+		}
+
+		void Buffer::DestroySkinInstance(RHI::SkinHandle instance)
+		{
+			if (instance.Index >= _skinInstances.size() || !_skinInstances[instance.Index].Alive) return;
+			FreeVertexData(_skinInstances[instance.Index].Output);
+			_skinInstances[instance.Index] = SkinInstance();
+			_freeSkinInstances.push_back(instance.Index);
+		}
+
+		uint32_t Buffer::WriteSkinMatrices(uint32_t frameIndex, uint32_t written, const SkinInstance& instance)
+		{
+			if (!_skinMatrices || written + instance.BoneCount > MAX_SKIN_MATRICES) return UINT32_MAX;
+			const uint64_t offset = (static_cast<uint64_t>(MAX_SKIN_MATRICES) * frameIndex + written) * 48ull;
+			if (!_skinMatrices->WriteData(offset, instance.Matrices.data(), static_cast<size_t>(instance.BoneCount) * 48)) return UINT32_MAX;
+			return written;
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::GetSkinMatrixAddress(uint32_t frameIndex)const
+		{
+			return _skinMatrices ? _skinMatrices->GetGPUVirtualAddress() + static_cast<uint64_t>(MAX_SKIN_MATRICES) * 48ull * frameIndex : 0;
+		}
+
 		void Buffer::FreeVertexData(const RHI::VertexRange& range)
 		{
 			if (!range.IsValid() || !_sceneVBAllocator) return;
@@ -1001,12 +1133,18 @@ namespace RHI
 
 			_sceneVBAllocator->Initialize(_SCENE_VB_SIZE);
 
-			return makeBuffer(
-				device,
-				_sceneVB.get(),
-				_SCENE_VB_SIZE,
-				D3D12_HEAP_TYPE_DEFAULT
-			);
+			// AN4 : GPU スキニングがコンピュートで書くので UAV にもできるようにする (読むのは今までどおり SRV)
+			if (!makeBuffer(device, _sceneVB.get(), _SCENE_VB_SIZE, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) return false;
+
+			// AN4 : 骨の番号と重み (VRAM) / 骨の行列 (UPLOAD、フレームごとの領域)
+			_skinBuffer    = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+			_skinAllocator = std::make_unique<RHI::ResourceBufferAllocator>();
+			_skinAllocator->Initialize(_SKIN_BUFFER_SIZE);
+			_skinMatrices  = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+			if (!makeBuffer(device, _skinBuffer.get(), _SKIN_BUFFER_SIZE, D3D12_HEAP_TYPE_DEFAULT)) return false;
+			// UPLOAD は作った時に Map して開いたままにする (WriteData は Map した所に書く。以前は Map を忘れて書けなかった)
+			return makeBuffer(device, _skinMatrices.get(), static_cast<uint64_t>(MAX_SKIN_MATRICES) * 48ull * CommandContext::FRAME_COUNT, D3D12_HEAP_TYPE_UPLOAD) &&
+			       SUCCEEDED(_skinMatrices->Map());
 		}
 
 		bool Buffer::makeGlobalCB(RHI::ObjectInterface::Device* device)
@@ -1085,12 +1223,14 @@ namespace RHI
 			);
 		}
 
-		bool Buffer::makeBuffer(RHI::ObjectInterface::Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType)
+		bool Buffer::makeBuffer(RHI::ObjectInterface::Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType,
+		                        D3D12_RESOURCE_FLAGS flags)
 		{
 			const HRESULT hr = resourceBuffer->Create(
 				device->GetDevice()->GetDevice(),
 				sizeInBytes,
-				heapType
+				heapType,
+				flags
 			);
 			if (FAILED(hr))
 			{

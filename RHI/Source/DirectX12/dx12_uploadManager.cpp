@@ -159,6 +159,8 @@ namespace RHI
 				}
 				else
 				{
+					// AN4 : 描画キューのバリアと重ならないように、送信の前に描画側を待たせる
+					if (_beforeSubmit) _beforeSubmit();
 					ID3D12CommandList* lists[] = { _commandList->GetCmdList() };
 					_queue->Get()->ExecuteCommandLists(1, lists);
 				}

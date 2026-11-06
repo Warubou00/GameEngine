@@ -40,6 +40,7 @@ public sealed class AssetManager
     private readonly Dictionary<string, uint>     _textures3D = new(StringComparer.OrdinalIgnoreCase);   // SH2 : builtin: の 3D テクスチャ
     private readonly Dictionary<string, Fbx.FbxAsset> _fbx = new(StringComparer.OrdinalIgnoreCase);   // AN1
     private readonly Dictionary<string, Skeleton> _skeletons = new(StringComparer.OrdinalIgnoreCase);    // AN3
+    private readonly Dictionary<string, ModelSkin> _modelSkins = new(StringComparer.OrdinalIgnoreCase);  // AN4 : 曲げるモデル (部品) の骨
     private readonly Dictionary<string, AnimationClip> _clips = new(StringComparer.OrdinalIgnoreCase);   // AN3
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
@@ -93,6 +94,7 @@ public sealed class AssetManager
         rekey(_shaders, (shader, path) => shader.Path = path);   // SH2 (#line のファイル名は次のコンパイルから)
         rekey(_fbx, (fbx, path) => fbx.Path = path);   // AN1
         rekey(_skeletons, (skeleton, path) => skeleton.Path = path);   // AN3
+        rekey(_modelSkins);   // AN4
         rekey(_clips, (clip, path) => clip.Path = path);
     }
 
@@ -142,6 +144,9 @@ public sealed class AssetManager
         AssetReloaded?.Invoke(path);
         return asset.IsValid;
     }
+
+    /// <summary>曲げるモデル (部品) の骨 (AN4。スキンが無ければ null)</summary>
+    public ModelSkin? GetSkin(Model model) => model.IsValid && _modelSkins.TryGetValue(model.Path, out var skin) ? skin : null;
 
     // AN3 : スケルトン (xxx.skl.fbx)。読めない / 中身が足りない時は理由付きの例外
     public Skeleton LoadSkeleton(string path)
@@ -211,6 +216,35 @@ public sealed class AssetManager
             handle = NativeMethods.Renderer_CreateModel(v, (uint)vertices.Length, i, (uint)indices.Length, s, (uint)subMeshes.Length, textures, path, replace, out subMeshCount);
         if (handle == NativeMethods.InvalidHandle) throw new InvalidDataException($"{path} : the renderer could not create the model");
         if (node == null) asset.ModelData = data;   // Inspector に出すのはモデル全体の形
+        // AN4 : スキン (部品の時だけ) → C++ に骨の番号と重み、こちらに骨の名前と休みの姿勢の逆行列
+        if (data.HasSkin)
+        {
+            var skinVertices = new NativeMethods.SkinVertex[data.Positions.Count];
+            for (int v = 0; v < skinVertices.Length; v++)
+            {
+                var (b0, b1, b2, b3) = data.SkinIndices[v];
+                var w = data.SkinWeights[v];
+                uint q(float x) => (uint)Math.Clamp(MathF.Round(x * 65535.0f), 0, 65535);
+                skinVertices[v] = new NativeMethods.SkinVertex
+                {
+                    Bones01 = b0 | (uint)b1 << 16, Bones23 = b2 | (uint)b3 << 16,
+                    Weights01 = q(w.X) | q(w.Y) << 16, Weights23 = q(w.Z) | q(w.W) << 16,
+                };
+            }
+            bool ok;
+            fixed (NativeMethods.SkinVertex* s = skinVertices)
+                ok = NativeMethods.Renderer_SetModelSkin(handle, s, (uint)skinVertices.Length, (uint)data.SkinBones.Count + 1);
+            if (!ok) Console.WriteLine($"[FBX] {path} : could not set the skin (drawn in the bind pose)");
+            if (!_modelSkins.TryGetValue(path, out var skin)) _modelSkins[path] = skin = new ModelSkin();
+            skin.BoneNames = data.SkinBones.ToList();
+            skin.InverseBind = data.SkinInverseBind.ToList();
+            skin.BoneRadius = data.SkinBoneRadius.ToList();
+            skin.BindPositions = data.Positions.ToList();
+            skin.BoneIndices = data.SkinIndices.ToList();
+            skin.BoneWeights = data.SkinWeights.ToList();
+            skin.Version++;
+        }
+        else _modelSkins.Remove(path);
         return new Model(handle, (int)subMeshCount, path);
     }
 

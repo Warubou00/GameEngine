@@ -41,6 +41,7 @@
 #include "dx12_header.h"
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -118,6 +119,13 @@ namespace RHI
 
 			ID3D12Fence* GetFence()const;
 
+			/***********************************************************************************
+			 * @brief コピー命令を COPY キューへ送る直前に呼ぶ関数 (AN4)
+			 * @details 描画キューが同じバッファに明示的なバリアを張っている間は、COPY キューで書けない。
+			 *          描画側がその完了を CPU で待つために使う
+			 ************************************************************************************/
+			void SetBeforeSubmit(std::function<void()> callback) { _beforeSubmit = std::move(callback); }
+
 			// 未送信のコピー命令・確保があるか
 			bool HasPendingWork()const { return _isRecording || _currentHasAllocations; }
 
@@ -153,6 +161,7 @@ namespace RHI
 			std::vector<AllocatorEntry>                  _allocators;
 			size_t                                       _currentAllocator = 0;
 			bool                                         _isRecording      = false;
+			std::function<void()>                        _beforeSubmit;        // 送信の直前に呼ぶ (AN4)
 
 			// リングバッファ
 			std::unique_ptr<ResourceBuffer>              _ring;

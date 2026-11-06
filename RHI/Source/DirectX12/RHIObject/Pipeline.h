@@ -300,6 +300,15 @@ namespace RHI
             ID3D12PipelineState* GetHiZPipelineMs()const;        // CSDownsampleMS (MSAA の深度から段 0 を作る。無ければ nullptr)
 
             // GPU パーティクル
+            // AN4 : GPU スキニング (skinning.shader の CSSkin)。ルート : 0 = 定数 b0 (5 個) / 1 = UAV u0 (メガ頂点バッファ) /
+            //       2 = SRV t0 (骨と重み) / 3 = SRV t1 (骨の行列)
+            enum SkinRootParameterIndex : unsigned int { SKIN_PARAM_CONSTANTS = 0, SKIN_PARAM_VERTICES, SKIN_PARAM_SKIN, SKIN_PARAM_MATRICES, SKIN_PARAM_COUNT };
+            static constexpr uint32_t SKIN_CONSTANT_COUNT = 6;   // (以前は 5。Full を足した)
+            static constexpr uint32_t SKIN_THREAD_GROUP   = 64;
+            bool                    IsSkinningAvailable()const { return _skinRootSignature && _skinPipeline; }
+            ID3D12RootSignature*    GetSkinRootSignature()const;
+            ID3D12PipelineState*    GetSkinPipeline()const;
+
             bool                    IsParticleAvailable()const;
             ID3D12RootSignature*    GetParticleRootSignature()const;
             ID3D12PipelineState*    GetParticlePipeline(ParticleKernel kernel)const;
@@ -347,6 +356,8 @@ namespace RHI
             std::unique_ptr<DirectX12::RootSignature>    _hiZRootSignature;        // Hi-Z 用
             std::unique_ptr<DirectX12::PipelineState>    _hiZPipeline;
             std::unique_ptr<DirectX12::PipelineState>    _hiZPipelineMs;
+            std::unique_ptr<DirectX12::RootSignature>    _skinRootSignature;       // AN4 : GPU スキニング
+            std::unique_ptr<DirectX12::PipelineState>    _skinPipeline;
             std::unique_ptr<DirectX12::RootSignature>    _particleRootSignature;   // GPU パーティクル用
             std::unique_ptr<DirectX12::PipelineState>    _particlePipelines[PARTICLE_KERNEL_COUNT];
             std::unique_ptr<DirectX12::CommandSignature> _particleDrawSignature;
@@ -369,6 +380,7 @@ namespace RHI
             void       makeCullingPipeline(Device* device);
             void       makeHiZPipeline(Device* device);
             void       makeParticlePipeline(Device* device);
+            void       makeSkinPipeline(Device* device);   // AN4
         };
 
     }

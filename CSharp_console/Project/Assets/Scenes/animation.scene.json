@@ -3,7 +3,7 @@
   "version": 1,
   "entities": [
     {
-      "id": "344496fb-1614-4919-94d9-4d4f95796976",
+      "id": "73d3b4e2-a178-4e49-b6c9-7fd9ad298568",
       "name": "Sun",
       "active": true,
       "components": [
@@ -39,7 +39,7 @@
       ]
     },
     {
-      "id": "1961a598-872c-4754-ad22-a4718c4be442",
+      "id": "57fcc94b-c9c0-4826-bbb2-4b13ed348c0a",
       "name": "Main Camera",
       "active": true,
       "components": [
@@ -69,7 +69,7 @@
       ]
     },
     {
-      "id": "ef5e3321-ea57-4ee5-9e39-bedc472c0535",
+      "id": "24d6145b-7bbc-4c23-a3d0-902983e4631b",
       "name": "Ground",
       "active": true,
       "components": [
@@ -105,7 +105,7 @@
       ]
     },
     {
-      "id": "7e770629-52bc-4e53-8118-df016200aeca",
+      "id": "12722b69-3a46-497e-93d4-7dc10b3d09a5",
       "name": "Robot",
       "active": true,
       "components": [
@@ -146,7 +146,7 @@
       ]
     },
     {
-      "id": "193cbec6-363d-44d1-9116-9d72236561ae",
+      "id": "39dabff9-2336-417c-a578-9f80fd4b2ca4",
       "name": "Robot",
       "active": true,
       "components": [
@@ -168,12 +168,12 @@
             1,
             1
           ],
-          "Parent": "7e770629-52bc-4e53-8118-df016200aeca"
+          "Parent": "12722b69-3a46-497e-93d4-7dc10b3d09a5"
         }
       ]
     },
     {
-      "id": "2d60b7ac-8af5-4cf5-9546-c5acd4fb55be",
+      "id": "335eae64-8c79-4a81-bde9-2bb1e2221030",
       "name": "Hips",
       "active": true,
       "components": [
@@ -195,12 +195,12 @@
             1,
             1
           ],
-          "Parent": "193cbec6-363d-44d1-9116-9d72236561ae"
+          "Parent": "39dabff9-2336-417c-a578-9f80fd4b2ca4"
         }
       ]
     },
     {
-      "id": "71c2932c-5466-45ad-965a-101aeae90b72",
+      "id": "3fabada0-dab9-4bdb-8b96-85f6b196eb69",
       "name": "Spine",
       "active": true,
       "components": [
@@ -222,12 +222,12 @@
             1,
             1
           ],
-          "Parent": "2d60b7ac-8af5-4cf5-9546-c5acd4fb55be"
+          "Parent": "335eae64-8c79-4a81-bde9-2bb1e2221030"
         }
       ]
     },
     {
-      "id": "bbae2927-24a8-466a-8a72-aaa728287b52",
+      "id": "ab20262e-be30-4a88-baaf-2164db3c2075",
       "name": "Head",
       "active": true,
       "components": [
@@ -249,12 +249,12 @@
             1,
             1
           ],
-          "Parent": "71c2932c-5466-45ad-965a-101aeae90b72"
+          "Parent": "3fabada0-dab9-4bdb-8b96-85f6b196eb69"
         }
       ]
     },
     {
-      "id": "ecf1a72c-a7f9-4455-9f0c-8ee31cc7ce12",
+      "id": "6047bc97-c50f-4ea2-89c2-f0ffe4beaff0",
       "name": "ArmL",
       "active": true,
       "components": [
@@ -276,12 +276,12 @@
             1,
             1
           ],
-          "Parent": "71c2932c-5466-45ad-965a-101aeae90b72"
+          "Parent": "3fabada0-dab9-4bdb-8b96-85f6b196eb69"
         }
       ]
     },
     {
-      "id": "7c1aa992-e572-43ec-8c06-b60e7a4ab821",
+      "id": "8e1ebd3e-2d76-44e7-847e-9dd79ade0b80",
       "name": "ArmR",
       "active": true,
       "components": [
@@ -303,12 +303,12 @@
             1,
             1
           ],
-          "Parent": "71c2932c-5466-45ad-965a-101aeae90b72"
+          "Parent": "3fabada0-dab9-4bdb-8b96-85f6b196eb69"
         }
       ]
     },
     {
-      "id": "2b9c3330-6419-40bd-a0b0-3b5d5a5f329b",
+      "id": "8b09a589-57e0-487c-82e1-78a54f8aa2c7",
       "name": "LegL",
       "active": true,
       "components": [
@@ -330,12 +330,12 @@
             1,
             1
           ],
-          "Parent": "2d60b7ac-8af5-4cf5-9546-c5acd4fb55be"
+          "Parent": "335eae64-8c79-4a81-bde9-2bb1e2221030"
         }
       ]
     },
     {
-      "id": "b7f4d6ce-d109-4566-a460-7abbfc86c33a",
+      "id": "0da0ea6a-e91e-4a45-8a29-17e489d4500a",
       "name": "LegR",
       "active": true,
       "components": [
@@ -357,12 +357,12 @@
             1,
             1
           ],
-          "Parent": "2d60b7ac-8af5-4cf5-9546-c5acd4fb55be"
+          "Parent": "335eae64-8c79-4a81-bde9-2bb1e2221030"
         }
       ]
     },
     {
-      "id": "17209bba-8ad9-47ec-b36c-41270f8574c2",
+      "id": "d7c2c883-1508-46c5-b8a8-d7ca5c8e4f81",
       "name": "Pelvis",
       "active": true,
       "components": [
@@ -390,12 +390,12 @@
             1,
             1
           ],
-          "Parent": "2d60b7ac-8af5-4cf5-9546-c5acd4fb55be"
+          "Parent": "335eae64-8c79-4a81-bde9-2bb1e2221030"
         }
       ]
     },
     {
-      "id": "e44c227f-8de7-4b11-84e5-e40108027ebf",
+      "id": "9b8bae50-ad26-4688-81c1-af3cc2651e28",
       "name": "Torso",
       "active": true,
       "components": [
@@ -423,12 +423,12 @@
             1,
             1
           ],
-          "Parent": "71c2932c-5466-45ad-965a-101aeae90b72"
+          "Parent": "3fabada0-dab9-4bdb-8b96-85f6b196eb69"
         }
       ]
     },
     {
-      "id": "eb147e8c-5134-41ed-bcc6-128e8cb1049f",
+      "id": "e2123b68-e9cc-4449-9ec8-cb4a32ed97f4",
       "name": "HeadBox",
       "active": true,
       "components": [
@@ -456,12 +456,12 @@
             1,
             1
           ],
-          "Parent": "bbae2927-24a8-466a-8a72-aaa728287b52"
+          "Parent": "ab20262e-be30-4a88-baaf-2164db3c2075"
         }
       ]
     },
     {
-      "id": "38e0200b-9d24-40a6-bf88-3b3abb70b061",
+      "id": "013b9e54-f988-49fe-9ba8-0c87f20ad1e5",
       "name": "ArmLBox",
       "active": true,
       "components": [
@@ -489,12 +489,12 @@
             1,
             1
           ],
-          "Parent": "ecf1a72c-a7f9-4455-9f0c-8ee31cc7ce12"
+          "Parent": "6047bc97-c50f-4ea2-89c2-f0ffe4beaff0"
         }
       ]
     },
     {
-      "id": "633e257c-d5af-49cd-aef0-8305efcee042",
+      "id": "e570c7c4-2519-4cff-b24c-bdc5cd8b67a7",
       "name": "ArmRBox",
       "active": true,
       "components": [
@@ -522,12 +522,12 @@
             1,
             1
           ],
-          "Parent": "7c1aa992-e572-43ec-8c06-b60e7a4ab821"
+          "Parent": "8e1ebd3e-2d76-44e7-847e-9dd79ade0b80"
         }
       ]
     },
     {
-      "id": "5a4612ae-08e9-4165-91da-fc6231fe9c41",
+      "id": "9ae34140-5498-43a7-a221-09d7717453c6",
       "name": "LegLBox",
       "active": true,
       "components": [
@@ -555,12 +555,12 @@
             1,
             1
           ],
-          "Parent": "2b9c3330-6419-40bd-a0b0-3b5d5a5f329b"
+          "Parent": "8b09a589-57e0-487c-82e1-78a54f8aa2c7"
         }
       ]
     },
     {
-      "id": "f3928df4-cd80-4efc-bee5-7a92f46258a5",
+      "id": "ecfc7202-ac3e-4ff9-bdec-712d7d92965f",
       "name": "LegRBox",
       "active": true,
       "components": [
@@ -588,12 +588,12 @@
             1,
             1
           ],
-          "Parent": "b7f4d6ce-d109-4566-a460-7abbfc86c33a"
+          "Parent": "0da0ea6a-e91e-4a45-8a29-17e489d4500a"
         }
       ]
     },
     {
-      "id": "18a00662-2012-422c-bbbe-7e44d7103cbb",
+      "id": "699bf306-afc1-4748-b82b-e4b1a58b4a99",
       "name": "Arm",
       "active": true,
       "components": [
@@ -609,7 +609,7 @@
           "Loop": true,
           "Playing": true,
           "Time": 0.0,
-          "ShowBones": true
+          "ShowBones": false
         },
         {
           "type": "GameEngine.Transform",
@@ -634,7 +634,7 @@
       ]
     },
     {
-      "id": "b879fbf8-8010-4f0d-8b4f-785a23bbcc82",
+      "id": "351e720e-d631-494b-bbe4-c8d003b9a2fe",
       "name": "Arm_Root",
       "active": true,
       "components": [
@@ -656,12 +656,12 @@
             1,
             1
           ],
-          "Parent": "18a00662-2012-422c-bbbe-7e44d7103cbb"
+          "Parent": "699bf306-afc1-4748-b82b-e4b1a58b4a99"
         }
       ]
     },
     {
-      "id": "c3cdc038-b20b-4e0d-8c73-2f41df49568e",
+      "id": "ccb9408c-744c-4c83-aa3a-305492686791",
       "name": "Arm_Mid",
       "active": true,
       "components": [
@@ -683,12 +683,12 @@
             1,
             1
           ],
-          "Parent": "b879fbf8-8010-4f0d-8b4f-785a23bbcc82"
+          "Parent": "351e720e-d631-494b-bbe4-c8d003b9a2fe"
         }
       ]
     },
     {
-      "id": "fdea706f-0328-46da-9e2b-7a74e66da413",
+      "id": "58ae66b1-121d-4267-bd2a-e099ad2f8cd1",
       "name": "Arm_Tip",
       "active": true,
       "components": [
@@ -710,12 +710,12 @@
             1,
             1
           ],
-          "Parent": "c3cdc038-b20b-4e0d-8c73-2f41df49568e"
+          "Parent": "ccb9408c-744c-4c83-aa3a-305492686791"
         }
       ]
     },
     {
-      "id": "55b22b1f-dcf2-467e-88c1-f3a539df7390",
+      "id": "8e677e6f-e057-4d84-821c-ed4fd4abdec0",
       "name": "Arm_End",
       "active": true,
       "components": [
@@ -737,12 +737,12 @@
             1,
             1
           ],
-          "Parent": "fdea706f-0328-46da-9e2b-7a74e66da413"
+          "Parent": "58ae66b1-121d-4267-bd2a-e099ad2f8cd1"
         }
       ]
     },
     {
-      "id": "0b8dbfcc-626f-42a9-b6eb-d2d463ffec79",
+      "id": "6c22b95b-19f8-4c56-910f-a4236af01a7e",
       "name": "Arm",
       "active": true,
       "components": [
@@ -751,6 +751,10 @@
           "Model": {
             "path": "Assets/Samples/Fbx/Arm.mod.fbx#Arm"
           }
+        },
+        {
+          "type": "GameEngine.SkinnedMesh",
+          "Root": "699bf306-afc1-4748-b82b-e4b1a58b4a99"
         },
         {
           "type": "GameEngine.Transform",
@@ -770,7 +774,7 @@
             1,
             1
           ],
-          "Parent": "18a00662-2012-422c-bbbe-7e44d7103cbb"
+          "Parent": "699bf306-afc1-4748-b82b-e4b1a58b4a99"
         }
       ]
     }

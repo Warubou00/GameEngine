@@ -81,6 +81,7 @@ namespace RHI
 			constexpr const wchar_t* UI_SHADER_PATH            = L"../Shader/ui.shader";             // UI (エディター。ED3)
 			constexpr const wchar_t* PARTICLE_SIM_SHADER_PATH  = L"../Shader/particleSim.shader";    // GPU パーティクル (コンピュート)
 			constexpr const wchar_t* PARTICLE_DRAW_SHADER_PATH = L"../Shader/particleDraw.shader";   // GPU パーティクル (描画)
+			constexpr const wchar_t* SKINNING_SHADER_PATH      = L"../Shader/skinning.shader";       // GPU スキニング (AN4)
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -144,6 +145,8 @@ namespace RHI
 			_indirectDrawSignature.reset();
 			for (auto& pso : _particlePipelines) pso.reset();
 			_particleRootSignature.reset();
+			_skinPipeline.reset();
+			_skinRootSignature.reset();
 			_particleDrawSignature.reset();
 			_particleDispatchSignature.reset();
 			_particleDrawShaders.reset();
@@ -195,6 +198,7 @@ namespace RHI
             if (IsGpuCullingAvailable()) makeHiZPipeline(device);
             // GPU パーティクル (作れなくても、パーティクルを描かずに続けられる)
             makeParticlePipeline(device);
+            makeSkinPipeline(device);   // AN4 (作れなければ曲げずに休みの姿勢で描く)
             return RHI_SUCCEEDED;
 		}
 
@@ -1221,6 +1225,65 @@ namespace RHI
                     _hiZPipelineMs->Attach(psoMs);
                 }
             }
+        }
+
+        ID3D12RootSignature* Pipeline::GetSkinRootSignature()const { return _skinRootSignature ? _skinRootSignature->Get() : nullptr; }
+        ID3D12PipelineState* Pipeline::GetSkinPipeline()const { return _skinPipeline ? _skinPipeline->Get() : nullptr; }
+
+        void Pipeline::makeSkinPipeline(Device* device)
+        {
+            // ==============================================================
+            // AN4 : GPU スキニングのコンピュート。ルート定数 5 + Root UAV / SRV / SRV (ディスクリプタは使わない)
+            // ==============================================================
+            ID3D12Device* dx12Device = device->GetDevice()->GetDevice();
+            D3D12_ROOT_PARAMETER1 params[SKIN_PARAM_COUNT] = {};
+            params[SKIN_PARAM_CONSTANTS].ParameterType            = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+            params[SKIN_PARAM_CONSTANTS].Constants.ShaderRegister = 0;
+            params[SKIN_PARAM_CONSTANTS].Constants.Num32BitValues = SKIN_CONSTANT_COUNT;
+            params[SKIN_PARAM_VERTICES].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_UAV;
+            params[SKIN_PARAM_VERTICES].Descriptor.ShaderRegister = 0;
+            params[SKIN_PARAM_VERTICES].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE;
+            params[SKIN_PARAM_SKIN].ParameterType                 = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[SKIN_PARAM_SKIN].Descriptor.ShaderRegister     = 0;
+            params[SKIN_PARAM_SKIN].Descriptor.Flags              = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            params[SKIN_PARAM_MATRICES].ParameterType             = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            params[SKIN_PARAM_MATRICES].Descriptor.ShaderRegister = 1;
+            params[SKIN_PARAM_MATRICES].Descriptor.Flags          = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            for (auto& param : params) param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC desc = {};
+            desc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_1;
+            desc.Desc_1_1.NumParameters = SKIN_PARAM_COUNT;
+            desc.Desc_1_1.pParameters   = params;
+            auto rootSignature = std::make_unique<DirectX12::RootSignature>();
+            if (FAILED(rootSignature->Create(dx12Device, desc)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create skinning root signature. GPU skinning disabled.");
+                return;
+            }
+            Shader::CompiledShader cs;
+            if (!_shaderCompiler->Compile(SKINNING_SHADER_PATH, "CSSkin", Shader::Stage::Compute, cs))
+            {
+                Core::Logger::Log("[Pipeline] Failed compile skinning shader. GPU skinning disabled.");
+                return;
+            }
+            D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+            psoDesc.pRootSignature = rootSignature->Get();
+            psoDesc.CS             = cs.View();
+            const uint64_t rootSignatureHash = rootSignature->GetHash();
+            uint64_t hash = fnv1a(&rootSignatureHash, sizeof(rootSignatureHash));
+            hash = fnv1a(cs.Bytecode.data(), cs.Bytecode.size(), hash);
+            wchar_t psoName[64] = {};
+            swprintf_s(psoName, L"Skin_%016llx", hash);
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+            if (FAILED(_pipelineCache->GetOrCreateComputePipeline(psoName, psoDesc, pso)))
+            {
+                Core::Logger::Log("[Pipeline] Failed create skinning pipeline. GPU skinning disabled.");
+                return;
+            }
+            _skinRootSignature = std::move(rootSignature);
+            _skinPipeline      = std::make_unique<DirectX12::PipelineState>();
+            _skinPipeline->Attach(pso);
         }
 
         void Pipeline::makeParticlePipeline(Device* device)

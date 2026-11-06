@@ -158,6 +158,34 @@ namespace RHI
 		bool IsValid()const { return Count != 0; }
 	};
 
+	// ==========================================================================
+	// AN4 : GPU スキニング
+	//   SkinVertex : 頂点ごとの骨 (番号 16bit × 4 / 重み 16bit (0〜1) × 4)。skinning.shader の SkinVertex と同じ並び (16 byte)
+	//   SkinRange  : 骨と重みのバッファの中の範囲 (モデルごと)
+	//   SkinHandle : 曲げる物 1 つ (その物専用の頂点の場所と、骨の行列)
+	// ==========================================================================
+	struct SkinVertex
+	{
+		uint32_t Bones01   = 0;
+		uint32_t Bones23   = 0;
+		uint32_t Weights01 = 0;
+		uint32_t Weights23 = 0;
+	};
+	static_assert(sizeof(SkinVertex) == 16, "RHI::SkinVertex must be 16 bytes (same as HLSL)");
+
+	struct SkinRange
+	{
+		uint32_t Base  = 0;
+		uint32_t Count = 0;
+		bool IsValid()const { return Count != 0; }
+	};
+
+	struct SkinHandle
+	{
+		uint32_t Index = UINT32_MAX;
+		bool IsValid()const { return Index != UINT32_MAX; }
+	};
+
 	// メガインデックスバッファ内の範囲
 	struct IndexRange
 	{

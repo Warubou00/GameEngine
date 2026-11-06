@@ -188,6 +188,15 @@ namespace RHI
 			hr = _uploadManager->Initialize(dx12Device);
 			if (FAILED(hr)) { logFailed("UploadManager::Initialize", hr); return RHI_FAILED_CREATE_ANY_OBJECT; }
 			_uploadFenceWaited = 0;
+			// AN4 : COPY キューの送信の前に、メガ頂点バッファへ明示的なバリアを張った描画フレームの完了を CPU で待つ
+			//       (以前は待たず、描画キューのバリアが GPU で動いている間に COPY キューが同じバッファへ書き、デバッグレイヤーのエラーになった)
+			_uploadManager->SetBeforeSubmit([this]()
+			{
+				if (_skinBarrierFence != 0 && _fence && !_fence->IsCompleted(_skinBarrierFence))
+				{
+					_fence->WaitForValue(_skinBarrierFence);
+				}
+			});
 
 			// ---------- スワップチェーン ----------
 			HWND hWnd   = static_cast<HWND>(info->HWnd);
@@ -347,6 +356,11 @@ namespace RHI
 					_stats.GpuUiMs    = intervals[1];
 					_stats.GpuTotalMs = intervals[0] + intervals[1];
 				}
+				// AN4 : GPU スキニングの時間 (8 → 9)。曲げなかったフレームは 0
+				double skin = 0.0;
+				if (!_skinTimed[_frameIndex] || !_gpuTimer->ReadIntervalsFrom(_frameIndex, TIMESTAMP_SKIN_BEGIN, TIMESTAMP_SKIN_COUNT - 1, &skin)) skin = 0.0;
+				_skinGpuMs = static_cast<float>(skin);
+				_skinTimed[_frameIndex] = false;
 			}
 			_stats.Width  = _swapChain->GetWidth();
 			_stats.Height = _swapChain->GetHeight();
@@ -475,7 +489,13 @@ namespace RHI
 				_gpuTimer->Timestamp(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_FRAME_END);
 				// GPU パーティクルのタイムスタンプ (3〜7) を書いたフレームはそこまで読み戻す (欠けた区切りは埋めてある)
 				finishParticleTimestamps();
+				// AN4 : スキニングを計ったフレームは 9 番まで読み戻す。パーティクルを計っていなければ 3〜7 を今書いて埋める (書いていない番号を読み戻さない)
+				if (_skinTimed[_frameIndex] && !_particleTimed[_frameIndex])
+				{
+					for (UINT i = 0; i < TIMESTAMP_PARTICLE_COUNT; ++i) _gpuTimer->Timestamp(_frameCommandList->GetCmdList(), _frameIndex, TIMESTAMP_PARTICLE_BEGIN + i);
+				}
 				_gpuTimer->Resolve(_frameCommandList->GetCmdList(), _frameIndex,
+					_skinTimed[_frameIndex] ? TIMESTAMP_SKIN_BEGIN + TIMESTAMP_SKIN_COUNT :
 					_particleTimed[_frameIndex] ? TIMESTAMP_PARTICLE_BEGIN + TIMESTAMP_PARTICLE_COUNT : TIMESTAMP_COUNT);
 			}
 
@@ -487,6 +507,13 @@ namespace RHI
 			// 9. コマンドリストのクローズと実行
 			HRESULT hr = _frameCommandList->Close();
 			if (FAILED(hr)) { logFailed("CommandList::Close(Frame)", hr); return false; }
+
+			// AN4 : このフレームでメガ頂点バッファに明示的なバリア (スキニング) を張った時は、COPY キューの転送 (同じバッファへの頂点の
+			//       コピー) を CPU で待ってから出す。明示的なバリアは他のキューが使っている間は張れない (デバッグレイヤーのエラーになった。
+			//       GPU 上の待機 (Wait) では足りない)。転送はアセットを読んだ時だけなので、普段は待つ物が無くすぐ戻る
+			if (_skinBarrierThisFrame && _uploadManager) _uploadManager->WaitIdle();
+			const bool skinBarrierFrame = _skinBarrierThisFrame;
+			_skinBarrierThisFrame = false;
 
 			// このフレームで使うデータのアップロードを送信し、描画キューに GPU 上で完了を待たせる
 			// (CPU は待たない。COPY キューと描画キューは並行して動く)
@@ -509,6 +536,7 @@ namespace RHI
 			// 11. このフレームの完了の目印をシグナルして、次のフレームへ
 			//     ここでは待たない (Phase 0 までは毎フレーム GPU の完了を待っていた : 2-3)
 			_frames[_frameIndex].FenceValue = _fence->Signal(_commandQueue->Get());
+			if (skinBarrierFrame) _skinBarrierFence = _frames[_frameIndex].FenceValue;
 			_frameIndex = (_frameIndex + 1) % FRAME_COUNT;
 
 			return true;
@@ -563,6 +591,85 @@ namespace RHI
 			_stats.Triangles          = frame.Triangles;
 		}
 
+		// ==============================================================
+		// AN4 : GPU スキニング
+		//   姿勢が変わった物 (SetSkinPose で行列が変わった / 作ったばかり) だけ、CSSkin で曲げてその物専用の場所に書く
+		//   メガ頂点バッファは前のフレームの完了で COMMON に戻っている。このフレームでまだ誰も読んでいない (描画の前) ので
+		//   COMMON → UNORDERED_ACCESS → (曲げる) → 頂点を読む状態 (NON_PIXEL | PIXEL) と明示的に移す
+		//   骨の行列はフレームごとの UPLOAD の領域に書く (GPU が前のフレームで読んでいる所には触らない)
+		// ==============================================================
+		uint32_t CommandContext::ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount)
+		{
+			// GPU の完了は呼ぶ側 (RenderHardwareInterface) が待つ
+			if (!_skinReadback || _skinReadbackCount == 0 || !outVertices) return 0;
+			const uint32_t count = (std::min)(maxCount, _skinReadbackCount);
+			void* mapped = nullptr;
+			const D3D12_RANGE readRange = { 0, static_cast<SIZE_T>(count) * sizeof(RHI::Vertex) };
+			if (FAILED(_skinReadback->Get()->Map(0, &readRange, &mapped))) return 0;
+			std::memcpy(outVertices, mapped, static_cast<size_t>(count) * sizeof(RHI::Vertex));
+			const D3D12_RANGE written = { 0, 0 };
+			_skinReadback->Get()->Unmap(0, &written);
+			_skinReadbackCount = 0;
+			return count;
+		}
+
+		void CommandContext::recordSkinning(Buffer* buffer, ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES vertexState)
+		{
+			_skinnedInstances = 0;
+			_skinnedVertices  = 0;
+			auto& instances = buffer->GetSkinInstances();
+			if (instances.empty() || !_currentPipeline || !_currentPipeline->IsSkinningAvailable() || !buffer->GetSceneVB() || !buffer->GetSkinBuffer()) return;
+			bool any = false;
+			for (const auto& instance : instances) if (instance.Alive && instance.Dirty) { any = true; break; }
+			if (!any) return;
+
+			ID3D12Resource* vertices = buffer->GetSceneVB()->Get();
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource   = vertices;
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = vertexState;   // COMMON (読み戻しをした時は COPY_SOURCE)
+			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			if (_gpuTimer) _gpuTimer->Timestamp(cmdList, _frameIndex, TIMESTAMP_SKIN_BEGIN);   // バリアも含めて計る
+			cmdList->ResourceBarrier(1, &barrier);
+			_skinBarrierThisFrame = true;
+
+			cmdList->SetComputeRootSignature(_currentPipeline->GetSkinRootSignature());
+			cmdList->SetPipelineState(_currentPipeline->GetSkinPipeline());
+			cmdList->SetComputeRootUnorderedAccessView(Pipeline::SKIN_PARAM_VERTICES, vertices->GetGPUVirtualAddress());
+			cmdList->SetComputeRootShaderResourceView(Pipeline::SKIN_PARAM_SKIN, buffer->GetSkinBuffer()->GetGPUVirtualAddress());
+			cmdList->SetComputeRootShaderResourceView(Pipeline::SKIN_PARAM_MATRICES, buffer->GetSkinMatrixAddress(_frameIndex));
+			uint32_t written = 0;
+			for (auto& instance : instances)
+			{
+				if (!instance.Alive || !instance.Dirty) continue;
+				const uint32_t matrixBase = buffer->WriteSkinMatrices(_frameIndex, written, instance);
+				if (matrixBase == UINT32_MAX)
+				{
+					Core::Logger::Log("[CommandContext] Too many skin matrices in a frame (the rest are skinned next frame).");
+					break;
+				}
+				written += instance.BoneCount;
+				const uint32_t constants[Pipeline::SKIN_CONSTANT_COUNT] = {
+					instance.Source.BaseVertex, instance.Output.BaseVertex, instance.Skin.Base, instance.Output.Count, matrixBase * 3, instance.Full ? 1u : 0u };
+				cmdList->SetComputeRoot32BitConstants(Pipeline::SKIN_PARAM_CONSTANTS, Pipeline::SKIN_CONSTANT_COUNT, constants, 0);
+				cmdList->Dispatch((instance.Output.Count + Pipeline::SKIN_THREAD_GROUP - 1) / Pipeline::SKIN_THREAD_GROUP, 1, 1);
+				instance.Dirty = false;
+				instance.Full  = false;
+				_skinnedInstances++;
+				_skinnedVertices += instance.Output.Count;
+			}
+
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			cmdList->ResourceBarrier(1, &barrier);
+			if (_gpuTimer)
+			{
+				_gpuTimer->Timestamp(cmdList, _frameIndex, TIMESTAMP_SKIN_BEGIN + 1);
+				_skinTimed[_frameIndex] = true;
+			}
+		}
+
 		void CommandContext::ExecuteRenderCommands(Buffer* buffer, const RHI::RenderCommand* commands, uint32_t count)
 		{
 			if (!buffer || !_frameCommandList->IsRecording() || (!commands && count > 0))
@@ -575,6 +682,30 @@ namespace RHI
 			_culledState    = D3D12_RESOURCE_STATE_COMMON;       // 前のフレームの完了で COMMON に戻っている
 			_sceneDepthReadLastFrame = _sceneDepthReadThisFrame;
 			_sceneDepthReadThisFrame = false;
+
+			// AN4 : 確認用の読み戻し (頼まれた時だけ)。前のフレームまでに曲げた頂点を写す。メガ頂点バッファは COMMON から COPY_SOURCE に暗黙で上がる
+			D3D12_RESOURCE_STATES vertexState = D3D12_RESOURCE_STATE_COMMON;
+			if (_skinReadbackRequest.IsValid() && buffer->GetSceneVB())
+			{
+				const UINT64 bytes = static_cast<UINT64>(_skinReadbackRequest.Count) * sizeof(RHI::Vertex);
+				if (!_skinReadback || _skinReadbackSize < bytes)
+				{
+					_skinReadback = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+					_skinReadbackSize = bytes;
+					if (FAILED(_skinReadback->Create(_device->GetDevice()->GetDevice(), bytes, D3D12_HEAP_TYPE_READBACK))) { _skinReadback.reset(); _skinReadbackSize = 0; }
+				}
+				if (_skinReadback)
+				{
+					cmdList->CopyBufferRegion(_skinReadback->Get(), 0, buffer->GetSceneVB()->Get(),
+					                          static_cast<UINT64>(_skinReadbackRequest.BaseVertex) * sizeof(RHI::Vertex), bytes);
+					_skinReadbackCount = _skinReadbackRequest.Count;
+					vertexState = D3D12_RESOURCE_STATE_COPY_SOURCE;
+				}
+				_skinReadbackRequest = RHI::VertexRange();
+			}
+
+			// AN4 : GPU スキニング (この後の描画が曲げた頂点を読む。姿勢が変わった物だけ)
+			recordSkinning(buffer, cmdList, vertexState);
 
 			for (uint32_t i = 0; i < count; ++i)
 			{

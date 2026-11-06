@@ -280,6 +280,37 @@ internal static unsafe class NativeMethods
                                                    [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPWStr)] string?[] texturePaths,
                                                    [MarshalAs(UnmanagedType.LPWStr)] string name, uint replace, out uint createdSubMeshCount);
 
+    // ---------- AN4 : GPU スキニング ----------
+    // 頂点ごとの骨 (C++ の RHI::SkinVertex と同じ並び : 16 byte。番号 16bit × 4 / 重み 16bit × 4)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SkinVertex
+    {
+        public uint Bones01;
+        public uint Bones23;
+        public uint Weights01;
+        public uint Weights23;
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_SetModelSkin(uint model, SkinVertex* vertices, uint count, uint boneCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetObjectsSkinned(uint* objects, uint count, [MarshalAs(UnmanagedType.I1)] bool skinned);
+
+    // 姿勢 : 骨の行列 (1 本 12 個 = 行ベクトルの行列の 3 列) を boneCounts[i] 本ずつ、境界球 (中心 xyz と半径) を 1 個ずつ
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetSkinPoses(uint* objects, uint count, float* matrices, uint* boneCounts, float* spheres);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_GetSkinStats(out uint instances, out uint vertices, out float gpuMs);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_RequestSkinReadback(uint obj);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_ReadSkinReadback(Primitives.NativeVertex* vertices, uint maxCount);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_CreateRenderObjects(uint model, uint count, uint* outHandles);
 

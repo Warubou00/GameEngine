@@ -120,6 +120,18 @@ namespace Renderer
 		uint32_t CreateModel(const RHI::Vertex* vertices, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount,
 		                     const ModelSubMeshDesc* subMeshes, uint32_t subMeshCount, const wchar_t* const* texturePaths,
 		                     const std::wstring& name, uint32_t replace, uint32_t* outSubMeshCount);
+		// ---------- AN4 : GPU スキニング ----------
+		// モデルに骨と重みを付ける (頂点の数と同じ数)。boneCount = 骨の行列の数。置いてある物の曲げ方も作り直す
+		bool SetModelSkin(uint32_t model, const RHI::SkinVertex* vertices, uint32_t count, uint32_t boneCount);
+		// 描画オブジェクトを曲げる / 曲げない (モデルに骨が無ければ何もしない)
+		void SetObjectsSkinned(const uint32_t* handles, uint32_t count, bool skinned);
+		// 姿勢 : オブジェクトごとに 骨の行列 (1 本 12 個) を boneCounts[i] 本、境界球 (4 個) を 1 個
+		void SetSkinPoses(const uint32_t* handles, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres);
+		void GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const;
+		// 確認用 : 描画オブジェクトの曲げた頂点を読み戻す (Request の数フレーム後に Read)
+		void     RequestSkinReadback(uint32_t handle);
+		uint32_t ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount);
+
 		// RHI をそのまま使う機能 (SH2 : 自分のシェーダー / 3D テクスチャ)。初期化前は nullptr
 		RHI::IRenderHardwareInterface* GetRHI()const { return IsInitialized() ? _rhi : nullptr; }
 		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)
@@ -234,6 +246,9 @@ namespace Renderer
 			std::vector<RHI::MaterialHandle> Materials;
 			std::vector<RHI::TextureHandle>  Textures;
 			std::vector<std::wstring>        TexturePaths;
+			// AN4 : 骨と重み (曲げるモデルだけ)
+			RHI::SkinRange                   Skin;
+			uint32_t                         SkinBones = 0;
 		};
 
 		// 描画オブジェクト : どのモデルを、どの RHI のオブジェクト (ワールド行列) で描くか
@@ -242,6 +257,7 @@ namespace Renderer
 			uint32_t          Model = INVALID_HANDLE;   // INVALID_HANDLE なら空き
 			RHI::ObjectHandle Object;                   // 全サブメッシュで共有する
 			uint32_t          MaterialOverride = INVALID_HANDLE;   // ED5 : マテリアルのアセット (INVALID_HANDLE ならモデルのマテリアル)
+			RHI::SkinHandle   Skin;                                // AN4 : 曲げる物 (有効なら、その物専用の頂点の場所で描く)
 		};
 
 		// テクスチャのファイルが無ければ、拡張子を変えて探す (見つからなければそのまま返す)
