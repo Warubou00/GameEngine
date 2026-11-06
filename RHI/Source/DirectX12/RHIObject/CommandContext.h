@@ -672,6 +672,28 @@ namespace RHI
             uint32_t                                             _customDrawCount = 0;   // このフレームで自分のシェーダーで描いた数 (確認用)
         public:
             uint32_t GetCustomDrawCount()const { return _customDrawCount; }
+            // AN4 : 前のフレームで曲げた物と頂点の数
+            uint32_t GetSkinnedInstances()const { return _skinnedInstances; }
+            uint32_t GetSkinnedVertices()const { return _skinnedVertices; }
+            float    GetSkinGpuMs()const { return _skinGpuMs; }   // FRAME_COUNT フレーム前の GPU スキニングの時間 (曲げなかったフレームは 0)
+        private:
+            void recordSkinning(Buffer* buffer, ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES vertexState);   // 描画の前に、姿勢が変わった物を曲げる
+            // 確認用の読み戻し (フレームの頭で写す)
+            RHI::VertexRange                                _skinReadbackRequest;
+            uint32_t                                        _skinReadbackCount = 0;   // 写した数 (読める数)
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _skinReadback;
+            UINT64                                          _skinReadbackSize = 0;
+        public:
+            void     RequestSkinReadback(RHI::VertexRange range) { _skinReadbackRequest = range; }
+            uint32_t ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount);
+        private:
+            uint32_t _skinnedInstances = 0;
+            bool     _skinBarrierThisFrame = false;   // このフレームでメガ頂点バッファに明示的なバリアを張ったか
+            UINT64   _skinBarrierFence     = 0;       // 明示的なバリアを張った最後のフレームのフェンス値 (COPY の送信前に待つ)
+            uint32_t _skinnedVertices  = 0;
+            bool     _skinTimed[FRAME_COUNT] = {};   // そのフレームで GPU スキニングの時間を計ったか
+            float    _skinGpuMs        = 0.0f;
+        public:
         private:
             void finishParticleTimestamps();            // RenderEnd : タイムスタンプの欠けを埋める
 
@@ -679,6 +701,9 @@ namespace RHI
             //                   3〜7 = パーティクル (更新の始め / ソートの始め / 更新の終わり / 描画の始め / 描画の終わり))
             static constexpr UINT TIMESTAMP_PARTICLE_BEGIN = 3;
             static constexpr UINT TIMESTAMP_PARTICLE_COUNT = 5;
+            // 8〜9 = GPU スキニング (始め / 終わり。AN4)
+            static constexpr UINT TIMESTAMP_SKIN_BEGIN     = 8;
+            static constexpr UINT TIMESTAMP_SKIN_COUNT     = 2;
             std::unique_ptr<RHI::DirectX12::GpuTimer>            _gpuTimer;
             RHI::FrameStats                                      _stats;
             bool                                                 _allowTearing = false;

@@ -1463,13 +1463,107 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- AN4 : GPU スキニング ----------
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        var skinRoot = _app.CreateAnimated(database.Find($"{FbxSamples.Folder}/Arm.skl.fbx")!, System.Numerics.Vector3.Zero, Entity.Null);
+        var skinPart = findChild(skinRoot, "Arm");
+        World.Get<Animator>(skinRoot).Time = 0;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var armSkin = _app.Engine.Assets.GetSkin(World.Get<MeshRenderer>(skinPart).Model)!;
+        // 休みの姿勢 : GPU の頂点 = 休みの姿勢の頂点
+        _app.Engine.RequestSkinReadback(skinPart);
+        for (int i = 0; i < 3; i++) yield return 0;
+        var bindRead = _app.Engine.ReadSkinReadback(armSkin.BindPositions.Count);
+        var bindError = bindRead.Length == armSkin.BindPositions.Count ? bindRead.Select((v, i) => System.Numerics.Vector3.Distance(v.Position, armSkin.BindPositions[i])).Max() : float.MaxValue;
+        check(World.Has<SkinnedMesh>(skinPart) && World.Get<SkinnedMesh>(skinPart).BoundBoneCount == 3 && armSkin.BoneNames.Count == 3 && bindError < 1e-4f,
+              $"a skinned part : 3 bones bound, the GPU output in the bind pose equals the bind vertices ({bindRead.Length} vertices, max error {bindError:G3})");
+        // 振りの 0.5 秒 : 上の輪 (休みの姿勢で高さ 3 m。先の骨に重み 1) の中心 = Arm_End (手で計算)
+        World.Get<Animator>(skinRoot).Time = 0.5f;
+        for (int i = 0; i < 3; i++) yield return 0;
+        _app.Engine.RequestSkinReadback(skinPart);
+        for (int i = 0; i < 3; i++) yield return 0;
+        var poseRead = _app.Engine.ReadSkinReadback(armSkin.BindPositions.Count);
+        var topRing = Enumerable.Range(0, armSkin.BindPositions.Count).Where(i => MathF.Abs(armSkin.BindPositions[i].Y - 3) < 1e-3f).ToList();
+        var topCenter = topRing.Aggregate(System.Numerics.Vector3.Zero, (acc, i) => acc + poseRead[i].Position) / topRing.Count;
+        var expectedTop = new System.Numerics.Vector3(-MathF.Sin(40 * MathF.PI / 180) - MathF.Sin(100 * MathF.PI / 180), 1 + MathF.Cos(40 * MathF.PI / 180) + MathF.Cos(100 * MathF.PI / 180), 0);
+        check(poseRead.Length == armSkin.BindPositions.Count && topRing.Count > 0 && near(topCenter, expectedTop, 2e-3f),
+              $"GPU skinning bends the mesh with the bones : the top ring at 0.5 s is centered at {topCenter:F3} (Arm_End by hand {expectedTop:F3})");
+        // CPU で同じ計算 (重み付きの行列) と比べる : 全部の頂点
+        System.Numerics.Matrix4x4.Invert(Hierarchy.GetWorldMatrix(World, skinPart), out var partInverse);
+        var bones = armSkin.BoneNames.Select(n => findChild(skinRoot, n)).ToList();
+        var cpuError = 0f;
+        var normalError = 0f;
+        for (int v = 0; v < armSkin.BindPositions.Count; v++)
+        {
+            var (b0, b1, b2, b3) = armSkin.BoneIndices[v];
+            var w = armSkin.BoneWeights[v];
+            var expected = System.Numerics.Vector3.Zero;
+            foreach (var (bi, weight) in new[] { (b0, w.X), (b1, w.Y), (b2, w.Z), (b3, w.W) })
+            {
+                if (weight <= 0) continue;
+                var m = bi < bones.Count ? armSkin.InverseBind[bi] * Hierarchy.GetWorldMatrix(World, bones[bi]) * partInverse : System.Numerics.Matrix4x4.Identity;
+                expected += weight * System.Numerics.Vector3.Transform(armSkin.BindPositions[v], m);
+            }
+            cpuError = MathF.Max(cpuError, System.Numerics.Vector3.Distance(expected, poseRead[v].Position));
+            normalError = MathF.Max(normalError, MathF.Abs(poseRead[v].Normal.Length() - 1));
+        }
+        check(cpuError < 1e-3f && normalError < 1e-3f,
+              $"GPU = CPU for every vertex (the same weighted bone matrices) : max error {cpuError * 1000:F3} mm, normals unit length (max error {normalError:G2})");
+        // 姿勢が同じなら曲げ直さない / 変わった物だけ
+        World.Get<Animator>(skinRoot).Time = 0.5f;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var idleStats = _app.Engine.SkinningStats;
+        World.Get<Animator>(skinRoot).Time = 0.75f;
+        yield return 0;
+        yield return 0;
+        var movedStats = _app.Engine.SkinningStats;
+        check(idleStats.Objects == 1 && idleStats.GpuInstances == 0 && movedStats.GpuInstances == 1 && movedStats.GpuVertices == armSkin.BindPositions.Count,
+              $"the GPU skins only when the pose changes (still : {idleStats.GpuInstances} instances, moved : {movedStats.GpuInstances} instance / {movedStats.GpuVertices} vertices)");
+        // 元に戻す / やり直す、保存して開き直す : また曲がる
+        _app.Undo();
+        yield return 0;
+        _app.Redo();
+        for (int i = 0; i < 3; i++) yield return 0;
+        var redoPart = World.Entities.FirstOrDefault(e => World.Has<SkinnedMesh>(e));
+        var skinScene = $"{determinismFolder}/skin.scene.json";
+        _app.SaveSceneTo(database.FullPath(skinScene));
+        _app.OpenScene(database.FullPath(skinScene));
+        foreach (var e in World.Entities.Where(e => World.Has<Animator>(e)).ToList()) World.Get<Animator>(e).Time = 0.3f;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var reopenedPart = World.Entities.FirstOrDefault(e => World.Has<SkinnedMesh>(e));
+        check(redoPart != Entity.Null && reopenedPart != Entity.Null && World.Get<SkinnedMesh>(reopenedPart).BoundBoneCount == 3 && _app.Engine.SkinningStats.Objects == 1,
+              "a skinned object survives undo / redo and save / reopen (bones bound, skinned again)");
+        // 時間 : 細かい腕 (周り 64 × 縦 96 = 約 1.9 万頂点) を 100 本、再生
+        foreach (var (name, data) in new[] { ("Dense.mod.fbx", FbxSamples.Arm(FbxSamples.ArmPart.Model, sides: 64, rings: 96)), ("Dense.skl.fbx", FbxSamples.Arm(FbxSamples.ArmPart.Skeleton)), ("Dense_Wave.anm.fbx", FbxSamples.Arm(FbxSamples.ArmPart.Animation)) })
+            File.WriteAllBytes(database.FullPath($"{determinismFolder}/{name}"), data);
+        database.Refresh();
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        for (int i = 0; i < 100; i++) _app.CreateAnimated(database.Find($"{determinismFolder}/Dense.skl.fbx")!, new System.Numerics.Vector3(i % 10 * 1.0f - 5, 0, i / 10 * 1.0f), Entity.Null);
+        Time.CaptureDeltaTime = 1.0f / 60;
+        _app.TogglePlay();
+        for (int i = 0; i < 10; i++) yield return 0;
+        var skinMs = new List<double>();
+        var skinGpuMs = new List<double>();
+        for (int i = 0; i < 60; i++) { yield return 0; skinMs.Add(_app.Engine.SkinningStats.Milliseconds); if (_app.Engine.SkinningStats.GpuMilliseconds > 0) skinGpuMs.Add(_app.Engine.SkinningStats.GpuMilliseconds); }
+        var denseStats = _app.Engine.SkinningStats;
+        _app.TogglePlay();
+        Time.CaptureDeltaTime = 0;
+        check(denseStats.Objects == 100 && denseStats.GpuInstances == 100 && denseStats.GpuVertices > 1_500_000 && skinGpuMs.Count > 30,
+              $"100 dense skinned arms : {denseStats.GpuInstances} instances / {denseStats.GpuVertices:N0} vertices skinned on the GPU per frame in {(skinGpuMs.Count > 0 ? skinGpuMs.Average() : 0):F3} ms (max {(skinGpuMs.Count > 0 ? skinGpuMs.Max() : 0):F3}, {skinGpuMs.Count} frames), " +
+              $"C# {skinMs.Average():F3} ms (max {skinMs.Max():F3}) for {denseStats.Matrices} bone matrices");
+        _app.OpenScene(database.FullPath(skinScene));
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene, animScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene, animScene, skinScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;

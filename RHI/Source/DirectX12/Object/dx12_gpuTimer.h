@@ -35,7 +35,8 @@ namespace RHI
 		public:
 			// 1 フレームで書けるタイムスタンプの数 (開始 / 区切り / 終了)
 			// (以前は 4。GPU パーティクルの 更新 / ソート / 描画 の区切りを足した : CommandContext の TIMESTAMP_PARTICLE_*)
-			static constexpr UINT TIMESTAMPS_PER_FRAME = 8;
+			// (AN4 : 8 → 10。GPU スキニングの始め / 終わりを足した : TIMESTAMP_SKIN_BEGIN)
+			static constexpr UINT TIMESTAMPS_PER_FRAME = 10;
 
 			GpuTimer();
 			~GpuTimer();

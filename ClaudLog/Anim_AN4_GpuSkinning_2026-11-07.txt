@@ -1,0 +1,67 @@
+﻿アニメーション AN4 : GPU スキニング 2026-11-07
+ブランチ : feature/anim-an4
+ロードマップ : ClaudLog/Engine_Roadmap_Animation_2026-11-07.txt (AN1 → AN5)
+
+■ できた物
+  スキンのある .mod.fbx (Arm など) が、骨に合わせて GPU で曲がる (以前 (AN3) は休みの姿勢のまま根の下に置いていた)
+  使い方 : .skl.fbx をシーンに落とすと、スキンのある部品に SkinnedMesh { Root = 動く物の根 } が付く。再生すると曲がる
+    SkinnedMesh : 骨は Root (空なら一番近い Animator) の下から、スキンの骨の名前で探す。Inspector に見つけた骨の数
+  見本のシーン : Assets/Scenes/animation.scene.json の Arm (骨の線は消した)
+
+■ しくみ
+  1. 読む (FbxModelImporter.importSkin) : Deformer (Skin) → SubDeformer (Cluster) の Indexes / Weights / Transform / TransformLink
+     頂点ごとに重みの大きい 4 本を選んで足して 1 にする。どの骨も効かない頂点は「動かない骨」(番号 = 骨の数。単位行列) へ
+     休みの姿勢の逆行列 InvBind_k = C⁻¹ · Transform · TransformLink⁻¹ · C (エンジンの空間。AN3 の C⁻¹ L C と同じ形)
+  2. 送る (AssetManager) : SkinVertex (骨の番号 u16 × 4 + 重み unorm16 × 4 = 16 byte) を RHI の専用バッファ (64 MB) へ。
+     ModelSkin (骨の名前 / InvBind / 骨の届く長さ) は C# に持つ
+  3. 物ごと (Renderer_SetObjectsSkinned) : メガ頂点バッファに、その物専用の書き先 (頂点の数だけ) を取る。
+     描画リストの BaseVertex を書き先に差し替える → 影 3 段 / 深度 / 本描画 / 自分のシェーダー が全部そのまま曲がった頂点を読む
+     (頂点シェーダーで曲げると 1 フレームに 5 回以上曲げることになるので、コンピュートで 1 回だけ曲げて書く)
+  4. 毎フレーム (SkinningSystem。RenderSync の後) : 骨 k の行列 = InvBind_k × 骨のワールド × メッシュのワールド⁻¹ (メッシュの空間)
+     12 個 (行ベクトルの行列の 3 列) にして、全部の物をまとめて 1 回の P/Invoke (Renderer_SetSkinPoses) で送る
+     境界の球 : 骨の原点と届く長さから作り、大きくなる時だけ広げる (× 1.25。描画リストを作り直す回数を減らす)
+  5. GPU (skinning.shader CSSkin、64 スレッド 1 頂点ずつ) : ExecuteRenderCommands の頭で、姿勢が変わった物だけ Dispatch
+     行列は毎フレームの UPLOAD のリング (最大 65536 本)。メガ頂点バッファのバリア COMMON → UAV → NON_PIXEL|PIXEL
+     毎フレーム書くのは位置と法線だけ (32 byte)。色と UV は作った直後の 1 回 (Full) だけ写す
+       (以前は頂点を丸ごと (56 byte) 毎フレーム読み書きしていた。下の計測で 3 割遅かった)
+  メガ頂点バッファ : UAV を許可して作る。64 MB → 256 MB (曲げた頂点の書き先を入れるため。VRAM が 192 MB 増える)
+
+■ 直した不具合 (途中で見つけた物)
+  1. 見本の Arm.mod.fbx (FbxSamples.Arm) : クラスターの Transform に骨の逆行列を書いていた → 単位行列 (休みの時のメッシュのワールド)。
+     休みの姿勢で 2 m ずれていた。読む側は正しかった。Arm.mod.fbx を作り直した
+  2. D3D12 のデバッグレイヤーのエラー (Debug でだけ。アセットを読み直した時) :
+     「Buffer Resource is still referenced by ... GPU operations in-flight on another Command Queue」
+     メガ頂点バッファに明示的なバリアを張る描画キューと、同じバッファへ頂点を写す COPY キューが重なった。GPU 上の待機 (Wait) では足りない
+     → (a) バリアを張るフレームは、送る前に COPY キューの転送を CPU で待つ (RenderEnd)
+       (b) COPY キューが送る前に、バリアを張った最後の描画フレームの完了を CPU で待つ (UploadManager::SetBeforeSubmit)
+     転送はアセットを読んだ時だけなので、普段は待つ物が無い。Debug のテストで エラー 1 → 0
+
+■ 計測 (RTX 2070 / Release / エディターのテスト。細かい腕 (周り 64 × 縦 96) を 100 本、毎フレーム曲げる)
+  GPU の時間 : 専用のタイムスタンプ (8 → 9 番。GpuTimer の 1 フレームの数 8 → 10) を足して計った。Engine.SkinningStats.GpuMilliseconds
+    190.9 万頂点 / フレーム
+      丸ごと読み書き (56 byte)        : 1.881 ms / 1.643 ms (2 回)
+      位置と法線だけ (32 byte) ← 今   : 1.092 ms / 1.272 ms (2 回)   約 3 割減。約 16 億頂点 / 秒
+  C# (SkinningSystem。400 本の行列) : 0.109〜0.135 ms (最大 0.4〜0.8 ms)
+  姿勢が変わらない物は曲げない (止まっている時 GPU 0 個、動いた 1 個だけ)
+  計っていない物 : 骨の無い普通のシーン (showcase) の時間。メガ頂点バッファの UAV の許可と大きさ以外は変えていない
+
+■ 確かめたこと (エディターのテスト 233 / 0。Release 2 回 / Debug 1 回、Debug の D3D12 のエラーと警告 0)
+  休みの姿勢 : GPU で曲げた頂点 (読み戻し) = 休みの姿勢の頂点 (242 頂点、誤差 3e-5)
+  0.5 秒 : 上の輪の中心 = Arm_End (手で計算 (-1.628, 1.592, 0))
+  全部の頂点で GPU = CPU (同じ重み付きの行列) : 誤差 0.031 mm、法線の長さ 1 (誤差 1.2e-7)
+  姿勢が同じなら曲げない / 変わった物だけ曲げる
+  元に戻す / やり直す、保存して開き直す : また骨が付いて曲がる
+  作ったゲーム (Player) で skin.scene.json がエディターの再生と同じに動く (誤差 0)
+  画面 : animation.scene.json を再生 → 腕がなめらかに曲がる (色もそのまま)。2 枚で姿勢が変わる
+
+■ 変えたファイル
+  新規 : RHI/Source/Shader/skinning.shader, GameEngine.Runtime/Components/SkinnedMesh.cs, Systems/SkinningSystem.cs
+  RHI : rhi.h / rhiTypes.h (SkinVertex / SkinRange / SkinHandle と関数), RenderHardwareInterface, Buffer (スキンのデータと物),
+        Pipeline (スキニングのルートシグネチャ / PSO), CommandContext (recordSkinning / 読み戻し / 時間 / キューの待ち),
+        dx12_uploadManager (送る前の関数), dx12_gpuTimer (10 個)
+  Renderer : sceneRenderer / rendererDll (SetModelSkin / SetObjectsSkinned / SetSkinPoses / GetSkinStats / 読み戻し)
+  C# : FbxModelImporter, Animation.cs (ModelSkin), Model.cs (GetSkin), AnimationSystem (SkinnedMesh を付ける), Engine.cs, NativeMethods.cs
+  エディター : EditorTest.cs (AN4), Fbx/FbxSamples.cs (Transform の直し / 細かさの引数)
+  アセット : Assets/Samples/Fbx/Arm.mod.fbx, Assets/Scenes/animation.scene.json
+
+■ 次 : AN5 プレビューのウインドウ (モデル / 階層型アニメーション)

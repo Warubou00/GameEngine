@@ -34,6 +34,23 @@ public sealed class Skeleton
     public override string ToString() => $"Skeleton({Path}, {Bones.Count} bones)";
 }
 
+/// <summary>
+/// 曲げるモデルの骨 (AN4。xxx.mod.fbx#ノード にスキンがある時)。骨の行列 k = InverseBind[k] × 骨の世界の行列 × メッシュの世界の逆行列
+/// 骨の番号 BoneNames.Count は「動かない骨」(単位行列)
+/// </summary>
+public sealed class ModelSkin
+{
+    public IReadOnlyList<string> BoneNames { get; internal set; } = Array.Empty<string>();
+    public IReadOnlyList<Matrix4x4> InverseBind { get; internal set; } = Array.Empty<Matrix4x4>();
+    public IReadOnlyList<float> BoneRadius { get; internal set; } = Array.Empty<float>();
+    public int Version { get; internal set; }
+    public int MatrixCount => BoneNames.Count + 1;
+    /// <summary>休みの姿勢の頂点 (メッシュの空間) と、頂点ごとの骨と重み (確認 / CPU で同じ計算をする用)</summary>
+    public IReadOnlyList<Vector3> BindPositions { get; internal set; } = Array.Empty<Vector3>();
+    public IReadOnlyList<(ushort, ushort, ushort, ushort)> BoneIndices { get; internal set; } = Array.Empty<(ushort, ushort, ushort, ushort)>();
+    public IReadOnlyList<Vector4> BoneWeights { get; internal set; } = Array.Empty<Vector4>();
+}
+
 public sealed class AnimationTrack
 {
     public string Name { get; internal set; } = "";

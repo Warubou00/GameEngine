@@ -213,6 +213,33 @@ namespace RHI
             uint64_t GetVertexBytesUsed()const;
             uint64_t GetIndexBytesUsed()const;
 
+            // ---------- AN4 : GPU スキニング ----------
+            struct SkinInstance
+            {
+                RHI::VertexRange   Source;           // 休みの姿勢の頂点 (モデルの物)
+                RHI::VertexRange   Output;           // この物専用の場所 (曲げた頂点を書く)
+                RHI::SkinRange     Skin;             // 骨の番号と重み
+                std::vector<float> Matrices;         // 骨の行列 (1 本 12 個)
+                uint32_t           BoneCount = 0;
+                bool               Dirty     = true; // 次の描画の前に曲げる
+                bool               Full      = true; // 次に曲げる時に 色 / UV も書く (作った直後の 1 回だけ。以降は位置と法線だけ)
+                bool               Alive     = false;
+            };
+            static constexpr uint32_t MAX_SKIN_MATRICES = 65536;   // 1 フレームに送れる骨の行列の数 (全部の物の合計)
+            RHI::SkinRange  UploadSkinData(RHI::ObjectInterface::IDevice* iDevice, RHI::ObjectInterface::ICommandContext* iCommandContext,
+                                           const RHI::SkinVertex* vertices, uint32_t count);
+            void            FreeSkinData(const RHI::SkinRange& range);
+            RHI::SkinHandle CreateSkinInstance(RHI::VertexRange source, RHI::SkinRange skin, uint32_t boneCount);
+            RHI::VertexRange GetSkinOutput(RHI::SkinHandle instance)const;
+            void            SetSkinPose(RHI::SkinHandle instance, const float* matrices, uint32_t boneCount);
+            void            SetSkinBounds(RHI::SkinHandle instance, const float* sphere);
+            void            DestroySkinInstance(RHI::SkinHandle instance);
+            std::vector<SkinInstance>& GetSkinInstances() { return _skinInstances; }
+            RHI::DirectX12::ResourceBuffer* GetSkinBuffer()const { return _skinBuffer.get(); }
+            // このフレームの行列の領域に書く (戻り値 = 書いた先頭の行列の番号。入らなければ UINT32_MAX) と、その領域のアドレス
+            uint32_t WriteSkinMatrices(uint32_t frameIndex, uint32_t written, const SkinInstance& instance);
+            D3D12_GPU_VIRTUAL_ADDRESS GetSkinMatrixAddress(uint32_t frameIndex)const;
+
             // マテリアルのブレンドの方法 (描く順番と PSO を決める。範囲外なら不透明)
             RHI::BlendMode GetMaterialBlend(uint32_t material)const
             {
@@ -364,8 +391,17 @@ namespace RHI
 
             std::unique_ptr<RHI::ObjectInterface::Texture>         _texture;                    // Texture
 
+            // ---------- AN4 : GPU スキニング ----------
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _skinBuffer;                 // 骨の番号と重み (VRAM)
+            std::unique_ptr<RHI::ResourceBufferAllocator>          _skinAllocator;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>        _skinMatrices;               // 骨の行列 (UPLOAD。フレームごとの領域)
+            std::vector<SkinInstance>                              _skinInstances;
+            std::vector<uint32_t>                                  _freeSkinInstances;
+            const uint64_t _SKIN_BUFFER_SIZE = 64ull * 1024ull * 1024ull;   // 400 万頂点分
+
             const uint64_t _GLOBAL_VB_SIZE = 16ull * 1024ull * 1024ull;
-            const uint64_t _SCENE_VB_SIZE  = 64ull * 1024ull * 1024ull;
+            // AN4 : 曲げる物はそれぞれ頂点の場所を持つので広げた (以前は 64 MB = 約 120 万頂点)
+            const uint64_t _SCENE_VB_SIZE  = 256ull * 1024ull * 1024ull;
             const uint64_t _GLOBAL_CB_SIZE = 4ull  * 1024ull * 1024ull;
             const uint64_t _SCENE_CB_SIZE  = SCENE_CB_SIZE;
             // フレームごとの定数 (View / Projection) : 1 フレーム 256byte × フレーム数
@@ -442,7 +478,8 @@ namespace RHI
             bool makeCommonCB(RHI::ObjectInterface::Device* device);                                                                                                   // Common Constant Buffer
             bool makeGlobalIB(RHI::ObjectInterface::Device* device);                                                                                                   // Global Index    Buffer
             bool makeSceneIB(RHI::ObjectInterface::Device* device);                                                                                                    // Scene  Index    Buffer
-            bool makeBuffer(RHI::ObjectInterface::Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType);     // TODO : D3D12の機能に直接触れたくないため要検討
+            bool makeBuffer(RHI::ObjectInterface::Device* device, RHI::DirectX12::ResourceBuffer* resourceBuffer, uint64_t sizeInBytes, D3D12_HEAP_TYPE heapType,
+                            D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);     // TODO : D3D12の機能に直接触れたくないため要検討
 
             bool makeCommonView(RHI::ObjectInterface::Device* device);                                                                                                 // Viewの作成
             bool makeGlobalVBV(RHI::ObjectInterface::Device* device);                                                                                                  // Global Vertex   Buffer View(srv)の作成

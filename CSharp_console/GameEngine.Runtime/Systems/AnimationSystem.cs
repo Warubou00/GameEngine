@@ -168,6 +168,7 @@ public static class AnimationRig
             var part = world.CreateEntity(node.Name);
             world.Add(part, new Transform { Position = position, Rotation = rotation, Scale = scale, Parent = parentEntity });
             world.Add(part, new MeshRenderer(model));
+            if (skinned) world.Add(part, new SkinnedMesh { Root = root });   // AN4 : 骨で曲げる (GPU)
             created.Add(part);
         }
         return created;

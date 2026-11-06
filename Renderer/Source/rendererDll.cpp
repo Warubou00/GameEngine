@@ -182,6 +182,45 @@ extern "C"
 		return g_renderer->CreateModel(vertices, vertexCount, indices, indexCount, subMeshes, subMeshCount, texturePaths, name, replace, outSubMeshCount);
 	}
 
+	// ---------- AN4 : GPU スキニング ----------
+	// モデルに骨と重みを付ける (頂点ごと 16 byte。頂点の数と同じ数)
+	static_assert(sizeof(RHI::SkinVertex) == 16, "RHI::SkinVertex must be 16 bytes (same as C#)");
+	RENDERER_API bool Renderer_SetModelSkin(uint32_t model, const RHI::SkinVertex* vertices, uint32_t count, uint32_t boneCount)
+	{
+		return g_renderer && g_renderer->SetModelSkin(model, vertices, count, boneCount);
+	}
+
+	// 描画オブジェクトを曲げる / 曲げない
+	RENDERER_API void Renderer_SetObjectsSkinned(const uint32_t* objects, uint32_t count, bool skinned)
+	{
+		if (g_renderer) g_renderer->SetObjectsSkinned(objects, count, skinned);
+	}
+
+	// 姿勢 (毎フレーム 1 回でまとめて) : 骨の行列 (1 本 12 個) を boneCounts[i] 本ずつ、境界球 (4 個) を 1 個ずつ
+	RENDERER_API void Renderer_SetSkinPoses(const uint32_t* objects, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres)
+	{
+		if (g_renderer) g_renderer->SetSkinPoses(objects, count, matrices, boneCounts, spheres);
+	}
+
+	// 確認用 : 曲げた頂点を読み戻す (Request の数フレーム後に Read。戻り値 = 読めた数)
+	RENDERER_API void Renderer_RequestSkinReadback(uint32_t object)
+	{
+		if (g_renderer) g_renderer->RequestSkinReadback(object);
+	}
+
+	RENDERER_API uint32_t Renderer_ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount)
+	{
+		return g_renderer ? g_renderer->ReadSkinReadback(outVertices, maxCount) : 0;
+	}
+
+	RENDERER_API void Renderer_GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)
+	{
+		if (outInstances) *outInstances = 0;
+		if (outVertices) *outVertices = 0;
+		if (outGpuMs) *outGpuMs = 0.0f;
+		if (g_renderer) g_renderer->GetSkinStats(outInstances, outVertices, outGpuMs);
+	}
+
 	// 同じファイルを読み直す (番号は同じまま)。読めなければ前の物のまま (false)
 	RENDERER_API bool Renderer_ReloadModel(uint32_t model, uint32_t* outSubMeshCount)
 	{

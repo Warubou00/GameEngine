@@ -506,6 +506,70 @@ namespace RHI
         for (uint32_t i = 0; textures  && i < textureCount;  ++i) _buffer->GetTexture()->ReleaseTexture(_buffer.get(), textures[i].Index);
     }
 
+    // ==============================================================
+    // AN4 : GPU スキニング (データは Buffer、曲げるのは CommandContext が描画の前に)
+    // ==============================================================
+
+    SkinRange RenderHardwareInterface::UploadSkin(const SkinVertex* vertices, uint32_t count)
+    {
+        if (!_isInitialized) return SkinRange();
+        return _buffer->UploadSkinData(_device.get(), _commandContext.get(), vertices, count);
+    }
+
+    void RenderHardwareInterface::ReleaseSkin(SkinRange range)
+    {
+        if (!_isInitialized || !range.IsValid()) return;
+        WaitForGpu();
+        _buffer->FreeSkinData(range);
+    }
+
+    SkinHandle RenderHardwareInterface::CreateSkinInstance(VertexRange source, SkinRange skin, uint32_t boneCount)
+    {
+        if (!_isInitialized) return SkinHandle();
+        return _buffer->CreateSkinInstance(source, skin, boneCount);
+    }
+
+    VertexRange RenderHardwareInterface::GetSkinOutput(SkinHandle instance)const
+    {
+        return _isInitialized ? _buffer->GetSkinOutput(instance) : VertexRange();
+    }
+
+    void RenderHardwareInterface::SetSkinPose(SkinHandle instance, const float* matrices, uint32_t boneCount)
+    {
+        if (_isInitialized) _buffer->SetSkinPose(instance, matrices, boneCount);
+    }
+
+    void RenderHardwareInterface::SetSkinBounds(SkinHandle instance, const float* sphere)
+    {
+        if (_isInitialized) _buffer->SetSkinBounds(instance, sphere);
+    }
+
+    void RenderHardwareInterface::DestroySkinInstance(SkinHandle instance)
+    {
+        if (!_isInitialized || !instance.IsValid()) return;
+        WaitForGpu();   // 前のフレームが書いた / 読んでいる頂点の場所を返すので
+        _buffer->DestroySkinInstance(instance);
+    }
+
+    void RenderHardwareInterface::GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const
+    {
+        if (outInstances) *outInstances = _isInitialized ? _commandContext->GetSkinnedInstances() : 0;
+        if (outVertices)  *outVertices  = _isInitialized ? _commandContext->GetSkinnedVertices() : 0;
+        if (outGpuMs)     *outGpuMs     = _isInitialized ? _commandContext->GetSkinGpuMs() : 0.0f;
+    }
+
+    void RenderHardwareInterface::RequestSkinReadback(SkinHandle instance)
+    {
+        if (_isInitialized) _commandContext->RequestSkinReadback(_buffer->GetSkinOutput(instance));
+    }
+
+    uint32_t RenderHardwareInterface::ReadSkinReadback(Vertex* outVertices, uint32_t maxCount)
+    {
+        if (!_isInitialized) return 0;
+        WaitForGpu();
+        return _commandContext->ReadSkinReadback(outVertices, maxCount);
+    }
+
     bool RenderHardwareInterface::ReloadShaders()
     {
         if (!_isInitialized) return false;

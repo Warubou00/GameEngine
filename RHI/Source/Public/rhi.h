@@ -96,6 +96,27 @@ namespace RHI
 		// GPU の完了を待ってから返すので、毎フレーム呼ぶ物ではない (エディターの読み直し / 解放用)。null / 0 個は飛ばす
 		virtual void ReleaseResources(const VertexRange* vertices, uint32_t vertexCount, const IndexRange* indices, uint32_t indexCount,
 		                              const MaterialHandle* materials, uint32_t materialCount, const TextureHandle* textures, uint32_t textureCount) = 0;
+		// ---------- AN4 : GPU スキニング ----------
+		// 頂点ごとの骨と重みを登録する (モデルごと。頂点の数と同じ数)。失敗時は IsValid() == false
+		virtual SkinRange  UploadSkin(const SkinVertex* vertices, uint32_t count) = 0;
+		// 返す (GPU を待つ。使っている曲げる物を先に消すこと)
+		virtual void       ReleaseSkin(SkinRange range) = 0;
+		// 曲げる物を作る : source (休みの姿勢の頂点) と同じ数の頂点の場所をメガ頂点バッファに取り、そこへ曲げた頂点を書く
+		//   boneCount 本の行列は最初は単位行列 (= 休みの姿勢)。描く時は DrawItem::BaseVertex を GetSkinOutput の物にする
+		virtual SkinHandle CreateSkinInstance(VertexRange source, SkinRange skin, uint32_t boneCount) = 0;
+		virtual VertexRange GetSkinOutput(SkinHandle instance)const = 0;
+		// 骨の行列 (1 本 12 個 : 行ベクトルの行列 M の 3 列 = (M11, M21, M31, M41), (M12, ...), (M13, ...))。次の描画の前に曲げる
+		virtual void       SetSkinPose(SkinHandle instance, const float* matrices, uint32_t boneCount) = 0;
+		// カリングの境界球 (曲げた形の空間で 中心 xyz と半径)。今の球から出る時だけ広げる (描画の引数を作り直すので、毎回は変えない)
+		virtual void       SetSkinBounds(SkinHandle instance, const float* sphere) = 0;
+		// 消す (GPU を待つ)
+		virtual void       DestroySkinInstance(SkinHandle instance) = 0;
+		// 前のフレームで曲げた物の数と頂点の数 / GPU の時間 (ms。FRAME_COUNT フレーム前の値)
+		virtual void       GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const = 0;
+		// 確認用 : 曲げた頂点を読み戻す。Request の次のフレームの頭で写し、Read は GPU を待って読む (戻り値 = 読めた数。まだなら 0)
+		virtual void       RequestSkinReadback(SkinHandle instance) = 0;
+		virtual uint32_t   ReadSkinReadback(Vertex* outVertices, uint32_t maxCount) = 0;
+
 		// シェーダーを読み直す (GPU を待ってからコンパイルし直し、PSO は次に使う時に作る)
 		// コンパイルに失敗したシェーダーは前の物を使い続ける。戻り値 = 全部成功したか
 		virtual bool ReloadShaders() = 0;

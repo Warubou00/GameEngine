@@ -434,7 +434,8 @@ public static class FbxSamples
     // ---------------------------------------------------------------------
     public static readonly string[] ArmBones = { "Arm_Root", "Arm_Mid", "Arm_Tip", "Arm_End" };
 
-    public static byte[] Arm(ArmPart part, bool compress = true, int version = 7400)
+    /// <param name="sides">円柱の周りの数 / rings : 縦の数 (AN4 : 時間を測る時は細かく)</param>
+    public static byte[] Arm(ArmPart part, bool compress = true, int version = 7400, int sides = 12, int rings = 6)
     {
         var ids = new Ids();
         var objects = new List<FbxNode>();
@@ -452,7 +453,7 @@ public static class FbxSamples
         if (part == ArmPart.Model)
         {
             long model = ids.Next(), geometry = ids.Next(), material = ids.Next(), skin = ids.Next();
-            var mesh = Cylinder(20, 300, 12, 6);
+            var mesh = Cylinder(20, 300, sides, rings);
             objects.Add(GeometryNode(geometry, "Arm", mesh));
             objects.Add(ModelNode(model, "Arm", "Mesh", Vector3.Zero));
             objects.Add(MaterialNode(material, "Skin", new Vector3(0.9f, 0.7f, 0.55f)));
@@ -475,7 +476,9 @@ public static class FbxSamples
                 objects.Add(Object("Deformer", cluster, ArmBones[b], "Cluster",
                     Node("Version", 100), Node("UserData", "", ""),
                     Node("Indexes", indexes.ToArray()), Node("Weights", weights.ToArray()),
-                    Node("Transform", Translation(new Vector3(0, -100 * b, 0))),     // メッシュ → 骨 (バインドの時)
+                    // Transform = 休みの姿勢のメッシュの世界の行列 (FBX の決まり。メッシュは原点なので単位行列)。
+                    // 以前は骨の行列の逆を書いていて、読む側が正しく読むと中の骨の所が 2 m ずれた (AN4 のテストで分かった)
+                    Node("Transform", Translation(Vector3.Zero)),
                     Node("TransformLink", Translation(new Vector3(0, 100 * b, 0)))));  // 骨の世界の行列 (バインドの時)
                 connections.Add(ConnectOO(cluster, skin));
                 connections.Add(ConnectOO(bones[b], cluster));

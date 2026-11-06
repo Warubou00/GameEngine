@@ -57,6 +57,14 @@ public sealed class FbxModelData
     public List<string> Warnings = new();
     public int MeshCount;
     public int TriangleCount => Indices.Count / 3;
+    // AN4 : スキン (部品 xxx.mod.fbx#ノード で、メッシュに Skin がある時だけ)。骨ごとに : 名前 / 休みの姿勢の逆行列 (エンジンの空間。
+    //   メッシュの空間 → 骨の空間) / 骨から一番遠い頂点までの距離 (境界球用)。頂点ごとに : 骨の番号 4 つと重み 4 つ (足して 1。無い所は 0)
+    public List<string> SkinBones = new();
+    public List<Matrix4x4> SkinInverseBind = new();
+    public List<float> SkinBoneRadius = new();
+    public List<(ushort, ushort, ushort, ushort)> SkinIndices = new();
+    public List<Vector4> SkinWeights = new();
+    public bool HasSkin => SkinBones.Count > 0;
     public Vector3 BoundsMin = new(float.MaxValue), BoundsMax = new(float.MinValue);
     public double ImportMilliseconds;
 }
@@ -203,8 +211,75 @@ public static class FbxModelImporter
             data.SubMeshes.Add(new FbxSubMeshData { Material = m, FirstIndex = data.Indices.Count, IndexCount = perMaterial[m].Count });
             data.Indices.AddRange(perMaterial[m]);
         }
+        if (onlyNode != null) importSkin(scene, data);   // AN4
         data.ImportMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
         return data;
+    }
+
+    // ---------------------------------------------------------------------
+    // AN4 : スキン (Deformer の Skin → Cluster (骨ごと : Indexes / Weights / Transform / TransformLink))
+    //   休みの姿勢の逆行列 (エンジンの空間) = C⁻¹ × Transform × TransformLink⁻¹ × C
+    //   (Transform = 休みの姿勢のメッシュの世界の行列、TransformLink = 休みの姿勢の骨の世界の行列。部品の頂点は p × C のノードの空間)
+    //   頂点ごとに重い 4 本 (足して 1 にする)。骨の無い頂点は「動かない骨」(一番後ろの単位行列) に付ける
+    // ---------------------------------------------------------------------
+    private static Matrix4x4 matrix(double[]? m) => m == null || m.Length < 16 ? Matrix4x4.Identity : new Matrix4x4(
+        (float)m[0], (float)m[1], (float)m[2], (float)m[3], (float)m[4], (float)m[5], (float)m[6], (float)m[7],
+        (float)m[8], (float)m[9], (float)m[10], (float)m[11], (float)m[12], (float)m[13], (float)m[14], (float)m[15]);
+
+    private static void importSkin(FbxScene scene, FbxModelData data)
+    {
+        var space = FbxAnimationImporter.SpaceMatrix(scene);
+        Matrix4x4.Invert(space, out var spaceInverse);
+        var boneIndex = new Dictionary<long, int>();
+        var influences = new Dictionary<(long Mesh, int ControlPoint), List<(int Bone, float Weight)>>();
+        foreach (var mesh in data.Sources.Select(s => s.Mesh).Distinct())
+        {
+            if (!scene.Objects.TryGetValue(mesh, out var geometry)) continue;
+            var skin = geometry.Children.Select(c => c.Child).FirstOrDefault(c => c.Kind == "Deformer" && c.SubKind == "Skin");
+            if (skin == null) continue;
+            foreach (var cluster in skin.Children.Select(c => c.Child).Where(c => c.Kind == "Deformer" && c.SubKind == "Cluster"))
+            {
+                var bone = cluster.Children.Select(c => c.Child).FirstOrDefault(c => c.Kind == "Model");
+                var indexes = cluster.Node.ChildArray<int>("Indexes");
+                var weights = cluster.Node.ChildArray<double>("Weights");
+                if (bone == null || indexes == null || weights == null) continue;
+                if (!boneIndex.TryGetValue(bone.Id, out var b))
+                {
+                    b = data.SkinBones.Count;
+                    boneIndex[bone.Id] = b;
+                    data.SkinBones.Add(bone.Name);
+                    Matrix4x4.Invert(matrix(cluster.Node.ChildArray<double>("TransformLink")), out var linkInverse);
+                    data.SkinInverseBind.Add(spaceInverse * matrix(cluster.Node.ChildArray<double>("Transform")) * linkInverse * space);
+                    data.SkinBoneRadius.Add(0);
+                }
+                for (int i = 0; i < indexes.Length && i < weights.Length; i++)
+                {
+                    if (weights[i] <= 0) continue;
+                    if (!influences.TryGetValue((mesh, indexes[i]), out var list)) influences[(mesh, indexes[i])] = list = new List<(int, float)>();
+                    list.Add((b, (float)weights[i]));
+                }
+            }
+        }
+        if (data.SkinBones.Count == 0) return;
+        var still = (ushort)data.SkinBones.Count;   // 動かない骨 (単位行列)
+        for (int v = 0; v < data.Positions.Count; v++)
+        {
+            if (!influences.TryGetValue(data.Sources[v], out var list) || list.Count == 0)
+            {
+                data.SkinIndices.Add((still, still, still, still));
+                data.SkinWeights.Add(new Vector4(1, 0, 0, 0));
+                continue;
+            }
+            var top = list.GroupBy(x => x.Bone).Select(g => (Bone: g.Key, Weight: g.Sum(x => x.Weight))).OrderByDescending(x => x.Weight).Take(4).ToList();
+            var sum = top.Sum(x => x.Weight);
+            while (top.Count < 4) top.Add((top[0].Bone, 0));
+            data.SkinIndices.Add(((ushort)top[0].Bone, (ushort)top[1].Bone, (ushort)top[2].Bone, (ushort)top[3].Bone));
+            data.SkinWeights.Add(new Vector4(top[0].Weight, top[1].Weight, top[2].Weight, top[3].Weight) / sum);
+            // 骨から頂点までの距離 (骨の空間の休みの姿勢)。曲げても (骨が回る / 動くだけなら) この距離の球に入る
+            for (int k = 0; k < 4; k++)
+                if (top[k].Weight > 0)
+                    data.SkinBoneRadius[top[k].Bone] = MathF.Max(data.SkinBoneRadius[top[k].Bone], Vector3.Transform(data.Positions[v], data.SkinInverseBind[top[k].Bone]).Length());
+        }
     }
 
     // 頂点をまとめる鍵 (同じメッシュの同じ点で、法線 / UV / 色が同じ角は 1 つ)

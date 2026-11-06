@@ -435,6 +435,11 @@ namespace Renderer
 		// 入れ替え (読み直し) : 同じ番号のまま、前の物を GPU を待ってから返す
 		if (replace != INVALID_HANDLE && replace < _models.size() && !_models[replace].Path.empty())
 		{
+			// AN4 : 前の形の曲げる物を消す (骨と重みは新しい形で付け直してもらう = SetModelSkin)
+			for (auto& object : _renderObjects)
+			{
+				if (object.Model == replace && object.Skin.IsValid()) { _rhi->DestroySkinInstance(object.Skin); object.Skin = RHI::SkinHandle(); }
+			}
 			ModelResource old = std::move(_models[replace]);
 			_models[replace] = std::move(model);
 			releaseModelResource(old);
@@ -460,6 +465,7 @@ namespace Renderer
 
 	void SceneRenderer::releaseModelResource(ModelResource& model)
 	{
+		if (model.Skin.IsValid()) _rhi->ReleaseSkin(model.Skin);   // AN4
 		std::vector<RHI::VertexRange> vertices;
 		if (model.Vertices.IsValid()) vertices.push_back(model.Vertices);
 		_rhi->ReleaseResources(vertices.data(), static_cast<uint32_t>(vertices.size()),
@@ -630,6 +636,7 @@ namespace Renderer
 			if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) continue;
 
 			_rhi->DestroyObject(_renderObjects[handle].Object);
+			if (_renderObjects[handle].Skin.IsValid()) _rhi->DestroySkinInstance(_renderObjects[handle].Skin);   // AN4
 			_renderObjects[handle] = RenderObject();
 			_freeRenderObjects.push_back(handle);
 			_aliveRenderObjects--;
@@ -653,6 +660,90 @@ namespace Renderer
 			std::memcpy(&constants.World, matrices + static_cast<size_t>(n) * 16, sizeof(constants.World));
 			_rhi->UpdateObject(object.Object, constants);
 		}
+	}
+
+	// ==============================================================
+	// AN4 : GPU スキニング
+	// ==============================================================
+
+	bool SceneRenderer::SetModelSkin(uint32_t handle, const RHI::SkinVertex* vertices, uint32_t count, uint32_t boneCount)
+	{
+		if (!IsInitialized() || handle >= _models.size() || _models[handle].Path.empty() || !vertices || boneCount == 0) return false;
+		ModelResource& model = _models[handle];
+		if (count != model.Vertices.Count)
+		{
+			Core::Logger::Log("[SceneRenderer] SetModelSkin : the skin count does not match the vertex count.");
+			return false;
+		}
+		// 置いてある曲げる物を消してから付け替える (骨の数が変わるかもしれないので作り直す)
+		std::vector<uint32_t> skinnedObjects;
+		for (uint32_t i = 0; i < _renderObjects.size(); ++i)
+		{
+			auto& object = _renderObjects[i];
+			if (object.Model != handle || !object.Skin.IsValid()) continue;
+			_rhi->DestroySkinInstance(object.Skin);
+			object.Skin = RHI::SkinHandle();
+			skinnedObjects.push_back(i);
+		}
+		if (model.Skin.IsValid()) _rhi->ReleaseSkin(model.Skin);
+		model.Skin      = _rhi->UploadSkin(vertices, count);
+		model.SkinBones = model.Skin.IsValid() ? boneCount : 0;
+		if (!skinnedObjects.empty()) SetObjectsSkinned(skinnedObjects.data(), static_cast<uint32_t>(skinnedObjects.size()), true);
+		_drawListDirty = true;
+		return model.Skin.IsValid();
+	}
+
+	void SceneRenderer::SetObjectsSkinned(const uint32_t* handles, uint32_t count, bool skinned)
+	{
+		if (!handles || !IsInitialized()) return;
+		for (uint32_t n = 0; n < count; ++n)
+		{
+			const uint32_t handle = handles[n];
+			if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) continue;
+			RenderObject& object = _renderObjects[handle];
+			const ModelResource& model = _models[object.Model];
+			if (skinned && !object.Skin.IsValid() && model.Skin.IsValid())
+			{
+				object.Skin = _rhi->CreateSkinInstance(model.Vertices, model.Skin, model.SkinBones);
+				_drawListDirty = true;
+			}
+			else if (!skinned && object.Skin.IsValid())
+			{
+				_rhi->DestroySkinInstance(object.Skin);
+				object.Skin = RHI::SkinHandle();
+				_drawListDirty = true;
+			}
+		}
+	}
+
+	void SceneRenderer::SetSkinPoses(const uint32_t* handles, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres)
+	{
+		if (!handles || !matrices || !boneCounts || !IsInitialized()) return;
+		size_t offset = 0;
+		for (uint32_t n = 0; n < count; ++n)
+		{
+			const uint32_t handle = handles[n];
+			const float* m = matrices + offset * 12;
+			offset += boneCounts[n];
+			if (handle >= _renderObjects.size() || !_renderObjects[handle].Skin.IsValid()) continue;
+			_rhi->SetSkinPose(_renderObjects[handle].Skin, m, boneCounts[n]);
+			if (spheres) _rhi->SetSkinBounds(_renderObjects[handle].Skin, spheres + static_cast<size_t>(n) * 4);
+		}
+	}
+
+	void SceneRenderer::GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const
+	{
+		if (_rhi) _rhi->GetSkinStats(outInstances, outVertices, outGpuMs);
+	}
+
+	void SceneRenderer::RequestSkinReadback(uint32_t handle)
+	{
+		if (IsInitialized() && handle < _renderObjects.size() && _renderObjects[handle].Skin.IsValid()) _rhi->RequestSkinReadback(_renderObjects[handle].Skin);
+	}
+
+	uint32_t SceneRenderer::ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount)
+	{
+		return IsInitialized() ? _rhi->ReadSkinReadback(outVertices, maxCount) : 0;
 	}
 
 	std::wstring SceneRenderer::resolveTexturePath(const std::wstring& path)
@@ -685,9 +776,12 @@ namespace Renderer
 		for (const auto& object : _renderObjects)
 		{
 			if (object.Model == INVALID_HANDLE) continue;
+			// AN4 : 曲げる物はその物専用の頂点の場所 (インデックスは同じ)
+			const RHI::VertexRange skinned = object.Skin.IsValid() ? _rhi->GetSkinOutput(object.Skin) : RHI::VertexRange();
 			for (RHI::DrawItem item : _models[object.Model].SubMeshes)
 			{
 				item.Object = object.Object;
+				if (skinned.IsValid()) item.BaseVertex = skinned.BaseVertex;
 				if (object.MaterialOverride != INVALID_HANDLE) item.Material.Index = object.MaterialOverride;   // ED5 : マテリアルのアセット
 				_drawItems.push_back(item);
 			}
