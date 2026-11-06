@@ -1,0 +1,63 @@
+﻿アニメーション AN3 : スケルトン (.skl.fbx) とアニメーション (.anm.fbx)、CPU で骨を動かす 2026-11-07
+ブランチ : feature/anim-an3
+ロードマップ : ClaudLog/Engine_Roadmap_Animation_2026-11-07.txt (AN1 → AN5)
+
+■ できた物
+  使い方 (エディター) :
+    .skl.fbx をシーン (か Hierarchy の物) に落とす → 動く物ができる : 根 (Animator) + 骨のエンティティ (骨の名前、親子のとおり) +
+      同じ名前の .mod.fbx があればその部品 (メッシュのノード) を、FBX で親だった骨の子に付ける + 同じフォルダの 名前_*.anm.fbx の最初の物をクリップに。
+      全部で 1 回の「元に戻す」
+    .anm.fbx を物に落とす → その物 (か一番近い親) の Animator のクリップにする (元に戻せる)
+    再生するとクリップのとおりに骨が動き、部品も一緒に動く (階層型のアニメーション)。止めると元に戻る
+    Inspector の Animator : Skeleton / Clip の欄 (ドラッグで入れる)、Speed / Loop / Playing / Time / ShowBones、見つけた骨の数、
+      クリップの長さ / fps / 使う列の数、骨が足りなければ「Build bones」ボタン
+  見本のシーン : Assets/Scenes/animation.scene.json (Robot が歩く / Arm が振れる (骨の線を出す))
+  ランタイム (外部のライブラリなし) :
+    Skeleton / AnimationClip のアセット (AssetManager.LoadSkeleton / LoadAnimationClip。読み直すと同じ物の中身が入れ替わる)
+    スケルトン : 骨 (LimbNode / Root) と、その上の Null を親から順に。休みの姿勢 = Lcl の値。エンジンの空間へは C⁻¹ × L × C
+      (C = 軸の変換 × 単位。メッシュの点の変換 p × C と合う。鏡の変換も消える)
+    アニメーション : 最初の AnimationStack の最初の層。曲線を FBX の fps で刻んで、骨ごとに 位置 / 回転 (四元数) / 大きさ の列にする
+      (毎フレームは刻みの間を直線 / 球面線形で補うだけ)。四元数は前の刻みと同じ側にそろえる (遠回りしない)
+    曲線 : 一定 / 直線 / 3 次 (エルミート)。3 次の傾きは KeyAttrDataFloat (User / Break) か自動 (前後のキーから。端と Clamp の極値は 0)。
+      キーの属性は KeyAttrFlags / KeyAttrRefCount で続くキーに割り当てる。回転は X / Y / Z を別々に補間して、ノードの式 (回す順番 / PreRotation /
+      中心) で行列にする (FBX と同じ)
+    Animator コンポーネント (Skeleton / Clip / Speed / Loop / Playing / Time / ShowBones) と AnimationSystem (エンジンが持つ。登録した System の後、
+      Transform の行列の前) : 子孫から骨の名前のエンティティを探し (Skeleton / Clip の読み直し、骨が消えた時に探し直す)、再生中だけ時間を進め、
+      列のある骨の Transform に書く (変わった時だけ)。ShowBones は行列ができた後に骨を線で
+    AnimationRig.Build : 骨のエンティティと部品を作る (ゲームのコードからも使える)
+    部品のモデル xxx.mod.fbx#ノード : そのノードのメッシュだけをノードの空間で作る (ノードの位置はエンティティの Transform)。
+      シーンには # の前のアセットの Id と # の後を書く (名前を変えても見つかる)。FBX を書き換えると部品も作り直す
+    スキンのあるメッシュは根の子に休みの姿勢のまま置く (曲げるのは AN4)
+    Engine.AnimationStats (Animator の数 / 書いた骨の数 / 時間)
+
+■ 確認
+  自動 (--editor-test) : 225 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。AN3 の 12 項目 (と書き出し) :
+    曲線 : 3 次の自動の傾き (LegL の 0.125 秒 = 15.625°、手で計算した値)、一定 / 直線 / 自分で決めた傾き (0.25 秒 = 0.75、手で計算した値) /
+    スケルトン (Null の根 + 骨 7 本、親、休みの姿勢の LegL = (0.14, 0.95, 0) m) / クリップ (Wave 2 秒 61 刻み 2 列、Walk 1 秒 5 列) /
+    階層型 : 骨 8 / 部品 7 が骨の子、歩きの 0 秒の左足の箱 = (0.140, 0.542, 0.190) (手で計算 : 足の付け根から 45 cm 下を X の周りに 25°) /
+    骨の回転が階層を通る : 振りの 0.5 秒の Arm_End = (0.372, 1.592, 0) (手で計算 : 中の骨 40° + 先の骨 60°) /
+    作るのは 1 回の「元に戻す」(根 + 骨 4 + スキンのメッシュ = 6 個) とやり直し / 再生で時間が進みループ、止めると戻る /
+    保存して開き直す (スケルトン / クリップ / #ノード の部品を Id で) / .anm.fbx を書き換えると同じクリップの中身が変わる (2 → 5 列) /
+    100 体の時間 / 書き出したゲームがスケルトンとクリップを読み、120 フレーム再生した後の全部の Transform がエディターと同じ (差 0)
+  見た目 (エディターの窓だけを撮った) : 見本のシーンを再生 → Robot の足と腕が振れる (2 つの瞬間を拡大して比べた)、Arm の骨の線が振れる
+    (メッシュは AN4 まで休みの姿勢)、Hierarchy に骨の木と部品
+  時間 (Release、RTX 2070) :
+    100 体の Robot (骨 8、動く骨 5) : アニメーション 0.071 〜 0.106 ms / フレーム (最大 0.15 〜 0.21 ms)、500 個の骨を書く
+    見本の exe : アニメーションのシーン C# 0.021 〜 0.022 ms / GPU 0.35 ms。showcase は C# 0.059 〜 0.061 ms / GPU 0.63 〜 0.69 ms (前と同じ)
+
+■ 変更
+  ランタイム : Assets/Fbx/FbxAnimationImporter.cs (新しい : 曲線 / スケルトン / アニメーション) / Assets/Animation.cs (新しい : Skeleton / AnimationClip) /
+    Components/Animator.cs (新しい) / Systems/AnimationSystem.cs (新しい : AnimationSystem / AnimationRig) /
+    Assets/Fbx/FbxModelImporter.cs (ノードの空間の部品、Local に値を渡せる) / Assets/Model.cs (LoadSkeleton / LoadAnimationClip / #ノード / 読み直し / 名前) /
+    Serialization/SceneSerializer.cs (Skeleton / AnimationClip、#ノード の Id) / Engine.cs
+  エディター : EditorApp.cs / EditorApp.Edit.cs (CreateAnimated / BuildBones / AssignClip) / Inspector.cs (欄 / Animator の情報) / EditorTest.cs
+  プロジェクト : Scenes/animation.scene.json
+
+■ 気付いた事
+  - テストの手計算を 1 つ間違えた (自分で決めた傾きの 0.25 秒を 1.125 とした。正しくは 8 × (0.140625 − 0.046875) = 0.75)。コードは正しかった
+
+■ 残り
+  - スキンのメッシュを骨で曲げるのは AN4 (GPU)。今は休みの姿勢のまま (骨は動く)
+  - クリップを混ぜる (クロスフェード) / 層 / IK / ルートモーションは無い。AnimationStack が複数でも最初の 1 つ
+  - 骨の名前が同じ物が複数あると最初の 1 つ (警告は FbxAsset が出す)
+  - 本物の DCC ツールの FBX での確認はまだ

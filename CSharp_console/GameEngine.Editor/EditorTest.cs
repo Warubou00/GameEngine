@@ -1340,13 +1340,136 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- AN3 : スケルトン (.skl.fbx) とアニメーション (.anm.fbx)、CPU で骨を動かす ----------
+        Entity findChild(Entity root, string name)
+        {
+            var queue = new Queue<Entity>(Hierarchy.GetChildren(World, root));
+            while (queue.Count > 0)
+            {
+                var e = queue.Dequeue();
+                if (World.Has<EntityInfo>(e) && World.Get<EntityInfo>(e).Name == name) return e;
+                foreach (var c in Hierarchy.GetChildren(World, e)) queue.Enqueue(c);
+            }
+            return Entity.Null;
+        }
+        System.Numerics.Vector3 worldOf(Entity e) => Hierarchy.GetWorldMatrix(World, e).Translation;
+        // 曲線 : 一定 / 直線 / 3 次 (自動の傾き = 手で計算した値) / 自分で決めた傾き
+        var walkScene = _app.Engine.Assets.LoadFbx($"{FbxSamples.Folder}/Robot_Walk.anm.fbx").Scene!;
+        var legLBone = walkScene.OfKind("Model", "LimbNode").First(b => b.Name == "LegL");
+        var legLCurve = GameEngine.Fbx.FbxCurve.From(legLBone.Children.First(c => c.Property == "Lcl Rotation").Child.Children.First(c => c.Property == "d|X").Child)!;
+        GameEngine.Fbx.FbxCurve curveOf(int flags, float[] data, double[] seconds, float[] values)
+        {
+            var bytes = FbxWriter.Write(new[] { FbxWriter.Node("Objects").With(FbxWriter.Object("AnimationCurve", 9, "", "",
+                FbxWriter.Node("KeyTime", seconds.Select(GameEngine.Fbx.FbxScene.Time).ToArray()), FbxWriter.Node("KeyValueFloat", values),
+                FbxWriter.Node("KeyAttrFlags", new[] { flags }), FbxWriter.Node("KeyAttrDataFloat", data), FbxWriter.Node("KeyAttrRefCount", new[] { values.Length }))) });
+            return GameEngine.Fbx.FbxCurve.From(new GameEngine.Fbx.FbxScene(GameEngine.Fbx.FbxDocument.Read(bytes)).Objects[9])!;
+        }
+        var constantCurve = curveOf(GameEngine.Fbx.FbxCurve.Constant, new float[4], new[] { 0.0, 1.0 }, new[] { 2f, 6f });
+        var linearCurve = curveOf(GameEngine.Fbx.FbxCurve.Linear, new float[4], new[] { 0.0, 1.0 }, new[] { 2f, 6f });
+        var userCurve = curveOf(GameEngine.Fbx.FbxCurve.Cubic | GameEngine.Fbx.FbxCurve.TangentUser, new[] { 8f, 8f, 0f, 0f }, new[] { 0.0, 1.0 }, new[] { 0f, 0f });
+        check(MathF.Abs(legLCurve.Evaluate(0.125) - 15.625f) < 1e-3f && legLCurve.Evaluate(0.25) == 0 && MathF.Abs(legLCurve.Evaluate(0.5) + 25) < 1e-4f &&
+              constantCurve.Evaluate(0.7) == 2 && MathF.Abs(linearCurve.Evaluate(0.25) - 3) < 1e-5f && MathF.Abs(userCurve.Evaluate(0.5)) < 1e-5f && MathF.Abs(userCurve.Evaluate(0.25) - 0.75f) < 1e-4f,
+              $"FBX curves : cubic with auto tangents (LegL at 0.125 s = {legLCurve.Evaluate(0.125):F3}, 15.625 by hand), constant, linear, user tangents (0.25 s = {userCurve.Evaluate(0.25):F4}, 0.75 by hand)");
+        // スケルトン : 根の Null + 骨、親、休みの姿勢 (cm → m)
+        var robotSkeleton = _app.Engine.Assets.LoadSkeleton($"{FbxSamples.Folder}/Robot.skl.fbx");
+        var armSkeleton = _app.Engine.Assets.LoadSkeleton($"{FbxSamples.Folder}/Arm.skl.fbx");
+        var legLIndex = robotSkeleton.IndexOf("LegL");
+        check(robotSkeleton.Bones.Count == 8 && robotSkeleton.Bones[0].Name == "Robot" && !robotSkeleton.Bones[0].IsBone && robotSkeleton.Bones[robotSkeleton.Bones[legLIndex].Parent].Name == "Hips" &&
+              near(robotSkeleton.Bones[legLIndex].BindGlobal.Translation, new(0.14f, 0.95f, 0)) && armSkeleton.Bones.Count == 4 &&
+              near(armSkeleton.Bones[3].BindGlobal.Translation, new(0, 3, 0)),
+              $"skeletons : {robotSkeleton.Bones.Count} nodes (Null root + 7 bones), parents, bind pose in meters (LegL {robotSkeleton.Bones[legLIndex].BindGlobal.Translation:F2})");
+        // アニメーション : 長さ / 刻み / 動く骨
+        var waveClip = _app.Engine.Assets.LoadAnimationClip($"{FbxSamples.Folder}/Arm_Wave.anm.fbx");
+        var walkClip = _app.Engine.Assets.LoadAnimationClip($"{FbxSamples.Folder}/Robot_Walk.anm.fbx");
+        check(waveClip.Duration == 2 && waveClip.FrameCount == 61 && waveClip.Tracks.Count == 2 && waveClip.TrackIndex("Arm_Mid") >= 0 && waveClip.Tracks.All(t => t.HasRotation) &&
+              walkClip.Duration == 1 && walkClip.FrameCount == 31 && walkClip.Tracks.Count == 5 && walkClip.Tracks[walkClip.TrackIndex("Hips")].HasTranslation,
+              $"clips : Wave {waveClip.Duration} s / {waveClip.FrameCount} frames / {waveClip.Tracks.Count} tracks, Walk {walkClip.Duration} s / {walkClip.Tracks.Count} tracks");
+
+        // 動く物を作る (.skl.fbx をシーンに落とすのと同じ) : 骨のエンティティ + 部品 + クリップ
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        var robotRoot = _app.CreateAnimated(database.Find($"{FbxSamples.Folder}/Robot.skl.fbx")!, System.Numerics.Vector3.Zero, Entity.Null);
+        var armRoot = _app.CreateAnimated(database.Find($"{FbxSamples.Folder}/Arm.skl.fbx")!, new System.Numerics.Vector3(2, 0, 0), Entity.Null);
+        World.Get<Animator>(armRoot).Time = 0.5f;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var robotAnimator = World.Get<Animator>(robotRoot);
+        var legLBox = findChild(robotRoot, "LegLBox");
+        var robotParts = new[] { "Pelvis", "Torso", "HeadBox", "ArmLBox", "ArmRBox", "LegLBox", "LegRBox" }.Select(n => findChild(robotRoot, n)).ToList();
+        var expectedLeg = new System.Numerics.Vector3(0.14f, 0.95f - 0.45f * MathF.Cos(25 * MathF.PI / 180), 0.45f * MathF.Sin(25 * MathF.PI / 180));
+        check(robotAnimator.Clip == walkClip && robotAnimator.BoundBoneCount == 8 && robotParts.All(p => p != Entity.Null && World.Has<MeshRenderer>(p) && World.Get<MeshRenderer>(p).Model.Path.Contains(".mod.fbx#")) &&
+              World.Get<Transform>(legLBox).Parent == findChild(robotRoot, "LegL") && near(worldOf(legLBox), expectedLeg, 1e-3f),
+              $"a rigid hierarchical model : 8 bones, 7 parts under their bones, the walk at 0 s puts the left leg at {worldOf(legLBox):F3} (by hand {expectedLeg:F3})");
+        var armEnd = findChild(armRoot, "Arm_End");
+        var expectedEnd = new System.Numerics.Vector3(2 - MathF.Sin(40 * MathF.PI / 180) - MathF.Sin(100 * MathF.PI / 180), 1 + MathF.Cos(40 * MathF.PI / 180) + MathF.Cos(100 * MathF.PI / 180), 0);
+        check(World.Get<Animator>(armRoot).Clip == waveClip && World.Get<Animator>(armRoot).ShowBones == false && near(worldOf(armEnd), expectedEnd, 1e-3f),
+              $"bone rotations go through the hierarchy : the wave at 0.5 s puts Arm_End at {worldOf(armEnd):F3} (by hand {expectedEnd:F3})");
+        // 元に戻す (作った全部が消える) / やり直す (戻って、骨も見つかる)
+        var countWithRobot = World.EntityCount;
+        _app.Undo();
+        var animAfterUndo = World.EntityCount;
+        _app.Redo();
+        for (int i = 0; i < 2; i++) yield return 0;
+        var redoRobot = World.Entities.FirstOrDefault(e => World.Has<Animator>(e) && World.Get<Animator>(e).Skeleton == armSkeleton);
+        check(countWithRobot - animAfterUndo == 1 + 4 + 1 && World.EntityCount == countWithRobot && redoRobot != Entity.Null && World.Get<Animator>(redoRobot).BoundBoneCount == 4,
+              $"creating an animated object is one undo step (removed {countWithRobot - animAfterUndo} : root + 4 bones + the skinned mesh) and redo restores it");
+        armRoot = redoRobot;
+        // 再生 : 時間が進む (決まった刻み)、ループ、止めると元に戻る
+        Time.CaptureDeltaTime = 1.0f / 30;
+        _app.TogglePlay();
+        for (int i = 0; i < 45; i++) yield return 0;
+        var playedTime = World.Get<Animator>(World.Entities.First(e => World.Has<Animator>(e) && World.Get<Animator>(e).Clip == walkClip)).Time;
+        var bonesWritten = _app.Engine.AnimationStats.BonesWritten;
+        _app.TogglePlay();
+        Time.CaptureDeltaTime = 0;
+        yield return 0;
+        var stoppedTime = World.Get<Animator>(World.Entities.First(e => World.Has<Animator>(e) && World.Get<Animator>(e).Clip == walkClip)).Time;
+        check(playedTime > 0.3f && playedTime < 0.8f && bonesWritten > 0 && stoppedTime == 0,
+              $"playing advances the time and loops (walk 1 s after ~45 frames : {playedTime:F3} s, {bonesWritten} bones written in a frame) and stopping restores it");
+        // 保存 → 開き直す (スケルトン / クリップ / 部品のモデル xxx.mod.fbx#ノード が戻る)
+        var animScene = $"{determinismFolder}/anim.scene.json";
+        _app.SaveSceneTo(database.FullPath(animScene));
+        var animJson = File.ReadAllText(database.FullPath(animScene));
+        _app.OpenScene(database.FullPath(animScene));
+        for (int i = 0; i < 3; i++) yield return 0;
+        var reopenedAnimators = World.Entities.Where(e => World.Has<Animator>(e)).ToList();
+        check(reopenedAnimators.Count == 2 && reopenedAnimators.All(e => World.Get<Animator>(e).Skeleton != null && World.Get<Animator>(e).Clip != null && World.Get<Animator>(e).BoundBoneCount == World.Get<Animator>(e).Skeleton!.Bones.Count) &&
+              animJson.Contains("Robot.mod.fbx#LegLBox") && animJson.Contains("\"guid\""),
+              "an animated scene saves and reopens (skeleton / clip / part models by id with #node)");
+        // クリップを書き換える → 同じ物の中身が変わる (Animator が持ったまま)
+        var hotClipPath = $"{determinismFolder}/Hot_Wave.anm.fbx";
+        File.WriteAllBytes(database.FullPath(hotClipPath), FbxSamples.Arm(FbxSamples.ArmPart.Animation));
+        database.Refresh();
+        var hotClip = _app.Engine.Assets.LoadAnimationClip(hotClipPath);
+        var hotVersion = hotClip.Version;
+        File.WriteAllBytes(database.FullPath(hotClipPath), FbxSamples.Robot(FbxSamples.ArmPart.Animation));
+        _app.Engine.Assets.ReloadFbx(hotClipPath);
+        check(hotClip.Version == hotVersion + 1 && hotClip.Tracks.Count == 5 && hotClip.Duration == 1,
+              "changing an .anm.fbx file updates the same clip in place (2 → 5 tracks)");
+        // 時間 : 100 体の Robot (骨 8 本) を動かす
+        _app.RequestNewScene();
+        if (_app.PendingPrompt != null) _app.ResolvePrompt(UnsavedChoice.DontSave);
+        for (int i = 0; i < 100; i++) _app.CreateAnimated(database.Find($"{FbxSamples.Folder}/Robot.skl.fbx")!, new System.Numerics.Vector3(i % 10 * 1.2f - 6, 0, i / 10 * 1.2f), Entity.Null);
+        Time.CaptureDeltaTime = 1.0f / 60;
+        _app.TogglePlay();
+        for (int i = 0; i < 10; i++) yield return 0;
+        var animationMs = new List<double>();
+        for (int i = 0; i < 60; i++) { yield return 0; animationMs.Add(_app.Engine.AnimationStats.Milliseconds); }
+        var stats = _app.Engine.AnimationStats;
+        _app.TogglePlay();
+        Time.CaptureDeltaTime = 0;
+        check(stats.Animators == 100 && stats.BonesWritten == 500,
+              $"100 animated robots : {stats.Animators} animators, {stats.BonesWritten} bones written per frame, animation {animationMs.Average():F3} ms (max {animationMs.Max():F3}), C# update {_app.Engine.UpdateMilliseconds:F3} ms");
+        _app.OpenScene(database.FullPath(animScene));
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene, animScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -1388,6 +1511,8 @@ internal sealed class EditorTest
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
             if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
+            if (compareScene == animScene)     // AN3 : 書き出したゲームも骨を同じに動かす (下の比べるのは再生した後の全部の Transform)
+                check(!playerLog.Contains("[FBX]") && !playerLog.Contains("[Animation]"), "the built game loads the skeletons and clips");
             if (compareScene == fbxScene)      // AN2 : 書き出したゲームも FBX を読んでモデルを作る (テクスチャも入っている)
                 check(!playerLog.Contains("[FBX]") && !playerLog.Contains("Failed to load model"), "the built game reads the FBX models");
             if (compareScene == graphScene)    // SH4 : シェーダーグラフも書き出したゲームで HLSL を作ってコンパイルする

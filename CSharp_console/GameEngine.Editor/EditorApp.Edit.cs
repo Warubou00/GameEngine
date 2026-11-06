@@ -80,6 +80,86 @@ internal sealed partial class EditorApp
         return entity;
     }
 
+    // ---------------------------------------------------------------------
+    // AN3 : アニメーション
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// スケルトン (xxx.skl.fbx) から動く物を作る : 根 (Animator) + 骨のエンティティ + 同じ名前のモデル (xxx.mod.fbx) の部品。
+    /// クリップは同じフォルダの xxx_*.anm.fbx / xxx.anm.fbx の最初の物。元に戻せる (1 回で全部)
+    /// </summary>
+    public Entity CreateAnimated(AssetEntry skeletonAsset, Vector3 position, Entity parent)
+    {
+        Skeleton skeleton;
+        try { skeleton = _engine.Assets.LoadSkeleton(skeletonAsset.Path); }
+        catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return Entity.Null; }
+        var stem = AssetDatabase.SplitName(skeletonAsset.Name, false).Stem;
+        var folder = skeletonAsset.Path[..skeletonAsset.Path.LastIndexOf('/')];
+        var modelPath = $"{folder}/{stem}{GameEngine.Fbx.FbxAsset.ModelExtension}";
+        var hasModel = _database.Find(modelPath) is { Kind: AssetKind.FbxModel };
+        var clipEntry = _database.Entries
+            .Where(e => e.Kind == AssetKind.FbxAnimation && e.Path.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase) && e.Path.LastIndexOf('/') == folder.Length &&
+                        (e.Name.StartsWith(stem + "_", StringComparison.OrdinalIgnoreCase) || e.Name.Equals(stem + GameEngine.Fbx.FbxAsset.AnimationExtension, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+        AnimationClip? clip = null;
+        if (clipEntry != null)
+        {
+            try { clip = _engine.Assets.LoadAnimationClip(clipEntry.Path); }
+            catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); }
+        }
+        var root = World.CreateEntity(stem);
+        var transform = new Transform(position);
+        if (World.IsAlive(parent) && World.Has<Transform>(parent) && Matrix4x4.Invert(Hierarchy.GetWorldMatrix(World, parent), out var inverse))
+        {
+            transform.Parent = parent;
+            transform.Position = Vector3.Transform(position, inverse);
+        }
+        World.Add(root, transform);
+        World.Add(root, new Animator(skeleton, clip) { ShowBones = !hasModel });
+        var created = AnimationRig.Build(World, _engine.Assets, root, skeleton, hasModel ? modelPath : null);
+        var all = new List<Entity> { root };
+        all.AddRange(created);
+        Selected = root;
+        _undo.Record(new EntitiesEdit($"Create {stem}", SceneSerializer.Save(World, all), all.Select(e => EditorWorld.IdOf(World, e)).ToList(), create: true));
+        Console.WriteLine($"[Editor] Created {stem} : {skeleton.Bones.Count} bones, {created.Count - skeleton.Bones.Count} parts{(hasModel ? $" from {modelPath}" : "")}{(clip != null ? $", clip {clipEntry!.Name}" : "")}");
+        return root;
+    }
+
+    /// <summary>Animator の骨のエンティティを (足りなければ) 作る。Skeleton と同じ名前のモデルがあれば部品も。戻り値 = 作った物</summary>
+    public List<Entity> BuildBones(Entity entity)
+    {
+        if (!World.IsAlive(entity) || !World.Has<Animator>(entity) || World.Get<Animator>(entity).Skeleton is not { } skeleton) return new List<Entity>();
+        var stem = AssetDatabase.SplitName(Path.GetFileName(skeleton.Path), false).Stem;
+        var modelPath = $"{skeleton.Path[..skeleton.Path.LastIndexOf('/')]}/{stem}{GameEngine.Fbx.FbxAsset.ModelExtension}";
+        var created = AnimationRig.Build(World, _engine.Assets, entity, skeleton, _database.Find(modelPath) is { Kind: AssetKind.FbxModel } ? modelPath : null);
+        if (created.Count > 0) _undo.Record(new EntitiesEdit($"Build bones of {NameOf(World, entity)}", SceneSerializer.Save(World, created), created.Select(e => EditorWorld.IdOf(World, e)).ToList(), create: true));
+        return created;
+    }
+
+    /// <summary>アニメーション (xxx.anm.fbx) を Animator に付ける (その物か、親の中で一番近い Animator。元に戻せる)</summary>
+    public bool AssignClip(Entity entity, AssetEntry asset)
+    {
+        var target = entity;
+        while (World.IsAlive(target) && !World.Has<Animator>(target)) target = World.Has<Transform>(target) ? World.Get<Transform>(target).Parent : Entity.Null;
+        if (!World.IsAlive(target))
+        {
+            Console.WriteLine("[Editor] Drop an animation onto an object that has an Animator (or one of its children).");
+            return false;
+        }
+        AnimationClip clip;
+        try { clip = _engine.Assets.LoadAnimationClip(asset.Path); }
+        catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return false; }
+        var id = EditorWorld.IdOf(World, target);
+        var before = SceneSerializer.SaveComponent(World, target, typeof(Animator));
+        World.Get<Animator>(target).Clip = clip;
+        World.Get<Animator>(target).Time = 0;
+        var after = SceneSerializer.SaveComponent(World, target, typeof(Animator));
+        _undo.Record(new ComponentEdit(id, typeof(Animator), before, after));
+        Selected = target;
+        Console.WriteLine($"[Editor] {NameOf(World, target)} plays {asset.Path}");
+        return true;
+    }
+
     // マテリアルのアセットを物に付ける (MeshRenderer.Material。元に戻せる)
     public bool AssignMaterial(Entity entity, AssetEntry asset)
     {

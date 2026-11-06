@@ -92,6 +92,13 @@ public static class SceneSerializer
         RegisterConverter<CollisionMesh?>(
             (w, v, _) => writeAsset(w, v?.Path, "model"),
             (e, c) => readAsset<CollisionMesh?>(e, c, path => c.Assets!.LoadCollisionMesh(c.Assets.LoadModel(path)), null, "model"));
+        // AN3 : スケルトン / アニメーション (FBX)
+        RegisterConverter<Skeleton?>(
+            (w, v, _) => writeAsset(w, v?.Path),
+            (e, c) => readAsset<Skeleton?>(e, c, path => c.Assets!.LoadSkeleton(path), null));
+        RegisterConverter<AnimationClip?>(
+            (w, v, _) => writeAsset(w, v?.Path),
+            (e, c) => readAsset<AnimationClip?>(e, c, path => c.Assets!.LoadAnimationClip(path), null));
     }
 
     // ---------------------------------------------------------------------
@@ -442,7 +449,9 @@ public static class SceneSerializer
     {
         if (path == null) { w.WriteNullValue(); return; }
         w.WriteStartObject();
-        if (AssetDatabase.Current?.Find(path) is { } entry) w.WriteString("guid", entry.Guid.ToString());
+        // AN3 : 部品 (xxx.mod.fbx#ノード) は # の前のアセットの Id
+        var hash = path.IndexOf('#');
+        if (AssetDatabase.Current?.Find(hash >= 0 ? path[..hash] : path) is { } entry) w.WriteString("guid", entry.Guid.ToString());
         w.WriteString(key, path);
         w.WriteEndObject();
     }
@@ -452,7 +461,8 @@ public static class SceneSerializer
         if (e.ValueKind != JsonValueKind.Object) return fallback;
         string? path = e.TryGetProperty(key, out var p) ? p.GetString() : null;
         // Id があれば Id を優先する (ファイルを動かした / 名前を変えた後も見つかる。ED5)
-        if (e.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var guid) && AssetDatabase.Current?.Find(guid) is { } entry) path = entry.Path;
+        if (e.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var guid) && AssetDatabase.Current?.Find(guid) is { } entry)
+            path = entry.Path + (path != null && path.IndexOf('#') is var hash and >= 0 ? path[hash..] : "");   // AN3 : # の後 (部品) は残す
         if (path == null) return fallback;
         if (context.Assets == null)
         {

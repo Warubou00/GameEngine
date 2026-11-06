@@ -39,6 +39,8 @@ public sealed class AssetManager
     private readonly Dictionary<string, ShaderAsset> _shaders = new(StringComparer.OrdinalIgnoreCase);   // SH2
     private readonly Dictionary<string, uint>     _textures3D = new(StringComparer.OrdinalIgnoreCase);   // SH2 : builtin: の 3D テクスチャ
     private readonly Dictionary<string, Fbx.FbxAsset> _fbx = new(StringComparer.OrdinalIgnoreCase);   // AN1
+    private readonly Dictionary<string, Skeleton> _skeletons = new(StringComparer.OrdinalIgnoreCase);    // AN3
+    private readonly Dictionary<string, AnimationClip> _clips = new(StringComparer.OrdinalIgnoreCase);   // AN3
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
     internal bool PhysicsLoaded { get; set; }
@@ -72,7 +74,7 @@ public sealed class AssetManager
     {
         string? map(string key) =>
             key.Equals(oldPath, StringComparison.OrdinalIgnoreCase) ? newPath :
-            key.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase) ? newPath + key[oldPath.Length..] : null;
+            key.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase) || key.StartsWith(oldPath + "#", StringComparison.Ordinal) ? newPath + key[oldPath.Length..] : null;   // AN3 : 部品 (xxx.mod.fbx#ノード) も
         void rekey<T>(Dictionary<string, T> cache, Action<T, string>? update = null)
         {
             foreach (var key in cache.Keys.ToList())
@@ -90,6 +92,8 @@ public sealed class AssetManager
         rekey(_prefabs, (prefab, path) => prefab.Path = path);
         rekey(_shaders, (shader, path) => shader.Path = path);   // SH2 (#line のファイル名は次のコンパイルから)
         rekey(_fbx, (fbx, path) => fbx.Path = path);   // AN1
+        rekey(_skeletons, (skeleton, path) => skeleton.Path = path);   // AN3
+        rekey(_clips, (clip, path) => clip.Path = path);
     }
 
     // パス → (覚える名前, 読むファイル)
@@ -120,25 +124,69 @@ public sealed class AssetManager
         if (!_fbx.TryGetValue(path, out var asset)) return false;
         asset.Reload(file);
         // AN2 : モデルとして置いてあれば、同じ番号のまま作り直す (置いた物も新しい形で描かれる)。読めなければ前の形のまま
-        if (asset.IsValid && asset.Type == Fbx.FbxAssetType.Model && _models.TryGetValue(path, out var model))
+        //   AN3 : 部品 (xxx.mod.fbx#ノード) も
+        if (asset.IsValid && asset.Type == Fbx.FbxAssetType.Model)
         {
-            try { _models[path] = createFbxModel(path, file, asset, model.Handle); }
-            catch (InvalidDataException ex) { Console.WriteLine($"[FBX] {path} : {ex.Message} (the previous model is kept)"); }
+            foreach (var key in _models.Keys.Where(k => k.Equals(path, StringComparison.OrdinalIgnoreCase) || k.StartsWith(path + "#", StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                try { _models[key] = createFbxModel(key, file, asset, _models[key].Handle); }
+                catch (InvalidDataException ex) { Console.WriteLine($"[FBX] {key} : {ex.Message} (the previous model is kept)"); }
+            }
         }
+        // AN3 : スケルトン / アニメーションは中身を入れ替える (Animator が持っている物もそのまま新しくなる)
+        if (asset.IsValid && asset.Scene != null && asset.Type == Fbx.FbxAssetType.Skeleton && _skeletons.TryGetValue(path, out var skeleton))
+            skeleton.Set(Fbx.FbxAnimationImporter.ImportSkeleton(asset.Scene));
+        if (asset.IsValid && asset.Scene != null && asset.Type == Fbx.FbxAssetType.Animation && _clips.TryGetValue(path, out var clip))
+            clip.Set(Fbx.FbxAnimationImporter.ImportAnimation(asset.Scene));
         ReloadCount++;
         AssetReloaded?.Invoke(path);
         return asset.IsValid;
     }
 
+    // AN3 : スケルトン (xxx.skl.fbx)。読めない / 中身が足りない時は理由付きの例外
+    public Skeleton LoadSkeleton(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_skeletons.TryGetValue(path, out var cached)) return cached;
+        if (Fbx.FbxAsset.TypeOf(path) != Fbx.FbxAssetType.Skeleton) throw new InvalidDataException($"{path} : not a skeleton (name it xxx.skl.fbx)");
+        if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load skeleton: {path}", path);
+        var asset = LoadFbx(path);
+        if (!asset.IsValid || asset.Scene == null) throw new InvalidDataException($"{path} : {asset.Error}");
+        var skeleton = new Skeleton(path);
+        skeleton.Set(Fbx.FbxAnimationImporter.ImportSkeleton(asset.Scene));
+        _skeletons.Add(path, skeleton);
+        return skeleton;
+    }
+
+    // AN3 : アニメーション (xxx.anm.fbx)
+    public AnimationClip LoadAnimationClip(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_clips.TryGetValue(path, out var cached)) return cached;
+        if (Fbx.FbxAsset.TypeOf(path) != Fbx.FbxAssetType.Animation) throw new InvalidDataException($"{path} : not an animation (name it xxx.anm.fbx)");
+        if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load animation: {path}", path);
+        var asset = LoadFbx(path);
+        if (!asset.IsValid || asset.Scene == null) throw new InvalidDataException($"{path} : {asset.Error}");
+        var data = Fbx.FbxAnimationImporter.ImportAnimation(asset.Scene);
+        foreach (var warning in data.Warnings) Console.WriteLine($"[FBX] {path} : warning : {warning}");
+        var clip = new AnimationClip(path);
+        clip.Set(data);
+        _clips.Add(path, clip);
+        return clip;
+    }
+
     // AN2 : .mod.fbx → 頂点 / インデックス / マテリアル → C++ のモデル (replace が有効なら同じ番号で入れ替える)
+    //   AN3 : path が xxx.mod.fbx#ノード なら、そのノードのメッシュだけをノードの空間で (部品)
     private unsafe Model createFbxModel(string path, string file, Fbx.FbxAsset asset, uint replace)
     {
         if (!asset.IsValid || asset.Scene == null) throw new InvalidDataException($"{path} : {asset.Error}");
         if (asset.Type != Fbx.FbxAssetType.Model) throw new InvalidDataException($"{path} : not a model (name it xxx.mod.fbx)");
         var embedded = _database != null ? Path.Combine(_database.ProjectRoot, "Library", "FbxTextures") : null;
-        var data = Fbx.FbxModelImporter.Import(asset.Scene, file, findTextureByName, embedded);
+        var hash = path.IndexOf('#');
+        var node = hash >= 0 ? path[(hash + 1)..] : null;
+        var data = Fbx.FbxModelImporter.Import(asset.Scene, file, findTextureByName, embedded, node);
         foreach (var warning in data.Warnings) Console.WriteLine($"[FBX] {path} : warning : {warning}");
-        if (data.SubMeshes.Count == 0) throw new InvalidDataException($"{path} : no triangles");
+        if (data.SubMeshes.Count == 0) throw new InvalidDataException(node != null ? $"{path} : no mesh in the node '{node}'" : $"{path} : no triangles");
         var vertices = new Primitives.NativeVertex[data.Positions.Count];
         for (int i = 0; i < vertices.Length; i++)
             vertices[i] = new Primitives.NativeVertex { Position = data.Positions[i], Normal = data.Normals[i], Color = data.Colors[i], UV = data.UVs[i] };
@@ -162,7 +210,7 @@ public sealed class AssetManager
         fixed (NativeMethods.ModelSubMeshDesc* s = subMeshes)
             handle = NativeMethods.Renderer_CreateModel(v, (uint)vertices.Length, i, (uint)indices.Length, s, (uint)subMeshes.Length, textures, path, replace, out subMeshCount);
         if (handle == NativeMethods.InvalidHandle) throw new InvalidDataException($"{path} : the renderer could not create the model");
-        asset.ModelData = data;
+        if (node == null) asset.ModelData = data;   // Inspector に出すのはモデル全体の形
         return new Model(handle, (int)subMeshCount, path);
     }
 
@@ -406,16 +454,22 @@ public sealed class AssetManager
     {
         // プリミティブ (SH1) : "builtin:Cube" など。ファイルを読まずにコードで作る
         if (Primitives.IsPrimitive(path)) return loadPrimitive(path);
+        // AN3 : 部品 (xxx.mod.fbx#ノード)。# の前をアセットのパスとして探す
+        var fragment = "";
+        var hashIndex = path.IndexOf('#');
+        if (hashIndex >= 0) { fragment = path[hashIndex..]; path = path[..hashIndex]; }
         (path, var file) = resolve(path);
-        if (_models.TryGetValue(path, out var cached)) return cached;
+        var key = path + fragment;
+        if (_models.TryGetValue(key, out var cached)) return cached;
         // AN2 : FBX のモデル (C# で読んで形を渡す)。読めない / 中身が足りない時は理由付きの例外
         if (Fbx.FbxAsset.TypeOf(path) == Fbx.FbxAssetType.Model)
         {
             if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load model: {path}", path);
-            var fbxModel = createFbxModel(path, file, LoadFbx(path), NativeMethods.InvalidHandle);
-            _models.Add(path, fbxModel);
+            var fbxModel = createFbxModel(key, file, LoadFbx(path), NativeMethods.InvalidHandle);
+            _models.Add(key, fbxModel);
             return fbxModel;
         }
+        if (fragment.Length > 0) throw new FileNotFoundException($"Failed to load model: {key} (# is only for FBX models)", key);
 
         var handle = NativeMethods.Renderer_LoadModel(file, out var subMeshCount);
         if (handle == NativeMethods.InvalidHandle)
