@@ -38,6 +38,7 @@ public sealed class AssetManager
     private readonly Dictionary<string, Prefab>   _prefabs   = new(StringComparer.OrdinalIgnoreCase);   // ED8
     private readonly Dictionary<string, ShaderAsset> _shaders = new(StringComparer.OrdinalIgnoreCase);   // SH2
     private readonly Dictionary<string, uint>     _textures3D = new(StringComparer.OrdinalIgnoreCase);   // SH2 : builtin: の 3D テクスチャ
+    private readonly Dictionary<string, Fbx.FbxAsset> _fbx = new(StringComparer.OrdinalIgnoreCase);   // AN1
 
     // Physics.dll を読み込めたか (Engine が設定する。無い時は LoadCollisionMesh が例外を出す)
     internal bool PhysicsLoaded { get; set; }
@@ -88,6 +89,7 @@ public sealed class AssetManager
         rekey(_materials, (material, path) => material.Path = path);
         rekey(_prefabs, (prefab, path) => prefab.Path = path);
         rekey(_shaders, (shader, path) => shader.Path = path);   // SH2 (#line のファイル名は次のコンパイルから)
+        rekey(_fbx, (fbx, path) => fbx.Path = path);   // AN1
     }
 
     // パス → (覚える名前, 読むファイル)
@@ -95,6 +97,31 @@ public sealed class AssetManager
     {
         if (_database?.ToAssetPath(path) is { } assetPath) return (assetPath, _database.FullPath(assetPath));
         return (path, path);
+    }
+
+    // ---------------------------------------------------------------------
+    // FBX (AN1) : xxx.mod.fbx / xxx.skl.fbx / xxx.anm.fbx。読めなくても FbxAsset は返す (Error に理由)
+    // ---------------------------------------------------------------------
+
+    public Fbx.FbxAsset LoadFbx(string path)
+    {
+        (path, var file) = resolve(path);
+        if (_fbx.TryGetValue(path, out var cached)) return cached;
+        if (!File.Exists(file)) throw new FileNotFoundException($"Failed to load FBX: {path}", path);
+        var asset = Fbx.FbxAsset.Load(path, file);
+        _fbx.Add(path, asset);
+        return asset;
+    }
+
+    /// <summary>FBX のファイルが変わった時 : 読み直す (読んだ事が無ければ何もしない)。戻り値 = 読めたか</summary>
+    public bool ReloadFbx(string path)
+    {
+        (path, var file) = resolve(path);
+        if (!_fbx.TryGetValue(path, out var asset)) return false;
+        asset.Reload(file);
+        ReloadCount++;
+        AssetReloaded?.Invoke(path);
+        return asset.IsValid;
     }
 
     /// <summary>

@@ -542,6 +542,65 @@ internal sealed class Inspector
         string.Join("\n", error.Split('\n').Select(l => l.Trim()).Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) || l.Contains(".hlsl")).Take(6)) is { Length: > 0 } lines ? lines : error;
 
     /// <summary>シェーダーのアセット (SH2。Project で .hlsl を選んだ時) : 設定 / パラメーター / エラー</summary>
+    // ---------------------------------------------------------------------
+    // FBX のアセット (AN1) : 種類 / 読めたか / 中身の数 / 気を付ける事 / ノードの木 (中を見る)
+    // ---------------------------------------------------------------------
+    public void DrawFbx(GameEngine.Fbx.FbxAsset fbx)
+    {
+        ImGui.Text(Path.GetFileName(fbx.Path));
+        ImGui.TextDisabled(fbx.Path);
+        ImGui.Text($"{fbx.Type} ({GameEngine.Fbx.FbxAsset.ExtensionOf(fbx.Type)})   {fbx.FileBytes / 1024.0:F1} KB   read in {fbx.LoadMilliseconds:F1} ms");
+        ImGui.Separator();
+        if (fbx.Error != null)
+        {
+            ImGui.PushTextWrapPos();
+            ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.45f, 0.4f, 1.0f), "Cannot use this file :");
+            ImGui.TextUnformatted(fbx.Error);
+            ImGui.PopTextWrapPos();
+        }
+        else ImGui.TextColored(new System.Numerics.Vector4(0.5f, 1.0f, 0.5f, 1.0f), $"OK : a {fbx.Type.ToString().ToLowerInvariant()}");
+        if (fbx.Summary.Count > 0 && ImGui.BeginTable("##fbx", 2, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        {
+            ImGui.TableSetupColumn("Item", ImGuiTableColumnFlags.WidthFixed, 120);
+            ImGui.TableSetupColumn("Value");
+            foreach (var (label, value) in fbx.Summary)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(label);
+                ImGui.TableNextColumn(); ImGui.TextWrapped(value);
+            }
+            ImGui.EndTable();
+        }
+        foreach (var warning in fbx.Warnings) ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.8f, 0.3f, 1.0f), "! " + warning);
+        if (fbx.Scene is { } scene && ImGui.CollapsingHeader($"Objects ({scene.Objects.Count})"))
+        {
+            foreach (var group in scene.Objects.Values.GroupBy(o => o.Kind).OrderBy(g => g.Key))
+            {
+                if (!ImGui.TreeNode($"{group.Key} ({group.Count()})##{group.Key}")) continue;
+                foreach (var o in group.Take(200))
+                    ImGui.BulletText($"{(o.Name.Length > 0 ? o.Name : "(no name)")}  {o.SubKind}  [{o.Children.Count} in / {o.Parents.Count} out]");
+                ImGui.TreePop();
+            }
+        }
+        if (fbx.Document is { } document && ImGui.CollapsingHeader("Raw nodes"))
+            foreach (var node in document.Root.Children) drawFbxNode(node, 0);
+    }
+
+    private static void drawFbxNode(GameEngine.Fbx.FbxNode node, int depth)
+    {
+        string describe(object p) => p switch
+        {
+            string s => $"\"{(s.Length > 40 ? s[..40] + "..." : s).Replace("\0\x01", "::")}\"",
+            Array a => $"{a.GetType().GetElementType()!.Name}[{a.Length}]",
+            _ => Convert.ToString(p, System.Globalization.CultureInfo.InvariantCulture) ?? "",
+        };
+        var label = $"{node.Name}  {string.Join(", ", node.Properties.Take(4).Select(describe))}{(node.Properties.Count > 4 ? " ..." : "")}##{node.Offset}";
+        if (node.Children.Count == 0) { ImGui.BulletText(label[..label.IndexOf("##", StringComparison.Ordinal)]); return; }
+        if (depth > 12 || !ImGui.TreeNode(label)) return;
+        foreach (var child in node.Children.Take(500)) drawFbxNode(child, depth + 1);
+        ImGui.TreePop();
+    }
+
     // グラフの窓で開く (SH4。EditorApp が入れる)
     public Action<string>? OpenShaderGraph;
 

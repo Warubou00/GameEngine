@@ -1,0 +1,64 @@
+﻿アニメーション AN1 : FBX を読む土台 (自作の inflate / ノードの木 / 種類ごとの確認) と 自作のサンプル 2026-11-07
+ブランチ : feature/anim-an1
+ロードマップ : ClaudLog/Engine_Roadmap_Animation_2026-11-07.txt (AN1 → AN5)
+
+■ できた物
+  外部のライブラリは使っていない (読む所は全部自分で書いた C#。.NET の ZLibStream はサンプルを書く道具とテストの比べ相手だけ)
+  inflate (Runtime/Assets/Fbx/Inflate.cs) : zlib / deflate を戻す (RFC 1950 / 1951)
+    ブロック 3 種類 (そのまま / 決まったハフマン / 表を送るハフマン)。10 bit までの符号は表を 1 回引く速い道、長い符号は 1 bit ずつ
+    最後に Adler-32 を比べる。壊れたデータは FbxFormatException (他の例外で落ちない)
+  FBX のバイナリを読む (FbxDocument.cs) : 頭 27 byte / 版 7.1 〜 7.7 / ノードの記録 (7.5 から長さが 64bit) / 子の終わりの空の記録 /
+    プロパティ Y C I F D L S R と配列 f d l i b (encoding 0 そのまま / 1 zlib)
+    大きさの食い違い / 途中で切れた / 知らない型 は、ファイルの中の位置を付けてエラー。ASCII の FBX と FBX 6 以前は分かるエラーを出す
+  中身を引ける形 (FbxScene.cs) : Objects (Id → 種類 / 名前 / 細かい種類) と Connections (OO / OP とプロパティの名前) を両方向に、
+    Properties70、GlobalSettings (軸と符号 / 単位 UnitScaleFactor / fps TimeMode)、FBX の時間 (1 秒 = 46186158000) ↔ 秒
+  アセット (FbxAsset.cs) : 名前で種類が決まる (AssetKind.FbxModel / FbxSkeleton / FbxAnimation)。中身が足りなければ読み取りエラー :
+    xxx.mod.fbx : メッシュ (Geometry) が無い / 頂点の番号が範囲の外 / 閉じていない多角形 / 角が 3 つより少ない
+    xxx.skl.fbx : 骨 (Model の LimbNode / Root) が無い
+    xxx.anm.fbx : AnimationStack が無い / キーのある曲線が骨の Lcl Translation / Rotation / Scaling に繋がっていない / 時間が戻る
+    読めた物は中身の数 (メッシュ / 頂点 / 多角形と三角形の数 / マテリアル / テクスチャ / スキンの骨 / 骨 / 根 / 深さ / バインドポーズ /
+    クリップ / 長さ / fps / 動く骨 / 曲線とキー / 軸 / 単位 / 縮めた配列) と、気を付ける事 (同じ名前の骨 / 繋がっていないメッシュ / スタックが複数)
+    ただの .fbx は種類が分からないのでアセットにしない (Project に赤い「FBX ?」と名前の付け方を出す)
+  エディター : Project のタイル (FBX Mod 緑 / FBX Skl 青 / FBX Anm 橙)、使えない物は赤い枠、乗せるとパスと理由 /
+    Inspector : 種類 / 大きさ / 読んだ時間 / OK か理由 / 中身の数 / 気を付ける事 / Objects (種類ごと) / Raw nodes (ノードの木をそのまま) /
+    ファイルを書き換えると読み直す / 名前を変えても .mod.fbx などは残る / Assets > Create FBX Samples
+  自作のサンプル (Editor/Fbx/FbxWriter.cs + FbxSamples.cs。Assets/Samples/Fbx に 7 個。git に入れる) :
+    本物の書き出しと同じ作り (FBXHeaderExtension / GlobalSettings (Y 上 / 右手系 / cm / 30 fps) / Definitions / Objects / Connections / Takes / 後ろの飾り)
+    Box.mod.fbx       : 立方体 (四角形 6 枚、法線 / UV / マテリアル)。7.4、縮めない
+    Arm.mod.fbx       : 円柱 (84 頂点、四角形 72 + 12 角形のふた 2)、骨 4 本、スキン (重みは山の形で足して 1)、Cluster の Transform / TransformLink、バインドポーズ。7.4、縮める
+    Arm.skl.fbx       : 骨 4 本 (Arm_Root → Mid → Tip → End) + バインドポーズ
+    Arm_Wave.anm.fbx  : Wave 2 秒、中と先の骨が Z の周りに ±40° / ±60° (直線の補間)
+    Robot.mod.fbx     : 階層型 (スキンなし) : 箱の部品 7 個が骨の子、マテリアル 2 つ。7.5 (64bit の記録)、縮める
+    Robot.skl.fbx     : 根の Null + 骨 7 本 (腰 → 背 → 頭 / 両腕、腰 → 両足)
+    Robot_Walk.anm.fbx: Walk 1 秒、足と腕が前後に振れ、腰が上下 (3 次の補間)
+
+■ 確認
+  自動 (--editor-test) : 198 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。AN1 の 10 項目 :
+    自分の inflate が ZLibStream と同じ (縮め方 4 × 大きさ 9 (0 〜 300000 byte) × 中身 3 = 108 通り) / 壊したデータ 200 通りが全部エラー /
+    inflate の速さ / サンプル 7 個が読めて種類が合う / 中身の数 (頂点 84、多角形 74 = 三角形 164、スキンの骨 3、骨 4、深さ 4、長さ 2 秒 = 60 フレーム、
+    曲線 2 本 = キー 10、Robot のメッシュ 7 と 64bit、縮めた配列とそのままの配列) / 曲線 → CurveNode → 骨の Lcl Rotation の繋がりとキーの値、
+    骨の親、スキンの重みの合計が全部 1、fps と単位 / 中身が名前と合わない 3 通りがエラー / 壊れたファイル 5 通り (途中で切れた / ゴミ / ASCII / 版 6.1 / 空) /
+    ただの .fbx はアセットでない / 書き換えると読み直し (エラー → 直る)、名前を変えても .mod.fbx / 大きなメッシュの時間
+  見た目 (エディターの窓だけを撮った。操作は PostMessage) : Project の Samples/Fbx のタイル (種類の色、使えない物の赤い枠、ただの .fbx の「FBX ?」) /
+    Arm.mod.fbx と Arm_Wave.anm.fbx の Inspector (中身の数) / 骨の無い .skl.fbx の Inspector (理由) / 乗せた時の理由
+  時間 (Release) :
+    inflate 16 MB を 119 〜 126 ms (127 〜 135 MB/s)。.NET の ZLibStream (C の zlib) は約 50 ms なので 2.5 倍ほど遅い
+    大きなメッシュ (300 × 300 の格子 : 9 万頂点 / 9 万の四角形、4.2 MB の FBX、配列は縮めてある) を読んで確かめるまで 94 〜 100 ms
+    サンプル 1 個 0.2 〜 2 ms (最初の 1 個は JIT で 20 ms ほど)
+    毎フレームの仕事は増えない (FBX は読む時だけ)。エディターの見本のシーンの GPU 0.42 ms は前と同じ
+
+■ 変更
+  ランタイム : Assets/Fbx/Inflate.cs・FbxDocument.cs・FbxScene.cs・FbxAsset.cs (新しい) / Assets/AssetDatabase.cs (種類 3 つ / 名前の拡張子) /
+    Assets/Model.cs (LoadFbx / ReloadFbx / 名前を変えた時)
+  エディター : Fbx/FbxWriter.cs・FbxSamples.cs (新しい) / ProjectPanel.cs (タイル / 赤い枠 / 読み直し / サンプル) / Inspector.cs (DrawFbx) /
+    EditorApp.cs (Assets > Create FBX Samples / Inspector) / EditorTest.cs
+  プロジェクト : Assets/Samples/Fbx (7 個) / .gitignore (Samples/Fbx の .fbx を git に入れる)
+
+■ 気付いた事
+  - .NET の ZLibStream は空のデータを 0 byte で書く (zlib の頭も無い)。長さ 0 の配列は空として読むようにした
+  - ツールチップは後から出した物が勝つ。FBX のエラーをパスのツールチップにまとめた (以前はパスだけが出た)
+
+■ 残り (次の段)
+  - AN2 : モデルを描く (多角形 → 三角形、法線 / UV / 色、マテリアルとテクスチャ、座標と単位の変換、シーンに置く)
+  - 本物の DCC ツールの FBX でも確かめたい (手元にあれば Assets に置いてもらう / 落とすなら先に許可を貰う)
+  - inflate はまだ速くできる (表を大きくする / 長さと距離をまとめて引く)。今の速さで 100 万頂点の配列 (24 MB) は約 0.2 秒
