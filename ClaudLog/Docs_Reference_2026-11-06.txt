@@ -1,0 +1,53 @@
+﻿開発者向けリファレンス (Docs/Reference/index.html) 2026-11-06
+ブランチ : feature/docs-reference
+エンジンには足していない (ソースは変えていない)。ブラウザーで index.html を開くだけで見られる (1 つのファイル。ネットも要らない)
+
+■ できた物
+  Docs/Reference/index.html : エンジンの開発者向けの地図 (日本語)
+    概要と構成図 : 13 モジュール (C# 6 / C++ 7) の箱と使う向きの矢印。C# と C++ の間の P/Invoke の線。外部 (Direct3D 12 / DXC / XAudio2 / XInput)
+      1 フレームの流れ (Engine.Run の順番 : 入力 → System → 物理 → Transform → 描画へ反映 → ライト / パーティクル / 音 → パイプライン → C++)
+    モジュールのページ : 説明 / 使う物 / 使われる物 / フォルダごとのクラス図 (UML) / 型の一覧
+      クラス図は自動で並べる : 継承の木 (親が上) を並べ、関係の無い型は下に詰める。継承 = 実線 + 三角 / 実装 = 破線 + 三角 / 使う = 灰の破線
+      メンバー / 使う関係 / 外の親 を切り替えられる。ホイールで拡大、ドラッグで移動、箱を押すとその型へ
+    型のページ : 種類 / 名前空間 / ファイル:行 (押すとソース) / 継承 / 子 / 中の型 / 使われる所 / コメント (説明) /
+      まわりの図 (上 = 親とその親 / 下 = 子 / 右 = 持つ型 / 左 = 持たれる型) /
+      メンバーの表 (種類ごと。宣言の中の型はリンク。internal を出す / 親のメンバーも出す / 名前で絞る)
+    継承の木 : エンジンの中の親子 19 本 (IComponent を実装する型、ISystem を実装する型 …) と、.NET などの外の型を継ぐ型
+    C# ↔ C++ の境界 : DLL の公開関数 105 個と C# の宣言 (102 個が対応。残りの 3 個は C++ の中だけ / C# から呼ばない物) /
+      同じ並びの構造体 28 組 (24 組は公開関数の同じ位置の引数から分かった物。名前が違っても分かる : WindowDesc ↔ WindowInfo、
+      MaterialDesc ↔ RendererMaterialDesc、PadState ↔ ControllerPadState)。フィールドの数を比べ、違えば赤
+    検索 (/ キー) : 型 / メンバー / 公開関数 / 説明の文
+    開発ガイド (手で書いた) : ビルドと実行 / テスト、コンポーネントと System を足す、描画パイプライン / 描画の命令を足す、
+      C++ の関数を C# から呼ぶ、アセットの種類を足す、エディターを広げる、シェーダー / シェーダーグラフのノード、テストを書く、決まり
+    明るい / 暗い (OS の設定に合わせる)。狭い画面 (スマホの幅) では目次がボタンで出る
+  Docs/Reference/make_reference.py : ソースを読んで index.html を作る (python Docs/Reference/make_reference.py。約 1 秒)
+    C# と C++ のソースを読み、型 / 継承 / メンバー (public / internal / protected) / コメント (/// / // / /** @brief */) / 使う関係 /
+    公開関数 (XXX_API) と C# の DllImport の対応 / 同じ並びの構造体 を集めて、template.html に JSON で入れる
+    コメントの無い型は、ファイルの先頭の説明を「ファイルの説明」として出す (説明の無い型は 526 個中 1 個)
+    Shift-JIS のファイル (Engine の旧い C++) も読める
+  Docs/Reference/template.html : 見た目 / 図の描き方 / 開発ガイド (手で書く所)。index.html は直接書き換えない
+
+■ 確認
+  作った数 : 526 型 (C# 283 / C++ 243)、4423 メンバー、公開関数 105 (C# の宣言あり 102)、1.0 MB
+  ブラウザー (エディターの中のブラウザーで、ローカルのサーバーから開いた) :
+    概要の構成図 / Rendering のクラス図 (RenderPipeline の下に Forward / Deferred) / RenderPipeline の型のページ (まわりの図、メンバーのリンク) /
+    IRenderHardwareInterface (C++) / 継承の木 / 境界の表 / 検索「Shader」/ ガイド を見た。コンソールのエラー 0
+    1440 × 900 と 375 × 812 (横にはみ出さない)、明るい / 暗い
+  読み違いを見つけて直した物 (以前は〜だった) :
+    - C++ の virtual の関数がフィールドになっていた (配列の判定がいつも当たっていた)
+    - タプルの型のフィールド (List<(string, int)>) が関数になっていた
+    - ComponentEditor と ComponentEditor<T> が 1 つの型にまとまっていた
+    - C# の固定長の配列 (fixed uint Colors[4]) が抜けていた
+    - 構造体の組を名前だけで作っていて、C# の MaterialDesc を RHI::MaterialDesc と比べていた (本当は RendererMaterialDesc)
+    - ファイルの先頭が空行だと、ファイルの説明 (rhi.h の @brief) が読めなかった
+  残っている違い : PhysicsNativeMethods.ContactPoint ↔ Physics::ContactPoint は名前が同じだけの別の物 (表に「名前だけ」と出る)
+
+■ 変更
+  Docs/Reference/index.html / make_reference.py / template.html (新しい)
+  エンジンのソースは変えていない
+
+■ 残り
+  - 読み方は簡単な物 (コンパイラーではない)。マクロで作る型 / 複雑なテンプレートは読み違えることがある
+  - private のメンバーは出さない。.cpp の中の関数 (メンバーの実装) の説明は出さない (宣言のコメントだけ)
+  - シーケンス図 (呼び出しの順番) は 1 フレームの流れだけ手で書いた。他の流れ (読み込み / 書き出し / 物理の 1 刻み) は無い
+  - ソースを変えたら make_reference.py を動かし直す必要がある (自動ではない)
