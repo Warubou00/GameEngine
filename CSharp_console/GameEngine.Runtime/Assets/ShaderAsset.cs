@@ -14,6 +14,7 @@ namespace GameEngine;
 //     // @blend opaque | alpha | additive | premultiplied   (既定 : opaque。transparent なら alpha)
 //     // @cull back | front | none            (既定 back)
 //     // @zwrite on | off                     (既定 : opaque は on / transparent は off)
+//     // @depth test | read                   (read : シーンの深度を SceneDepth / SceneWorldPosition で読む。深度のテストはしない。SH3)
 //     // @param float     Density   1.0  range(0, 4)
 //     // @param color     Tint      (1, 0.5, 0.2, 1)
 //     // @param vector    Wind      (1, 0, 0, 0)
@@ -29,6 +30,8 @@ namespace GameEngine;
 //     CameraPosition / UV / Color (頂点の色) / ScreenUV / Time (秒) / LocalToWorld / WorldToLocal (行ベクトル : mul(float4(p, 1), M))
 //     パラメーターは名前でそのまま (float / float4 の値、テクスチャは Texture2D / Texture3D として Noise.Sample(g_Sampler, uv))
 //     Lit(albedo, normal, position, metallic, roughness) : シーンと同じライティング (ライト / 環境光 / 影)
+//     MainLight(out direction, out color) : 一番目の平行光源 (光の進む向き / 色 × 強さ)。無ければ false
+//     SceneDepth(screenUV) / SceneWorldPosition(screenUV) : @depth read の時だけ (それ以外は 1 = 一番奥)
 //     ToLinear(color) : sRGB → 線形 / シーンのシェーダーの関数 / g_Sampler (線形・繰り返し) / g_LinearClamp
 //   コンパイルのエラーは「ファイル:行」で Console に出る (書いたファイルの行番号)
 // ==========================================================================
@@ -49,6 +52,7 @@ public sealed class ShaderAsset : IDisposable
     public ShaderCull  Cull  { get; private set; }
     public bool DepthWrite  { get; private set; } = true;
     public bool Transparent { get; private set; }
+    public bool ReadsDepth  { get; private set; }   // @depth read (SH3)
 
     /// <summary>最後のコンパイルのエラー (成功なら null)。前に成功していれば、その時のシェーダーで描き続ける</summary>
     public string? Error { get; private set; }
@@ -81,6 +85,7 @@ public sealed class ShaderAsset : IDisposable
         var settings = new NativeMethods.CustomShaderSettings
         {
             Blend = (uint)parsed.Blend, Cull = (uint)parsed.Cull, DepthWrite = parsed.DepthWrite ? 1u : 0u, Transparent = parsed.Transparent ? 1u : 0u,
+            ReadDepth = parsed.ReadDepth ? 1u : 0u,
         };
         var source = Encoding.UTF8.GetBytes(GeneratedSource + "\0");
         var error = new byte[8192];
@@ -108,6 +113,7 @@ public sealed class ShaderAsset : IDisposable
         Cull        = parsed.Cull;
         DepthWrite  = parsed.DepthWrite;
         Transparent = parsed.Transparent;
+        ReadsDepth  = parsed.ReadDepth;
         Error = null;
         Version++;
         return true;
@@ -128,6 +134,7 @@ public sealed class ShaderAsset : IDisposable
         public ShaderCull Cull = ShaderCull.Back;
         public bool DepthWrite = true;
         public bool Transparent;
+        public bool ReadDepth;
     }
 
     private Parsed parse(string text, out string? error)
@@ -162,6 +169,10 @@ public sealed class ShaderAsset : IDisposable
                 break;
             case "zwrite":
                 zwrite = value.Equals("on", StringComparison.OrdinalIgnoreCase) || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+                break;
+            case "depth":
+                if (value.Equals("read", StringComparison.OrdinalIgnoreCase)) parsed.ReadDepth = true;
+                else if (!value.Equals("test", StringComparison.OrdinalIgnoreCase)) { error = $"{where()}: @depth must be test or read"; return parsed; }
                 break;
             case "param":
                 var p = ParamLine.Match(value);
@@ -202,6 +213,12 @@ public sealed class ShaderAsset : IDisposable
         }
         if (parsed.Transparent && !blendSet) parsed.Blend = ShaderBlend.Alpha;
         parsed.DepthWrite = zwrite ?? !parsed.Transparent;
+        if (parsed.ReadDepth)
+        {
+            // 深度を読む物は深度の描画先が無い所で描く (書けない)。不透明の列には入れない (半透明の後に描く)
+            if (!parsed.Transparent) { error = $"{Path}: @depth read needs @queue transparent"; return parsed; }
+            parsed.DepthWrite = false;
+        }
         if (!Regex.IsMatch(text, @"\bSurface\s*\(\s*SurfaceInput\b")) error = $"{Path}: define float4 Surface(SurfaceInput IN)";
         return parsed;
     }
@@ -251,6 +268,26 @@ public sealed class ShaderAsset : IDisposable
             }
         }
         b.AppendLine("float3 ToLinear(float3 c) { return toLinear(c); }");
+        // シーンの深度 (SH3。@depth read の時だけ番号が来る。それ以外は 1 = 一番奥)
+        b.AppendLine("bool HasSceneDepth() { return g_Inputs[0].z != 0xFFFFFFFFu; }");
+        b.AppendLine("float SceneDepth(float2 screenUV) { return HasSceneDepth() ? g_Textures[g_Inputs[0].z].SampleLevel(g_PointClamp, screenUV, 0).r : 1.0f; }");
+        b.AppendLine("float3 SceneWorldPosition(float2 screenUV)");
+        b.AppendLine("{");
+        b.AppendLine("    const float4 world = mul(float4(screenUV.x * 2.0f - 1.0f, 1.0f - screenUV.y * 2.0f, SceneDepth(screenUV), 1.0f), g_InvViewProj);");
+        b.AppendLine("    return world.xyz / world.w;");
+        b.AppendLine("}");
+        // 一番目の平行光源 (光の進む向き / 色 × 強さ)
+        b.AppendLine("bool MainLight(out float3 direction, out float3 color)");
+        b.AppendLine("{");
+        b.AppendLine("    direction = float3(0.0f, -1.0f, 0.0f); color = float3(0.0f, 0.0f, 0.0f);");
+        b.AppendLine("    for (uint i = 0; i < g_LightCount; ++i)");
+        b.AppendLine("    {");
+        b.AppendLine("        if (g_Lights[i].Type != 0) continue;");
+        b.AppendLine("        direction = normalize(g_Lights[i].Direction); color = g_Lights[i].Color * g_Lights[i].Intensity;");
+        b.AppendLine("        return true;");
+        b.AppendLine("    }");
+        b.AppendLine("    return false;");
+        b.AppendLine("}");
         b.AppendLine("float3 Lit(float3 albedo, float3 normal, float3 position, float metallic, float roughness)");
         b.AppendLine("{");
         b.AppendLine("    return shade(albedo, normalize(normal), normalize(g_CameraPosition - position), position, metallic, roughness, 1.0f);");

@@ -915,13 +915,57 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- SH3 : 雲 ----------
+        // 3D ノイズ : いつも同じ値 / 端が繋がる (繰り返しで継ぎ目が出ない) / キャッシュ
+        var noise = Noise3D.Generate("PerlinWorley3D", 32);
+        var noiseAgain = Noise3D.Generate("PerlinWorley3D", 32);
+        double edgeDiff(int channel, bool wrap)
+        {
+            double sum = 0;
+            for (int z = 0; z < 32; z++)
+                for (int y = 0; y < 32; y++)
+                {
+                    int a = wrap ? 31 : 15, b = wrap ? 0 : 16;
+                    sum += Math.Abs(noise[((z * 32 + y) * 32 + a) * 4 + channel] - noise[((z * 32 + y) * 32 + b) * 4 + channel]);
+                }
+            return sum / (32 * 32);
+        }
+        var tiles = Enumerable.Range(0, 4).All(c => edgeDiff(c, true) < edgeDiff(c, false) * 2.5 + 1);
+        check(noise.Length == 32 * 32 * 32 * 4 && noise.AsSpan().SequenceEqual(noiseAgain) && tiles,
+              $"3D noise is deterministic and tiles (wrap / inner difference : {string.Join(", ", Enumerable.Range(0, 4).Select(c => $"{edgeDiff(c, true):F1}/{edgeDiff(c, false):F1}"))})");
+        var noiseCache = Path.Combine(Path.GetTempPath(), "ge_editor_test_noise");
+        if (Directory.Exists(noiseCache)) Directory.Delete(noiseCache, true);
+        var first = Noise3D.Load("Worley3D", 16, noiseCache);
+        var second = Noise3D.Load("Worley3D", 16, noiseCache);
+        check(first.Generated && !second.Generated && first.Data.AsSpan().SequenceEqual(second.Data), "3D noise is cached on disk");
+        Directory.Delete(noiseCache, true);
+
+        // 雲のシェーダー (ユーザーの volumetricCloud2.hlsl を移した物)
+        var cloudShader = _app.Engine.Assets.LoadShader("Assets/Shaders/VolumetricCloud.hlsl");
+        check(cloudShader.IsValid && cloudShader.ReadsDepth && cloudShader.Transparent && !cloudShader.DepthWrite && cloudShader.Blend == ShaderBlend.Premultiplied &&
+              cloudShader.Cull == ShaderCull.Front && cloudShader.Parameters.Any(p => p.Name == "Volume" && p.Type == ShaderParamType.Texture3D) &&
+              cloudShader.Parameters.Any(p => p.Name == "DetailNoise" && p.Type == ShaderParamType.Texture),
+              $"the cloud shader compiles ({cloudShader.Error ?? $"{cloudShader.Parameters.Count} parameters, reads the scene depth"})");
+        var badDepthPath = $"{determinismFolder}/BadDepth.hlsl";
+        File.WriteAllText(database.FullPath(badDepthPath), "// @depth read\nfloat4 Surface(SurfaceInput IN) { return 1; }");
+        database.Refresh();
+        var badDepth = _app.Engine.Assets.LoadShader(badDepthPath);
+        check(!badDepth.IsValid && (badDepth.Error ?? "").Contains("@depth read needs @queue transparent"), "@depth read is refused in the opaque queue");
+
+        // 雲のシーン : 雲海 + 浮かぶ雲 2 個 = 3 個を雲のシェーダーで (深度を読む命令で) 描く
+        var cloudScene = "Assets/Scenes/clouds.scene.json";
+        _app.OpenScene(database.FullPath(cloudScene));
+        for (int i = 0; i < 3; i++) yield return 0;
+        var cloudDraws = _app.Engine.Graphics.CustomDrawCount;
+        check(cloudDraws == 3, $"the clouds scene draws the cloud cubes with the cloud shader ({cloudDraws})");
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene },
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -963,6 +1007,9 @@ internal sealed class EditorTest
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
             if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
+            if (compareScene == cloudScene)    // SH3 : 雲のシェーダーと、3D ノイズはキャッシュから (作り直さない)
+                check(!playerLog.Contains("compile failed") && playerLog.Contains("PerlinWorley3D:128 : 128^3 x4 from cache"),
+                      "the built game draws the clouds (shader compiled, 3D noise from the shipped cache)");
             // 初めての起動でも、シェーダーは入れたキャッシュから (コンパイルしない)
             if (compareScene == buildSettings.Scenes[0])
                 check(build.ShaderCacheFiles > 0 && playerLog.Contains("shader from cache") && !playerLog.Contains("shader compiled"),

@@ -617,7 +617,7 @@ namespace RHI
 					break;
 
 				case RHI::RenderCommandType::DrawCustom:
-					drawCustom(buffer, command.Arg1, command.Params[0]);   // SH2 : Arg1 = 列 (不透明 / 半透明) / Params[0] = 時間
+					drawCustom(buffer, command.Arg1, command.Params[0], (command.Arg0 & 1u) != 0);   // SH2 : Arg1 = 列 / Params[0] = 時間 / Arg0 bit0 = 深度を読む物 (SH3)
 					break;
 				}
 			}
@@ -1702,7 +1702,7 @@ namespace RHI
 			return false;
 		}
 
-		void CommandContext::drawCustom(Buffer* buffer, uint32_t queue, float time)
+		void CommandContext::drawCustom(Buffer* buffer, uint32_t queue, float time, bool readDepth)
 		{
 			// ==============================================================
 			// 自分のシェーダー (SH2) の物を今の描画先へ描く
@@ -1721,7 +1721,7 @@ namespace RHI
 			for (uint32_t i = 0; i < frame.Custom.size(); ++i)
 			{
 				const auto* settings = _currentPipeline->GetCustomShaderSettings(buffer->GetMaterialShader(frame.Custom[i].Material));
-				if (settings && (settings->Transparent != 0) == transparentQueue) _customOrder.push_back(i);
+				if (settings && (settings->Transparent != 0) == transparentQueue && (settings->ReadDepth != 0) == readDepth) _customOrder.push_back(i);
 			}
 			if (_customOrder.empty()) return;
 			if (transparentQueue)
@@ -1792,6 +1792,22 @@ namespace RHI
 			}
 			frame.CustomUploadUsed = cursor;
 
+			// シーンの深度を読む物 (SH3) : 深度を描画先から外し、テクスチャとして読める状態にする (全画面のパスが深度を読む時と同じ)
+			uint32_t depthTexture = 0xFFFFFFFFu;
+			if (readDepth && ensureDepthSrv(buffer))
+			{
+				if (_boundDepth != RHI::RenderTargetHandle::INVALID)
+				{
+					cmdList->OMSetRenderTargets(_boundColorCount, _boundColorCount > 0 ? _boundRtvs : nullptr, FALSE, nullptr);
+					_boundDepth     = RHI::RenderTargetHandle::INVALID;
+					_boundDepthMsaa = false;
+				}
+				if (_msaaDepthDirty) resolveSceneDepth(buffer);   // MSAA なら 1 サンプルの深度へ解決してから
+				_sceneDepthReadThisFrame = true;
+				transitionDepth(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+				depthTexture = _depthSrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+			}
+
 			// 2. 描く
 			const DXGI_FORMAT dsvFormat = _boundDepth != RHI::RenderTargetHandle::INVALID ? DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
 			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_DRAW_DATA_SRV, frame.Gpu->Get()->GetGPUVirtualAddress());
@@ -1806,6 +1822,7 @@ namespace RHI
 				uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
 				constants[0] = static_cast<uint32_t>(_customParamBase[draw.Material]);   // g_Inputs[0].x : パラメーターの先頭 (float4 の番号)
 				constants[1] = worldBase[order];                                        // g_Inputs[0].y : ワールド行列の先頭 (float4 の番号。4 個)
+				constants[2] = depthTexture;                                            // g_Inputs[0].z : シーンの深度のテクスチャ (読まない物は 0xFFFFFFFF。SH3)
 				std::memcpy(&constants[8], &time, sizeof(float));                       // g_Params[0].x : 時間 (秒)
 				cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
 				cmdList->DrawIndexedInstanced(draw.IndexCount, 1, draw.FirstIndex, 0, draw.Slot);

@@ -1,0 +1,360 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "e039b827-6999-4d49-adf5-98c7979febb7",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.93,
+            0.82
+          ],
+          "Intensity": 1.7
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.24,
+            -0.33,
+            0.09,
+            0.91
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e311916d-6404-413e-9d41-8d6211d5e8c3",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            20,
+            -70
+          ],
+          "Rotation": [
+            0.087,
+            0,
+            0,
+            0.996
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "f6c83e11-6c82-4718-80a5-740b1061f5b0",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            -3,
+            60
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            40,
+            1,
+            40
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e185959c-5982-4e1a-9caf-96d1caf02fb1",
+      "name": "Mountain 0",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cone"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -45,
+            14.0,
+            70
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            34,
+            34,
+            34
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "685bb43a-1e7d-4686-b703-aaa8e37607d5",
+      "name": "Mountain 1",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cone"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -15,
+            10.0,
+            95
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            28,
+            26,
+            28
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "bcd68ac9-3364-4c2f-9122-d4812cb2dc22",
+      "name": "Mountain 2",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cone"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            25,
+            8.0,
+            60
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            24,
+            22,
+            24
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "a43f8ac1-3729-4e42-9928-4800cf8d93e8",
+      "name": "Mountain 3",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cone"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            55,
+            16.0,
+            105
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            40,
+            38,
+            40
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "664e58b1-43a3-4b14-9eb8-28c804ed877a",
+      "name": "Cloud Sea",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Material": {
+            "path": "Assets/Materials/CloudSea.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            4,
+            80
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            260,
+            12,
+            220
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "a4b732ac-f3e8-4108-8c87-b5b1d9381c13",
+      "name": "Cloud A",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Material": {
+            "path": "Assets/Materials/Cloud.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -35,
+            32,
+            95
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            46,
+            16,
+            30
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "8d745905-ce6a-4f26-ae71-eb35e11489d9",
+      "name": "Cloud B",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Material": {
+            "path": "Assets/Materials/Cloud.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            40,
+            38,
+            130
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            40,
+            16,
+            26
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}

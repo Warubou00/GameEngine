@@ -376,9 +376,12 @@ public sealed class AssetManager
         if (Noise3D.TryParse(path, out var kind, out var size))
         {
             var start = System.Diagnostics.Stopwatch.GetTimestamp();
-            var data = Noise3D.Generate(kind, size);
-            fixed (byte* d = data) handle = NativeMethods.Renderer_CreateTexture3D((uint)size, (uint)size, (uint)size, 1, d);
-            Console.WriteLine($"[Texture3D] {path} : {size}^3 ({System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms)");
+            // キャッシュ : プロジェクトの Library/Noise3D (SH3。書き出したゲームは Data/Library/Noise3D)
+            var cacheFolder = _database != null ? System.IO.Path.Combine(_database.ProjectRoot, "Library", "Noise3D") : null;
+            var (data, generated) = Noise3D.Load(kind, size, cacheFolder);
+            var channels = (uint)Noise3D.ChannelsOf(kind);
+            fixed (byte* d = data) handle = NativeMethods.Renderer_CreateTexture3D((uint)size, (uint)size, (uint)size, channels, d);
+            Console.WriteLine($"[Texture3D] {path} : {size}^3 x{channels} {(generated ? "generated" : "from cache")} ({System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds:F0} ms)");
         }
         else Console.WriteLine($"[Texture3D] Unknown 3D texture : {path} (builtin:{string.Join(" / builtin:", Noise3D.Kinds)})");
         _textures3D[path] = handle;

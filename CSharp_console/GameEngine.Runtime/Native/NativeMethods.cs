@@ -389,6 +389,8 @@ internal static unsafe class NativeMethods
         public uint Cull;          // 0 裏 / 1 表 / 2 なし
         public uint DepthWrite;
         public uint Transparent;   // 1 : 半透明の列
+        public uint ReadDepth;     // 1 : シーンの深度を読む (SH3)
+        public uint Padding0, Padding1, Padding2;
     }
 
     // source は UTF-8 の 0 終わり。error は 0 終わりの UTF-8 が入る

@@ -137,8 +137,10 @@ namespace RHI
 		CustomCull  Cull        = CustomCull::Back;
 		uint32_t    DepthWrite  = 1;   // 深度を書くか (半透明の雲などは 0)
 		uint32_t    Transparent = 0;   // 1 : 半透明の列 (不透明の後に、遠い順に描く)
+		uint32_t    ReadDepth   = 0;   // 1 : シーンの深度をテクスチャとして読む (SH3 : 雲が物に埋まる所)。深度のテストはしない (シェーダーが比べる)
+		uint32_t    Padding[3]  = {};
 	};
-	static_assert(sizeof(CustomShaderSettings) == 16, "CustomShaderSettings must be 16 bytes (same as C#)");
+	static_assert(sizeof(CustomShaderSettings) == 32, "CustomShaderSettings must be 32 bytes (same as C#)");
 
 	constexpr uint32_t MAX_CUSTOM_PARAMS = 64;   // マテリアル 1 つのパラメーター (float4) の数の上限
 
@@ -255,6 +257,7 @@ namespace RHI
 		UpdateParticles  = 5,   // GPU パーティクルの発生 / 更新 (/ ソート)。不透明の後に置く (衝突でシーンの深度を読む)。1 フレームに 1 回
 		DrawParticles    = 6,   // GPU パーティクルを今の描画先へ描く (深度はシェーダーがシーンの深度を読んで比べる。描画先に深度は付けない)
 		DrawCustom       = 7,   // 自分のシェーダーのマテリアルの物を今の描画先へ描く (SH2)。Arg1 = RenderQueue / Params[0] = 時間 (秒)
+		                        //   Arg0 bit0 = シーンの深度を読む物だけを描く (SH3。深度は描画先から外し、テクスチャとして渡す)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
