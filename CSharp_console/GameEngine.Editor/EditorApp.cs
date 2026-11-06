@@ -44,6 +44,8 @@ internal sealed partial class EditorApp
     private readonly ProjectSettingsWindow _projectSettings;   // ED6
     private bool    _showBuild;
     private bool    _showReference;
+    private readonly ShaderGraphWindow _graph;   // SH4
+    private bool    _showGraph;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
     private bool    _resetLayout;
@@ -79,9 +81,12 @@ internal sealed partial class EditorApp
         _project.PrefabChanged = SyncPrefab;   // ED8
         _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
         _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
+        _graph = new ShaderGraphWindow(engine, database);   // SH4
+        _project.OpenShaderGraph = path => OpenShaderGraph(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
+        _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
         _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
         _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
@@ -238,6 +243,7 @@ internal sealed partial class EditorApp
         _build.Draw(ref _showBuild);
         drawUnsavedPrompt();   // ED10
         _reference.Draw(ref _showReference);
+        _graph.Draw(ref _showGraph);   // SH4
         _shaders?.Update();
         _scripts.Update();
 
@@ -344,6 +350,7 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Console",   null, ref _showConsole);
             ImGui.MenuItem("Stats",     null, ref _showStats);
             ImGui.MenuItem("Project",   null, ref _showProject);
+            ImGui.MenuItem("Shader Graph", null, ref _showGraph);   // SH4
             ImGui.Separator();
             // 確認用の表示 (ED6。シーンには保存しない)
             if (ImGui.BeginMenu("Debug Display"))
@@ -394,6 +401,7 @@ internal sealed partial class EditorApp
     {
         var io = ImGui.GetIO();
         if (io.WantTextInput) return;
+        if (_graph.HasFocus) return;   // シェーダーグラフの窓が自分で使う (元に戻す / 消す / 複製。SH4)
         if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);
@@ -799,11 +807,11 @@ internal sealed partial class EditorApp
         if (_project.SelectionVersion != _seenAssetSelection)
         {
             _seenAssetSelection = _project.SelectionVersion;
-            _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader;   // SH2 : シェーダーも
+            _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader or AssetKind.ShaderGraph;   // SH2 : シェーダーも / SH4 : グラフも
         }
         if (ImGui.Begin("Inspector", ref _showInspector))
         {
-            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Shader } shaderEntry)
+            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Shader or AssetKind.ShaderGraph } shaderEntry)
             {
                 try { _inspector.DrawShader(_engine.Assets.LoadShader(shaderEntry.Path)); }
                 catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }

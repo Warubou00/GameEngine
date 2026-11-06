@@ -76,6 +76,34 @@ public sealed class ShaderAsset : IDisposable
     private static readonly Regex RangeText = new(@"range\s*\(\s*([-+0-9.eE]+)\s*,\s*([-+0-9.eE]+)\s*\)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly HashSet<string> Reserved = new(StringComparer.Ordinal) { "Surface", "SurfaceInput", "Lit", "ToLinear", "IN", "Time" };
 
+    /// <summary>最後にコンパイルしたソース (同じ物はコンパイルし直さない : 保存の度に呼ばれても 1 回)</summary>
+    public string? SourceText { get; private set; }
+    /// <summary>ノードグラフから作った物か (SH4)。GeneratedSource の前の、グラフが作った HLSL は GraphSource</summary>
+    public bool IsGraph => ShaderGraph.IsGraph(Path);
+    public string GraphSource { get; private set; } = "";
+    /// <summary>グラフの最後の結果 (ノードのエラー / ピンの型。SH4)</summary>
+    public ShaderGraphResult? GraphResult { get; private set; }
+
+    /// <summary>ファイルの中身 (.hlsl のソース / .shadergraph.json) でコンパイルする。前と同じ中身なら何もしない</summary>
+    public bool CompileFile(string text)
+    {
+        if (SourceText == text) return Error == null;
+        SourceText = text;
+        if (!IsGraph) return Compile(text);
+        // SH4 : グラフ → HLSL (SH2 の書き方) → いつものコンパイル。グラフのエラーは「node_番号」でノードに戻せる形
+        ShaderGraphResult result;
+        try { result = ShaderGraph.FromJson(text).Generate(); }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            GraphResult = null;
+            return fail($"graph:1:1: error: cannot read the graph ({ex.Message})");
+        }
+        GraphResult = result;
+        GraphSource = result.Source;
+        if (result.Error != null) return fail(result.Error);
+        return Compile(result.Source);
+    }
+
     /// <summary>ソースを読んでコンパイルする。戻り値 = 成功したか (失敗しても前の物があればそれで描く)</summary>
     public bool Compile(string text)
     {

@@ -1,0 +1,79 @@
+﻿シェーダー SH4 : シェーダーノードの窓 (シェーダーグラフ) 2026-11-06
+ブランチ : feature/shader-sh4
+ロードマップ : ClaudLog/Engine_Roadmap_Shader_2026-11-06.txt (SH1 → SH5)
+
+■ できた物
+  シェーダーグラフのアセット : Assets の「名前.shadergraph.json」(AssetKind.ShaderGraph。Project では紫の「Graph」)
+    ノードを出力 (Output) まで繋ぐと、SH2 と同じ書き方の HLSL (// @param ... + float4 Surface(SurfaceInput IN)) を作り、
+    いつもの ShaderAsset の道でコンパイルする。マテリアルの Shader の欄にこのファイルを落とすと、そのシェーダーで描く
+    (新しい描き方は足していない。立方体などの物は SH2 と同じ DrawCustom で描く)
+    書き出したゲームも .shadergraph.json から HLSL を作ってコンパイルする (エディターだけの物ではない : Runtime に置いた)
+  シェーダーグラフの窓 (Window > Shader Graph。Project でダブルクリック / Create Shader Graph / インスペクターの Open in Shader Graph)
+    置く : 右クリック → 分類のメニュー、または文字で検索して Enter (置くのはクリックした所)
+    繋ぐ : ピンから左ドラッグ。入力のピンには 1 本 (前の物は外れる)。繋がっている入力から引くと線を外して持てる
+           何も無い所で離すと、その線を繋げられるノードだけのメニューが出て、足すと繋がる。輪になる線 / テクスチャ ↔ 数 は繋がない
+    消す : Delete (右クリック → Delete / Disconnect)。複製 Ctrl+D。元に戻す Ctrl+Z / やり直す Ctrl+Y (グラフの JSON を積む。シーンの Undo とは別)
+    動かす : 左ドラッグ (範囲で選ぶ / Ctrl で足す)。画面は右ドラッグか中ドラッグ、拡大はホイール (25 〜 250%)、F で全部を見る
+    左の欄 : 選んだノードの設定と、繋いでいない入力の値 (Dynamic の入力は大きさ 1 〜 4 も選べる)。何も選ばなければ
+             エラーのあるノードの一覧 (押すとそこへ) / マテリアルのパラメーター / HLSL のチェックで作った HLSL を見られる
+    変えると 0.25 秒後に自動で保存してコンパイルする (シーンの物の見た目がすぐ変わる)。かかった時間は上に出る (約 77 ms)
+    エラーのあるノードは見出しと枠が赤く「!」が付き、乗せると理由が出る。コンパイルに失敗しても前の版で描き続ける
+  ノード 58 種類
+    入力 : UV / Position (World・Local) / Normal / View Direction / Camera Position / Vertex Color / Screen UV / Time (Sin / Cos も)
+    定数 : Float / Vector2〜4 / Color (sRGB で選び、線形で出す)
+    パラメーター (マテリアルで変えられる) : Float (既定の値 / 範囲) / Color / Vector / Texture 2D (white / black / アセット) /
+      Texture 3D (builtin:PerlinWorley3D:64 などエンジンが作る 3D ノイズ)
+    テクスチャ : Sample Texture 2D (sRGB なら線形へ) / Sample Texture 3D / Tiling And Offset / Panner
+    計算 : Add / Subtract / Multiply / Divide / Min / Max / Power / Modulo / Step / Lerp / Clamp / Smoothstep / Remap /
+      One Minus / Negate / Absolute / Saturate / Floor / Fraction / Square Root / Sine / Cosine / Exponential
+    ベクトル : Dot / Cross / Normalize / Length / Distance / Fresnel
+    ノイズ : Value Noise / Gradient Noise (Perlin) / Voronoi (2D、シェーダーの中で計算) / Noise 3D (3D テクスチャを自動で用意)
+    分解・合成 : Split / Combine
+    出力 : BaseColor / Alpha / Emission / Metallic / Roughness / Normal / AlphaClip。Lit (シーンと同じライティング) か Unlit、
+      Queue (Opaque / Transparent) / Blend / Cull / ZWrite を選べる (SH2 の @queue などになる)
+  ピンの型 : float / float2 / float3 / float4 / Dynamic (繋いだ物の一番大きい物) / Texture2D / Texture3D。色で分かる
+    (灰 = float / 緑 = 2 / 黄 = 3 / 桃 = 4 / 橙・赤 = テクスチャ)。違う大きさは自動で変える
+    (float → 全部同じ値 / 大きい → 前から切る / 小さい → 0 で埋めて w は 1)
+  エラーをノードに戻す仕組み : 各ノードのコードの前に「#line 1 "node_番号"」を書く。DXC のエラーの「node_番号:行:列」からノードが分かる
+    グラフを作る時のエラー (名前の重なり / 繋いでいない Texture / 型の違い / 輪 / Output が無い) も同じ形にして、Inspector にも出る
+  見本 : Assets/Shaders/Lava.shadergraph.json (流れる溶岩。Panner → Gradient Noise → Power → Lerp (岩の色 / 熱い色) × Glow + Fresnel の縁)
+    Assets/Materials/Lava.material.json / Assets/Scenes/shadergraph.scene.json (球 / 立方体 / トーラス)
+  起動の引数 : --open-graph Assets/....shadergraph.json (グラフの窓で開いて始める)
+
+■ 確認
+  自動 (--editor-test) : 188 / 0 (Release と Debug。Debug は D3D12 の検証でエラー / 警告 0)。SH4 の 14 項目 :
+    全部の種類のノード (58 種類、135 個) を 1 つのグラフで繋いでコンパイルが通る / 保存して読み直すと同じ /
+    Dynamic のピンが繋いだ物の大きさになる・型の変え方・輪を断る・Output が無いと断る /
+    窓で開いてコンパイル / ノードを足して繋ぎ保存すると作り直す (Speed のパラメーターが増える) /
+    そのグラフのマテリアルの立方体がグラフのシェーダーで描かれる / 消す・元に戻す・やり直す・複製 /
+    名前が重なるパラメーター → 2 個のノードにエラー、前の版で描き続ける / HLSL のコンパイルのエラー → ノード (#5 FloatParameter, #7 Lerp) に戻る /
+    直すとコンパイルし直す / 書き出しにグラフとマテリアルが入る / 書き出したゲームがグラフをコンパイルして動く・エディターの再生と同じ動き
+  見本のテスト (--hierarchy-test 18 / 0、--serialize-test 4 / 0)
+  見た目 (エディターの窓だけを撮った。操作は PostMessage) :
+    溶岩のグラフ (12 ノード / 13 本) が窓に出て「Compiled」/ 右クリックのメニュー (分類) / 検索 "voro" + Enter で Voronoi が置かれ選ばれる /
+    Voronoi の Distance のピンから Output の Metallic のピンへドラッグして繋がる (ファイルにも入る。版が上がる) /
+    シーンでは球・立方体・トーラスが流れる溶岩に見える (ライティングと影もある)。書き出したゲームと同じ見本の exe でも同じ
+  時間 (RTX 2070、1280x720、見本の exe) : 溶岩 3 個 GPU 0.361 / 0.368 ms ← 同じシーンの普通のマテリアル 0.351 / 0.355 ms (約 0.01 ms)
+    C# の更新 0.008 〜 0.010 ms (グラフはコンパイルの時だけ動く。毎フレームの仕事は増えない)。グラフ → HLSL → コンパイル 約 77 ms
+
+■ 変更
+  ランタイム : Assets/ShaderGraph.cs (新しい : データ / ノードの一覧 / HLSL を作る / JSON) /
+    Assets/ShaderAsset.cs (CompileFile : .hlsl と .shadergraph.json。同じ中身ならコンパイルしない) /
+    Assets/Model.cs (LoadShader / ReloadShader がグラフも読む) / Assets/AssetDatabase.cs (AssetKind.ShaderGraph / 名前の拡張子)
+  エディター : ShaderGraphWindow.cs (新しい) / EditorApp.cs・EditorApp.Edit.cs (窓 / メニュー / ショートカットを窓に譲る) /
+    ProjectPanel.cs (Create Shader Graph / ダブルクリック / 外で書き換えた時) / Inspector.cs (Shader の欄にグラフ / Open in Shader Graph) /
+    Program.cs (--open-graph) / EditorTest.cs
+  プロジェクト : Shaders/Lava.shadergraph.json / Materials/Lava.material.json / Scenes/shadergraph.scene.json /
+    .gitignore (*.shadergraph.json を git に入れる。以前は Assets の *.* の行で外れていた)
+
+■ 気付いた事
+  - 縮小すると隣の行のピンに繋がっていた (当たりの円が行の間より大きく、最初に当たった物を選んでいた)。一番近いピンを選び、半径は行の半分までにした
+  - 窓の最初の大きさが 1100 × 640 だと全部を見せた時に字が小さすぎた (49%)。エディターの 9 割で真ん中に出すようにした
+  - パラメーターの名前を HLSL の関数の名前 (lerp など) にするとグラフは通るがコンパイルで失敗する (ノードは赤くなる)
+
+■ 残り
+  - プレビュー (ノードごとの小さい絵 / 球のプレビュー) は SH5。今はシーンの物で見る
+  - 雲のレイマーチのノードは SH5
+  - 窓の外でグラフのファイルを書き換えても、開いている窓は読み直さない (シェーダーはコンパイルし直す)
+  - ノードのコピー / 貼り付け (別のグラフへ)、グループ / コメントの枠、サブグラフ、カスタムの HLSL のノードは無い
+  - 頂点を動かすノード (頂点シェーダー) は無い (SH2 の仕組みが画素のシェーダーだけ)

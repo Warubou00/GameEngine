@@ -423,10 +423,10 @@ internal sealed class Inspector
         var shaderEntered = ImGui.InputText("Shader", ref shaderPath, 512, ImGuiInputTextFlags.EnterReturnsTrue);
         if (ImGui.BeginDragDropTarget())
         {
-            if (ProjectPanel.AcceptDrop(AssetKind.Shader) is { } asset) { shaderPath = asset.Path; shaderEntered = true; }
+            if (ProjectPanel.AcceptDrop(AssetKind.Shader, AssetKind.ShaderGraph) is { } asset) { shaderPath = asset.Path; shaderEntered = true; }   // SH4 : グラフも
             ImGui.EndDragDropTarget();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drop a shader (.hlsl) from Project (empty = the standard lit shader)");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drop a shader (.hlsl) or a shader graph (.shadergraph.json) from Project (empty = the standard lit shader)");
         if (!string.IsNullOrEmpty(material.Shader))
         {
             ImGui.SameLine();
@@ -542,10 +542,14 @@ internal sealed class Inspector
         string.Join("\n", error.Split('\n').Select(l => l.Trim()).Where(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) || l.Contains(".hlsl")).Take(6)) is { Length: > 0 } lines ? lines : error;
 
     /// <summary>シェーダーのアセット (SH2。Project で .hlsl を選んだ時) : 設定 / パラメーター / エラー</summary>
+    // グラフの窓で開く (SH4。EditorApp が入れる)
+    public Action<string>? OpenShaderGraph;
+
     public void DrawShader(ShaderAsset shader)
     {
         ImGui.Text(Path.GetFileName(shader.Path));
         ImGui.TextDisabled(shader.Path);
+        if (shader.IsGraph && ImGui.Button("Open in Shader Graph")) OpenShaderGraph?.Invoke(shader.Path);   // SH4
         ImGui.Separator();
         if (shader.Error != null)
         {

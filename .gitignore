@@ -39,6 +39,8 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.prefab.json
 # 自分のシェーダー (SH2) と、雲のノイズのテクスチャ (SH3。ユーザーが用意した物。小さいので入れる)
 !CSharp_console/Project/Assets/**/*.hlsl
+# シェーダーグラフも入れる (SH4)
+!CSharp_console/Project/Assets/**/*.shadergraph.json
 !CSharp_console/Project/Assets/Textures/Noise/*.png
 !CSharp_console/Project/Assets/Textures/Noise/*.jpg
 CSharp_console/Project/Library/

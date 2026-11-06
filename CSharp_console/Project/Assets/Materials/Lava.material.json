@@ -1,0 +1,21 @@
+{
+  "format": "GameEngineMaterial",
+  "version": 1,
+  "color": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "texture": null,
+  "metallic": 0,
+  "roughness": 0.8,
+  "transparent": false,
+  "doubleSided": false,
+  "shader": {
+    "path": "Assets/Shaders/Lava.shadergraph.json"
+  },
+  "values": {
+    "Glow": 4.0
+  }
+}

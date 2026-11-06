@@ -1,0 +1,216 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "f0a7bfa8-b03f-4f93-9722-749666e819c8",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.93,
+            0.82
+          ],
+          "Intensity": 1.7
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.24,
+            -0.33,
+            0.09,
+            0.91
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "40577f03-57f9-461a-b710-d115e134cc8d",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            2.2,
+            -6.5
+          ],
+          "Rotation": [
+            0.13,
+            0,
+            0,
+            0.991
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "bbbb202a-4083-4fe9-865a-14d4943711f0",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            8,
+            1,
+            8
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "4bec77e4-6083-424a-ae4b-3b1a5bcf0004",
+      "name": "Lava Sphere",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Sphere"
+          },
+          "Material": {
+            "path": "Assets/Materials/Lava.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -2.2,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.8,
+            1.8,
+            1.8
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "707c2180-3476-42e5-b189-656338769f58",
+      "name": "Lava Cube",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Material": {
+            "path": "Assets/Materials/Lava.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0.8,
+            1
+          ],
+          "Rotation": [
+            0,
+            0.383,
+            0,
+            0.924
+          ],
+          "Scale": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "6e464eb4-1c47-4e9f-bace-c6ba7a4d63d5",
+      "name": "Lava Torus",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Torus"
+          },
+          "Material": {
+            "path": "Assets/Materials/Lava.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2.3,
+            1,
+            0
+          ],
+          "Rotation": [
+            0.5,
+            0,
+            0,
+            0.866
+          ],
+          "Scale": [
+            1.8,
+            1.8,
+            1.8
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}
