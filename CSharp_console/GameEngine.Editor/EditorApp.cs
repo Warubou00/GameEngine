@@ -87,6 +87,7 @@ internal sealed partial class EditorApp
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
+        _inspector.BuildBones = entity => BuildBones(entity).Count;    // AN3
         _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
         _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
@@ -446,13 +447,15 @@ internal sealed partial class EditorApp
             // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
             if (ImGui.BeginDragDropTarget())
             {
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Scene, AssetKind.Material, AssetKind.Prefab) is { } asset)   // AN2 : FBX のモデルも
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Scene, AssetKind.Material, AssetKind.Prefab, AssetKind.FbxSkeleton, AssetKind.FbxAnimation) is { } asset)   // AN2 : FBX のモデルも / AN3 : スケルトン / アニメーション
                 {
                     var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
                     var ray = view.RayDirection(ImGui.GetIO().MousePos);
                     if (asset.Kind == AssetKind.Scene) RequestOpenScene(_database.FullPath(asset.Path));
                     else if (asset.Kind == AssetKind.Material) AssignMaterial(_picker.Pick(_cameraPosition, ray, out _), asset);   // マウスの下の物に付ける
                     else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, dropPoint(ray), Entity.Null);              // ED8
+                    else if (asset.Kind == AssetKind.FbxSkeleton) CreateAnimated(asset, dropPoint(ray), Entity.Null);              // AN3 : 骨 (と部品) を作る
+                    else if (asset.Kind == AssetKind.FbxAnimation) AssignClip(_picker.Pick(_cameraPosition, ray, out _), asset);   // AN3 : マウスの下の物 (の Animator) に
                     else PlaceModel(asset, dropPoint(ray), Entity.Null);
                 }
                 ImGui.EndDragDropTarget();
@@ -751,9 +754,11 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
-            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Material, AssetKind.Prefab) is { } asset)
+            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Material, AssetKind.Prefab, AssetKind.FbxSkeleton, AssetKind.FbxAnimation) is { } asset)
             {
                 if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
+                else if (asset.Kind == AssetKind.FbxAnimation) AssignClip(entity, asset);   // AN3
+                else if (asset.Kind == AssetKind.FbxSkeleton) CreateAnimated(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);
                 else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として (ED8)
                 else PlaceModel(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として親の位置に
             }

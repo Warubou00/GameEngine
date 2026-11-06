@@ -114,7 +114,8 @@ internal sealed class Inspector
                 {
                     changed = drawDefault(ref boxed, type, entity);
                 }
-                if (changed) write(entity, pool.ComponentType, boxed, null);   // 以前は pool.SetBoxed (元に戻せず、Static な物の行列も作り直されなかった)
+                if (changed) write(entity, pool.ComponentType, boxed, null);
+                if (pool.ComponentType == typeof(Animator)) drawAnimatorInfo(entity);   // AN3   // 以前は pool.SetBoxed (元に戻せず、Static な物の行列も作り直されなかった)
             }
             ImGui.PopID();
         }
@@ -206,6 +207,14 @@ internal sealed class Inspector
             return drawAssetPath(label, material.Path, ref value, path => _engine.Assets.LoadMaterial(path));
         case null when type == typeof(Material):
             return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadMaterial(path));
+        case Skeleton skeleton:   // AN3
+            return drawAssetPath(label, skeleton.Path, ref value, path => _engine.Assets.LoadSkeleton(path));
+        case null when type == typeof(Skeleton):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadSkeleton(path));
+        case AnimationClip clip:
+            return drawAssetPath(label, clip.Path, ref value, path => _engine.Assets.LoadAnimationClip(path));
+        case null when type == typeof(AnimationClip):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadAnimationClip(path));
         case CollisionMesh mesh:
             return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
         case null when type == typeof(CollisionMesh):
@@ -329,7 +338,8 @@ internal sealed class Inspector
         // Project からアセットを落とす (ED5。モデル / 当たりのメッシュはモデル、音は wav)
         if (ImGui.BeginDragDropTarget())
         {
-            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material : AssetKind.Model;
+            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material :
+                       typeof(T) == typeof(Skeleton) ? AssetKind.FbxSkeleton : typeof(T) == typeof(AnimationClip) ? AssetKind.FbxAnimation : AssetKind.Model;   // AN3
             var accepted = kind == AssetKind.Model ? ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel) : ProjectPanel.AcceptDrop(kind);   // AN2 : FBX のモデルも
             if (accepted is { } asset) { edited = asset.Path; entered = true; }
             ImGui.EndDragDropTarget();
@@ -621,6 +631,33 @@ internal sealed class Inspector
         if (depth > 12 || !ImGui.TreeNode(label)) return;
         foreach (var child in node.Children.Take(500)) drawFbxNode(child, depth + 1);
         ImGui.TreePop();
+    }
+
+    // ---------------------------------------------------------------------
+    // Animator (AN3) : 見つけた骨の数 / クリップの長さ / 骨を作るボタン
+    // ---------------------------------------------------------------------
+    public Func<Entity, int>? BuildBones;   // EditorApp が入れる (元に戻せる)
+
+    private void drawAnimatorInfo(Entity entity)
+    {
+        var animator = World.Get<Animator>(entity);
+        if (animator.Skeleton is { } skeleton)
+        {
+            var bound = animator.BoundBoneCount;
+            var color = bound == skeleton.Bones.Count ? new Vector4(0.5f, 1.0f, 0.5f, 1.0f) : new Vector4(1.0f, 0.8f, 0.3f, 1.0f);
+            ImGui.TextColored(color, $"Bones : {bound} / {skeleton.Bones.Count} found under this object");
+            if (bound < skeleton.Bones.Count)
+            {
+                ImGui.TextDisabled("Bone objects are children named like the skeleton's bones.");
+                if (BuildBones != null && ImGui.Button("Build bones (and parts from the model)")) BuildBones(entity);
+            }
+        }
+        else ImGui.TextDisabled("Set a skeleton (drop an .skl.fbx)");
+        if (animator.Clip is { } clip)
+        {
+            var used = animator.AnimatedBoneCount;
+            ImGui.Text($"{clip.Name} : {clip.Duration:F2} s, {clip.FrameCount} frames at {clip.FrameRate:G4} fps, {used} / {clip.Tracks.Count} tracks used");
+        }
     }
 
     // グラフの窓で開く (SH4。EditorApp が入れる)

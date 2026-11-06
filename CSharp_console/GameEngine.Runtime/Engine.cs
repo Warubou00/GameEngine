@@ -307,6 +307,10 @@ public sealed class Engine : IDisposable
     private readonly LightSystem      _lightSystem     = new();
     private readonly RenderSettingsSystem _renderSettingsSystem = new();   // RenderSettings / Volume → Graphics (ED6)
     private readonly ParticleSystem   _particleSystem;
+    private readonly AnimationSystem  _animationSystem = new();   // AN3
+
+    /// <summary>アニメーション (AN3) : 動かした Animator の数 / このフレームで書いた骨の数 / かかった時間 (ms)</summary>
+    public (int Animators, int BonesWritten, double Milliseconds) AnimationStats => (_animationSystem.AnimatorCount, _animationSystem.BonesWritten, _animationSystem.LastMilliseconds);
     private readonly AudioSystem      _audioSystem;
     private readonly bool             _audioLoaded;
     private readonly CollisionSystem  _collisionSystem;
@@ -528,11 +532,13 @@ public sealed class Engine : IDisposable
 
             if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
             if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
+            _animationSystem.Update(World, IsPlaying, Time.DeltaTime);   // AN3 : 骨のエンティティに姿勢を書く (編集中は時間を進めず、その時間の姿勢)
             _transformSystem.Update(World);
             _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
             // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
+            _animationSystem.DrawBones(World);   // AN3 : ShowBones の骨を線で (行列ができた後)
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
             _cameraSystem.Update(World, Graphics.CameraOverride);
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)

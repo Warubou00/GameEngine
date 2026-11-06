@@ -66,7 +66,8 @@ public static class FbxModelImporter
     /// <param name="fbxFile">FBX のファイル (テクスチャを隣から探す)</param>
     /// <param name="findTexture">名前でテクスチャを探す (Assets の中。無ければ null)</param>
     /// <param name="embeddedFolder">FBX に入っているテクスチャを書き出す所 (null なら一時フォルダ)</param>
-    public static FbxModelData Import(FbxScene scene, string fbxFile, Func<string, string?>? findTexture = null, string? embeddedFolder = null)
+    /// <param name="onlyNode">そのノード (Model の名前) のメッシュだけを、ノードの空間で作る (部品。AN3 : xxx.mod.fbx#ノード)。null なら全部を焼き込む</param>
+    public static FbxModelData Import(FbxScene scene, string fbxFile, Func<string, string?>? findTexture = null, string? embeddedFolder = null, string? onlyNode = null)
     {
         var start = Stopwatch.GetTimestamp();
         var data = new FbxModelData();
@@ -106,8 +107,11 @@ public static class FbxModelImporter
             if (positions == null || polygonIndex == null || positions.Length < 9) continue;
             data.MeshCount++;
             var model = geometry.Parents.Select(p => p.Parent).FirstOrDefault(p => p.Kind == "Model");
+            if (onlyNode != null && model?.Name != onlyNode) { data.MeshCount--; continue; }   // 部品 : そのノードの物だけ
             if (model == null) data.Warnings.Add($"mesh '{geometry.Name}' is not attached to a node : placed at the origin");
-            var matrix = model != null ? FbxTransforms.Geometric(model) * FbxTransforms.Global(model, globals) : Matrix4x4.Identity;
+            var matrix = model == null ? Matrix4x4.Identity :
+                         onlyNode != null ? FbxTransforms.Geometric(model) :   // 部品はノードの空間 (ノードの位置はエンティティの Transform が持つ)
+                         FbxTransforms.Geometric(model) * FbxTransforms.Global(model, globals);
             var toEngine = matrix * axes * Matrix4x4.CreateScale(unit);
             Matrix4x4.Invert(matrix * axes, out var inverse);
             var normalMatrix = Matrix4x4.Transpose(inverse);
@@ -456,15 +460,15 @@ public static class FbxTransforms
         };
     }
 
-    /// <summary>ノード自身の行列 (親を含まない)</summary>
-    public static Matrix4x4 Local(FbxObject model)
+    /// <summary>ノード自身の行列 (親を含まない)。translation / rotation / scaling を渡すと Lcl の値の代わりに使う (アニメーション。AN3)</summary>
+    public static Matrix4x4 Local(FbxObject model, Vector3? translation = null, Vector3? rotation = null, Vector3? scaling = null)
     {
         var props = FbxScene.Properties70(model.Node);
         Vector3 v(string name, Vector3 fallback) => props.TryGetValue(name, out var p) && p.Values.Length >= 3 ? p.Vector : fallback;
         var order = props.TryGetValue("RotationOrder", out var o) ? (int)o.Number() : 0;
-        var t = Matrix4x4.CreateTranslation(v("Lcl Translation", Vector3.Zero));
-        var r = euler(v("Lcl Rotation", Vector3.Zero), order);
-        var s = Matrix4x4.CreateScale(v("Lcl Scaling", Vector3.One));
+        var t = Matrix4x4.CreateTranslation(translation ?? v("Lcl Translation", Vector3.Zero));
+        var r = euler(rotation ?? v("Lcl Rotation", Vector3.Zero), order);
+        var s = Matrix4x4.CreateScale(scaling ?? v("Lcl Scaling", Vector3.One));
         var rotationOffset = Matrix4x4.CreateTranslation(v("RotationOffset", Vector3.Zero));
         var rotationPivot = Matrix4x4.CreateTranslation(v("RotationPivot", Vector3.Zero));
         var scalingOffset = Matrix4x4.CreateTranslation(v("ScalingOffset", Vector3.Zero));
