@@ -1089,6 +1089,131 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- AN1 : FBX を読む (自作の inflate / ノードの木 / 種類ごとの中身の確認) ----------
+        // inflate を .NET の ZLibStream (比べる相手だけに使う) と比べる : 縮め方 4 通り × 大きさ 9 通り × 中身 3 通り
+        var inflateRandom = new Random(7);
+        var inflateCases = 0;
+        var inflateWrong = new List<string>();
+        foreach (var level in new[] { System.IO.Compression.CompressionLevel.NoCompression, System.IO.Compression.CompressionLevel.Fastest, System.IO.Compression.CompressionLevel.Optimal, System.IO.Compression.CompressionLevel.SmallestSize })
+            foreach (var size in new[] { 0, 1, 7, 100, 1000, 65535, 65536, 70000, 300000 })
+                foreach (var pattern in new[] { 0, 1, 2 })
+                {
+                    var raw = new byte[size];
+                    if (pattern == 0) inflateRandom.NextBytes(raw);
+                    else if (pattern == 1) for (int i = 0; i < size; i++) raw[i] = (byte)(i % 7 == 0 ? inflateRandom.Next(256) : i % 13);
+                    else for (int i = 0; i + 4 <= size; i += 4) BitConverter.TryWriteBytes(raw.AsSpan(i), MathF.Sin(i * 0.01f) * 10);
+                    inflateCases++;
+                    try { if (!GameEngine.Fbx.Inflate.Zlib(FbxWriter.Zlib(raw, level), size).AsSpan().SequenceEqual(raw)) inflateWrong.Add($"{level}/{size}/{pattern}"); }
+                    catch (GameEngine.Fbx.FbxFormatException ex) { inflateWrong.Add($"{level}/{size}/{pattern} : {ex.Message}"); }
+                }
+        // 壊したデータはエラー (FbxFormatException だけ。他の例外で落ちない)
+        var packedSample = FbxWriter.Zlib(Enumerable.Range(0, 20000).Select(i => (byte)(i * 31 % 251)).ToArray());
+        var corruptCaught = 0;
+        for (int trial = 0; trial < 200; trial++)
+        {
+            var broken = (byte[])packedSample.Clone();
+            broken[2 + inflateRandom.Next(broken.Length - 2)] ^= (byte)(1 + inflateRandom.Next(255));
+            try { GameEngine.Fbx.Inflate.Zlib(broken, 20000); }
+            catch (GameEngine.Fbx.FbxFormatException) { corruptCaught++; }
+        }
+        check(inflateWrong.Count == 0 && corruptCaught == 200,
+              $"the own inflate matches ZLibStream ({inflateCases} cases) and rejects corrupted data ({corruptCaught} / 200){(inflateWrong.Count > 0 ? " : " + string.Join("; ", inflateWrong.Take(3)) : "")}");
+        var bigRaw = new byte[16 << 20];
+        for (int i = 0; i + 4 <= bigRaw.Length; i += 4) BitConverter.TryWriteBytes(bigRaw.AsSpan(i), MathF.Round(MathF.Sin(i * 0.001f) * 100, 2));
+        var bigPacked = FbxWriter.Zlib(bigRaw);
+        GameEngine.Fbx.Inflate.Zlib(bigPacked, bigRaw.Length);
+        var inflateStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        var bigBack = GameEngine.Fbx.Inflate.Zlib(bigPacked, bigRaw.Length);
+        var inflateMs = System.Diagnostics.Stopwatch.GetElapsedTime(inflateStart).TotalMilliseconds;
+        check(bigBack.AsSpan().SequenceEqual(bigRaw), $"inflate speed : 16 MB in {inflateMs:F0} ms ({16 / (inflateMs / 1000):F0} MB/s)");
+
+        // サンプル (Assets > Create FBX Samples と同じ道) : 7 個とも読めて、中身の数が合う
+        var fbxWritten = _app.Project.CreateFbxSamples();
+        var fbxAssets = fbxWritten.ToDictionary(n => n, n => _app.Engine.Assets.LoadFbx($"{FbxSamples.Folder}/{n}"));
+        string summary(string name, string label) => fbxAssets[name].Summary.FirstOrDefault(s => s.Label == label).Value ?? "";
+        check(fbxWritten.Count == 7 && fbxAssets.Values.All(a => a.IsValid) &&
+              database.Find($"{FbxSamples.Folder}/Arm.mod.fbx")?.Kind == AssetKind.FbxModel && database.Find($"{FbxSamples.Folder}/Arm.skl.fbx")?.Kind == AssetKind.FbxSkeleton &&
+              database.Find($"{FbxSamples.Folder}/Arm_Wave.anm.fbx")?.Kind == AssetKind.FbxAnimation,
+              $"the FBX samples are written and read as their kinds ({string.Join(", ", fbxAssets.Select(a => $"{a.Key} {a.Value.LoadMilliseconds:F1} ms"))}){string.Join("; ", fbxAssets.Values.Where(a => !a.IsValid).Select(a => a.Error))}");
+        check(summary("Arm.mod.fbx", "Vertices") == "84" && summary("Arm.mod.fbx", "Polygons") == "74 (164 triangles)" && summary("Arm.mod.fbx", "Skins").StartsWith("1 (3 bones") &&
+              summary("Arm.skl.fbx", "Bones") == "4" && summary("Arm.skl.fbx", "Depth") == "4" &&
+              summary("Arm_Wave.anm.fbx", "Length").StartsWith("2.000 s (60 frames") && summary("Arm_Wave.anm.fbx", "Curves") == "2 (10 keys)" &&
+              summary("Robot.mod.fbx", "Meshes") == "7" && summary("Robot.mod.fbx", "FBX").StartsWith("7.5 (64-bit") &&
+              summary("Robot.skl.fbx", "Bones") == "7" && summary("Robot_Walk.anm.fbx", "Animated nodes") == "5" &&
+              fbxAssets["Arm.mod.fbx"].Document!.CompressedArrays > 0 && fbxAssets["Box.mod.fbx"].Document!.CompressedArrays == 0,
+              "the FBX contents are counted (vertices / polygons / skin / bones / depth / length / curves, 32- and 64-bit records, compressed and plain arrays)");
+        // 中の物と繋がり : 曲線 → CurveNode → 骨の "Lcl Rotation"、骨の親子、Cluster の重み
+        var waveScene = fbxAssets["Arm_Wave.anm.fbx"].Scene!;
+        var midBone = waveScene.OfKind("Model", "LimbNode").First(b => b.Name == "Arm_Mid");
+        var midRotation = midBone.Children.FirstOrDefault(c => c.Property == "Lcl Rotation").Child;
+        var midCurve = midRotation?.Children.FirstOrDefault(c => c.Property == "d|Z").Child;
+        var midKeys = midCurve?.Node.ChildArray<float>("KeyValueFloat");
+        var armScene = fbxAssets["Arm.mod.fbx"].Scene!;
+        var weightSums = new float[84];
+        foreach (var cluster in armScene.OfKind("Deformer", "Cluster"))
+        {
+            var idx = cluster.Node.ChildArray<int>("Indexes")!;
+            var w = cluster.Node.ChildArray<double>("Weights")!;
+            for (int i = 0; i < idx.Length; i++) weightSums[idx[i]] += (float)w[i];
+        }
+        check(midBone.Parents.Any(p => p.Parent.Name == "Arm_Root") && midKeys != null && midKeys.SequenceEqual(new[] { 0f, 40f, 0f, -40f, 0f }) &&
+              weightSums.All(s => MathF.Abs(s - 1) < 1e-5f) && waveScene.FrameRate == 30 && armScene.UnitScaleFactor == 1,
+              "objects and connections : curve → curve node → bone rotation, bone parents, skin weights add up to 1, frame rate and unit");
+
+        // 種類に合わない中身はエラー (名前の決まり)
+        string fbxError(string name, byte[] data)
+        {
+            var path = $"{determinismFolder}/{name}";
+            File.WriteAllBytes(database.FullPath(path), data);
+            database.Refresh();
+            return _app.Engine.Assets.LoadFbx(path).Error ?? "(no error)";
+        }
+        var noSkeleton = fbxError("BoxAsSkeleton.skl.fbx", FbxSamples.Box());
+        var noAnimation = fbxError("SkeletonAsAnimation.anm.fbx", FbxSamples.Arm(FbxSamples.ArmPart.Skeleton));
+        var noMesh = fbxError("AnimationAsModel.mod.fbx", FbxSamples.Arm(FbxSamples.ArmPart.Animation));
+        check(noSkeleton.Contains("no skeleton") && noAnimation.Contains("no animation") && noMesh.Contains("no mesh"),
+              $"a file whose content does not match its name is an error ({noSkeleton} / {noAnimation} / {noMesh})");
+        var goodArm = FbxSamples.Arm(FbxSamples.ArmPart.Model);
+        var oldVersion = (byte[])goodArm.Clone();
+        BitConverter.TryWriteBytes(oldVersion.AsSpan(23), 6100);
+        var brokenErrors = new[]
+        {
+            fbxError("Truncated.mod.fbx", goodArm[..(goodArm.Length / 2)]),
+            fbxError("Garbage.mod.fbx", Enumerable.Range(0, 4000).Select(i => (byte)(i * 7919 % 256)).ToArray()),
+            fbxError("Ascii.mod.fbx", System.Text.Encoding.ASCII.GetBytes("; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n}\n")),
+            fbxError("Old.mod.fbx", oldVersion),
+            fbxError("Empty.mod.fbx", Array.Empty<byte>()),
+        };
+        check(brokenErrors[0].Contains("end") && brokenErrors[1].Contains("not an FBX") && brokenErrors[2].Contains("ASCII") && brokenErrors[3].Contains("6.1") && brokenErrors[4].Contains("not an FBX"),
+              $"broken files are errors, not crashes ({string.Join(" / ", brokenErrors)})");
+        File.WriteAllBytes(database.FullPath($"{determinismFolder}/Plain.fbx"), FbxSamples.Box());
+        database.Refresh();
+        check(database.Find($"{determinismFolder}/Plain.fbx")?.Kind == AssetKind.Other, "a plain .fbx (no .mod / .skl / .anm) is not an FBX asset");
+        // 書き換え → 読み直し (中身が合わなくなればエラー、戻せば直る) / 名前を変えても .mod.fbx は残る
+        var reloadPath = $"{determinismFolder}/Reload.mod.fbx";
+        File.WriteAllBytes(database.FullPath(reloadPath), FbxSamples.Box());
+        database.Refresh();
+        var reloadAsset = _app.Engine.Assets.LoadFbx(reloadPath);
+        var firstOk = reloadAsset.IsValid;
+        File.WriteAllBytes(database.FullPath(reloadPath), FbxSamples.Arm(FbxSamples.ArmPart.Skeleton));
+        var fbxReloadFailed = !_app.Engine.Assets.ReloadFbx(reloadPath) && (reloadAsset.Error ?? "").Contains("no mesh");
+        File.WriteAllBytes(database.FullPath(reloadPath), FbxSamples.Box(compress: true, version: 7500));
+        var reloadFixed = _app.Engine.Assets.ReloadFbx(reloadPath) && reloadAsset.Summary.Any(s => s.Value.StartsWith("7.5"));
+        var fbxRenamed = database.Rename(reloadPath, "Renamed");
+        check(firstOk && fbxReloadFailed && reloadFixed && fbxRenamed.EndsWith("/Renamed.mod.fbx") && _app.Engine.Assets.LoadFbx(fbxRenamed) == reloadAsset,
+              $"an FBX asset reloads when its file changes and keeps its .mod.fbx name when renamed ({fbxRenamed})");
+        // 大きなメッシュの時間 (300 × 300 の格子 = 9 万頂点 / 9 万の四角形、縮めた配列)
+        var gridPath = $"{determinismFolder}/Grid.mod.fbx";
+        var gridBytes = FbxSamples.MeshModel("Grid", FbxSamples.Grid(300, 1000), System.Numerics.Vector3.Zero, "Ground", new System.Numerics.Vector3(0.4f, 0.6f, 0.3f));
+        File.WriteAllBytes(database.FullPath(gridPath), gridBytes);
+        database.Refresh();
+        var gridAsset = _app.Engine.Assets.LoadFbx(gridPath);
+        _app.Engine.Assets.ReloadFbx(gridPath);   // 2 回目 (JIT の後) を測る
+        check(gridAsset.IsValid && gridAsset.Summary.Any(s => s.Label == "Vertices" && s.Value == "90,601"),
+              $"a large FBX mesh : {gridBytes.Length / 1024} KB, 90,601 vertices / 90,000 quads read and checked in {gridAsset.LoadMilliseconds:F1} ms");
+        database.Refresh();
+        yield return 0;
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);

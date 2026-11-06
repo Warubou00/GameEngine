@@ -41,6 +41,8 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.hlsl
 # シェーダーグラフも入れる (SH4)
 !CSharp_console/Project/Assets/**/*.shadergraph.json
+# 自作の FBX のサンプル (AN1。Assets > Create FBX Samples で作り直せる)
+!CSharp_console/Project/Assets/Samples/Fbx/*.fbx
 !CSharp_console/Project/Assets/Textures/Noise/*.png
 !CSharp_console/Project/Assets/Textures/Noise/*.jpg
 CSharp_console/Project/Library/

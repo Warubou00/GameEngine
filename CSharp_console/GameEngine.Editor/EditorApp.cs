@@ -340,6 +340,8 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Create Material")) _project.CreateMaterial();
             if (ImGui.MenuItem("Reload Shaders", null, false, _shaders != null)) _shaders!.Reload();
             if (ImGui.MenuItem("Unload Unused Assets")) UnloadUnused();
+            ImGui.Separator();
+            if (ImGui.MenuItem("Create FBX Samples")) _project.CreateFbxSamples();   // AN1
             ImGui.EndMenu();
         }
         drawExtensionMenus();
@@ -807,11 +809,17 @@ internal sealed partial class EditorApp
         if (_project.SelectionVersion != _seenAssetSelection)
         {
             _seenAssetSelection = _project.SelectionVersion;
-            _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader or AssetKind.ShaderGraph;   // SH2 : シェーダーも / SH4 : グラフも
+            _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader or AssetKind.ShaderGraph
+                            or AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation;   // SH2 : シェーダーも / SH4 : グラフも / AN1 : FBX も
         }
         if (ImGui.Begin("Inspector", ref _showInspector))
         {
-            if (_inspectAsset && _project.Selected is { Kind: AssetKind.Shader or AssetKind.ShaderGraph } shaderEntry)
+            if (_inspectAsset && _project.Selected is { Kind: AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation } fbxEntry)
+            {
+                try { _inspector.DrawFbx(_engine.Assets.LoadFbx(fbxEntry.Path)); }   // AN1
+                catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }
+            }
+            else if (_inspectAsset && _project.Selected is { Kind: AssetKind.Shader or AssetKind.ShaderGraph } shaderEntry)
             {
                 try { _inspector.DrawShader(_engine.Assets.LoadShader(shaderEntry.Path)); }
                 catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }

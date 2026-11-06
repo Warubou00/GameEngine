@@ -113,6 +113,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Material => _engine.Assets.ReloadMaterial(path) ? 1 : 0,
                     AssetKind.Shader   => _engine.Assets.ReloadShader(path) ? 1 : 0,   // SH2 : コンパイルし直す (失敗したら前の物のまま。理由は Console)
                     AssetKind.ShaderGraph => _engine.Assets.ReloadShader(path) ? 1 : 0,   // SH4 : 外で書き換えた時 (グラフの窓の保存は同じ中身なので何もしない)
+                    AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation => _engine.Assets.ReloadFbx(path) ? 1 : 0,   // AN1
                     AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     _ => 0,
                 };
@@ -281,6 +282,12 @@ internal sealed class ProjectPanel : IDisposable
             draw.AddRectFilled(start + new Vector2(10), start + size - new Vector2(10), color, 6.0f);
             var textSize = ImGui.CalcTextSize(label);
             draw.AddText(start + (size - textSize) * 0.5f, 0xFFFFFFFF, label);
+            // FBX (AN1) : 読めない / 中身が名前と合わない物は赤い枠と「!」
+            if (fbxError(entry) is { } error)
+            {
+                draw.AddRect(start + new Vector2(8), start + size - new Vector2(8), 0xFF3030FFu, 6.0f, ImDrawFlags.None, 3.0f);
+                draw.AddText(start + new Vector2(14, 12), 0xFF4040FFu, "!");
+            }
         }
         if (clicked) Select(entry);
         // 右クリック (ED10)
@@ -317,7 +324,8 @@ internal sealed class ProjectPanel : IDisposable
                 catch (Exception ex) { Console.WriteLine($"[Assets] {importer.GetType().Name}.OnOpen : {ex.Message}"); }
             }
         }
-        if (hovered) ImGui.SetTooltip(entry.Path);
+        // FBX のエラーも出す (AN1。以前はパスだけで、先に出した FBX のエラーを上書きしていた)
+        if (hovered) ImGui.SetTooltip(fbxError(entry) is { } fbxProblem ? $"{entry.Path}\n{fbxProblem}" : entry.Path);
 
         // ドラッグ (フォルダ以外)
         if (entry.Kind != AssetKind.Folder && ImGui.BeginDragDropSource())
@@ -346,6 +354,10 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Prefab   => ("Prefab", 0xFFE0A050u),
         AssetKind.Shader   => ("HLSL", 0xFF6040B0u),   // SH2
         AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
+        AssetKind.FbxModel     => ("FBX Mod", 0xFF5A7A2Au),   // AN1
+        AssetKind.FbxSkeleton  => ("FBX Skl", 0xFF7A5A2Au),
+        AssetKind.FbxAnimation => ("FBX Anm", 0xFF2A5A9Au),
+        AssetKind.Other when entry.Path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) => ("FBX ?", 0xFF3030A0u),   // 種類の分からない .fbx
         _                  => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF404040u),
     };
 
@@ -505,6 +517,28 @@ internal sealed class ProjectPanel : IDisposable
             Console.WriteLine($"[Assets] Failed to create a shader : {ex.Message}");
             return null;
         }
+    }
+
+    // FBX のエラー (AN1。読み込んだ時の結果。ただの .fbx は名前の付け方を教える)
+    private string? fbxError(AssetEntry entry)
+    {
+        if (entry.Kind == AssetKind.Other && entry.Path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase))
+            return "Name FBX files xxx.mod.fbx (model) / xxx.skl.fbx (skeleton) / xxx.anm.fbx (animation)";
+        if (entry.Kind is not (AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation)) return null;
+        try { return _engine.Assets.LoadFbx(entry.Path).Error; }
+        catch (IOException ex) { return ex.Message; }
+    }
+
+    // 自作の FBX のサンプルを Assets/Samples/Fbx に書く (AN1。Assets > Create FBX Samples)
+    public List<string> CreateFbxSamples()
+    {
+        var folder = _database.FullPath(FbxSamples.Folder);
+        var written = FbxSamples.WriteAll(folder);
+        _database.Refresh();
+        foreach (var name in written) _engine.Assets.ReloadFbx($"{FbxSamples.Folder}/{name}");
+        _folder = FbxSamples.Folder;
+        Console.WriteLine($"[Assets] Wrote {written.Count} FBX samples to {FbxSamples.Folder}");
+        return written;
     }
 
     // 今のフォルダにシェーダーグラフ (.shadergraph.json) を作って選ぶ (SH4)。出力と色 / 粗さのパラメーターが繋がった物
