@@ -446,7 +446,7 @@ internal sealed partial class EditorApp
             // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
             if (ImGui.BeginDragDropTarget())
             {
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Scene, AssetKind.Material, AssetKind.Prefab) is { } asset)
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Scene, AssetKind.Material, AssetKind.Prefab) is { } asset)   // AN2 : FBX のモデルも
                 {
                     var view = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, ImGui.GetItemRectMin(), new Vector2(width, height));
                     var ray = view.RayDirection(ImGui.GetIO().MousePos);
@@ -704,7 +704,7 @@ internal sealed partial class EditorApp
             if (ImGui.BeginDragDropTarget())
             {
                 if (acceptEntity()) SetParent(_dragged, Entity.Null);
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Prefab) is { } asset)
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Prefab) is { } asset)
                 {
                     if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Vector3.Zero, Entity.Null);
                     else PlaceModel(asset, Vector3.Zero, Entity.Null);
@@ -751,7 +751,7 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
-            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.Material, AssetKind.Prefab) is { } asset)
+            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Material, AssetKind.Prefab) is { } asset)
             {
                 if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
                 else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として (ED8)

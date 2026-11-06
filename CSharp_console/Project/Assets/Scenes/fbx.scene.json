@@ -1,0 +1,273 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "647fd2c4-efe4-4bdd-8368-8b7131993a34",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.93,
+            0.82
+          ],
+          "Intensity": 1.7
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.24,
+            -0.33,
+            0.09,
+            0.91
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "9409ae2b-06bd-4cc8-ba2a-086610004627",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            2.2,
+            -6.0
+          ],
+          "Rotation": [
+            0.12,
+            0,
+            0,
+            0.993
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "601c3f25-024a-4377-a7e3-fafd82780af3",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Material": {
+            "path": "Assets/Materials/Mountain.material.json"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            10,
+            1,
+            10
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "49cc89a2-d219-4ae6-84e1-d1aa4f0d7375",
+      "name": "Robot",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "Assets/Samples/Fbx/Robot.mod.fbx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -2.6,
+            0,
+            1.0
+          ],
+          "Rotation": [
+            0,
+            0.2588,
+            0,
+            0.9659
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "585691f4-13fe-45d2-b51b-ac4e6df574e1",
+      "name": "Arm",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "Assets/Samples/Fbx/Arm.mod.fbx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -0.9,
+            0,
+            1.5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "135b05b4-4d31-4bd5-be6f-9a625e940380",
+      "name": "Crate",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "Assets/Samples/Fbx/Crate.mod.fbx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0.6,
+            0,
+            0.6
+          ],
+          "Rotation": [
+            0,
+            0.3827,
+            0,
+            0.9239
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "61d0a970-74e8-490c-839f-85491fad5237",
+      "name": "Box",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "Assets/Samples/Fbx/Box.mod.fbx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2.3,
+            0,
+            1.4
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.7,
+            0.7,
+            0.7
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "56917b99-b16e-401f-9383-fd9241c9b4d2",
+      "name": "Panel",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "Assets/Samples/Fbx/Panel.mod.fbx"
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0.4,
+            0,
+            -1.6
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}

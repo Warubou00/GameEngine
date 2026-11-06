@@ -31,6 +31,8 @@ public sealed class FbxAsset
     public FbxScene? Scene { get; private set; }
     public long FileBytes { get; private set; }
     public double LoadMilliseconds { get; private set; }
+    /// <summary>最後にモデルとして作った形 (.mod.fbx を LoadModel した時。AN2)</summary>
+    public FbxModelData? ModelData { get; internal set; }
     /// <summary>読み直した回数 (エディターが表示を作り直す印)</summary>
     public int Version { get; private set; }
 

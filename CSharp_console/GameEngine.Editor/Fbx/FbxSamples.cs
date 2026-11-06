@@ -14,6 +14,10 @@ namespace GameEngine.Editor;
 //           Wave = 中と先の骨が Z の周りに振れる 2 秒 (直線の補間)
 //   Robot : 階層型 : 箱の部品が骨の子 (スキンなし)。骨 7 本 + 根の Null。
 //           Walk = 足と腕が振れ、腰が上下する 1 秒 (3 次の補間)
+//   Crate : 箱 (AN2)。上下の面はテクスチャ (FBX からの相対パス ../../Textures/Noise/fbm.png)、横は色。マテリアルは多角形ごと
+//           (ByPolygon)、法線は IndexToDirect
+//   Panel : 星の形の板 (AN2)。Z 上 / m の FBX (軸と単位の変換)、凹んだ 10 角形 (耳を切る方法)、頂点の色 (ByControlPoint)、法線なし
+//           (点ごとに作る)、FBX に入っているテクスチャ (市松模様の BMP)、ノードの PreRotation / RotationPivot / Geometric
 //   1 つの物から .mod / .skl / .anm を書き分ける (同じ骨の名前)
 // ==========================================================================
 public static class FbxSamples
@@ -33,6 +37,8 @@ public static class FbxSamples
         write("Robot.mod.fbx", Robot(ArmPart.Model));
         write("Robot.skl.fbx", Robot(ArmPart.Skeleton));
         write("Robot_Walk.anm.fbx", Robot(ArmPart.Animation));
+        write("Crate.mod.fbx", Crate());
+        write("Panel.mod.fbx", Panel());
         return written;
     }
 
@@ -146,9 +152,19 @@ public static class FbxSamples
                 P3("AmbientColor", "Color", Vector3.Zero),
                 P3("EmissiveColor", "Color", Vector3.Zero)));
 
-    /// <summary>メッシュ (Geometry)。法線 = 面ごと (ByPolygonVertex / Direct)、UV = 面の向きで投影 (ByPolygonVertex / IndexToDirect)</summary>
-    private static FbxNode GeometryNode(long id, string name, MeshData mesh, int[]? polygonMaterials = null)
+    /// <summary>メッシュの書き方の選び方 (AN2 : 層の並び方 / 引き方を変えて読む側を確かめる)</summary>
+    public sealed class GeometryOptions
     {
+        public bool Normals = true;            // false : 法線を書かない (読む側が作る)
+        public bool IndexedNormals;            // true : 法線を IndexToDirect (同じ法線は 1 つ)
+        public Vector4[]? ControlPointColors;  // 頂点の色 (ByControlPoint / Direct)
+        public float UvScale = 0.01f;          // UV = 位置 × この値 (cm の FBX は 0.01 = 1 m で 1 回。m の FBX は 1)
+    }
+
+    /// <summary>メッシュ (Geometry)。法線 = 面ごと (ByPolygonVertex / Direct)、UV = 面の向きで投影 (ByPolygonVertex / IndexToDirect)</summary>
+    private static FbxNode GeometryNode(long id, string name, MeshData mesh, int[]? polygonMaterials = null, GeometryOptions? options = null)
+    {
+        options ??= new GeometryOptions();
         var vertices = mesh.Positions.SelectMany(p => new double[] { p.X, p.Y, p.Z }).ToArray();
         var indices = new List<int>();
         var normals = new List<double>();
@@ -161,20 +177,48 @@ public static class FbxSamples
             {
                 indices.Add(i == polygon.Length - 1 ? ~polygon[i] : polygon[i]);
                 normals.AddRange(new double[] { n.X, n.Y, n.Z });
-                var p = mesh.Positions[polygon[i]] * 0.01f;
+                var p = mesh.Positions[polygon[i]] * options.UvScale;
                 var uv = axis == 0 ? new Vector2(p.Z, p.Y) : axis == 1 ? new Vector2(p.X, p.Z) : new Vector2(p.X, p.Y);
                 uvs.AddRange(new double[] { uv.X, uv.Y });
             }
         }
         var corners = indices.Count;
+        FbxNode? normalLayer = null;
+        if (options.Normals && !options.IndexedNormals)
+            normalLayer = Node("LayerElementNormal", 0).With(
+                Node("Version", 102), Node("Name", ""), Node("MappingInformationType", "ByPolygonVertex"), Node("ReferenceInformationType", "Direct"),
+                Node("Normals", normals.ToArray()));
+        else if (options.Normals)
+        {
+            // 同じ法線は 1 つにして番号で引く
+            var unique = new List<Vector3>();
+            var normalIndex = new List<int>();
+            for (int i = 0; i < normals.Count; i += 3)
+            {
+                var n = new Vector3((float)normals[i], (float)normals[i + 1], (float)normals[i + 2]);
+                var k = unique.FindIndex(u => Vector3.DistanceSquared(u, n) < 1e-10f);
+                if (k < 0) { k = unique.Count; unique.Add(n); }
+                normalIndex.Add(k);
+            }
+            normalLayer = Node("LayerElementNormal", 0).With(
+                Node("Version", 102), Node("Name", ""), Node("MappingInformationType", "ByPolygonVertex"), Node("ReferenceInformationType", "IndexToDirect"),
+                Node("Normals", unique.SelectMany(u => new double[] { u.X, u.Y, u.Z }).ToArray()), Node("NormalsIndex", normalIndex.ToArray()));
+        }
+        var colorLayer = options.ControlPointColors == null ? null : Node("LayerElementColor", 0).With(
+            Node("Version", 101), Node("Name", "Col"), Node("MappingInformationType", "ByControlPoint"), Node("ReferenceInformationType", "Direct"),
+            Node("Colors", options.ControlPointColors.SelectMany(c => new double[] { c.X, c.Y, c.Z, c.W }).ToArray()));
+        var layer = Node("Layer", 0).With(Node("Version", 100));
+        if (normalLayer != null) layer.With(Node("LayerElement").With(Node("Type", "LayerElementNormal"), Node("TypedIndex", 0)));
+        if (colorLayer != null) layer.With(Node("LayerElement").With(Node("Type", "LayerElementColor"), Node("TypedIndex", 0)));
+        layer.With(Node("LayerElement").With(Node("Type", "LayerElementUV"), Node("TypedIndex", 0)),
+                   Node("LayerElement").With(Node("Type", "LayerElementMaterial"), Node("TypedIndex", 0)));
         return Object("Geometry", id, name, "Mesh",
             Node("Properties70"),
             Node("GeometryVersion", 124),
             Node("Vertices", vertices),
             Node("PolygonVertexIndex", indices.ToArray()),
-            Node("LayerElementNormal", 0).With(
-                Node("Version", 102), Node("Name", ""), Node("MappingInformationType", "ByPolygonVertex"), Node("ReferenceInformationType", "Direct"),
-                Node("Normals", normals.ToArray())),
+            normalLayer,
+            colorLayer,
             Node("LayerElementUV", 0).With(
                 Node("Version", 101), Node("Name", "UVMap"), Node("MappingInformationType", "ByPolygonVertex"), Node("ReferenceInformationType", "IndexToDirect"),
                 Node("UV", uvs.ToArray()), Node("UVIndex", Enumerable.Range(0, corners).ToArray())),
@@ -182,11 +226,7 @@ public static class FbxSamples
                 Node("Version", 101), Node("Name", ""),
                 Node("MappingInformationType", polygonMaterials == null ? "AllSame" : "ByPolygon"), Node("ReferenceInformationType", "IndexToDirect"),
                 Node("Materials", polygonMaterials ?? new[] { 0 })),
-            Node("Layer", 0).With(
-                Node("Version", 100),
-                Node("LayerElement").With(Node("Type", "LayerElementNormal"), Node("TypedIndex", 0)),
-                Node("LayerElement").With(Node("Type", "LayerElementUV"), Node("TypedIndex", 0)),
-                Node("LayerElement").With(Node("Type", "LayerElementMaterial"), Node("TypedIndex", 0))));
+            layer);
     }
 
     /// <summary>曲線 (AnimationCurve)。cubic = 3 次 (自動の傾き)、でなければ直線</summary>
@@ -204,8 +244,13 @@ public static class FbxSamples
             Node("KeyAttrRefCount", new[] { seconds.Length }));
     }
 
-    private static FbxNode Document(int version, string creator, IEnumerable<(string Type, int Count)> definitions, List<FbxNode> objects, List<FbxNode> connections, string? take, double takeSeconds)
+    /// <summary>軸と単位 (既定 : Y 上 / Z 前 / X 横 / cm)。Z 上の FBX は (2, 1, 1, -1, 0, 1)</summary>
+    public readonly record struct AxisSettings(int Up = 1, int UpSign = 1, int Front = 2, int FrontSign = 1, int Coord = 0, int CoordSign = 1, double Unit = 1.0);
+
+    private static FbxNode Document(int version, string creator, IEnumerable<(string Type, int Count)> definitions, List<FbxNode> objects, List<FbxNode> connections, string? take, double takeSeconds, AxisSettings? axes = null)
     {
+        // 既定は書いて渡す (record struct の new AxisSettings() は引数の既定を使わず全部 0 になる。以前はそれで UpAxis / 単位が 0 だった)
+        var a = axes ?? new AxisSettings(1, 1, 2, 1, 0, 1, 1.0);
         var top = Node("root").With(
             Node("FBXHeaderExtension").With(
                 Node("FBXHeaderVersion", 1003),
@@ -214,11 +259,11 @@ public static class FbxSamples
             Node("GlobalSettings").With(
                 Node("Version", 1000),
                 Properties70(
-                    P("UpAxis", "int", "Integer", "", 1), P("UpAxisSign", "int", "Integer", "", 1),
-                    P("FrontAxis", "int", "Integer", "", 2), P("FrontAxisSign", "int", "Integer", "", 1),
-                    P("CoordAxis", "int", "Integer", "", 0), P("CoordAxisSign", "int", "Integer", "", 1),
-                    P("OriginalUpAxis", "int", "Integer", "", 1), P("OriginalUpAxisSign", "int", "Integer", "", 1),
-                    P("UnitScaleFactor", "double", "Number", "", 1.0), P("OriginalUnitScaleFactor", "double", "Number", "", 1.0),
+                    P("UpAxis", "int", "Integer", "", a.Up), P("UpAxisSign", "int", "Integer", "", a.UpSign),
+                    P("FrontAxis", "int", "Integer", "", a.Front), P("FrontAxisSign", "int", "Integer", "", a.FrontSign),
+                    P("CoordAxis", "int", "Integer", "", a.Coord), P("CoordAxisSign", "int", "Integer", "", a.CoordSign),
+                    P("OriginalUpAxis", "int", "Integer", "", a.Up), P("OriginalUpAxisSign", "int", "Integer", "", a.UpSign),
+                    P("UnitScaleFactor", "double", "Number", "", a.Unit), P("OriginalUnitScaleFactor", "double", "Number", "", a.Unit),
                     P("TimeMode", "enum", "", "", 6), P("TimeSpanStart", "KTime", "Time", "", 0L),
                     P("TimeSpanStop", "KTime", "Time", "", FbxScene.Time(takeSeconds)), P("CustomFrameRate", "double", "Number", "", -1.0))),
             Node("Documents").With(Node("Count", 1), Node("Document", 1_000_000L, "Scene", "Scene").With(Node("RootNode", 0L))),
@@ -273,6 +318,115 @@ public static class FbxSamples
             for (int x = 0; x < n; x++)
                 m.Polygons.Add(new[] { z * (n + 1) + x, (z + 1) * (n + 1) + x, (z + 1) * (n + 1) + x + 1, z * (n + 1) + x + 1 });
         return m;
+    }
+
+    // ---------------------------------------------------------------------
+    // Crate (テクスチャ + 多角形ごとのマテリアル + IndexToDirect の法線)
+    // ---------------------------------------------------------------------
+    public const string CrateTexture = "../../Textures/Noise/fbm.png";   // Assets/Samples/Fbx から見た相対パス
+
+    public static byte[] Crate(bool compress = true, int version = 7400, string texture = CrateTexture)
+    {
+        var ids = new Ids();
+        long model = ids.Next(), geometry = ids.Next(), wood = ids.Next(), paint = ids.Next(), textureId = ids.Next();
+        var mesh = BoxMesh(Vector3.Zero, new Vector3(100));
+        // 上下 (法線が Y) の面はマテリアル 0 (テクスチャ)、横は 1 (色)
+        var polygonMaterials = mesh.Polygons.Select(p => MathF.Abs(mesh.Newell(p).Y) > 0.5f ? 0 : 1).ToArray();
+        var objects = new List<FbxNode>
+        {
+            GeometryNode(geometry, "Crate", mesh, polygonMaterials, new GeometryOptions { IndexedNormals = true }),
+            ModelNode(model, "Crate", "Mesh", new Vector3(0, 50, 0)),
+            MaterialNode(wood, "Top", new Vector3(0.6f, 0.6f, 0.6f)),
+            MaterialNode(paint, "Side", new Vector3(0.15f, 0.35f, 0.8f)),
+            Object("Texture", textureId, "TopTexture", "", Node("Type", "TextureVideoClip"), Node("Version", 202),
+                Node("TextureName", "TopTexture\0\x01Texture"), Node("FileName", "C:/missing/" + Path.GetFileName(texture)), Node("RelativeFilename", texture)),
+        };
+        var connections = new List<FbxNode>
+        {
+            ConnectOO(model, 0), ConnectOO(geometry, model), ConnectOO(wood, model), ConnectOO(paint, model),
+            ConnectOP(textureId, wood, "DiffuseColor"),
+        };
+        return Finish(Document(version, "GameEngine FbxSamples (AN2) : crate", Count(objects), objects, connections, null, 0), version, compress);
+    }
+
+    // ---------------------------------------------------------------------
+    // Panel (Z 上 / m、凹んだ多角形、頂点の色、法線なし、入っているテクスチャ、ノードの細かい変換)
+    // ---------------------------------------------------------------------
+    public static MeshData Star(float outer, float inner, float thickness, int points = 5)
+    {
+        // Z 上の FBX なので、星は XY の面 (地面) に置き、厚みは Z
+        var m = new MeshData();
+        var n = points * 2;
+        for (int layer = 0; layer < 2; layer++)
+            for (int i = 0; i < n; i++)
+            {
+                var a = i * MathF.Tau / n + MathF.PI / 2;
+                var r = i % 2 == 0 ? outer : inner;
+                m.Positions.Add(new Vector3(r * MathF.Cos(a), r * MathF.Sin(a), layer * thickness));
+            }
+        m.Polygons.Add(Enumerable.Range(0, n).ToArray());          // 下 (凹んだ 10 角形)
+        m.Polygons.Add(Enumerable.Range(n, n).ToArray());          // 上
+        for (int i = 0; i < n; i++) m.Polygons.Add(new[] { i, (i + 1) % n, n + (i + 1) % n, n + i });
+        // 向き : ふたは厚みの向き、横は中心から外
+        for (int i = 0; i < m.Polygons.Count; i++)
+        {
+            var p = m.Polygons[i];
+            var c = p.Aggregate(Vector3.Zero, (acc, k) => acc + m.Positions[k]) / p.Length;
+            var outward = i < 2 ? new Vector3(0, 0, i == 0 ? -1 : 1) : new Vector3(c.X, c.Y, 0);
+            if (Vector3.Dot(m.Newell(p), outward) < 0) m.Polygons[i] = p.Reverse().ToArray();
+        }
+        return m;
+    }
+
+    /// <summary>市松模様の BMP (24bit、size × size)。FBX に入れるテクスチャ (外部の物を使わずに作る)</summary>
+    public static byte[] CheckerBmp(int size = 64, int cell = 8)
+    {
+        var row = (size * 3 + 3) & ~3;
+        var data = new byte[54 + row * size];
+        void u32(int at, int v) => BitConverter.TryWriteBytes(data.AsSpan(at), v);
+        data[0] = (byte)'B'; data[1] = (byte)'M';
+        u32(2, data.Length); u32(10, 54); u32(14, 40); u32(18, size); u32(22, size);
+        BitConverter.TryWriteBytes(data.AsSpan(26), (short)1); BitConverter.TryWriteBytes(data.AsSpan(28), (short)24);
+        u32(34, row * size);
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                var on = (x / cell + y / cell) % 2 == 0;
+                var o = 54 + y * row + x * 3;
+                data[o] = on ? (byte)40 : (byte)230; data[o + 1] = on ? (byte)200 : (byte)230; data[o + 2] = on ? (byte)250 : (byte)230;   // BGR : 黄と白
+            }
+        return data;
+    }
+
+    public static byte[] Panel(bool compress = true, int version = 7500)
+    {
+        var ids = new Ids();
+        long model = ids.Next(), geometry = ids.Next(), material = ids.Next(), texture = ids.Next(), video = ids.Next();
+        var mesh = Star(1.0f, 0.45f, 0.08f);   // m (UnitScaleFactor = 100)
+        var colors = mesh.Positions.Select((p, i) => new Vector4(0.5f + 0.5f * MathF.Cos(i * 0.6f), 0.6f, 0.5f + 0.5f * MathF.Sin(i * 0.6f), 1)).ToArray();
+        var node = ModelNode(model, "Panel", "Mesh", new Vector3(0, 0, 0.5f));
+        // ノードの細かい変換 : 回す中心 (RotationPivot) と回す前の回転 (PreRotation) と、メッシュだけの位置 (Geometric)。
+        // PreRotation は Z の周りに 90° (星の向きが変わるだけ)、Geometric は中心を Z へ少し上げる
+        node.Child("Properties70")!.With(
+            P3("RotationPivot", "Vector3D", new Vector3(0, 0, 0), ""),
+            P3("PreRotation", "Vector3D", new Vector3(0, 0, 90), ""),
+            P3("GeometricTranslation", "Vector3D", new Vector3(0, 0, 0.02f), ""));
+        var objects = new List<FbxNode>
+        {
+            GeometryNode(geometry, "Panel", mesh, null, new GeometryOptions { Normals = false, ControlPointColors = colors, UvScale = 1.0f }),
+            node,
+            MaterialNode(material, "Checker", new Vector3(1, 1, 1)),
+            Object("Video", video, "checker.bmp", "Clip", Node("Type", "Clip"), Node("Properties70").With(P("Path", "KString", "XRefUrl", "", "checker.bmp")),
+                Node("UseMipMap", 0), Node("Filename", "checker.bmp"), Node("RelativeFilename", "checker.bmp"), Node("Content", CheckerBmp())),
+            Object("Texture", texture, "Checker", "", Node("Type", "TextureVideoClip"), Node("Version", 202),
+                Node("TextureName", "Checker\0\x01Texture"), Node("FileName", "checker.bmp"), Node("RelativeFilename", "checker.bmp")),
+        };
+        var connections = new List<FbxNode>
+        {
+            ConnectOO(model, 0), ConnectOO(geometry, model), ConnectOO(material, model), ConnectOO(video, texture), ConnectOP(texture, material, "DiffuseColor"),
+        };
+        var zUp = new AxisSettings(Up: 2, UpSign: 1, Front: 1, FrontSign: -1, Coord: 0, CoordSign: 1, Unit: 100);
+        return Finish(Document(version, "GameEngine FbxSamples (AN2) : panel", Count(objects), objects, connections, null, 0, zUp), version, compress);
     }
 
     // ---------------------------------------------------------------------

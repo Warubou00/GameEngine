@@ -65,7 +65,7 @@ internal sealed partial class EditorApp
         Model model;
         try { model = _engine.Assets.LoadModel(asset.Path); }
         catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return Entity.Null; }
-        var entity = World.CreateEntity(Path.GetFileNameWithoutExtension(asset.Name));
+        var entity = World.CreateEntity(AssetDatabase.SplitName(asset.Name, false).Stem);   // AN2 : Arm.mod.fbx → Arm (以前は拡張子を 1 つだけ外していた)
         var transform = new Transform(position);
         if (World.IsAlive(parent) && World.Has<Transform>(parent) && Matrix4x4.Invert(Hierarchy.GetWorldMatrix(World, parent), out var inverse))
         {
