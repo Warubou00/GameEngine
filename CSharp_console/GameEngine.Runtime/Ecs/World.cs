@@ -94,6 +94,7 @@ public sealed class World
             _pools.Remove(pool.ComponentType);
             _poolList.Remove(pool);
             removed++;
+            _poolsVersion++;
         }
         return removed;
     }
@@ -171,15 +172,29 @@ public sealed class World
     // ---------------------------------------------------------------------
 
     // 型ごとの入れ物 (無ければ作る)。System が詰めた配列を直接回す時に使う
+    //   v1.2 : 型ごとに最後に引いた入れ物を覚える (同じ World で入れ物が捨てられていなければ、辞書を引かない)。
+    //          GetComponent / Has / Get を毎フレーム何千回も呼んでも速いように (以前は毎回 Dictionary<Type> を引いていた)
     public ComponentPool<T> GetPool<T>() where T : struct
     {
-        if (_pools.TryGetValue(typeof(T), out var pool)) return (ComponentPool<T>)pool;
+        var cached = PoolCache<T>.Entry;
+        if (cached != null && ReferenceEquals(cached.World, this) && cached.Version == _poolsVersion) return cached.Pool;
 
-        var created = new ComponentPool<T>();
-        _pools.Add(typeof(T), created);
-        _poolList.Add(created);
-        return created;
+        ComponentPool<T> result;
+        if (_pools.TryGetValue(typeof(T), out var pool)) result = (ComponentPool<T>)pool;
+        else
+        {
+            result = new ComponentPool<T>();
+            _pools.Add(typeof(T), result);
+            _poolList.Add(result);
+        }
+        PoolCache<T>.Entry = new PoolCacheEntry<T>(this, _poolsVersion, result);   // 1 つの物にまとめて入れ替える (別のスレッドでも組がずれない)
+        return result;
     }
+
+    // 型ごとの覚え (別の World を使うと入れ替わるだけで、間違った入れ物は返さない)
+    private sealed record PoolCacheEntry<T>(World World, int Version, ComponentPool<T> Pool) where T : struct;
+    private static class PoolCache<T> where T : struct { public static PoolCacheEntry<T>? Entry; }
+    private int _poolsVersion;   // 入れ物を捨てた回数 (RemovePools)。覚えた入れ物が古くないか見る
 
     public void Add<T>(Entity entity, in T component) where T : struct
     {

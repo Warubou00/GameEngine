@@ -6,7 +6,7 @@ namespace GameEngine.Editor;
 
 // ==========================================================================
 // スクリプトの雛形と、外のエディター (Visual Studio) で開く (v1.1。Unity の Create > C# Script / ダブルクリックと同じ)
-//   - Project の右クリック > Create > Scripts > Behaviour : 今のフォルダに .cs を作る (コンポーネント + [GameSystem] の System)
+//   - Project の右クリック > Create > Scripts > Behaviour : 今のフォルダに .cs を作る (コンポーネント + Behaviour<T>。v1.2 で Behaviour<T> に)
 //     Assets の .cs も Game.csproj がビルドする (Assets/**/Editor/ の下は GameEditor.csproj)
 //   - .cs をダブルクリック : プロジェクトのフォルダに <プロジェクト名>.sln を作り (Game / GameEditor の csproj)、
 //     Visual Studio でその sln と .cs を開く。同じ sln を開いている Visual Studio があれば、そこで .cs を開く
@@ -39,7 +39,11 @@ internal static class ScriptEditor
         // ==========================================================================
         // {{typeName}}
         //   コンポーネント : Inspector の Add Component で物に付ける。public の値は Inspector で変えられ、シーンに保存される
-        //   System : 再生中、毎フレーム Update が呼ばれる ([GameSystem] を付けると、エディターが見つけて登録する)
+        //   Behaviour : 再生中、{{typeName}} を持つ物ごとに Update が毎フレーム呼ばれる ([GameSystem] でエディターが登録する)
+        //     GetComponent<T>() : 同じ物の T への参照 (Transform は Transform で) / TryGetComponent / HasComponent
+        //     OnCollisionEnter / Stay / Exit : 押し返す Collider と当たった時 (OnTriggerEnter / Stay / Exit : トリガー)
+        //       collision.Other が相手、collision.GetComponent<T>() で相手のコンポーネント
+        //     使わないメソッドは消してよい (書いていないメソッドは呼ばれない)
         // ==========================================================================
         public struct {{typeName}} : IComponent
         {
@@ -47,14 +51,23 @@ internal static class ScriptEditor
         }
 
         [GameSystem]
-        public sealed class {{typeName}}System : ISystem
+        public sealed class {{typeName}}System : Behaviour<{{typeName}}>
         {
-            public void Update(World world)
+            protected override void Update(ref {{typeName}} data)
             {
-                world.ForEach((Entity entity, ref Transform transform, ref {{typeName}} data) =>
-                {
-                    // 例 : transform.Position += Vector3.UnitZ * data.Speed * Time.DeltaTime;
-                });
+                // 例 : Transform.Position += Vector3.UnitZ * data.Speed * Time.DeltaTime;
+            }
+
+            protected override void OnCollisionEnter(ref {{typeName}} data, in Collision collision)
+            {
+            }
+
+            protected override void OnCollisionStay(ref {{typeName}} data, in Collision collision)
+            {
+            }
+
+            protected override void OnCollisionExit(ref {{typeName}} data, in Collision collision)
+            {
             }
         }
 

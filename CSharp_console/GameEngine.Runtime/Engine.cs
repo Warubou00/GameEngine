@@ -390,6 +390,7 @@ public sealed class Engine : IDisposable
     private readonly AudioSystem      _audioSystem;
     private readonly bool             _audioLoaded;
     private readonly CollisionSystem  _collisionSystem;
+    private readonly CollisionCallbackSystem _collisionCallbacks = new();   // v1.2 : Behaviour<T> の OnCollisionEnter / Stay / Exit
     private readonly bool             _physicsLoaded;
     private readonly RenderCommandBuffer _commands     = new();
     private bool _closed;
@@ -513,6 +514,7 @@ public sealed class Engine : IDisposable
     {
         Time.ResetPlayTime();
         _collisionSystem.ResetForPlay();
+        _collisionCallbacks.Reset(Physics);
         IsPlaying = true;
     }
 
@@ -526,6 +528,9 @@ public sealed class Engine : IDisposable
     public Form Window => _window;
 
     // 毎フレーム呼ばれる System を足す (登録した順に呼ばれる)。IFixedSystem も実装していれば FixedUpdate も呼ぶ
+    /// <summary>今重なっている組の数 (Behaviour の衝突のメソッドの表。確認用。v1.2)</summary>
+    public int CollisionPairCount => _collisionCallbacks.PairCount;
+
     public void AddSystem(ISystem system)
     {
         _systems.Add(system);
@@ -608,6 +613,7 @@ public sealed class Engine : IDisposable
             Gamepad.Update();
 
             if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
+            if (IsPlaying) _collisionCallbacks.Dispatch(World, Physics, _systems);   // v1.2 : 前の物理の刻みの衝突 → Behaviour の OnCollision* (Update の前。Unity と同じ順)
             if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
             _animationSystem.Update(World, IsPlaying, Time.DeltaTime);   // AN3 : 骨のエンティティに姿勢を書く (編集中は時間を進めず、その時間の姿勢)
             _transformSystem.Update(World);
