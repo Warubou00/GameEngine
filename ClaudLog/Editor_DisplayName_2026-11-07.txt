@@ -1,0 +1,53 @@
+﻿エディター : アセット / フォルダの表示名 (日本語の表示) 2026-11-07
+ブランチ : feature/editor-display-name
+
+■ 頼まれたこと
+  アセットやフォルダに日本語の表示名を付ける。例 : フォルダ「aaa」を、エディター上の右クリックのメニューで「モデル」と表示するだけにする
+  (中の名前は aaa のまま。エクスプローラーでも aaa)。.meta に入れてよい
+
+■ できた物
+  Project の右クリック (フォルダの木 / タイル) :
+    Display Name... : 表示名を書く欄が出る (日本語も打てる)。Enter で決める / Esc でやめる / 空にすると表示名を消す
+    Clear Display Name (本当の名前) : 表示名を消す (表示名がある時だけ出る)
+  表示名を出す所 : フォルダの木、タイルの名前 (少し青い色にして、ファイルの名前と違うと分かるように)、上のパンくず、ドラッグ中の名前
+  ツールチップ : 表示名がある物は「表示名 + 本当のパス」(例 : トミミ (PMX) / Assets/Models/pmx)
+  探す : ファイルの名前でも表示名でも見つかる。並びは表示名の順
+  ファイル / フォルダの名前とパスは変わらない (シーン / プレハブ / マテリアル / コードのパスもそのまま)
+
+■ しくみ
+  .meta の "displayName" に書く。例 :
+    {
+      "guid": "...",
+      "kind": "Folder",
+      "displayName": "モデル"
+    }
+  日本語はそのまま書く (モ のようにしない。git の差分や手で見ても読めるように)。表示名が無ければ書かない (前と同じ形)
+  AssetDatabase :
+    AssetEntry.DisplayName (無ければ null) / Label (表示名があればそれ、無ければファイルの名前)
+    SetDisplayName(パス, 表示名) : .meta を書き直す。前後の空白と改行は取る / 空 = 消す / ファイルの名前と同じなら付けない / Assets には付けない
+    LabelPath(パス) : パスを表示名でつなぐ (例 : Assets/モデル/メモ)
+    名前を変える (Rename) と .meta ごと動くので表示名もそのまま
+    外で .meta が書き換わった時 (git で取ってきた / 手で直した) も、見回り (Refresh) で .meta の時刻が変わった物だけ読み直す
+  日本語の字 : エディターのフォントは前から Meiryo の日本語の範囲を足してある (そのまま出る)
+
+■ 直した不具合 (途中で見つけた物)
+  LabelPath が、表示名に置き換えたフォルダの名前で次の物を探していたので、2 段目から先が表示名にならなかった
+  (テストで見つけた : Assets/_DisplayNameTest/モデル/note.txt → 今は Assets/_DisplayNameTest/モデル/メモ)
+
+■ 確かめたこと (エディターのテスト 248 / 0。Release / Debug、Debug の D3D12 のエラーと警告 0)
+  フォルダ aaa に「モデル」と打って Enter (右クリック > Display Name... と同じ) : 表示はモデル、ディスクのフォルダは aaa、Id は同じ、
+    .meta に "displayName": "モデル" がそのまま書かれる
+  ファイルにも付く (前後の空白 / 改行は取る)。パスを表示名でつなぐと Assets/_DisplayNameTest/モデル/メモ
+  開き直しても .meta から読める / フォルダの名前を変えても表示名はそのまま / 外で .meta を書き換えると読み直す /
+  空にすると消える (.meta から displayName が無くなる) / Assets には付けられない
+  画面 : 一時的に Models を「モデル」、その中を「OBJ のモデル」「トミミ (PMX)」にして撮った (木 / タイル / ツールチップに本当のパス)。
+    撮った後、.meta は元に戻した (Project/Assets に変更は残していない)
+
+■ 変えたファイル
+  GameEngine.Runtime/Assets/AssetDatabase.cs (表示名の読み書き / SetDisplayName / LabelPath / 外の変更の読み直し)
+  GameEngine.Editor/ProjectPanel.cs (右クリックのメニュー / 書く欄 / 表示 / 探す / 並び / ツールチップ)
+  GameEngine.Editor/EditorTest.cs (表示名のテスト 6 個)
+
+■ やっていない事
+  Inspector のアセットの欄 (Model / Skeleton などのパス) やシーンのファイルは、本当のパスのまま (表示名は Project の中だけ)
+  表示名の変更は「元に戻す (Ctrl+Z)」の対象ではない (名前を変えるのと同じく、ファイルの操作として扱う)
