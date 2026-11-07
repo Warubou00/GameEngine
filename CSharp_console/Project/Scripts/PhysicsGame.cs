@@ -179,7 +179,7 @@ public sealed class PhysicsDemoSystem : ISystem, IFixedSystem
     }
 
     // [GameSystem] で作る時 (ED7)
-    public PhysicsDemoSystem(Engine engine) : this(engine, engine.Assets.LoadModel("../Model/obj/box.obj")) { }
+    public PhysicsDemoSystem(Engine engine) : this(engine, engine.Assets.LoadModel("Assets/Models/obj/box.obj")) { }
 
     // 物理の見本 (積み木 / 動く床) のあるシーンだけ動く (ED7 : どのシーンでも登録されるので)
     private static bool active(World world) => world.GetPool<StackBlock>().Count > 0 || world.GetPool<MovingPlatform>().Count > 0;

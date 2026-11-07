@@ -1,0 +1,44 @@
+﻿整理 : 使っていないプロジェクト / ソースの削除、見本の素材を Project/Assets だけに 2026-11-07
+ブランチ : feature/cleanup-unused
+
+■ 頼まれたこと
+  1. 今の作業で使っていないプロジェクトやソースを消す (先に一覧を出して、了承をもらってから)
+  2. 見本のモデル / テクスチャの元を消し、Project/Assets にだけ置く
+
+■ 調べ方
+  C++ の各 .vcxproj の参照 (ProjectReference) と、C# が実行時に写して使う DLL (NativeEngine.targets : Core / Renderer / RHI / Audio / Physics) を突き合わせた
+  どの .vcxproj にも入っていないソースを探し、#include でも読まれていないかを確かめた。各フォルダを最後に変えたコミットも見た
+
+■ 1. 消した物
+  プロジェクト (丸ごと)
+    Engine/            : C++ の exe (main.cpp と自作の Math)。どこからも参照されていない。最初のコミット (2026-09-12) から変わっていない
+    Platform/          : 静的ライブラリ (windowSystem)。どこにもリンクされていない。最初のコミットから変わっていない
+    CSharp/GameEngine/ : 古い WPF のアプリ (.sln も)。今の C# は CSharp_console。2026-09-13 から変わっていない
+    GameEngine.sln から Engine と Platform を外した (BOM / CRLF はそのまま)
+  ソース (どのプロジェクトにも入っておらず、使っている所から読まれていない)
+    RHI/Source/Shader/hlslCompiledState.cpp / hlslCompiledState.h / IShaderCompiledState.h (お互いを読んでいるだけ)
+    ImGui/imgui_impl_dx11.cpp / .h (DX11 用。エンジンは DX12 版) / ImGui/imgui_demo.cpp (デモ。呼んでいない)
+  ライブラリ
+    DirectXTex/lib/Debug/DirectXTex_old.lib / Release/DirectXTex_old.lib (リンクするのは DirectXTex.lib だけ)
+  残した物 : プロジェクトに入っていないが読まれているヘッダー (imgui_internal.h / imstb_*.h / imconfig.h / hlslHeader.h / dxgiHeader.h)、
+             GameEngine_console (エディターがその出力の ../Shader を読む)、DirectXTex_old_old.lib (未追跡のあなたのファイル)、各 .vcxproj.user
+  開発者リファレンス (Docs/Reference) : make_reference.py のモジュールから Platform / Engine (旧) を外し、template.html の構成図と
+    ビルドの説明も直して作り直した (AN4 / AN5 で増えた型も入った)
+
+■ 2. 見本の素材を Project/Assets だけに
+  元の場所 : GameEngine_console/bin/x64/Release/Model と Debug/Model (各 85 MB。obj / pmx とテクスチャ)、Debug/Image/image.png (どこからも使っていない)
+    消す前に、Project/Assets/Models に同じ 28 ファイルがあり、中身も同じことを確かめた (Release と Debug の Model も同じ)
+  コード :
+    エディター (Program.cs) : 起動時に ../Model を Assets/Models へ写す処理 (seedSampleAssets) を消した。以前は Assets/Models が無いとそこから写した
+    見本 (GameEngine_console) : "../Model/..." → "Assets/Models/..." (Program.cs / Samples/Showcase.cs / Samples/SerializationTest.cs)
+      Project/Assets が見つからない時は、理由を出して終わる (以前は ../Model から直接読んだ)
+    ゲームのコード (Project/Scripts/PhysicsGame.cs) : "../Model/obj/box.obj" → "Assets/Models/obj/box.obj"
+    Engine.cs の使い方の例のコメントも Assets のパスに。.gitignore の説明も直した
+    古いシーン / スクリプトの "../Model/..." を Assets/Models/... に読み替える仕組み (AssetDatabase) はそのまま残した (古いファイルも読めるように)
+  モデルの本体は今までどおり git に入れない (.gitignore。.meta だけ入る)。手元の Project/Assets/Models だけが本体になった
+  Project/Build (書き出したゲーム。git に入らない) の中の写しは、ビルドの出力なので残した
+
+■ 確かめたこと
+  ビルド : GameEngine.sln (Release / Debug)、エディター / 見本 / Player / ランチャー。エラー 0
+  見本 : --serialize-test 4 / 0。showcase を起動して撮った絵で、モデル (PMX / OBJ) とテクスチャが Assets から読めている
+  エディターのテスト : Release 242 / 0、Debug 242 / 0 (D3D12 のエラーと警告 0)。ゲームの書き出しと、書き出したゲームの起動も含む

@@ -30,8 +30,6 @@ MODULES = [
     ("physics",  "Physics",           "C++", "DLL (Physics.dll)",    ["Physics/Source"],   "当たり判定と剛体 (球 / 箱 / カプセル、接触の解決、ジョイント、レイキャスト)", []),
     ("audio",    "Audio",             "C++", "DLL (Audio.dll)",      ["Audio/Source"],     "XAudio2 の音 (WAV の読み込み、3D の音)", ["core"]),
     ("core",     "Core",              "C++", "DLL (Core.dll)",       ["Core/Source"],      "共通 (ログ / ファイル / 数学 / ハッシュ) とゲームパッド (XInput / DirectInput)", []),
-    ("platform", "Platform",          "C++", "静的ライブラリ",       ["Platform/Source"],  "Win32 の窓 (C++ のテスト用アプリが使う)", []),
-    ("legacy",   "Engine (旧)",       "C++", "exe (C++ のテスト)",   ["Engine"],           "最初の C++ だけのテストアプリと数学 (今のエンジンは使っていない。Shift-JIS)", ["rhi", "renderer", "audio", "core", "platform"]),
     ("runtime",  "GameEngine.Runtime", "C#", "DLL (GameEngine.dll)", ["CSharp_console/GameEngine.Runtime"], "エンジンの本体 (C#)。ECS (World / Entity / コンポーネント / システム)、描画パイプライン、アセット、シーンの保存、入力、時間。C++ の DLL を P/Invoke で呼ぶ", ["renderer", "physics", "audio", "core"]),
     ("editor",   "GameEngine.Editor", "C#", "exe",                  ["CSharp_console/GameEngine.Editor"],  "エディター (ImGui)。Hierarchy / Inspector / Project / シーンビュー / 元に戻す / プレハブ / ゲームの書き出し / スクリプトの読み直し / シェーダーグラフ / 自動テスト", ["runtime"]),
     ("player",   "GameEngine.Player", "C#", "exe",                  ["CSharp_console/GameEngine.Player"],  "書き出したゲームの起動 (エディター無しでシーンを動かす)", ["runtime"]),

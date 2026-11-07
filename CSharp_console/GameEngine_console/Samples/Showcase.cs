@@ -19,13 +19,13 @@ internal static class Showcase
         // ---------- 地面 (箱を平たく伸ばしたもの。上の面が y = 0。物が接する所に SSAO の影が出る) ----------
         var ground = world.CreateEntity();
         world.Add(ground, new Transform(new Vector3(0, -0.1f, 1.0f)) { Scale = new Vector3(12.0f, 0.05f, 10.0f) });
-        world.Add(ground, new MeshRenderer(engine.Assets.LoadModel("../Model/obj/box.obj")));
+        world.Add(ground, new MeshRenderer(engine.Assets.LoadModel("Assets/Models/obj/box.obj")));
         world.Add(ground, new Static());
         world.Add(ground, Collider.Box(new Vector3(1, 1, 1), new Vector3(0, 1, 0)));   // box.obj は x, z : -1〜1 / y : 0〜2
 
         // ---------- 岩 (小さいモデルなので大きくして、原点の箱の周りに置く) ----------
         var stopwatch = Stopwatch.StartNew();
-        var rock = engine.Assets.LoadModel("../Model/obj/rock.obj");
+        var rock = engine.Assets.LoadModel("Assets/Models/obj/rock.obj");
         var rockMesh = engine.Assets.LoadCollisionMesh(rock);
         engine.WaitForGpu();
         engine.ReportProfilerValue("Load rock.obj (ms)", stopwatch.Elapsed.TotalMilliseconds);
@@ -52,7 +52,7 @@ internal static class Showcase
         }
 
         // ---------- 親子 (ED2) : 回る台の上の箱と、その周りを回る小さな箱 (親が回ると子も回る / 子のコライダーも付いて行く) ----------
-        var box = engine.Assets.LoadModel("../Model/obj/box.obj");
+        var box = engine.Assets.LoadModel("Assets/Models/obj/box.obj");
         var pivot = world.CreateEntity("Hierarchy pivot");
         world.Add(pivot, new Transform(new Vector3(-1.5f, 0.0f, -5.0f)) { Scale = new Vector3(0.6f, 0.05f, 0.6f) });
         world.Add(pivot, new MeshRenderer(box));
@@ -68,7 +68,7 @@ internal static class Showcase
 
         // ---------- PMX のキャラクター (MMD の 1 単位 ≒ 8cm。身長 20 前後なので小さくして箱の横に立たせる) ----------
         stopwatch.Restart();
-        var tomimi = engine.Assets.LoadModel("../Model/pmx/Sour式トミミ/Tomimi.pmx");
+        var tomimi = engine.Assets.LoadModel("Assets/Models/pmx/Sour式トミミ/Tomimi.pmx");
         engine.WaitForGpu();
         engine.ReportProfilerValue("Load Tomimi.pmx (ms)", stopwatch.Elapsed.TotalMilliseconds);
 

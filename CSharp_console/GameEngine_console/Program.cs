@@ -39,7 +39,8 @@ namespace GameEngine_console;
 //   --particle-sort on|off / --particle-collision on|off / --particle-capacity N / --particle-half on|off : GPU パーティクルの設定
 //   見本のシーン (ED6) : 見本 (既定 / --scene physics / --scene particles) は、プロジェクトのシーンのファイル
 //                       (CSharp_console/Project/Assets/Scenes/showcase|physics|particles.scene.json) から読む。
-//                       プロジェクトの Assets/Models が無い時 (エディターを 1 回も起動していない時) / --view を付けた時 / 計測の時はコードで作る
+//                       --view を付けた時 / 計測の時はコードで作る
+//   モデル / テクスチャは CSharp_console/Project/Assets だけにある (以前は出力の ../Model に元があり、Assets が無ければそこから読んだ)
 //   --code-scene on             : 見本をシーンのファイルではなくコードで作る (シーンのファイルを作り直す時 : --code-scene on --save-scene <path>)
 //   --save-scene <path>         : 起動時に作ったシーンを JSON に保存する (ED1)
 //   --load-scene <path>         : 起動時に作ったシーンを消して、JSON のシーンを読み込む (System は同じ引数の時と同じ物が入る)
@@ -72,20 +73,23 @@ internal static class Program
         var options     = ParseArguments(args);
 
         // ---------- プロジェクト (ED6) : 見本のシーンのファイルとアセット (Assets/Models) ----------
-        //   Assets/Models があれば、モデルのパス (../Model/...) も Assets/Models/... に読み替える (シーンのファイルと同じモデルを使う)
+        //   モデル / テクスチャは Project/Assets だけに置く (以前は出力の ../Model にも元があった)。無ければ動かせないので終わる
         var project = findProject();
-        if (project != null)
+        if (project == null)
         {
-            engine.Assets.Database = new AssetDatabase(project);
-            engine.Assets.Database.Refresh();
+            Console.WriteLine("[Sample] CSharp_console/Project/Assets/Models が見つかりません (モデル / テクスチャは Project/Assets にだけ置く)。");
+            Environment.ExitCode = 1;
+            return;
         }
+        engine.Assets.Database = new AssetDatabase(project);
+        engine.Assets.Database.Refresh();
         var stressCount = options.TryGetValue("--stress", out var stress) && int.TryParse(stress, out var n) ? n : 0;
         var view        = options.GetValueOrDefault("--view", "");
 
         // ---------- モデル (読み込み〜 GPU への転送完了までの時間をプロファイラーに出す) ----------
-        // モデルは Model/obj と Model/pmx/<モデル名> に分けて置く (以前は Model の直下)
+        // モデルは Assets/Models/obj と Assets/Models/pmx/<モデル名> に置く
         var stopwatch = Stopwatch.StartNew();
-        var box = engine.Assets.LoadModel("../Model/obj/box.obj");
+        var box = engine.Assets.LoadModel("Assets/Models/obj/box.obj");
         engine.WaitForGpu();
         engine.ReportProfilerValue("LoadModel (ms)", stopwatch.Elapsed.TotalMilliseconds);
 

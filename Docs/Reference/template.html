@@ -185,7 +185,7 @@ svg .bandlabel { fill: var(--faint); font-size: 12px; font-weight: 700; letter-s
 <h2>ビルドと実行 / テスト</h2>
 <h3>何がどこにできるか</h3>
 <ul>
-  <li>C++ (<code>GameEngine.sln</code> : RHI / Renderer / Physics / Audio / Core / Platform) は <b>Visual Studio 2022 の MSBuild</b> で x64 の Debug / Release をビルドする。DLL と <code>Shader</code> フォルダは見本 (GameEngine_console) の出力の隣に置かれ、C# の exe はそこから DLL を読む</li>
+  <li>C++ (<code>GameEngine.sln</code> : RHI / Renderer / Physics / Audio / Core) は <b>Visual Studio 2022 の MSBuild</b> で x64 の Debug / Release をビルドする。DLL と <code>Shader</code> フォルダは見本 (GameEngine_console) の出力の隣に置かれ、C# の exe はそこから DLL を読む</li>
   <li>C# の見本 <code>GameEngine_console</code> も VS の MSBuild でビルドする (COM の参照があるので <code>dotnet build</code> は失敗する)
 <pre><code>"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" CSharp_console\GameEngine_console\GameEngine_console.csproj /p:Configuration=Release /p:Platform=x64</code></pre></li>
   <li>エディター / Player / ランチャーは <code>dotnet build</code> でよい。<b>必ず <code>-p:Platform=x64</code> を付ける</b> (付けないと <code>bin\Release</code> に出て、いつも動かしている <code>bin\x64\Release</code> が古いまま)
@@ -656,7 +656,6 @@ function architecture() {
     runtime: [190, 160, 880],
     renderer: [100, 330, 210], physics: [380, 330, 190], audio: [620, 330, 180], core: [850, 330, 200],
     rhi: [100, 450, 210],
-    platform: [380, 560, 150], legacy: [550, 560, 170],
   };
   const ext = [["Direct3D 12 / DXGI / DXC", 60, 560, 290], ["XAudio2", 640, 450, 140], ["XInput / DirectInput", 860, 450, 180]];
   const boxH = 62;
@@ -665,11 +664,11 @@ function architecture() {
     <line x1="0" x2="${W}" y1="276" y2="276" stroke="var(--accent)" stroke-dasharray="8 6" stroke-width="1.5"/>
     <text x="${W - 8}" y="270" text-anchor="end" style="fill:var(--accent);font-size:12px;font-weight:600">P/Invoke : extern "C" の関数 + ハンドル (uint) + blittable な構造体</text>
     <rect class="band" x="0" y="310" width="${W}" height="220" rx="8"/><text class="bandlabel" x="12" y="305">ネイティブ (C++ の DLL)</text>
-    <text class="bandlabel" x="12" y="555">外部 / 旧</text>`;
+    <text class="bandlabel" x="12" y="555">外部</text>`;
   const center = id => { const [x, y, w] = pos[id]; return [x + w / 2, y, y + boxH]; };
   const edge = (a, b, cls = "") => { const [ax, , ab] = center(a), [bx, bt] = center(b); const my = (ab + bt) / 2; return `<path class="edge ${cls}" d="M${ax},${ab} C${ax},${my} ${bx},${my} ${bx},${bt - 2}" marker-end="url(#ah)"/>`; };
   let e = "";
-  for (const m of D.modules) for (const d of m.deps) if (pos[m.id] && pos[d] && !(m.id === "legacy")) e += edge(m.id, d);
+  for (const m of D.modules) for (const d of m.deps) if (pos[m.id] && pos[d]) e += edge(m.id, d);
   e += edge("launcher", "editor", "use");
   for (const [label, x, y, w] of ext) s += `<rect class="box ghost" x="${x}" y="${y}" width="${w}" height="44" rx="6"/><text x="${x + w / 2}" y="${y + 27}" text-anchor="middle" style="font-size:12.5px;fill:var(--muted)">${esc(label)}</text>`;
   e += `<path class="edge use" d="M205,512 V560"/><path class="edge use" d="M710,392 V450"/><path class="edge use" d="M950,392 V450"/>`;
