@@ -213,7 +213,46 @@ public sealed class GraphicsSettings
     {
         commands.Clear();
         _pipeline!.Render(commands, this);
+        foreach (var preview in _previews) preview.Submit(commands);   // AN5 : プレビューの窓 (シーンの後、UI の前)
         commands.Submit();
+        // AN5 : 窓を閉じた / 大きさを変えたレンダーターゲットは、このフレームを描いた後で消す
+        //       (以前はその場で消していたので、同じフレームの UI がもう消えたテクスチャを読み、GPU が止まった (デバイスの削除))
+        foreach (var texture in _retiredTextures) texture.Dispose();
+        _retiredTextures.Clear();
+    }
+
+    private readonly List<RenderTexture> _retiredTextures = new();
+
+    // このフレームの UI が読んでいるかもしれないレンダーターゲットを、描いた後で消す
+    internal void RetireTexture(RenderTexture? texture)
+    {
+        if (texture != null) _retiredTextures.Add(texture);
+    }
+
+    // ---------- プレビューの窓 (AN5) ----------
+    private readonly List<PreviewScene> _previews = new();
+
+    /// <summary>今あるプレビューの窓の世界</summary>
+    public IReadOnlyList<PreviewScene> Previews => _previews;
+
+    /// <summary>プレビューの窓の世界を作る (視点の番号は 1〜15 の空いている物。全部使っていれば null)。使い終わったら Dispose</summary>
+    internal PreviewScene? CreatePreview(Engine engine)
+    {
+        for (int view = 1; view < NativeMethods.MaxPreviewViews; view++)
+        {
+            if (_previews.Any(p => p.View == view)) continue;
+            var preview = new PreviewScene(engine, view);
+            _previews.Add(preview);
+            return preview;
+        }
+        return null;
+    }
+
+    internal void RemovePreview(PreviewScene preview) => _previews.Remove(preview);
+
+    internal void UpdatePreviews(float deltaTime)
+    {
+        for (int i = 0; i < _previews.Count; i++) _previews[i].Update(deltaTime);
     }
 
     internal void Shutdown()
@@ -337,6 +376,14 @@ public sealed class Engine : IDisposable
             return (_skinningSystem.ObjectCount, _skinningSystem.MatrixCount, _skinningSystem.LastMilliseconds, (int)instances, (int)vertices, gpuMs);
         }
     }
+
+    /// <summary>プレビューの窓の世界を作る (AN5。視点の番号 1〜15 の空いている物。全部使っていれば null)。使い終わったら Dispose</summary>
+    public PreviewScene? CreatePreview() => Graphics.CreatePreview(this);
+
+    /// <summary>確認用 (AN5) : 描画リストの数 (view 0 = シーン / 1〜 = プレビューの窓)</summary>
+    public int DrawItemCount(int view = 0) => (int)NativeMethods.Renderer_GetDrawItemCount((uint)Math.Max(0, view));
+    /// <summary>確認用 (AN5) : C++ の生きている描画オブジェクトの数 (シーン + 窓)</summary>
+    public int RenderObjectCount => (int)NativeMethods.Renderer_GetRenderObjectCount();
 
     /// <summary>アニメーション (AN3) : 動かした Animator の数 / このフレームで書いた骨の数 / かかった時間 (ms)</summary>
     public (int Animators, int BonesWritten, double Milliseconds) AnimationStats => (_animationSystem.AnimatorCount, _animationSystem.BonesWritten, _animationSystem.LastMilliseconds);
@@ -573,6 +620,7 @@ public sealed class Engine : IDisposable
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)
             _renderSyncSystem.Update(World);
             _skinningSystem.Update(World, Assets);   // AN4 : 曲げる物の骨の行列を C++ へ (描画オブジェクトができた後)
+            Graphics.UpdatePreviews(Time.DeltaTime);   // AN5 : プレビューの窓の世界 (骨 / 行列 / 描画オブジェクト / 曲げる)
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)

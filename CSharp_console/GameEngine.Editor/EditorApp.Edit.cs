@@ -245,6 +245,15 @@ internal sealed partial class EditorApp
         return _graph.Open(path);
     }
 
+    /// <summary>FBX のプレビューの窓 (AN5)。null なら空の窓を開く。戻り値 = 作れたか</summary>
+    public PreviewWindow Preview => _preview;
+
+    public bool OpenPreview(string? path)
+    {
+        if (path == null) { _preview.OpenEmpty(); return false; }
+        return _preview.Open(path);
+    }
+
     /// <summary>スクリプトリファレンスを開いて、その型を出す (ED9)</summary>
     public bool OpenReference(Type type)
     {

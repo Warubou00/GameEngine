@@ -82,6 +82,10 @@ namespace RHI
         void        SetSkinBounds(SkinHandle instance, const float* sphere)override;
         void        DestroySkinInstance(SkinHandle instance)override;
         void        GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const override;
+        void        SetPreviewItems(uint32_t view, const DrawItem* items, uint32_t count) override;
+        void        SetPreviewFrame(uint32_t view, const PreviewFrame& frame, const DebugLineVertex* lines, uint32_t lineVertexCount,
+                                    uint32_t depthLineVertexCount) override;
+        uint32_t    GetRenderTargetTexture(RenderTargetHandle target)const override;
         void        RequestSkinReadback(SkinHandle instance)override;
         uint32_t    ReadSkinReadback(Vertex* outVertices, uint32_t maxCount)override;
         ObjectHandle CreateObject()override;

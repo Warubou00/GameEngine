@@ -298,6 +298,36 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetObjectsSkinned(uint* objects, uint count, [MarshalAs(UnmanagedType.I1)] bool skinned);
 
+    // ---------- プレビューの窓 (AN5) ----------
+    public const int MaxPreviewViews = 16;   // C++ の RHI::MAX_PREVIEW_VIEWS (視点の番号は 1〜15)
+
+    // C++ の RHI::PreviewFrame と同じ並び (112 byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PreviewFrame
+    {
+        public Matrix4x4 ViewProjection;   // 行ベクトル (v × M) のまま。C++ が転置する
+        public Vector3   LightDirection;
+        public uint      Flags;            // 1 = 面 / 2 = ワイヤーフレーム
+        public Vector3   CameraPosition;
+        public float     Padding0;
+        public Vector4   WireColor;
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetObjectsView(uint* objects, uint count, uint view);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetPreviewFrame(uint view, PreviewFrame* frame, DebugLineVertex* lines, uint lineVertexCount, uint depthLineVertexCount);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetRenderTargetTexture(uint target);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetDrawItemCount(uint view);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetRenderObjectCount();
+
     // 姿勢 : 骨の行列 (1 本 12 個 = 行ベクトルの行列の 3 列) を boneCounts[i] 本ずつ、境界球 (中心 xyz と半径) を 1 個ずつ
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetSkinPoses(uint* objects, uint count, float* matrices, uint* boneCounts, float* spheres);

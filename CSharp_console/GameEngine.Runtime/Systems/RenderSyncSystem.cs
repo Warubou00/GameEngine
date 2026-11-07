@@ -24,10 +24,14 @@ internal sealed unsafe class RenderSyncSystem : ISystem
     private readonly List<uint>                      _pendingDestroy = new();
     private readonly Dictionary<uint, List<int>>     _pendingCreate  = new();   // モデル → 詰めた配列の位置
 
-    public RenderSyncSystem(World world, TransformSystem transforms)
+    // AN5 : 作った描画オブジェクトを出す視点 (0 = シーン / 1〜 = プレビューの窓。窓の世界の物はシーンに描かない)
+    private readonly uint _view;
+
+    public RenderSyncSystem(World world, TransformSystem transforms, uint view = 0)
     {
         _world      = world;
         _transforms = transforms;
+        _view       = view;
         // MeshRenderer が外れたら (エンティティの削除も含む)、C++ の描画オブジェクトも消す
         world.GetPool<MeshRenderer>().Removed += (_, renderer) =>
         {
@@ -102,6 +106,7 @@ internal sealed unsafe class RenderSyncSystem : ISystem
                 fixed (uint* created = _created)
                 {
                     NativeMethods.Renderer_CreateRenderObjects(model, (uint)list.Count, created);
+                    if (_view != 0) NativeMethods.Renderer_SetObjectsView(created, (uint)list.Count, _view);   // AN5 (作った同じフレームのうちに)
                 }
                 for (int n = 0; n < list.Count; n++)
                 {

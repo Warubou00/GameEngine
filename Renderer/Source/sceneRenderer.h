@@ -128,6 +128,16 @@ namespace Renderer
 		// 姿勢 : オブジェクトごとに 骨の行列 (1 本 12 個) を boneCounts[i] 本、境界球 (4 個) を 1 個
 		void SetSkinPoses(const uint32_t* handles, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres);
 		void GetSkinStats(uint32_t* outInstances, uint32_t* outVertices, float* outGpuMs)const;
+
+		// ---------- プレビューの窓 (AN5) ----------
+		// 描画オブジェクトを視点 view (0 = シーン / 1〜 = プレビュー) に出す
+		void SetObjectsView(const uint32_t* handles, uint32_t count, uint32_t view);
+		void SetPreviewFrame(uint32_t view, const RHI::PreviewFrame& frame, const RHI::DebugLineVertex* lines, uint32_t lineVertexCount,
+		                     uint32_t depthLineVertexCount);
+		uint32_t GetRenderTargetTexture(uint32_t target)const;
+		// 確認用 : 描画リストの数 (view 0 = シーン / 1〜 = 窓) / 生きている描画オブジェクトの数
+		uint32_t GetDrawItemCount(uint32_t view);
+		uint32_t GetRenderObjectCount()const { return _aliveRenderObjects; }
 		// 確認用 : 描画オブジェクトの曲げた頂点を読み戻す (Request の数フレーム後に Read)
 		void     RequestSkinReadback(uint32_t handle);
 		uint32_t ReadSkinReadback(RHI::Vertex* outVertices, uint32_t maxCount);
@@ -258,6 +268,7 @@ namespace Renderer
 			RHI::ObjectHandle Object;                   // 全サブメッシュで共有する
 			uint32_t          MaterialOverride = INVALID_HANDLE;   // ED5 : マテリアルのアセット (INVALID_HANDLE ならモデルのマテリアル)
 			RHI::SkinHandle   Skin;                                // AN4 : 曲げる物 (有効なら、その物専用の頂点の場所で描く)
+			uint32_t          View = 0;                            // AN5 : 0 = シーン / 1〜 = プレビューの窓 (シーンには描かない)
 		};
 
 		// テクスチャのファイルが無ければ、拡張子を変えて探す (見つからなければそのまま返す)
@@ -281,6 +292,7 @@ namespace Renderer
 		uint32_t                       _aliveRenderObjects = 0;
 
 		std::vector<RHI::DrawItem>     _drawItems;              // 毎フレーム RHI に渡す描画リスト
+		std::vector<RHI::DrawItem>     _previewItems[RHI::MAX_PREVIEW_VIEWS];   // AN5 : 窓ごとの描画リスト (0 番は使わない)
 		bool                           _drawListDirty = false;  // 描画オブジェクトが増減した
 
 		CameraDesc                     _camera    = {};

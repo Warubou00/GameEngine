@@ -141,6 +141,15 @@ public sealed unsafe class RenderCommandBuffer
         command.Params[0] = (float)Time.TotalTime;   // シェーダーの SurfaceInput.Time (エディターの編集中も進む。パーティクルと同じ)
     }
 
+    // ---------- プレビューの窓 (AN5) ----------
+
+    /// <summary>視点 view (1〜) の物と線を今の描画先へ描く (色 RGBA8 1 枚 + 深度 Depth32 を SetRenderTarget で付けておく)</summary>
+    public void DrawPreview(int view)
+    {
+        ref var command = ref Add(8);
+        command.Arg0 = (uint)view;
+    }
+
     // 1 フレーム分を C++ へ渡して描く
     internal void Submit()
     {
