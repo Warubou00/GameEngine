@@ -50,3 +50,8 @@ CSharp_console/Project/Library/
 CSharp_console/Project/Build/
 # 雲の参考資料 (CEDEC の発表資料。大きく、他の方の物なので入れない。SH1 の時に決めた)
 CSharp_console/GameEngine.Editor/assets/*.pptx
+
+# ==============================================================
+# Package (Tools/make_package.py が作る。外部の PC へ持っていく、ビルドした物と .NET の集まり。git には入れない)
+# ==============================================================
+/Package/

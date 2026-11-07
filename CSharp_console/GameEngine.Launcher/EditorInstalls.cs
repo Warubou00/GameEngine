@@ -10,11 +10,14 @@ namespace GameEngine.Launcher;
 //     Installed   : 入れた版のフォルダ (InstallRoot/<版>_<コミット>/Editor/GameEngine.Editor.exe)。ランチャーの「Install Current Build」で作る
 //     Development : リポジトリのビルド (CSharp_console/GameEngine.Editor/bin/x64/Release|Debug/...)。ビルドし直すと中身が変わる
 //     Added       : 手で足した GameEngine.Editor.exe (どこにあってもよい)
+//     Package     : Package のエディター (<Package>/Editor/<エンジン名>_v<版>/Editor/GameEngine.Editor.exe。Package 化で足した)
+//   Package : ランチャーが <Package>/Luncher にあり、exe の隣に同梱の dotnet がある時。リポジトリは探さない
+//             初めての起動で <Package>/Project の下のフォルダをプロジェクトの一覧に入れる
 //   版 : GameEngine.Editor.dll のファイルの版 (ProductVersion = "0.9.0+コミット")。エディターの csproj の <Version>
 //   入れた版のフォルダ : Editor (エディターの出力を全部) / Shader (エディターは作業フォルダの ../Shader を読む) /
 //                        Player (ビルド済み。リポジトリの外でもゲームを書き出せる)
 // ==========================================================================
-internal enum InstallKind { Installed, Development, Added }
+internal enum InstallKind { Installed, Development, Added, Package }
 
 internal sealed record EditorInstall(string Exe, string Version, string Commit, InstallKind Kind, string Label)
 {
@@ -67,15 +70,23 @@ internal sealed class EditorInstalls
     public string InstallRoot => Path.Combine(DataFolder, "Editors");
     public string SettingsFile => Path.Combine(DataFolder, "launcher.json");
     public string? RepoRoot   { get; }   // ランチャーのあるリポジトリ (開発版を探す)
+
+    /// <summary>Package のルート (ランチャーの exe の隣に同梱の dotnet がある時、exe のフォルダの 1 つ上。それ以外は null)</summary>
+    public static string? PackageRoot { get; } =
+        Directory.Exists(Path.Combine(AppContext.BaseDirectory, "dotnet", "shared")) ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")) : null;
     public LauncherSettings Settings { get; private set; }
     public List<EditorInstall> All { get; private set; } = new();
 
     public EditorInstalls(string dataFolder)
     {
         DataFolder = Path.GetFullPath(dataFolder);
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        for (var dir = PackageRoot != null ? null : new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "GameEngine.sln"))) { RepoRoot = dir.FullName; break; }
         Settings = LauncherSettings.Load(SettingsFile);
+        // 初めて (Package) : Package の Project の下のフォルダを一覧に入れる
+        if (!File.Exists(SettingsFile) && PackageRoot != null && Directory.Exists(Path.Combine(PackageRoot, "Project")))
+            foreach (var project in Directory.EnumerateDirectories(Path.Combine(PackageRoot, "Project")).Order(StringComparer.OrdinalIgnoreCase))
+                Settings.Projects.Add(new LauncherSettings.ProjectEntry { Path = project });
         // 初めて : リポジトリの見本のプロジェクトを一覧に入れる
         if (!File.Exists(SettingsFile) && RepoRoot != null && Directory.Exists(Path.Combine(RepoRoot, "CSharp_console", "Project")))
             Settings.Projects.Add(new LauncherSettings.ProjectEntry { Path = Path.Combine(RepoRoot, "CSharp_console", "Project") });
@@ -92,6 +103,11 @@ internal sealed class EditorInstalls
         {
             foreach (var dir in Directory.EnumerateDirectories(InstallRoot))
                 if (EditorInstall.Read(Path.Combine(dir, "Editor", "GameEngine.Editor.exe"), InstallKind.Installed, "Installed") is { } install) found.Add(install);
+        }
+        if (PackageRoot != null && Directory.Exists(Path.Combine(PackageRoot, "Editor")))
+        {
+            foreach (var dir in Directory.EnumerateDirectories(Path.Combine(PackageRoot, "Editor")))
+                if (EditorInstall.Read(Path.Combine(dir, "Editor", "GameEngine.Editor.exe"), InstallKind.Package, $"Package ({Path.GetFileName(dir)})") is { } install) found.Add(install);
         }
         if (RepoRoot != null)
         {

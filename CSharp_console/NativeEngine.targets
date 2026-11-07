@@ -21,6 +21,13 @@
     -->
     <DxcRedistDir>$(MSBuildProgramFiles32)\Windows Kits\10\bin\10.0.26100.0\x64\</DxcRedistDir>
     <DxcRedistDir Condition="!Exists('$(DxcRedistDir)dxcompiler.dll')">$(MSBuildProgramFiles32)\Windows Kits\10\Redist\D3D\x64\</DxcRedistDir>
+    <!--
+      OpenMP (vcomp140.dll)。RHI.dll が使う (DirectXTex の並列処理)。Windows 本体には入っていないので、
+      Visual Studio の再頒布用のフォルダ (VC\Redist\MSVC\<版>\x64\Microsoft.VC143.OpenMP) から写す (Package 化で足した)
+      以前は写していなかったので、VC++ の再頒布パッケージを入れていない PC では RHI.dll が読めなかった
+      C の実行時ライブラリは C++ 側を Release で静的 (/MT) にしたので要らない
+    -->
+    <VcRedistSearchRoot>$(ProgramW6432)\Microsoft Visual Studio\</VcRedistSearchRoot>
   </PropertyGroup>
 
   <Target Name="CopyNativeEngineFiles" AfterTargets="Build">
@@ -33,6 +40,8 @@
       <NativeEngineFile Include="$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.dll;$(EngineRootDir)Audio\x64\$(NativeConfiguration)\Audio.pdb" />
       <!-- 衝突判定。無ければ衝突判定だけ無効になる -->
       <NativeEngineFile Include="$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.dll;$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.pdb" Condition="Exists('$(EngineRootDir)Physics\x64\$(NativeConfiguration)\Physics.dll')" />
+      <!-- OpenMP : 見つかった版の内、最後の物 (同じ名前なので上書き) -->
+      <VcOpenMpFile Include="$(VcRedistSearchRoot)*\*\VC\Redist\MSVC\*\x64\Microsoft.VC143.OpenMP\vcomp140.dll" />
       <!-- DXC : dxcompiler.dll (コンパイラ) と dxil.dll (シェーダーの署名)。無い時は RHI が FXC に戻す -->
       <NativeEngineFile Include="$(DxcRedistDir)dxcompiler.dll;$(DxcRedistDir)dxil.dll" />
       <!-- シェーダー : RHI は実行時に "../Shader/" から読むので、出力フォルダの 1 つ上に置く -->
@@ -47,6 +56,8 @@
              Text="Audio.dll ($(NativeConfiguration)) が見つかりません。音を鳴らすには Audio プロジェクト (x64) をビルドしてください。" />
 
     <Copy SourceFiles="@(NativeEngineFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+    <Copy SourceFiles="@(VcOpenMpFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="'@(VcOpenMpFile)' != ''" />
+    <Warning Condition="'@(VcOpenMpFile)' == ''" Text="vcomp140.dll (OpenMP) が見つかりません。VC++ の再頒布パッケージの無い PC では RHI.dll が読めません。" />
     <Copy SourceFiles="@(EngineShaderFile)" DestinationFolder="$(OutDir)..\Shader\" SkipUnchangedFiles="true" />
 
     <Message Importance="high" Text="[Engine] C++ ($(NativeConfiguration)) の DLL とシェーダーを $(OutDir) にコピーしました" />

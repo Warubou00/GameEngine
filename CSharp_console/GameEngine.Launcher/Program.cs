@@ -5,6 +5,7 @@ namespace GameEngine.Launcher;
 // ==========================================================================
 // ランチャー (ED9) : GameEngine.Launcher.exe [--data <folder>] [--test]
 //   --data : 設定 (launcher.json) と入れた版 (Editors) の置き場。既定は %LOCALAPPDATA%\GameEngine
+//            Package のランチャー (exe の隣に同梱の dotnet がある) は exe の隣の Data (持ち運べるように。Package 化で足した)
 //   --test : 窓を出さずに確認して終わる (LauncherTest。結果は標準出力と終了コード。--keep で入れた版を残す)
 //   --tab installs : 最初に Installs の頁を出す
 // ==========================================================================
@@ -15,7 +16,8 @@ internal static class Program
     {
         var options = new Dictionary<string, string>();
         for (int i = 0; i + 1 < args.Length; i++) if (args[i].StartsWith("--") && !args[i + 1].StartsWith("--")) options[args[i]] = args[++i];
-        var data = options.GetValueOrDefault("--data", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GameEngine"));
+        var data = options.GetValueOrDefault("--data", EditorInstalls.PackageRoot != null ? Path.Combine(AppContext.BaseDirectory, "Data")
+                                                       : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GameEngine"));
 
         if (args.Contains("--test"))
         {

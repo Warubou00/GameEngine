@@ -24,7 +24,8 @@ internal sealed class LauncherForm : Form
     public LauncherForm(EditorInstalls installs)
     {
         _installs = installs;
-        Text = $"GameEngine Launcher {Application.ProductVersion.Split('+')[0]}";
+        Text = $"{Application.ProductName} Launcher {Application.ProductVersion.Split('+')[0]}";   // 名前は ../Engine.props (以前は "GameEngine Launcher")
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception ex) when (ex is ArgumentException or IOException) { }   // exe のアイコンを窓にも
         ClientSize = new Size(940, 520);
         MinimumSize = new Size(700, 380);
         StartPosition = FormStartPosition.CenterScreen;
@@ -169,7 +170,9 @@ internal sealed class LauncherForm : Form
         var note = new Label
         {
             Dock = DockStyle.Top, Height = 40, Padding = new Padding(6, 4, 6, 0),
-            Text = "Installed : copies kept by the launcher (" + _installs.InstallRoot + ")\nDevelopment : the builds in the repository (they change when you rebuild)",
+            Text = EditorInstalls.PackageRoot != null
+                ? "Package : the editors in " + Path.Combine(EditorInstalls.PackageRoot, "Editor") + "\nInstalled : copies kept by the launcher (" + _installs.InstallRoot + ")"
+                : "Installed : copies kept by the launcher (" + _installs.InstallRoot + ")\nDevelopment : the builds in the repository (they change when you rebuild)",
         };
         _editors.DoubleClick += (_, _) => launchSelectedEditor();
         page.Controls.Add(_editors);
@@ -242,6 +245,7 @@ internal sealed class LauncherForm : Form
     {
         if (selectedEditor() is not { } install) return;
         if (install.Kind == InstallKind.Development) { status("Development builds are not removed (they are the repository's build output)"); return; }
+        if (install.Kind == InstallKind.Package) { status("Package editors are not removed here (delete the folder in the package)"); return; }
         var message = install.Kind == InstallKind.Installed ? $"Delete the installed editor {install.Display}?\n{Path.GetDirectoryName(install.Folder)}" : $"Remove {install.Display} from the list? (files are kept)";
         if (MessageBox.Show(this, message, "Remove editor", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         try { _installs.Remove(install); refreshAll(); status($"Removed {install.Display}"); }

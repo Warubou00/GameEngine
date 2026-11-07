@@ -27,10 +27,14 @@
     <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
     <!--
       エディターの版 (ED9)。ランチャーが GameEngine.Editor.dll の版を読んで一覧に出す / プロジェクトの ProjectVersion.txt に書く
-      上げる時はここを変える (git のコミットは .NET の SDK が InformationalVersion の "+" の後ろに付ける)
+      版は ../Engine.props の EngineVersion (以前はここの <Version> 0.9.0)。git のコミットは .NET の SDK が InformationalVersion の "+" の後ろに付ける
+      Package : 同梱の .NET (SDK) は exe の 1 つ上の dotnet (<エンジン名>_v<版>/dotnet)
     -->
-    <Version>0.9.0</Version>
+    <AppHostRelativeDotNet>..\dotnet</AppHostRelativeDotNet>
   </PropertyGroup>
+
+  <!-- エンジンの名前 / 版 / アイコン (Package 化で足した) -->
+  <Import Project="..\Engine.props" />
 
   <!--
     スクリプトリファレンス (ED9) : エンジンとエディターのソースを exe に埋め込む (コメントを型の説明として読む)

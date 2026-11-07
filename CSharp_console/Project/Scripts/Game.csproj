@@ -25,9 +25,23 @@
     <None Remove="Editor\**" />
   </ItemGroup>
 
-  <!-- エンジンは参照するだけ (写さない : エディター / 見本が読み込んだ物を使う) -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\GameEngine.Runtime\GameEngine.Runtime.csproj" Private="false" />
+  <!--
+    エンジンは参照するだけ (写さない : エディター / 見本が読み込んだ物を使う)
+      リポジトリの中 : GameEngine.Runtime.csproj を参照する
+      リポジトリの外 (Package のプロジェクト) : エディターが渡す EngineAssemblyDir (エディターの exe のフォルダ) の GameEngine.Runtime.dll を参照する
+      (以前はいつも ..\..\GameEngine.Runtime を参照していたので、リポジトリの外ではビルドできなかった)
+  -->
+  <PropertyGroup>
+    <EngineRuntimeProject>$(MSBuildThisFileDirectory)..\..\GameEngine.Runtime\GameEngine.Runtime.csproj</EngineRuntimeProject>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(EngineRuntimeProject)')">
+    <ProjectReference Include="$(EngineRuntimeProject)" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(EngineRuntimeProject)')">
+    <Reference Include="GameEngine.Runtime">
+      <HintPath>$(EngineAssemblyDir)GameEngine.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

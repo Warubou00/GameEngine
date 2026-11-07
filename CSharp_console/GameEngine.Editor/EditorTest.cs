@@ -1647,9 +1647,16 @@ internal sealed class EditorTest
         check(build.Ok && File.Exists(build.ExePath), $"build the game ({(build.Ok ? $"{build.FileCount} files, {build.Bytes / 1024 / 1024} MB, {build.TotalMs / 1000:F1} s" : build.Error)})");
         if (!build.Ok) yield break;
         var builtFiles = Directory.EnumerateFiles(buildFolder, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(buildFolder, f).Replace('\\', '/')).ToList();
-        check(!builtFiles.Any(f => f.Contains("Editor", StringComparison.OrdinalIgnoreCase) || f.Contains("ImGui", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pdb")) &&
+        // dotnet (同梱の .NET) は除いて調べる (.NET の WinForms に System.Windows.Forms.Design.Editors.dll があるため。Package 化で足した)
+        check(!builtFiles.Where(f => !f.StartsWith("dotnet/")).Any(f => f.Contains("Editor", StringComparison.OrdinalIgnoreCase) || f.Contains("ImGui", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pdb")) &&
               builtFiles.Contains("Game.dll") && builtFiles.Contains("RHI.dll") && builtFiles.Contains("Shader/hlslTemplate.shader") && builtFiles.Contains("Data/player.json"),
               "the build has the player, engine, game code and shaders, and no editor files");
+        // .NET を入れていない PC でも動くように、exe の隣の dotnet に .NET (hostfxr / coreclr / WinForms) と OpenMP (vcomp140.dll) が入る
+        check(builtFiles.Any(f => f.StartsWith("dotnet/host/fxr/") && f.EndsWith("/hostfxr.dll")) &&
+              builtFiles.Any(f => f.StartsWith("dotnet/shared/Microsoft.NETCore.App/") && f.EndsWith("/coreclr.dll")) &&
+              builtFiles.Any(f => f.StartsWith("dotnet/shared/Microsoft.WindowsDesktop.App/") && f.EndsWith("/System.Windows.Forms.dll")) &&
+              builtFiles.Contains("vcomp140.dll"),
+              $"the build has the .NET runtime next to the exe ({builtFiles.Count(f => f.StartsWith("dotnet/"))} files)");
         var builtAssets = builtFiles.Where(f => f.StartsWith("Data/Assets/") && !f.EndsWith(".meta") && !f.EndsWith(".dds")).ToList();
         check(builtAssets.Count == included.Count && builtAssets.All(f => builtFiles.Contains(f + ".meta")), $"only used assets, each with its .meta ({builtAssets.Count} of {database.Entries.Count(e => e.Kind != AssetKind.Folder)})");
 
@@ -1672,6 +1679,9 @@ internal sealed class EditorTest
             check(player.ExitCode == 0 && playerDump.Length > 0 && playerLog.Contains($"{_app.Scripts.SystemCount} systems"),
                   $"the built game runs {Path.GetFileName(compareScene)} ({System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalSeconds:F1} s, exit {player.ExitCode})");
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
+            if (compareScene == buildSettings.Scenes[0])   // 書き出したゲームは exe の隣の dotnet の .NET で動く (PC の .NET ではない。Package 化で足した)
+                check(playerLog.Contains($".NET {Environment.Version} : {Path.Combine(buildFolder, "dotnet")}", StringComparison.OrdinalIgnoreCase),
+                      "the built game runs on the .NET next to the exe");
             if (compareScene == customScene)   // SH2 : 書き出したゲームも自分のシェーダーをコンパイルできる (DXC も入っている)
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the custom shaders");
             if (compareScene == animScene)     // AN3 : 書き出したゲームも骨を同じに動かす (下の比べるのは再生した後の全部の Transform)

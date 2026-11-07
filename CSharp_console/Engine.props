@@ -1,0 +1,42 @@
+<Project>
+
+  <!--
+    ==========================================================================
+    エンジンの名前 / 版 / アイコン (ランチャー / エディター / Player / Runtime の共通。Package 化で足した)
+      - 名前 (Product) は exe のファイルの説明と、窓のタイトル (Runtime の EngineInfo.Name が読む) に使う
+      - exe / DLL のファイル名 (GameEngine.Editor.exe など) はコードが参照しているので変えない
+      - 版を上げる時はここの EngineVersion を変える (以前はエディター / ランチャーの csproj の <Version> にそれぞれ書いていた)
+        Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <EngineName>Tsumugi Engine</EngineName>
+    <EngineVersion>1.0.0.0</EngineVersion>
+    <Product>$(EngineName)</Product>
+    <Version>$(EngineVersion)</Version>
+    <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    .NET を入れていない PC で動かす (Package)
+      exe (apphost) は、まず exe から見た AppHostRelativeDotNet のフォルダの .NET を使い、無ければ PC に入っている .NET を使う
+      AppHostRelativeDotNet は exe ごとに決める (エディター : ../dotnet (同梱の SDK) / ランチャー と Player : dotnet)
+      開発の時 (リポジトリのビルド) は同梱の .NET が無いので、今まで通り PC の .NET で動く
+  -->
+  <PropertyGroup Condition="'$(OutputType)' != 'Library'">
+    <AppHostDotNetSearch>AppRelative;Global</AppHostDotNetSearch>
+  </PropertyGroup>
+
+  <!--
+    .NET の SDK は AppHostDotNetSearch を publish の exe にしか付けない (build の exe は PC の .NET だけを探す)。
+    Package / ゲームの書き出しは build の出力を使うので、publish 用の exe を作って build の exe と入れ替える
+    (確かめた時に分かった : 入れ替える前は、同梱の dotnet があっても C:\Program Files\dotnet の .NET で動いていた)
+  -->
+  <Target Name="UseAppRelativeAppHost" AfterTargets="Build"
+          DependsOnTargets="_GetAppHostPaths;_GetAppHostCreationConfiguration;_CreateAppHostForPublish"
+          Condition="'$(OutputType)' != 'Library' and '$(UseAppHost)' != 'false'">
+    <Copy SourceFiles="$(AppHostForPublishIntermediatePath)" DestinationFiles="$(OutDir)$(AssemblyName)$(_NativeExecutableExtension)"
+          SkipUnchangedFiles="true" Condition="Exists('$(AppHostForPublishIntermediatePath)')" />
+  </Target>
+
+</Project>

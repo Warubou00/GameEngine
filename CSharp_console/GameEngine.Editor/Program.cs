@@ -10,6 +10,8 @@
 //     既定は Assets/Scenes/showcase.scene.json を開く (無ければ空のシーン)
 //     --resave-scenes : Assets の全部のシーンを読んで今の形式 (アセットの Id 付き) で保存し直して終わる
 //   作業フォルダは見本の出力フォルダ (シェーダー ../Shader を読むため)
+//   Package のエディター (exe の 1 つ上に同梱の dotnet がある) : リポジトリを探さない。作業フォルダは exe のフォルダ (シェーダーは <版>/Shader)
+//     プロジェクトの既定は Package の Project/SampleProject (<Package>/Editor/<版>/Editor/exe から辿る)
 // ==========================================================================
 internal static class Program
 {
@@ -21,7 +23,8 @@ internal static class Program
 
         // リポジトリのルート (GameEngine.sln のあるフォルダ) を探す
         var exeDirectory = AppContext.BaseDirectory;
-        var root = new DirectoryInfo(exeDirectory);
+        // Package のエディターはリポジトリの中に置かれていても、リポジトリの物 (見本の出力 / Player のソース) を使わない (Package 化で足した)
+        var root = DotnetTool.IsPackaged ? null : new DirectoryInfo(exeDirectory);
         while (root != null && !File.Exists(Path.Combine(root.FullName, "GameEngine.sln"))) root = root.Parent;
         var configuration = exeDirectory.Contains($"{Path.DirectorySeparatorChar}Debug{Path.DirectorySeparatorChar}") ? "Debug" : "Release";
         // シェーダー (../Shader) は見本の出力フォルダから読む
@@ -36,15 +39,18 @@ internal static class Program
         Console.SetOut(log);
 
         // プロジェクト (ED5)
-        var projectRoot = options.GetValueOrDefault("--project", root != null ? Path.Combine(root.FullName, "CSharp_console", "Project") : Path.Combine(exeDirectory, "Project"));
+        var packageSample = Path.GetFullPath(Path.Combine(exeDirectory, "..", "..", "..", "Project", "SampleProject"));   // Package の見本
+        var projectRoot = options.GetValueOrDefault("--project",
+            root != null ? Path.Combine(root.FullName, "CSharp_console", "Project") :
+            DotnetTool.IsPackaged && Directory.Exists(packageSample) ? packageSample : Path.Combine(exeDirectory, "Project"));
         var database = new AssetDatabase(projectRoot);
         var created = database.Refresh();
         EditorVersion.WriteProjectVersion(database.ProjectRoot);   // どの版のエディターで開いたか (ED9。ランチャーが出す)
-        Console.WriteLine($"[Editor] GameEngine Editor {EditorVersion.Display}");
+        Console.WriteLine($"[Editor] {EngineInfo.Name} Editor {EditorVersion.Display}{(DotnetTool.IsPackaged ? $" (package, .NET SDK : {DotnetTool.Bundled})" : "")}");
         Console.WriteLine($"[Assets] {database.AssetsRoot} : {database.Entries.Count()} assets{(created > 0 ? $" ({created} new .meta)" : "")}");
         var scenes = Path.Combine(database.AssetsRoot, "Scenes");
 
-        using var engine = new Engine(new EngineSettings { Title = "GameEngine Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory });
+        using var engine = new Engine(new EngineSettings { Title = $"{EngineInfo.Name} Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory });
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
         engine.Assets.Database = database;
@@ -79,5 +85,6 @@ internal static class Program
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
 
         engine.Run();
+        DotnetTool.ShutdownBuildServers();   // Package : 同梱の SDK のビルドのサーバーを残さない (フォルダを掴んだままになるため)
     }
 }
