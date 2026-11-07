@@ -286,6 +286,8 @@ namespace RHI
 		DrawParticles    = 6,   // GPU パーティクルを今の描画先へ描く (深度はシェーダーがシーンの深度を読んで比べる。描画先に深度は付けない)
 		DrawCustom       = 7,   // 自分のシェーダーのマテリアルの物を今の描画先へ描く (SH2)。Arg1 = RenderQueue / Params[0] = 時間 (秒)
 		                        //   Arg0 bit0 = シーンの深度を読む物だけを描く (SH3。深度は描画先から外し、テクスチャとして渡す)
+		DrawPreview      = 8,   // プレビューの窓 (AN5) : Arg0 = 視点の番号 (1〜) の物と線を今の描画先へ描く (色 RGBA8 1 枚 + 深度 Depth32)
+		                        //   描いた色の描画先は、この後 UI が読めるようにする (UI の Texture に GetRenderTargetTexture の番号)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
@@ -384,6 +386,30 @@ namespace RHI
 
 	// シーンを描いたテクスチャ (SetRenderSize で大きさを決めた時。エディターのシーンビュー)
 	static constexpr uint32_t UI_TEXTURE_VIEW = 0xFFFFFFF0u;
+
+	// ==============================================================
+	// プレビューの窓 (AN5)。描画オブジェクトに視点の番号 (0 = シーン / 1〜 = プレビュー) を付け、
+	// シーンの描画には 0 の物だけ、DrawPreview には その番号の物だけを描く
+	// ==============================================================
+	static constexpr uint32_t MAX_PREVIEW_VIEWS = 16;   // 視点の番号は 1 〜 MAX_PREVIEW_VIEWS - 1
+
+	// preview.shader の cbuffer PreviewFrame と同じ並び (112 byte)
+	struct PreviewFrame
+	{
+		float    ViewProjection[16];          // 行ベクトル (v × M) の行列 (C# の Matrix4x4 のまま。RHI が転置する)
+		float    LightDirection[3] = { -0.4f, -0.8f, 0.45f };   // 光が進む向き
+		uint32_t Flags             = 0;       // PreviewFlags
+		float    CameraPosition[3] = {};
+		float    Padding0          = 0.0f;
+		float    WireColor[4]      = { 0.1f, 0.1f, 0.1f, 1.0f };
+	};
+	static_assert(sizeof(PreviewFrame) == 112, "PreviewFrame must be 112 bytes (same as C# / preview.shader)");
+
+	enum PreviewFlags : uint32_t
+	{
+		PREVIEW_SHADED    = 1u << 0,   // 面を描く
+		PREVIEW_WIREFRAME = 1u << 1,   // 線 (ワイヤーフレーム) を重ねる
+	};
 
 	struct ShadowSettings
 	{

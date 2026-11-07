@@ -716,6 +716,43 @@ namespace Renderer
 		}
 	}
 
+	// ==============================================================
+	// プレビューの窓 (AN5)
+	// ==============================================================
+
+	void SceneRenderer::SetObjectsView(const uint32_t* handles, uint32_t count, uint32_t view)
+	{
+		if (!handles || !IsInitialized() || view >= RHI::MAX_PREVIEW_VIEWS) return;
+		for (uint32_t n = 0; n < count; ++n)
+		{
+			const uint32_t handle = handles[n];
+			if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) continue;
+			if (_renderObjects[handle].View == view) continue;
+			_renderObjects[handle].View = view;
+			_drawListDirty = true;
+		}
+	}
+
+	void SceneRenderer::SetPreviewFrame(uint32_t view, const RHI::PreviewFrame& frame, const RHI::DebugLineVertex* lines, uint32_t lineVertexCount,
+	                                    uint32_t depthLineVertexCount)
+	{
+		if (_rhi) _rhi->SetPreviewFrame(view, frame, lines, lineVertexCount, depthLineVertexCount);
+	}
+
+	uint32_t SceneRenderer::GetDrawItemCount(uint32_t view)
+	{
+		if (_drawListDirty && IsInitialized()) rebuildDrawList();
+		if (view == 0) return static_cast<uint32_t>(_drawItems.size());
+		return view < RHI::MAX_PREVIEW_VIEWS ? static_cast<uint32_t>(_previewItems[view].size()) : 0;
+	}
+
+	uint32_t SceneRenderer::GetRenderTargetTexture(uint32_t target)const
+	{
+		RHI::RenderTargetHandle handle;
+		handle.Index = target;
+		return _rhi ? _rhi->GetRenderTargetTexture(handle) : 0xFFFFFFFFu;
+	}
+
 	void SceneRenderer::SetSkinPoses(const uint32_t* handles, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres)
 	{
 		if (!handles || !matrices || !boneCounts || !IsInitialized()) return;
@@ -773,9 +810,13 @@ namespace Renderer
 		// 描画オブジェクトの番号の順に並べる (作った順に近い順 = インスタンシングと GPU のまとまりが良い)
 		_drawItems.clear();
 		_drawItems.reserve(_aliveRenderObjects * 2);
+		// AN5 : プレビューの窓の物は窓ごとのリストへ (シーンには描かない)。以前は全部シーンのリストだった
+		bool previewUsed[RHI::MAX_PREVIEW_VIEWS] = {};
+		for (uint32_t v = 1; v < RHI::MAX_PREVIEW_VIEWS; ++v) { previewUsed[v] = !_previewItems[v].empty(); _previewItems[v].clear(); }
 		for (const auto& object : _renderObjects)
 		{
 			if (object.Model == INVALID_HANDLE) continue;
+			auto& list = object.View == 0 ? _drawItems : _previewItems[object.View];
 			// AN4 : 曲げる物はその物専用の頂点の場所 (インデックスは同じ)
 			const RHI::VertexRange skinned = object.Skin.IsValid() ? _rhi->GetSkinOutput(object.Skin) : RHI::VertexRange();
 			for (RHI::DrawItem item : _models[object.Model].SubMeshes)
@@ -783,8 +824,13 @@ namespace Renderer
 				item.Object = object.Object;
 				if (skinned.IsValid()) item.BaseVertex = skinned.BaseVertex;
 				if (object.MaterialOverride != INVALID_HANDLE) item.Material.Index = object.MaterialOverride;   // ED5 : マテリアルのアセット
-				_drawItems.push_back(item);
+				list.push_back(item);
 			}
+		}
+		for (uint32_t v = 1; v < RHI::MAX_PREVIEW_VIEWS; ++v)
+		{
+			if (previewUsed[v] || !_previewItems[v].empty())
+				_rhi->SetPreviewItems(v, _previewItems[v].data(), static_cast<uint32_t>(_previewItems[v].size()));
 		}
 		_drawListDirty = false;
 		_rhi->ReportProfilerValue("Render objects", static_cast<double>(_aliveRenderObjects));

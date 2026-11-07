@@ -694,6 +694,33 @@ namespace RHI
             bool     _skinTimed[FRAME_COUNT] = {};   // そのフレームで GPU スキニングの時間を計ったか
             float    _skinGpuMs        = 0.0f;
         public:
+            // ---------- プレビューの窓 (AN5) ----------
+            void     SetPreviewItems(uint32_t view, const RHI::DrawItem* items, uint32_t count);
+            void     SetPreviewFrame(uint32_t view, const RHI::PreviewFrame& frame, const RHI::DebugLineVertex* lines, uint32_t lineVertexCount,
+                                     uint32_t depthLineVertexCount);
+            uint32_t GetRenderTargetTexture(uint32_t target)const;   // UI のテクスチャの番号 (無ければ 0xFFFFFFFF)
+            uint32_t GetPreviewDrawCount()const { return _previewDrawCount; }   // 前のフレームでプレビューに描いた数 (確認用)
+        private:
+            struct PreviewView
+            {
+                std::vector<RHI::DrawItem>        Items;
+                RHI::PreviewFrame                 Frame;
+                std::vector<RHI::DebugLineVertex> Lines;
+                uint32_t                          DepthLines = 0;   // Lines の先頭から何頂点が深度で隠れる線か
+                bool                              HasFrame   = false;
+            };
+            PreviewView _previews[RHI::MAX_PREVIEW_VIEWS];
+            // フレームごとの UPLOAD (窓ごとの定数 + 線)。足りなくなったら大きく作り直し、古い物はそのフレームの GPU が終わるまで残す
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>              _previewUpload[FRAME_COUNT];
+            UINT64                                                       _previewUploadSize[FRAME_COUNT] = {};
+            UINT64                                                       _previewUploadUsed = 0;
+            std::vector<std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _previewRetired[FRAME_COUNT];
+            std::vector<uint32_t>      _uiReadTargets;             // このフレームで描いて、UI が読む描画先 (最後に PIXEL_SHADER_RESOURCE へ)
+            D3D12_GPU_VIRTUAL_ADDRESS  _frameConstantsAddress = 0; // カメラのフレームの定数 (プレビューの後に b0 を戻す)
+            D3D12_GPU_VIRTUAL_ADDRESS  _materialAddress       = 0; // このフレームのマテリアル
+            uint32_t                   _previewDrawCount      = 0;
+            bool                       _previewWarned         = false;
+            void drawPreview(Buffer* buffer, uint32_t view);
         private:
             void finishParticleTimestamps();            // RenderEnd : タイムスタンプの欠けを埋める
 

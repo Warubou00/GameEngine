@@ -449,7 +449,8 @@ namespace RHI
 
 			// Global定数バッファ (b1) : このフレーム専用の領域に View / Projection を書いてからセットする
 			// (GPU が前のフレームで読んでいる領域を CPU が上書きしないよう、フレームごとに領域を分けている)
-			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, buffer->WriteFrameConstants(_frameIndex));
+			_frameConstantsAddress = buffer->WriteFrameConstants(_frameIndex);   // AN5 : プレビューの後に戻す
+			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
 
 			// バインドレス・テクスチャ配列 (t1)
 			// テーブルの先頭 = テクスチャの0番。シェーダー側の g_TextureID はここからの相対番号になる
@@ -567,7 +568,8 @@ namespace RHI
 			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_OBJECT_DATA_SRV, _scene.ObjectData);
 
 			// マテリアル / ライト (増えた / 変わった時だけ VRAM へ写す)
-			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_MATERIAL_SRV, buffer->WriteMaterials(_frameIndex, cmdList));
+			_materialAddress = buffer->WriteMaterials(_frameIndex, cmdList);   // AN5 : プレビューでも使う
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_MATERIAL_SRV, _materialAddress);
 			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_LIGHT_SRV,    buffer->WriteLights(_frameIndex, cmdList));
 
 			// 描画ごとのデータ (DrawData) と引数を用意する (描画リストが同じなら前回のものを使い回す)
@@ -682,6 +684,11 @@ namespace RHI
 			_culledState    = D3D12_RESOURCE_STATE_COMMON;       // 前のフレームの完了で COMMON に戻っている
 			_sceneDepthReadLastFrame = _sceneDepthReadThisFrame;
 			_sceneDepthReadThisFrame = false;
+			// AN5 : プレビューの UPLOAD はこのフレームの領域の先頭から (前にこのフレームの番号で使った GPU の処理は RenderStart で待ってある)
+			_previewUploadUsed = 0;
+			_previewRetired[_frameIndex].clear();
+			_previewDrawCount = 0;
+			_uiReadTargets.clear();
 
 			// AN4 : 確認用の読み戻し (頼まれた時だけ)。前のフレームまでに曲げた頂点を写す。メガ頂点バッファは COMMON から COPY_SOURCE に暗黙で上がる
 			D3D12_RESOURCE_STATES vertexState = D3D12_RESOURCE_STATE_COMMON;
@@ -750,6 +757,10 @@ namespace RHI
 				case RHI::RenderCommandType::DrawCustom:
 					drawCustom(buffer, command.Arg1, command.Params[0], (command.Arg0 & 1u) != 0);   // SH2 : Arg1 = 列 / Params[0] = 時間 / Arg0 bit0 = 深度を読む物 (SH3)
 					break;
+
+				case RHI::RenderCommandType::DrawPreview:
+					drawPreview(buffer, command.Arg0);   // AN5 : Arg0 = 視点の番号
+					break;
 				}
 			}
 
@@ -770,6 +781,16 @@ namespace RHI
 				cmdList->RSSetScissorRects(1, &scissorRect);
 				cmdList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
 			};
+			// AN5 : プレビューを描いた描画先は UI が読む (PIXEL_SHADER_RESOURCE へ)
+			for (const uint32_t index : _uiReadTargets)
+			{
+				if (index >= _renderTargets.size() || !_renderTargets[index].Alive) continue;
+				RenderTarget& target = _renderTargets[index];
+				if (target.State == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) continue;
+				const auto toRead = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+				cmdList->ResourceBarrier(1, &toRead);
+				target.State = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			}
 			const auto backBufferRtv = _rtvHeap->GetCpuHandle(_swapChain->GetCurrentBackBufferIndex());
 			_boundColorCount = 0;
 			_boundDepth      = RHI::RenderTargetHandle::INVALID;
@@ -952,6 +973,142 @@ namespace RHI
 			}
 			const D3D12_RECT full = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 			cmdList->RSSetScissorRects(1, &full);
+		}
+
+		// ==============================================================
+		// プレビューの窓 (AN5)
+		//   描画オブジェクトのうち視点の番号が view の物 (SetPreviewItems) と線を、今の描画先 (RGBA8 1 枚 + 深度) へ描く
+		//   シーンと同じルートシグネチャ。b0 (フレームの定数) だけ窓のカメラ (PreviewFrame) に差し替え、描き終えたら戻す
+		//   物は少ない (エディターで見る 1 体) ので、カリングもまとめもせず 1 個ずつ描く
+		// ==============================================================
+
+		void CommandContext::SetPreviewItems(uint32_t view, const RHI::DrawItem* items, uint32_t count)
+		{
+			if (view == 0 || view >= RHI::MAX_PREVIEW_VIEWS) return;
+			_previews[view].Items.assign(items, items + (items ? count : 0));
+		}
+
+		void CommandContext::SetPreviewFrame(uint32_t view, const RHI::PreviewFrame& frame, const RHI::DebugLineVertex* lines, uint32_t lineVertexCount,
+		                                     uint32_t depthLineVertexCount)
+		{
+			if (view == 0 || view >= RHI::MAX_PREVIEW_VIEWS) return;
+			PreviewView& preview = _previews[view];
+			preview.Frame    = frame;
+			preview.HasFrame = true;
+			lineVertexCount = (std::min)(lines ? lineVertexCount : 0u, RHI::MAX_DEBUG_LINE_VERTICES) & ~1u;
+			preview.Lines.assign(lines, lines + lineVertexCount);
+			preview.DepthLines = (std::min)(depthLineVertexCount, lineVertexCount) & ~1u;
+		}
+
+		uint32_t CommandContext::GetRenderTargetTexture(uint32_t target)const
+		{
+			if (target >= _renderTargets.size()) return 0xFFFFFFFFu;
+			const RenderTarget& rt = _renderTargets[target];
+			if (!rt.Alive || rt.IsDepth || rt.SampleCount > 1 || rt.SrvIndex == 0xFFFFFFFFu) return 0xFFFFFFFFu;
+			return rt.SrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+		}
+
+		void CommandContext::drawPreview(Buffer* buffer, uint32_t view)
+		{
+			if (!buffer || view == 0 || view >= RHI::MAX_PREVIEW_VIEWS || !_currentPipeline) return;
+			PreviewView& preview = _previews[view];
+			if (!preview.HasFrame) return;
+			const bool depthOk = _boundDepth < _renderTargets.size() && _renderTargets[_boundDepth].Alive && _renderTargets[_boundDepth].IsDepth;
+			if (_boundColorCount != 1 || _boundFormats[0] != Pipeline::PREVIEW_COLOR_FORMAT || !depthOk || _boundSamples != 1)
+			{
+				if (!_previewWarned) Core::Logger::Log("[CommandContext] DrawPreview needs one RGBA8 color target and a Depth32 target (no MSAA). Skipped.");
+				_previewWarned = true;
+				return;
+			}
+			auto cmdList = _frameCommandList->GetCmdList();
+
+			// 窓の定数 (256 byte の境目) と線を、このフレームの UPLOAD へ
+			const UINT64 lineBytes = preview.Lines.size() * sizeof(RHI::DebugLineVertex);
+			const UINT64 needed    = 256 + ((lineBytes + 255) & ~255ull);
+			auto& upload = _previewUpload[_frameIndex];
+			if (!upload || _previewUploadSize[_frameIndex] < _previewUploadUsed + needed)
+			{
+				// 作り直す。このフレームですでに積んだ描画が古い物を読むので、古い物はこのフレームが終わるまで残す
+				if (upload) _previewRetired[_frameIndex].push_back(std::move(upload));
+				const UINT64 size = (std::max)((_previewUploadUsed + needed) * 2, UINT64(256) * 1024);
+				upload = std::make_unique<DirectX12::ResourceBuffer>();
+				if (FAILED(upload->Create(_device->GetDevice()->GetDevice(), size, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(upload->Map()))
+				{
+					Core::Logger::Log("[CommandContext] Failed create preview buffer.");
+					upload.reset();
+					_previewUploadSize[_frameIndex] = 0;
+					return;
+				}
+				_previewUploadSize[_frameIndex] = size;
+				_previewUploadUsed = 0;
+			}
+			uint8_t* mapped = static_cast<uint8_t*>(upload->GetMappedData()) + _previewUploadUsed;
+			const D3D12_GPU_VIRTUAL_ADDRESS address = upload->Get()->GetGPUVirtualAddress() + _previewUploadUsed;
+			RHI::PreviewFrame frame = preview.Frame;
+			for (int r = 0; r < 4; ++r)
+				for (int c = 0; c < 4; ++c)
+					frame.ViewProjection[r * 4 + c] = preview.Frame.ViewProjection[c * 4 + r];   // HLSL の cbuffer は列優先で読むので転置
+			std::memcpy(mapped, &frame, sizeof(frame));
+			if (lineBytes > 0) std::memcpy(mapped + 256, preview.Lines.data(), lineBytes);
+			_previewUploadUsed += needed;
+
+			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, address);
+
+			// 物 (面 → ワイヤーフレーム)
+			if (!preview.Items.empty() && _scene.ObjectData != 0 && _materialAddress != 0)
+			{
+				cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_OBJECT_DATA_SRV, _scene.ObjectData);
+				cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_MATERIAL_SRV, _materialAddress);
+				cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				const Pipeline::PreviewPso passes[2] = { Pipeline::PREVIEW_PSO_SHADED, Pipeline::PREVIEW_PSO_WIRE };
+				const uint32_t flags[2] = { RHI::PREVIEW_SHADED, RHI::PREVIEW_WIREFRAME };
+				for (int p = 0; p < 2; ++p)
+				{
+					if ((preview.Frame.Flags & flags[p]) == 0) continue;
+					ID3D12PipelineState* pso = _currentPipeline->GetPreviewPso(passes[p]);
+					if (!pso) continue;
+					cmdList->SetPipelineState(pso);
+					for (const RHI::DrawItem& item : preview.Items)
+					{
+						if (item.IndexCount == 0 || !item.Object.IsValid()) continue;
+						const uint32_t constants[4] = { item.Object.Index, item.BaseVertex, item.Material.Index, 0 };
+						cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, 4, constants, 0);
+						cmdList->DrawIndexedInstanced(item.IndexCount, 1, item.FirstIndex, 0, 0);
+						_previewDrawCount++;
+					}
+				}
+			}
+
+			// 線 (深度で隠れる物 → 一番上の物)
+			const UINT lineCount = static_cast<UINT>(preview.Lines.size());
+			if (lineCount > 0)
+			{
+				D3D12_VERTEX_BUFFER_VIEW lineView = { address + 256, static_cast<UINT>(lineBytes), sizeof(RHI::DebugLineVertex) };
+				cmdList->IASetVertexBuffers(0, 1, &lineView);
+				cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
+				if (preview.DepthLines > 0 && _currentPipeline->GetPreviewPso(Pipeline::PREVIEW_PSO_LINE))
+				{
+					cmdList->SetPipelineState(_currentPipeline->GetPreviewPso(Pipeline::PREVIEW_PSO_LINE));
+					cmdList->DrawInstanced(preview.DepthLines, 1, 0, 0);
+				}
+				if (lineCount > preview.DepthLines && _currentPipeline->GetPreviewPso(Pipeline::PREVIEW_PSO_LINE_OVERLAY))
+				{
+					cmdList->SetPipelineState(_currentPipeline->GetPreviewPso(Pipeline::PREVIEW_PSO_LINE_OVERLAY));
+					cmdList->DrawInstanced(lineCount - preview.DepthLines, 1, preview.DepthLines, 0);
+				}
+				// 描画番号の入力 (DRAWID) を戻す
+				D3D12_VERTEX_BUFFER_VIEW drawIdView = {};
+				drawIdView.BufferLocation = _drawIdBuffer->GetGPUVirtualAddress();
+				drawIdView.SizeInBytes    = MAX_DRAWS * sizeof(uint32_t);
+				drawIdView.StrideInBytes  = sizeof(uint32_t);
+				cmdList->IASetVertexBuffers(0, 1, &drawIdView);
+			}
+
+			// 後の命令のために戻す
+			cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			if (_frameConstantsAddress != 0) cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
+			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
+			_uiReadTargets.push_back(_boundColors[0]);
 		}
 
 		void CommandContext::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)

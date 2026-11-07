@@ -253,6 +253,23 @@ namespace RHI
         if (_isInitialized) _commandContext->SetDebugLines(vertices, count);
     }
 
+    // ---------- プレビューの窓 (AN5) ----------
+    void RenderHardwareInterface::SetPreviewItems(uint32_t view, const DrawItem* items, uint32_t count)
+    {
+        if (_isInitialized) _commandContext->SetPreviewItems(view, items, count);
+    }
+
+    void RenderHardwareInterface::SetPreviewFrame(uint32_t view, const PreviewFrame& frame, const DebugLineVertex* lines, uint32_t lineVertexCount,
+                                                  uint32_t depthLineVertexCount)
+    {
+        if (_isInitialized) _commandContext->SetPreviewFrame(view, frame, lines, lineVertexCount, depthLineVertexCount);
+    }
+
+    uint32_t RenderHardwareInterface::GetRenderTargetTexture(RenderTargetHandle target)const
+    {
+        return _isInitialized ? _commandContext->GetRenderTargetTexture(target.Index) : 0xFFFFFFFFu;
+    }
+
     bool RenderHardwareInterface::SetRenderSize(uint32_t width, uint32_t height)
     {
         return _isInitialized && _commandContext->SetRenderSize(_buffer.get(), width, height);

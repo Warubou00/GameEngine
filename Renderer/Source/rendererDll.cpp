@@ -196,6 +196,37 @@ extern "C"
 		if (g_renderer) g_renderer->SetObjectsSkinned(objects, count, skinned);
 	}
 
+	// ---------- プレビューの窓 (AN5) ----------
+	// 描画オブジェクトを視点 view (0 = シーン / 1〜 = プレビューの窓) に出す。窓の物はシーンに描かれない
+	RENDERER_API void Renderer_SetObjectsView(const uint32_t* objects, uint32_t count, uint32_t view)
+	{
+		if (g_renderer) g_renderer->SetObjectsView(objects, count, view);
+	}
+
+	// 窓のカメラ / 光 / 線 (毎フレーム)。描くのは RenderCommand の DrawPreview (Arg0 = view)
+	RENDERER_API void Renderer_SetPreviewFrame(uint32_t view, const RHI::PreviewFrame* frame, const RHI::DebugLineVertex* lines, uint32_t lineVertexCount,
+	                                           uint32_t depthLineVertexCount)
+	{
+		if (g_renderer && frame) g_renderer->SetPreviewFrame(view, *frame, lines, lines ? lineVertexCount : 0, depthLineVertexCount);
+	}
+
+	// 確認用 : 描画リストの数 (view 0 = シーン / 1〜 = 窓) / 生きている描画オブジェクトの数
+	RENDERER_API uint32_t Renderer_GetDrawItemCount(uint32_t view)
+	{
+		return g_renderer ? g_renderer->GetDrawItemCount(view) : 0;
+	}
+
+	RENDERER_API uint32_t Renderer_GetRenderObjectCount()
+	{
+		return g_renderer ? g_renderer->GetRenderObjectCount() : 0;
+	}
+
+	// レンダーターゲットを UI のテクスチャとして使う時の番号 (無ければ 0xFFFFFFFF)
+	RENDERER_API uint32_t Renderer_GetRenderTargetTexture(uint32_t target)
+	{
+		return g_renderer ? g_renderer->GetRenderTargetTexture(target) : 0xFFFFFFFFu;
+	}
+
 	// 姿勢 (毎フレーム 1 回でまとめて) : 骨の行列 (1 本 12 個) を boneCounts[i] 本ずつ、境界球 (4 個) を 1 個ずつ
 	RENDERER_API void Renderer_SetSkinPoses(const uint32_t* objects, uint32_t count, const float* matrices, const uint32_t* boneCounts, const float* spheres)
 	{

@@ -265,6 +265,19 @@ namespace RHI
             ID3D12PipelineState* GetDebugLinePso();
             ID3D12PipelineState* GetUIPso();   // UI (エディターの ImGui。ED3)
 
+            // プレビューの窓 (AN5。preview.shader)。描画先は RGBA8 1 枚 + Depth32。初めて使う時に作る
+            enum PreviewPso : uint32_t
+            {
+                PREVIEW_PSO_SHADED = 0,      // 物 (裏面カリング)
+                PREVIEW_PSO_WIRE,            // ワイヤーフレーム (深度は比べるだけ。少し手前に寄せる)
+                PREVIEW_PSO_LINE,            // 線 (深度で隠れる。床の格子 / 法線)
+                PREVIEW_PSO_LINE_OVERLAY,    // 線 (一番上。骨)
+                PREVIEW_PSO_COUNT
+            };
+            static constexpr DXGI_FORMAT PREVIEW_COLOR_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+            static constexpr DXGI_FORMAT PREVIEW_DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT;
+            ID3D12PipelineState* GetPreviewPso(PreviewPso kind);
+
             /***********************************************************************************
              * @brief シェーダーを読み直す (ED5。エディターでシェーダーのファイルを書き換えた時)
              * @details シーン / 全画面 / 確認用の線 / UI / パーティクルを描くシェーダーをコンパイルし直し、作った PSO を捨てる
@@ -341,6 +354,8 @@ namespace RHI
             std::vector<std::unique_ptr<FullscreenShader>> _fullscreenShaders;
             uint32_t                                       _depthResolveShader = 0xFFFFFFFFu;   // _fullscreenShaders の番号
             Microsoft::WRL::ComPtr<ID3D12PipelineState>    _debugLinePso;
+            Microsoft::WRL::ComPtr<ID3D12PipelineState>    _previewPsos[PREVIEW_PSO_COUNT];   // AN5
+            bool                                           _previewFailed = false;
             bool                                           _debugLineFailed = false;
             Microsoft::WRL::ComPtr<ID3D12PipelineState>    _uiPso;
             bool                                           _uiFailed = false;

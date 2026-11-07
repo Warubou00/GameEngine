@@ -45,6 +45,7 @@ internal sealed partial class EditorApp
     private bool    _showBuild;
     private bool    _showReference;
     private readonly ShaderGraphWindow _graph;   // SH4
+    private readonly PreviewWindow _preview;     // AN5
     private bool    _showGraph;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
@@ -83,6 +84,8 @@ internal sealed partial class EditorApp
         _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
         _graph = new ShaderGraphWindow(engine, database);   // SH4
         _project.OpenShaderGraph = path => OpenShaderGraph(path);
+        _preview = new PreviewWindow(engine, database);     // AN5
+        _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
@@ -245,6 +248,7 @@ internal sealed partial class EditorApp
         drawUnsavedPrompt();   // ED10
         _reference.Draw(ref _showReference);
         _graph.Draw(ref _showGraph);   // SH4
+        _preview.Draw();               // AN5
         _shaders?.Update();
         _scripts.Update();
 
@@ -354,6 +358,12 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Stats",     null, ref _showStats);
             ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.MenuItem("Shader Graph", null, ref _showGraph);   // SH4
+            if (ImGui.MenuItem("FBX Preview", null, _preview.IsOpen))   // AN5
+            {
+                if (_preview.IsOpen) _preview.Close();
+                else if (World.IsAlive(Selected) && World.Has<Animator>(Selected) && World.Get<Animator>(Selected).Skeleton is { } skeleton) OpenPreview(skeleton.Path);
+                else OpenPreview(null);
+            }
             ImGui.Separator();
             // 確認用の表示 (ED6。シーンには保存しない)
             if (ImGui.BeginMenu("Debug Display"))
@@ -405,6 +415,7 @@ internal sealed partial class EditorApp
         var io = ImGui.GetIO();
         if (io.WantTextInput) return;
         if (_graph.HasFocus) return;   // シェーダーグラフの窓が自分で使う (元に戻す / 消す / 複製。SH4)
+        if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
         if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);

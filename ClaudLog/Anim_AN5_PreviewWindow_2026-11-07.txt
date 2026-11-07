@@ -1,0 +1,65 @@
+﻿アニメーション AN5 : プレビューの窓 2026-11-07
+ブランチ : feature/anim-an5
+ロードマップ : ClaudLog/Engine_Roadmap_Animation_2026-11-07.txt (AN1 → AN5。これで最後)
+
+■ できた物
+  FBX Preview の窓 : Project で .mod.fbx / .skl.fbx / .anm.fbx をダブルクリック、または View > FBX Preview
+    (View から開くと、選んでいる物に Animator があればそのスケルトンを開く)
+  シーンとは別の小さな世界をその窓の中だけに描く (シーンの物は窓に出ず、窓の物はシーンに出ない)
+  - 開いた物から仲間を探す : Arm_Wave.anm.fbx → Arm.skl.fbx + Arm.mod.fbx (名前の _ の前を順に短くして探す)
+                           Arm.skl.fbx → Arm.mod.fbx + Arm_*.anm.fbx の最初の物 / Arm.mod.fbx → Arm.skl.fbx があれば
+    左の Model / Skeleton / Clip の欄で入れ替えられる ((none) も)
+  - カメラ : 右ドラッグで回す / 中ドラッグでずらす / ホイールで近づく / F (と Frame ボタン) で全体を見る
+  - 表示 : Shaded (面) / Wireframe (面の上に線) / Normals (法線。骨で曲げた後の向き) / Bones / Grid (床の格子)
+  - モデル : 頂点 / 三角形 / メッシュの数、大きさ、マテリアルの一覧 (色 / テクスチャのファイル / 半透明)
+  - スケルトン : 骨の木 (選ぶとその骨が黄色に光り、向き (XYZ) と名前が画面に出る。位置も出る)。Null は (null)
+  - アニメーション : Play / Pause / Stop / Loop / Speed、時間のバー (動かすと止まってその時間の姿勢)、今の時間とフレーム
+  - アセットを読み直すと作り直す (時間はそのまま)。窓を閉じると世界ごと消える
+
+■ しくみ
+  1. RHI : 描画オブジェクトに「視点の番号」(0 = シーン / 1〜15 = プレビュー)。シーンの描画リストには 0 の物だけ、
+     窓の物は窓ごとのリスト (SetPreviewItems) へ (以前は全部シーンのリストだった)
+     新しい命令 DrawPreview (RenderCommandType 8。Arg0 = 視点の番号) : 今の描画先 (RGBA8 1 枚 + Depth32) に、その番号の物と線を描く
+       シーンと同じルートシグネチャ。b0 (フレームの定数) だけ窓のカメラ (PreviewFrame 112 byte) に差し替えて、描き終えたら戻す
+       物は少ない (1 体) ので、カリング / まとめはせず 1 個ずつ DrawIndexedInstanced
+       曲げた物 (AN4) はその物専用の頂点の場所 (BaseVertex) をそのまま使う → 窓の中でも GPU で曲がる
+     preview.shader : 面 (半球の環境光 + 平行光 1 つ) / ワイヤーフレーム (少し手前に寄せる) / 線 (深度で隠れる物と一番上の物)
+     描いた描画先はフレームの最後に PIXEL_SHADER_RESOURCE にして、UI (ImGui.Image) が読む (GetRenderTargetTexture の番号)
+  2. C# : PreviewScene (Runtime/Rendering) = 別の World と、その World 用の TransformSystem / RenderSyncSystem (視点の番号付き) /
+     AnimationSystem / SkinningSystem。エンジンが毎フレーム、シーンの後に動かし、描画の命令の最後 (UI の前) に窓の分を足す
+     Engine.CreatePreview() で作り、Dispose で消す。カメラは注視点の周りを回る (左手系の行列を C# で作る)
+  3. エディター : PreviewWindow (左に欄 / 木 / 情報、右に絵と時間のバー)。骨の線と法線は C# で作る
+     法線 : 部品ごとに FBX を読み (部品 xxx.mod.fbx#ノード)、固い部品は部品の行列、曲げる部品は GPU と同じ式 (InvBind × 骨のワールド) を CPU で
+
+■ 直した不具合 (途中で見つけた物)
+  1. 窓を閉じると GPU が止まった (デバイスの削除 0x887A0006。テストで、窓の絵を UI に出した同じフレームの中で閉じた時)
+     → 同じフレームの UI がもう消したテクスチャを読んでいた。窓の (と大きさを変えた時の古い) レンダーターゲットは、
+       そのフレームを描いた後で消す (Graphics.RetireTexture)。以前はその場で消していた
+  2. シェーダーは見本 (GameEngine_console) の出力の ../Shader から読む → 新しいシェーダーは console のビルドで写る (エディターのビルドだけでは読めない)
+
+■ 計測
+  窓の描画の GPU の時間は別に計っていない (1 体 / 1〜7 回の描画と線だけ)。窓の腕は GPU で曲げている (AN4 と同じ。窓だけ動く時 1 物 / 242 頂点)
+  Release のテストの細かい腕 100 本 (AN4) は GPU 0.885 ms / C# 0.123 ms (AN4 の時の 1.09〜1.27 ms より速いのは GPU の揺れ。窓の変更は曲げる処理に触っていない)
+
+■ 確かめたこと (エディターのテスト 242 / 0。Release / Debug、Debug の D3D12 のエラーと警告 0)
+  Arm_Wave.anm.fbx を開くと Arm.mod.fbx + Arm.skl.fbx (骨 4 / 部品 1、視点 1)
+  窓の世界は別 : 窓の描画 1、シーンの描画の数とエンティティの数は開く前と同じ
+  時間のバー : 0 秒で Arm_End = (0, 3, 0)、0.5 秒で (-1.628, 1.592, 0) (手で計算と同じ)
+  窓の腕は GPU で曲がる (シーンは編集中で止まっている時に 1 物 / 242 頂点)
+  Play で窓のクリップだけ進む (12 フレームで 0.185 秒。シーンは編集中のまま)
+  骨の木で Arm_Mid を選ぶ / 骨の線 3 本 / 法線 242 本
+  モデルだけ (Box.mod.fbx) : 24 頂点 / 12 三角形 / マテリアル Red / 法線 24 本
+  スケルトン (Robot.skl.fbx) : 骨 8 (Robot の Null を含む) / 部品 7 / クリップ Robot_Walk
+  窓を閉じると描く物が残らない (描画オブジェクトの数が開く前と同じ、窓の描画 0)
+  画面 : 窓の中で腕が曲がり、骨の線 / 選んだ骨の名前 / ワイヤーフレーム / 法線 (曲がった向き) / 床の格子が出る。シーンのロボットは窓に出ない
+
+■ 変えたファイル
+  新規 : RHI/Source/Shader/preview.shader, GameEngine.Runtime/Rendering/PreviewScene.cs, GameEngine.Editor/PreviewWindow.cs
+  RHI : rhiTypes.h (DrawPreview / PreviewFrame / MAX_PREVIEW_VIEWS), rhi.h, RenderHardwareInterface, Pipeline (プレビューの PSO 4 つ),
+        CommandContext (drawPreview / 窓ごとのデータ / UI が読む描画先)
+  Renderer : sceneRenderer (視点の番号 / 窓ごとの描画リスト / 確認用の数), rendererDll (SetObjectsView / SetPreviewFrame /
+             GetRenderTargetTexture / GetDrawItemCount / GetRenderObjectCount)
+  C# : Engine.cs (窓の世界を動かして描く / RetireTexture), NativeMethods.cs, RenderCommandBuffer.cs (DrawPreview), RenderSyncSystem.cs (視点の番号)
+  エディター : EditorApp (窓 / View のメニュー), EditorApp.Edit (OpenPreview), ProjectPanel (ダブルクリック), EditorTest.cs (AN5)
+
+■ ロードマップ AN1 〜 AN5 はこれで全部。やらない事 (ASCII FBX / モーフ / 混ぜ合わせ / IK など) は必要になったら AN6 以降

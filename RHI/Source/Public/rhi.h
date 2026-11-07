@@ -117,6 +117,15 @@ namespace RHI
 		virtual void       RequestSkinReadback(SkinHandle instance) = 0;
 		virtual uint32_t   ReadSkinReadback(Vertex* outVertices, uint32_t maxCount) = 0;
 
+		// ---------- プレビューの窓 (AN5) ----------
+		// 視点 view (1〜) の物 (描画リスト。シーンの物と同じ形) を決める。描画オブジェクトが増減した時だけ呼べばよい
+		virtual void       SetPreviewItems(uint32_t view, const DrawItem* items, uint32_t count) = 0;
+		// 視点 view のカメラ / 光 / 線 (depthLineCount 本目までは深度で隠れる線、残りは一番上に描く線。2 頂点で 1 本)。毎フレーム
+		virtual void       SetPreviewFrame(uint32_t view, const PreviewFrame& frame, const DebugLineVertex* lines, uint32_t lineVertexCount,
+		                                   uint32_t depthLineVertexCount) = 0;
+		// レンダーターゲットを UI のテクスチャとして使う時の番号 (UIDrawCommand.Texture。無ければ 0xFFFFFFFF)
+		virtual uint32_t   GetRenderTargetTexture(RenderTargetHandle target)const = 0;
+
 		// シェーダーを読み直す (GPU を待ってからコンパイルし直し、PSO は次に使う時に作る)
 		// コンパイルに失敗したシェーダーは前の物を使い続ける。戻り値 = 全部成功したか
 		virtual bool ReloadShaders() = 0;

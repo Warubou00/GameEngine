@@ -46,6 +46,7 @@
 // ========================================
 
 #include <wrl.h>
+#include <cstring>
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -82,6 +83,7 @@ namespace RHI
 			constexpr const wchar_t* PARTICLE_SIM_SHADER_PATH  = L"../Shader/particleSim.shader";    // GPU パーティクル (コンピュート)
 			constexpr const wchar_t* PARTICLE_DRAW_SHADER_PATH = L"../Shader/particleDraw.shader";   // GPU パーティクル (描画)
 			constexpr const wchar_t* SKINNING_SHADER_PATH      = L"../Shader/skinning.shader";       // GPU スキニング (AN4)
+			constexpr const wchar_t* PREVIEW_SHADER_PATH       = L"../Shader/preview.shader";        // プレビューの窓 (AN5)
 
 			// PSO キャッシュのファイル (実行フォルダ)
 			constexpr const wchar_t* PIPELINE_CACHE_PATH = L"pipeline.cache";
@@ -636,6 +638,8 @@ namespace RHI
             _psoMap.clear();
             _debugLinePso.Reset();
             _debugLineFailed = false;
+            for (auto& pso : _previewPsos) pso.Reset();   // AN5
+            _previewFailed = false;
             _uiPso.Reset();
             _uiFailed = false;
             _particleDrawShaders.reset();
@@ -944,6 +948,62 @@ namespace RHI
             ID3D12PipelineState* pso = createPso(fnv1a("DebugLine", 9, 0xDEB61Eull), L"DebugLine", desc);
             if (!pso) { _debugLineFailed = true; return nullptr; }
             _debugLinePso = pso;
+            return pso;
+        }
+
+        ID3D12PipelineState* Pipeline::GetPreviewPso(PreviewPso kind)
+        {
+            // ==============================================================
+            // AN5 : プレビューの窓。シーンと同じルートシグネチャ (b0 は窓ごとの PreviewFrame に差し替える)
+            // ==============================================================
+            if (kind >= PREVIEW_PSO_COUNT) return nullptr;
+            if (_previewPsos[kind]) return _previewPsos[kind].Get();
+            if (_previewFailed) return nullptr;
+            const bool line = kind == PREVIEW_PSO_LINE || kind == PREVIEW_PSO_LINE_OVERLAY;
+            Shader::CompiledShader vs, ps;
+            if (!_shaderCompiler->Compile(PREVIEW_SHADER_PATH, line ? "VSPreviewLine" : "VSPreview", Shader::Stage::Vertex, vs) ||
+                !_shaderCompiler->Compile(PREVIEW_SHADER_PATH, line ? "PSPreviewLine" : kind == PREVIEW_PSO_WIRE ? "PSPreviewWire" : "PSPreview", Shader::Stage::Pixel, ps))
+            {
+                Core::Logger::Log("[Pipeline] Failed compile preview shader.");
+                _previewFailed = true;
+                return nullptr;
+            }
+            static const D3D12_INPUT_ELEMENT_DESC lineElements[] = {
+                { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            };
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = vs.View();
+            desc.PS = ps.View();
+            desc.NumRenderTargets = 1;
+            desc.RTVFormats[0]    = PREVIEW_COLOR_FORMAT;
+            desc.DSVFormat        = PREVIEW_DEPTH_FORMAT;
+            switch (kind)
+            {
+            case PREVIEW_PSO_SHADED:
+                desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;   // シーンの不透明と同じ (画面上で時計回りが表)
+                break;
+            case PREVIEW_PSO_WIRE:
+                desc.RasterizerState.FillMode = D3D12_FILL_MODE_WIREFRAME;
+                desc.RasterizerState.DepthBias            = -200;      // 面と同じ深さの線が面に埋もれないように少し手前へ
+                desc.RasterizerState.SlopeScaledDepthBias = -1.0f;
+                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+                desc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+                break;
+            default:
+                desc.InputLayout = { lineElements, _countof(lineElements) };
+                desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+                desc.DepthStencilState.DepthFunc      = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+                if (kind == PREVIEW_PSO_LINE_OVERLAY) desc.DepthStencilState.DepthEnable = FALSE;
+                setAlphaBlend(desc.BlendState.RenderTarget[0]);
+                break;
+            }
+            static const char* const names[PREVIEW_PSO_COUNT] = { "PreviewShaded", "PreviewWire", "PreviewLine", "PreviewLineOverlay" };
+            const uint64_t key = fnv1a(names[kind], std::strlen(names[kind]), fnv1a(vs.View().pShaderBytecode, vs.View().BytecodeLength, 0xA5B5ull));
+            ID3D12PipelineState* pso = createPso(fnv1a(ps.View().pShaderBytecode, ps.View().BytecodeLength, key), L"Preview", desc);
+            if (!pso) { _previewFailed = true; return nullptr; }
+            _previewPsos[kind] = pso;
             return pso;
         }
 

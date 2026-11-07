@@ -40,6 +40,7 @@ internal sealed class ProjectPanel : IDisposable
     public Func<Prefab, int>? PrefabChanged;
     // シェーダーグラフをダブルクリックした時 (グラフの窓で開く。SH4)
     public Action<string>? OpenShaderGraph;
+    public Action<string>? OpenPreview;   // AN5 : FBX をダブルクリック
     public int SelectionVersion { get; private set; }
 
     private string  _folder = AssetDatabase.AssetsFolder;
@@ -318,6 +319,7 @@ internal sealed class ProjectPanel : IDisposable
             if (entry.Kind == AssetKind.Folder) { _folder = entry.Path; _search = ""; }
             else if (entry.Kind == AssetKind.Scene) _openScene(_database.FullPath(entry.Path));
             else if (entry.Kind == AssetKind.ShaderGraph) OpenShaderGraph?.Invoke(entry.Path);   // SH4
+            else if (entry.Kind is AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation) OpenPreview?.Invoke(entry.Path);   // AN5
             else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
             {
                 try { importer.OnOpen(entry.Path, _database.FullPath(entry.Path)); }

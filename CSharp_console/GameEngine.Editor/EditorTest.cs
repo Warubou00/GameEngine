@@ -1557,6 +1557,75 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
+        // ---------- AN5 : プレビューの窓 ----------
+        for (int i = 0; i < 2; i++) yield return 0;
+        var sceneItems = _app.Engine.DrawItemCount(0);
+        var sceneObjects = _app.Engine.RenderObjectCount;
+        var sceneEntities = World.EntityCount;
+        var preview = _app.Preview;
+        var previewOpened = _app.OpenPreview($"{FbxSamples.Folder}/Arm_Wave.anm.fbx");
+        for (int i = 0; i < 3; i++) yield return 0;
+        var previewView = preview.Preview?.View ?? 0;
+        check(previewOpened && preview.IsOpen && preview.ModelPath == $"{FbxSamples.Folder}/Arm.mod.fbx" && preview.SkeletonPath == $"{FbxSamples.Folder}/Arm.skl.fbx" &&
+              preview.ClipPath == $"{FbxSamples.Folder}/Arm_Wave.anm.fbx" && preview.BoneEntities.Count == 4 && preview.Parts.Count == 1 && previewView > 0,
+              $"opening Arm_Wave.anm.fbx finds Arm.mod.fbx + Arm.skl.fbx (4 bones, 1 part, view {previewView})");
+        check(_app.Engine.DrawItemCount(previewView) == 1 && _app.Engine.DrawItemCount(0) == sceneItems && _app.Engine.RenderObjectCount == sceneObjects + 1 && World.EntityCount == sceneEntities,
+              $"the preview world is separate : 1 draw in the window, scene draws {_app.Engine.DrawItemCount(0)} (before {sceneItems}), scene entities {World.EntityCount} (before {sceneEntities})");
+        // 時間のバーを動かす : 先の骨が動く (0 秒はまっすぐ / 0.5 秒は手で計算した位置)
+        var pvArmEnd = preview.Skeleton!.IndexOf("Arm_End");
+        preview.Playing = false;
+        preview.Time = 0;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var pvEndAt0 = Hierarchy.GetWorldMatrix(preview.Preview!.World, preview.BoneEntities[pvArmEnd]).Translation;
+        preview.Time = 0.5f;
+        for (int i = 0; i < 3; i++) yield return 0;
+        var pvEndAtHalf = Hierarchy.GetWorldMatrix(preview.Preview!.World, preview.BoneEntities[pvArmEnd]).Translation;
+        var pvExpectedEnd = new System.Numerics.Vector3(-MathF.Sin(40 * MathF.PI / 180) - MathF.Sin(100 * MathF.PI / 180), 1 + MathF.Cos(40 * MathF.PI / 180) + MathF.Cos(100 * MathF.PI / 180), 0);
+        check(near(pvEndAt0, new System.Numerics.Vector3(0, 3, 0), 1e-3f) && near(pvEndAtHalf, pvExpectedEnd, 2e-3f),
+              $"moving the time bar moves the bones : Arm_End {pvEndAt0:F3} at 0 s, {pvEndAtHalf:F3} at 0.5 s (by hand {pvExpectedEnd:F3})");
+        // 窓の物も GPU で曲げる (シーンは編集中で止まっている)
+        preview.Time = 0.75f;
+        yield return 0;   // 窓の世界はシーンの後 (このフックの後) に動くので、1 フレーム後に前のフレームの数が読める
+        var previewSkin = _app.Engine.SkinningStats;
+        check(preview.Preview!.SkinnedObjects == 1 && previewSkin.GpuInstances == 1 && previewSkin.GpuVertices == 242,
+              $"the window's skinned arm is bent on the GPU ({previewSkin.GpuInstances} instance / {previewSkin.GpuVertices} vertices when only the window moves)");
+        // 再生 : 時間が進む
+        Time.CaptureDeltaTime = 1.0f / 60;
+        preview.Time = 0;
+        preview.Playing = true;
+        for (int i = 0; i < 12; i++) yield return 0;
+        var pvPlayedTime = preview.Time;
+        preview.Playing = false;
+        Time.CaptureDeltaTime = 0;
+        check(pvPlayedTime > 0.1f && pvPlayedTime < 0.3f && !_app.Engine.IsPlaying, $"Play advances the window's clip while the scene stays in edit mode ({pvPlayedTime:F3} s after 12 frames)");
+        // 骨を選ぶ / 骨と法線の線
+        preview.SelectBone("Arm_Mid");
+        preview.ShowBones = true;
+        preview.ShowNormals = true;
+        yield return 0;
+        yield return 0;
+        check(preview.SelectedBone == preview.Skeleton!.IndexOf("Arm_Mid") && preview.BoneLineCount == 3 && preview.NormalLineCount == 242,
+              $"bone tree selection and lines : Arm_Mid selected, {preview.BoneLineCount} bone lines, {preview.NormalLineCount} normals (skinned on the CPU like the GPU)");
+        // モデルだけ (.mod.fbx) : マテリアルの一覧と数
+        _app.OpenPreview($"{FbxSamples.Folder}/Box.mod.fbx");
+        for (int i = 0; i < 3; i++) yield return 0;
+        check(preview.SkeletonPath == null && preview.ModelData is { Materials.Count: 1 } pvBoxData && pvBoxData.Materials[0].Name == "Red" && preview.Preview!.World.Has<MeshRenderer>(preview.Root) &&
+              _app.Engine.DrawItemCount(preview.Preview!.View) == 1 && preview.NormalLineCount == pvBoxData.Positions.Count,
+              $"a model alone : {preview.ModelData?.Positions.Count} vertices / {preview.ModelData?.TriangleCount} triangles, material {preview.ModelData?.Materials.FirstOrDefault()?.Name}, {preview.NormalLineCount} normals");
+        // スケルトン (.skl.fbx) : 同じ名前のモデルの部品が骨に付く
+        _app.OpenPreview($"{FbxSamples.Folder}/Robot.skl.fbx");
+        for (int i = 0; i < 3; i++) yield return 0;
+        check(preview.BoneEntities.Count == 8 && preview.Skeleton!.Bones.Count == 8 && preview.Parts.Count == 7 && preview.ClipPath == $"{FbxSamples.Folder}/Robot_Walk.anm.fbx" && _app.Engine.DrawItemCount(preview.Preview!.View) == 7,
+              $"a skeleton : {preview.BoneEntities.Count} bones (with the Robot null), {preview.Parts.Count} parts from Robot.mod.fbx, clip {Path.GetFileName(preview.ClipPath ?? "")}");
+        // 閉じる : 描く物が残らない
+        var closedView = preview.Preview!.View;
+        preview.Close();
+        yield return 0;
+        yield return 0;
+        check(!preview.IsOpen && _app.Engine.Graphics.Previews.Count == 0 && _app.Engine.DrawItemCount(closedView) == 0 && _app.Engine.RenderObjectCount == sceneObjects &&
+              _app.Engine.DrawItemCount(0) == sceneItems,
+              $"closing the window leaves nothing to draw (render objects {_app.Engine.RenderObjectCount} = before {sceneObjects})");
+
         var builder = _app.BuildWindow.Builder;
         var buildFolder = Path.Combine(Path.GetTempPath(), "ge_editor_test_build");
         if (Directory.Exists(buildFolder)) Directory.Delete(buildFolder, true);
