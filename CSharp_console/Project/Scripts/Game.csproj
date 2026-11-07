@@ -26,6 +26,17 @@
   </ItemGroup>
 
   <!--
+    Assets の .cs もゲームのコード (v1.1。エディターの Project の Create > Scripts > Behaviour で作る。Unity と同じ)
+    Assets の Editor フォルダの下は GameEditor.csproj へ (ゲームには入れない)
+  -->
+  <ItemGroup>
+    <Compile Include="..\Assets\**\*.cs" Exclude="..\Assets\**\Editor\**" LinkBase="Assets" />
+  </ItemGroup>
+
+  <!-- Visual Studio などでビルドする時の、エンジンの DLL の場所 (エディターが書く。v1.1) -->
+  <Import Project="..\Library\EngineReferences.props" Condition="Exists('..\Library\EngineReferences.props')" />
+
+  <!--
     エンジンは参照するだけ (写さない : エディター / 見本が読み込んだ物を使う)
       リポジトリの中 : GameEngine.Runtime.csproj を参照する
       リポジトリの外 (Package のプロジェクト) : エディターが渡す EngineAssemblyDir (エディターの exe のフォルダ) の GameEngine.Runtime.dll を参照する

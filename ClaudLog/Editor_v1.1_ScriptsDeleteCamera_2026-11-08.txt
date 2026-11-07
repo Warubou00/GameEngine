@@ -1,0 +1,81 @@
+﻿v1.1.0.0 : スクリプトの作成と sln / アセットの削除 / エディターのカメラ  2026-11-08
+ブランチ : feature/editor-scripts-delete-camera
+
+■ やったこと
+1. Project の右クリック > Create > Scripts > Behaviour
+  - 右クリックできる所 : Project の何も無い所 / フォルダの木 / タイル
+    メニュー : Create (Folder / Scripts > Behaviour / Material / Shader / Shader Graph)
+    以前は上のボタンだけで、右クリックは Rename / Display Name / Show in Explorer だけだった
+  - Behaviour : 今のフォルダに NewBehaviour.cs を作り、すぐ名前を書く欄になる (Unity と同じ)
+    中身 : コンポーネント (struct, IComponent) と [GameSystem] の System
+    決めた名前が中の型の名前にもなる (雛形から書き換えていない時だけ。"Mover Test" なら Mover_Test)
+    UTF-8 (BOM 付き) / CRLF で書く (Visual Studio の既定)
+  - Assets の .cs もゲームのコードになった
+    Game.csproj が Assets/**/*.cs をビルドする
+    Assets/**/Editor/ の下は GameEditor.csproj (Unity の Editor フォルダと同じ)
+    ScriptHost は Assets の .cs も見張り、保存するとビルドし直す
+    以前は Project/Scripts の .cs だけで、Project の窓には出なかった
+  - AssetKind.Script (.cs)。タイルは紫の「C#」
+  - .gitignore : Assets の .cs は git に入れる。エディターが作る Project/*.sln は入れない
+
+2. .cs をダブルクリック (右クリック > Open / Scripts > Open C# Project) : sln が立ち上がる (ScriptEditor.cs)
+  - プロジェクトのフォルダに <プロジェクト名>.sln を作る (Game.csproj と GameEditor.csproj)
+    プロジェクトの Id はパスから決める。中身が同じなら書き直さない (開いている VS が「外で変わった」と聞かないように)
+  - Library/EngineReferences.props : VS でビルドする時の、エンジン / エディターの DLL の場所
+    Package のプロジェクトは、この場所が無いと VS でビルドできないため。エディターの起動時と sln を作る時に書く
+  - Visual Studio を vswhere で探して開く
+    同じ sln を開いている VS がある時 : そこで .cs を開く (/edit)
+    無い時 : sln を開き、読み終わってから (窓のタイトルに sln の名前が出てから) /edit で .cs を開く
+    VS が無い PC : sln を関連付けで開く。それも無ければ .cs を関連付けで開く
+  - 確かめた時に分かって直した事
+    最初は devenv の /Command "File.OpenFile ..." で .cs を渡していた
+    VS が引用符を読めず「ファイルが見つかりません」の窓が出て、.cs が開かなかった
+    VS の窓に出た箱を PrintWindow で撮って分かった。今の、読み終わってから /edit で開く形にした
+
+3. アセットの削除 : 右クリック > Delete / Delete キー
+  - 確かめる窓 (Delete Asset) を出してから消す
+    フォルダは中の物の数も出す
+    ごみ箱へ送る (Windows で元に戻せる)。.meta とテクスチャの DDS キャッシュも一緒に消す
+  - AssetDatabase.Delete を足した。Assets は消せない
+  - Project にフォーカスがある時の Delete キーは、アセットを消す方
+    以前は、Project でアセットを選んでいても、シーンで選んでいる物が消えた
+
+4. エディターのカメラ
+  - 注視点を足した (位置 + 前 x 距離)
+  - 右ボタンを押している間の WASD QE
+    カメラの軸 (前 / 右 / 上) の向きに、位置と注視点を一緒に平行移動する
+    以前の Q / E はワールドの上下で、注視点は無かった
+  - ホイール : ズーム。注視点へ寄る / 離れる (1 目盛りで距離が 0.85 倍)
+    一番近くまで寄った後も回すと、注視点ごと前へ進む
+    右ボタンを押している間のホイールは、今まで通り移動の速さ
+    以前は、ホイールはいつも移動の速さだった
+  - F (選んだ物を見る) は、注視点を選んだ物の中心にする
+
+5. 版 : 1.1.0.0 (Engine.props)。以後、機能を足すたびに上げる
+  - make_package.py
+    Editor : 前の版のフォルダを消し、新しい版だけにする
+    Luncher/Data (ランチャーの設定) と Project/SampleProject は残す
+    SampleProject は csproj だけ新しくする。--fresh-project で写し直す
+  - ランチャー (Package)
+    いつも一番新しい Package のエディターを選ぶ (前に古い版を選んでいても)
+    新しい版へ上げる時は「違う版で開くか」を聞かない (古い版で開く時だけ聞く)
+
+■ 確認
+  - EditorTest に 13 項目を足した
+    作る / 名前と型の名前 / Assets の .cs のビルド / sln / Delete キー / 削除と .meta / 型が消える /
+    フォルダの削除 / Assets は消せない / カメラの平行移動 / ズーム / 戻す / 一番近くでも進む
+  - リポジトリ Release : 263 / 0
+  - リポジトリ Debug : 263 / 0 (D3D12 のエラー 0)
+  - Package (環境を外した状態) : 263 / 0
+    SampleProject.sln を同梱の dotnet でビルドできた。エディターからは引数を渡さず、IDE と同じ条件で
+  - 画面で確かめた (PrintWindow / PostMessage)
+    右クリック > Create > Scripts > Behaviour : メニューが出て、名前を書く欄になった
+      Rotator と打つと Rotator.cs ができ、型も Rotator になり、ビルドされた (9 components)
+    ダブルクリック : VS で Project.sln と Rotator.cs が開いた (VS の DTE で確かめた)
+      VS が開いている時にもう一度ダブルクリック : 同じ VS で開き、VS は増えなかった
+    右クリック > Delete : 確かめる窓 → Delete で消え、型も無くなった (8 components)
+    ホイール 4 目盛り : カメラが注視点へ寄った
+  - 右ボタン + WASD はキーを DirectInput で読むため、PostMessage では押せない
+    EditorTest で MoveCamera を呼んで確かめた
+  - ランチャー : 古い 1.0.0.0 を覚えた設定でも 1.1.0.0 を選び、聞かずに開いた
+  - 確認で作った Rotator.cs は、確認の中でごみ箱へ消した

@@ -13,6 +13,7 @@ namespace GameEngine.Editor;
 //     古い DLL を捨てる → 新しい DLL を読み、[GameSystem] を作る → JSON からシーンを作り直す (値は型の名前で引き継ぐ)
 //   - エディターの拡張 (ED7 後半) : Scripts/Editor/GameEditor.csproj があれば、そちらをビルドし (Game も一緒にビルドされる)、
 //     Game.dll と GameEditor.dll を同じ AssemblyLoadContext に読む。GameEditor.dll の [CustomEditor] などを EditorExtensions に登録する
+//   - Assets の .cs (v1.1。Project の Create > Scripts > Behaviour で作る) も見張る。Game.csproj が Assets/**/*.cs もビルドする
 // ==========================================================================
 internal sealed class ScriptHost : IDisposable
 {
@@ -21,6 +22,8 @@ internal sealed class ScriptHost : IDisposable
     private readonly string _editorProject;    // Editor/GameEditor.csproj (無ければ Game だけ)
     private readonly string _folder;
     private readonly FileSystemWatcher? _watcher;
+    private readonly FileSystemWatcher? _assetsWatcher;   // Assets の .cs (v1.1)
+    private readonly string _assets;
     private volatile bool _changed;
     private double _changedAt;
     private Task<(bool Ok, string Log, double Ms)>? _build;
@@ -46,6 +49,7 @@ internal sealed class ScriptHost : IDisposable
         _project = Path.GetFullPath(project);
         _folder  = Path.GetDirectoryName(_project)!;
         _editorProject = Path.Combine(_folder, "Editor", "GameEditor.csproj");
+        _assets = Path.GetFullPath(Path.Combine(_folder, "..", "Assets"));
         if (!Directory.Exists(_folder)) return;
         try
         {
@@ -61,6 +65,15 @@ internal sealed class ScriptHost : IDisposable
             _watcher.Created += handler;
             _watcher.Deleted += handler;
             _watcher.Renamed += (_, e) => handler(null!, e);
+            if (Directory.Exists(_assets))
+            {
+                _assetsWatcher = new FileSystemWatcher(_assets, "*.cs") { IncludeSubdirectories = true, EnableRaisingEvents = true,
+                                                                           NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName };
+                _assetsWatcher.Changed += handler;
+                _assetsWatcher.Created += handler;
+                _assetsWatcher.Deleted += handler;
+                _assetsWatcher.Renamed += (_, e) => handler(null!, e);
+            }
         }
         catch (Exception ex)
         {
@@ -88,6 +101,9 @@ internal sealed class ScriptHost : IDisposable
         var newest = Directory.EnumerateFiles(_folder, "*.cs*", SearchOption.AllDirectories).Where(source).Select(File.GetLastWriteTimeUtc)
             .Concat(Directory.EnumerateDirectories(_folder, "*", SearchOption.AllDirectories).Where(source).Select(Directory.GetLastWriteTimeUtc))
             .Append(Directory.GetLastWriteTimeUtc(_folder))
+            // Assets の .cs (v1.1)。フォルダの日時も (.cs を消しただけの時もビルドし直すため)
+            .Concat(Directory.Exists(_assets) ? Directory.EnumerateFiles(_assets, "*.cs", SearchOption.AllDirectories).Select(File.GetLastWriteTimeUtc) : [])
+            .Concat(Directory.Exists(_assets) ? Directory.EnumerateDirectories(_assets, "*", SearchOption.AllDirectories).Append(_assets).Select(Directory.GetLastWriteTimeUtc) : [])
             .DefaultIfEmpty(DateTime.MinValue).Max();
         var built = hasEditorProject ? editorDll : outputDll;
         if (!File.Exists(built) || !File.Exists(outputDll) || File.GetLastWriteTimeUtc(built) < newest)

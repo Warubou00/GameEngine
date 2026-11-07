@@ -11,6 +11,9 @@
       - エンジン (GameEngine.Runtime) : リポジトリの中は csproj を、外 (Package) は EngineAssemblyDir の DLL を参照する (Game.csproj と同じ)
     ==========================================================================
   -->
+  <!-- Visual Studio などでビルドする時の、エンジン / エディターの DLL の場所 (エディターが書く。v1.1。下の既定より先に) -->
+  <Import Project="..\..\Library\EngineReferences.props" Condition="Exists('..\..\Library\EngineReferences.props')" />
+
   <PropertyGroup>
     <TargetFramework>net9.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
@@ -32,6 +35,11 @@
       <HintPath>$(EditorAssemblyDir)ImGui.NET.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <!-- Assets の Editor フォルダの .cs (v1.1。Unity の Editor フォルダと同じ) -->
+  <ItemGroup>
+    <Compile Include="..\..\Assets\**\Editor\**\*.cs" LinkBase="Assets" />
   </ItemGroup>
 
   <PropertyGroup>

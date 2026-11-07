@@ -141,6 +141,8 @@ internal sealed class EditorInstalls
     // プロジェクトに合う版 : 前に選んだ物 → 同じ版 (入れた版を先に) → 一番新しい物
     public EditorInstall? Suggest(LauncherSettings.ProjectEntry project)
     {
+        // Package : いつも一番新しい Package のエディター (版を上げた Package を入れ替えた時に、古い版を選んだままにしない。v1.1)
+        if (PackageRoot != null && All.FirstOrDefault(i => i.Kind == InstallKind.Package) is { } newest) return newest;
         if (Find(project.Editor) is { } chosen) return chosen;
         var version = ProjectVersion(project.Path);
         return All.Where(i => i.Version == version).OrderBy(i => i.Kind).FirstOrDefault() ?? All.FirstOrDefault();

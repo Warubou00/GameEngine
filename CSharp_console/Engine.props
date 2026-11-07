@@ -6,12 +6,13 @@
       - 名前 (Product) は exe のファイルの説明と、窓のタイトル (Runtime の EngineInfo.Name が読む) に使う
       - exe / DLL のファイル名 (GameEngine.Editor.exe など) はコードが参照しているので変えない
       - 版を上げる時はここの EngineVersion を変える (以前はエディター / ランチャーの csproj の <Version> にそれぞれ書いていた)
+        機能を足すたびに上げる (1.0.0.0 : Package 化 / 1.1.0.0 : スクリプトの作成と sln / アセットの削除 / カメラのズーム)
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>1.0.0.0</EngineVersion>
+    <EngineVersion>1.1.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

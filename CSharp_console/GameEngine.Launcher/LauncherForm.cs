@@ -122,7 +122,9 @@ internal sealed class LauncherForm : Form
         if (!Directory.Exists(project.Path)) { status($"Project folder not found : {project.Path}"); return; }
         var install = _installs.All[_editorChoice.SelectedIndex];
         var previous = EditorInstalls.ProjectVersion(project.Path);
-        if (previous != null && previous != install.Version &&
+        // Package で新しい版へ上げる時は聞かない (Package は一番新しい版を使う。古い版で開く時だけ聞く。v1.1)
+        var upgrade = EditorInstalls.PackageRoot != null && System.Version.TryParse(previous, out var previousNumber) && install.Number > previousNumber;
+        if (previous != null && previous != install.Version && !upgrade &&
             MessageBox.Show(this, $"This project was last opened with editor {previous}.\nOpen it with {install.Version}?",
                             "Different editor version", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         try

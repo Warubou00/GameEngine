@@ -3,7 +3,8 @@
 # Package を作る (Visual Studio / .NET / DirectX の SDK を入れていない PC へ持っていくためのフォルダ)
 #   python Tools/make_package.py [--skip-build] [--out <フォルダ>]
 #     --skip-build : ビルドしない (前にビルドした物を写すだけ)
-#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher / Editor / Project は作り直す
+#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher / Editor は作り直す
+#                    (Luncher/Data と Project/SampleProject は残す。--fresh-project で SampleProject を写し直す)
 #
 #   Package/
 #     Luncher/                        ランチャー (GameEngine.Launcher.exe) + dotnet (.NET の動かすだけの物)
@@ -122,6 +123,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--out", default=os.path.join(ROOT, "Package"))
+    parser.add_argument("--fresh-project", action="store_true", help="SampleProject をリポジトリから写し直す")
     args = parser.parse_args()
     name, version = engine_props()
     folder_name = f"{name.replace(' ', '')}_v{version}"
@@ -132,12 +134,25 @@ def main():
         build()
 
     # 作り直す (Package の中の 3 つのフォルダだけ。Package の他の物は消さない)
+    #   Editor : 前の版のフォルダも消す (いつも一番新しい版だけ。ランチャーもその版を使う)
+    #   Luncher/Data (ランチャーの設定) と Project/SampleProject (Package の中で作った物) は残す (v1.1。以前は作り直すたびに消えた)
     os.makedirs(out, exist_ok=True)
+    keep = os.path.join(out, "_keep")
+    if os.path.isdir(keep):
+        shutil.rmtree(keep)
+    os.makedirs(keep)
+    kept = {}
+    for name, rel in [("Data", os.path.join("Luncher", "Data")), ("SampleProject", os.path.join("Project", "SampleProject"))]:
+        if os.path.isdir(os.path.join(out, rel)):
+            shutil.move(os.path.join(out, rel), os.path.join(keep, name))
+            kept[name] = rel
     for sub in ["Luncher", "Editor", "Project"]:
         path = os.path.join(out, sub)
         if os.path.isdir(path):
             shutil.rmtree(path)
         os.makedirs(path)
+    if "Data" in kept:
+        shutil.move(os.path.join(keep, "Data"), os.path.join(out, kept["Data"]))
 
     no_pdb = lambda rel: rel.lower().endswith(".pdb")
 
@@ -170,8 +185,17 @@ def main():
         return (low.startswith("build/") or low in ("projectversion.txt", "imgui.ini") or
                 ("scripts" in parts[:1] and ("bin" in parts or "obj" in parts)) or
                 any(p.startswith("_determinismtest") or p.startswith("_displaynametest") for p in parts))
-    n = copy_tree(os.path.join(CS, "Project"), os.path.join(out, "Project", "SampleProject"), project_skip)
-    print(f"SampleProject : {n} files")
+    sample = os.path.join(out, "Project", "SampleProject")
+    if "SampleProject" in kept and not args.fresh_project:
+        # 前の Package の SampleProject を残し、リポジトリの Scripts の csproj だけ新しくする (ビルドの仕方が版で変わるため)
+        shutil.move(os.path.join(keep, "SampleProject"), sample)
+        for rel in [os.path.join("Scripts", "Game.csproj"), os.path.join("Scripts", "Editor", "GameEditor.csproj")]:
+            shutil.copy2(os.path.join(CS, "Project", rel), os.path.join(sample, rel))
+        print("SampleProject : kept (csproj updated. --fresh-project to copy it again)")
+    else:
+        n = copy_tree(os.path.join(CS, "Project"), sample, project_skip)
+        print(f"SampleProject : {n} files")
+    shutil.rmtree(keep, ignore_errors=True)
 
     write_text(os.path.join(out, "README.txt"), f"""{name} {version}
 
