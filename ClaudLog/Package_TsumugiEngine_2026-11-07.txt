@@ -1,0 +1,103 @@
+﻿Package 化 (Tsumugi Engine v1.0.0.0) 2026-11-07
+ブランチ : feature/package
+
+■ やったこと
+1. エンジン名とアイコン
+  - 名前 : Tsumugi Engine (紡ぎ)。版 : 1.0.0.0
+  - CSharp_console/Engine.props を新しく作り、名前 / 版 / アイコンを 1 か所にまとめた
+    (Runtime / Editor / Launcher / Player の csproj が読む)
+    以前はエディターとランチャーの csproj にそれぞれ <Version>0.9.0</Version> を書いていた
+  - アイコン : CSharp_console/Branding/make_icon.py で作る (Python の標準ライブラリだけで描く)
+    図柄は、藍色の角丸の四角 / 立方体 / 上の面に T / 立方体を巻く金の糸
+    TsumugiEngine.ico (16 から 256) と、見本の TsumugiEngine_256.png
+  - Runtime に EngineInfo (Name / Version / ExeIcon) を足した
+    窓のタイトルとアイコンに使う
+    以前はタイトルが "GameEngine" / "GameEngine Editor" / "GameEngine Launcher" で、窓のアイコンは WinForms の既定だった
+
+2. Package の作り方 : python Tools/make_package.py [--skip-build]
+  Package/
+    Luncher/                      ランチャーと dotnet (.NET の動かすだけの物)
+    Editor/TsumugiEngine_v1.0.0.0/
+      Editor/                     エディター
+      Shader/
+      Player/                     ゲームの書き出しに使う
+      dotnet/                     .NET SDK 9.0.310 (ゲームのコードのビルドに使う)
+    Project/SampleProject/        CSharp_console/Project の写し
+                                  (Build / bin / obj / ProjectVersion.txt は入れない)
+    README.txt
+  大きさ : Luncher 169 MB / Editor 694 MB / Project 94 MB
+  .NET は、この PC の C:\Program Files\dotnet から要る分だけ写す。ダウンロードはしていない
+  Package/ は .gitignore に入れた
+
+3. 外部の PC 向けにプロジェクトの設定を変えた
+  - C++ の Release : Renderer / Audio / Physics を /MD から /MT にした
+    以前は MSVCP140.dll / VCRUNTIME140.dll が要った
+    Core / RHI は前から /MT だった
+  - vcomp140.dll (OpenMP) を NativeEngine.targets が VS の Redist から写す
+    RHI.dll (DirectXTex) が使うが、以前は写していなかった
+  - 確かめた結果、ネイティブの DLL が使う物は Windows の DLL だけになった
+    d3d12 / dxgi / D3DCOMPILER_47 / XINPUT1_4 / DINPUT8 / xaudio2_9 など
+    dxcompiler.dll / dxil.dll は前から写している
+  - .NET を同梱した
+    exe は AppHostDotNetSearch=AppRelative;Global で作る
+      エディター : ../dotnet を探す
+      ランチャー / Player : exe の隣の dotnet を探す
+    .NET の SDK は、この設定を publish の exe にしか付けない
+    そこで Engine.props の UseAppRelativeAppHost が publish 用の exe を作り、build の exe と入れ替える
+    self-contained にしなかった理由 : runtime pack を NuGet からダウンロードする必要があるため
+  - Game.csproj / GameEditor.csproj
+    リポジトリの中では GameEngine.Runtime.csproj を参照する
+    リポジトリの外では EngineAssemblyDir (エディターのフォルダ) の GameEngine.Runtime.dll を参照する
+    以前はいつも ..\..\GameEngine.Runtime を参照していたので、リポジトリの外ではビルドできなかった
+  - エディター : DotnetTool を新しく作った
+    同梱の SDK があればそれを使う。無ければ PATH の dotnet を使う
+    EngineAssemblyDir を渡す
+    利用状況の送信と初回の案内を切る
+    以前は ScriptHost / GameBuilder がそれぞれ PATH の "dotnet" を起動していた
+  - Package のエディター / ランチャー (同梱の dotnet がある時) はリポジトリを探さない
+    Package がリポジトリの中にあっても、Package の物だけを使う
+    エディターのプロジェクトの既定 : Project/SampleProject
+    ランチャー : 設定を Luncher/Data に書く (持ち運べる)
+                 Package の Editor を Package という種類で出す
+                 初めての起動で Project の下を一覧に入れる
+  - ゲームの書き出し : exe の隣の dotnet に .NET を写す (Build Settings の Include .NET。既定でオン。約 100 MB)
+    書き出したゲームも .NET の無い PC で動く
+    Player は使っている .NET の場所をログに出す
+
+■ 確かめた時に分かって直した事
+  - AspNetCore の参照用のパックが無いと、インターネットに繋がらない PC では Game.csproj の復元が NU1100 で失敗した
+    SDK は使わない framework の参照パックも探すため。make_package.py で packs/Microsoft.AspNetCore.App.Ref を入れるようにした
+  - build の exe は同梱の dotnet があっても C:\Program Files\dotnet の .NET で動いていた
+    動いているプロセスの読んだ DLL を見て気付いた。上の exe の入れ替えで直した
+  - エディターを閉じても、同梱の SDK の VBCSCompiler が約 10 分残っていた。その間 Package のフォルダを消せなかった
+    Package のエディターは閉じる時に dotnet build-server shutdown を呼ぶようにした
+  - EditorTest の「書き出しに Editor という名前のファイルが無い」確認が、.NET の System.Windows.Forms.Design.Editors.dll に引っかかった
+    dotnet フォルダを除いて調べるようにした
+    代わりに「.NET が入っている」「書き出したゲームは隣の .NET で動く」の確認を足した
+
+■ 動作の確認 (環境の無い PC を真似た)
+  確かめ方 : Package をリポジトリの外 (D:\TsumugiPackageTest) に写し、次の状態で起動した
+    PATH は Windows だけ
+    DOTNET_* / VS / MSBuild の環境変数を外した
+    NuGet のキャッシュは空
+    NuGet.Config で取得先を全部外した (インターネットに繋がらない状態と同じ)
+  - エディター
+    .NET (hostfxr / coreclr / WinForms) は全部 Package の dotnet から読んでいた
+    Program Files\dotnet や VS の物は読んでいない
+    ゲームのコードは同梱の SDK でビルドできた (初回 16 秒 / 2 回目から 3 から 5 秒)
+    NuGet から取った物は 0
+  - ランチャー
+    同梱の .NET で起動した。タイトルは "Tsumugi Engine Launcher 1.0.0.0" で、アイコンも出た
+    SampleProject と Package のエディターが一覧に出た
+    Open でエディターが開いた (PrintWindow で撮って確かめた)
+  - エディターの自動テスト (--editor-test) を Package の環境で動かした : 250 / 0
+    書き出したゲームを 10 シーン動かし、エディターの再生と同じ動きになることも確かめた
+    書き出したゲームが隣の dotnet で動くことも確かめた
+  - 閉じた後に残るプロセスは無い
+  - リポジトリ (開発) の --editor-test : Release 250 / 0、Debug 250 / 0 (D3D12 のエラー 0)
+    以前は 248 項目。.NET が入っているかと、隣の .NET で動くかの 2 つを足した
+
+■ 外部の PC で要る物
+  Windows 10 / 11 (64 bit) と、DirectX 12 に対応した GPU
+  (D3D12 / XAudio2 / D3DCompiler_47 は Windows に入っている)
+  本当に別の PC では確かめていない (この PC で、環境を外した状態を真似ただけ)

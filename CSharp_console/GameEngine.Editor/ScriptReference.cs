@@ -45,7 +45,7 @@ internal sealed class ScriptReference
         _scriptsFolder = scriptsFolder;
         _engineDocs.AddEmbedded(EditorAssembly, "RuntimeSource/");
         _engineDocs.AddEmbedded(EditorAssembly, "EditorSource/");
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        for (var dir = DotnetTool.IsPackaged ? null : new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)   // Package のエディターは埋め込んだソースだけ
             if (File.Exists(Path.Combine(dir.FullName, "GameEngine.sln"))) { _repoRoot = dir.FullName; break; }
     }
 

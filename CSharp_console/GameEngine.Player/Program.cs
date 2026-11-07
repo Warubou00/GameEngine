@@ -58,6 +58,8 @@ internal static class Program
         if (!Directory.Exists(data)) throw new DirectoryNotFoundException($"Data folder not found : {data}");
         var settings = PlayerSettings.Load(Path.Combine(data, PlayerSettings.FileName));
         Console.WriteLine($"[Player] {settings.ProductName} : data {data}");
+        // どの .NET で動いているか (exe の隣の dotnet か、PC に入っている物か。Package 化で足した)
+        Console.WriteLine($"[Player] .NET {Environment.Version} : {Path.GetDirectoryName(typeof(object).Assembly.Location)}");
 
         using var engine = new Engine(new EngineSettings
         {

@@ -8,6 +8,7 @@
       - ゲーム (Game.dll) はこのプロジェクトを参照しない (出来上がったゲームにエディターの物が入らないように)
       - EditorAssemblyDir : 参照するエディターの GameEngine.Editor.dll / ImGui.NET.dll の場所 (エディターがビルドする時に渡す。
         IDE で開いた時は既定の Release の出力)
+      - エンジン (GameEngine.Runtime) : リポジトリの中は csproj を、外 (Package) は EngineAssemblyDir の DLL を参照する (Game.csproj と同じ)
     ==========================================================================
   -->
   <PropertyGroup>
@@ -23,13 +24,25 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Game.csproj" />
-    <ProjectReference Include="..\..\..\GameEngine.Runtime\GameEngine.Runtime.csproj" Private="false" />
     <Reference Include="GameEngine.Editor">
       <HintPath>$(EditorAssemblyDir)GameEngine.Editor.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="ImGui.NET">
       <HintPath>$(EditorAssemblyDir)ImGui.NET.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <EngineRuntimeProject>$(MSBuildThisFileDirectory)..\..\..\GameEngine.Runtime\GameEngine.Runtime.csproj</EngineRuntimeProject>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(EngineRuntimeProject)')">
+    <ProjectReference Include="$(EngineRuntimeProject)" Private="false" />
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('$(EngineRuntimeProject)')">
+    <Reference Include="GameEngine.Runtime">
+      <HintPath>$(EngineAssemblyDir)GameEngine.Runtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

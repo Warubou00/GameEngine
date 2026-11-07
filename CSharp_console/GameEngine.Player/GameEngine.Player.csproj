@@ -18,7 +18,12 @@
     <Platforms>AnyCPU;x64</Platforms>
     <RootNamespace>GameEngine.Player</RootNamespace>
     <AssemblyName>GameEngine.Player</AssemblyName>
+    <!-- 書き出したゲームは exe の隣の dotnet (エディターが .NET を写す) で動く。.NET を入れていない PC でも動かすため (Package 化で足した) -->
+    <AppHostRelativeDotNet>dotnet</AppHostRelativeDotNet>
   </PropertyGroup>
+
+  <!-- エンジンの名前 / 版 / アイコン -->
+  <Import Project="..\Engine.props" />
 
   <!-- C++ 側の DLL とシェーダーを出力フォルダへ (見本 / エディターと共通) -->
   <Import Project="..\NativeEngine.targets" />

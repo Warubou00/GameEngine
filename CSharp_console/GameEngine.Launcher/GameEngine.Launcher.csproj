@@ -17,7 +17,11 @@
     <RootNamespace>GameEngine.Launcher</RootNamespace>
     <AssemblyName>GameEngine.Launcher</AssemblyName>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>0.9.0</Version>
+    <!-- Package : 同梱の .NET (動かすだけの物) は exe の隣の dotnet。版は ../Engine.props (以前はここの <Version> 0.9.0) -->
+    <AppHostRelativeDotNet>dotnet</AppHostRelativeDotNet>
   </PropertyGroup>
+
+  <!-- エンジンの名前 / 版 / アイコン (Package 化で足した) -->
+  <Import Project="..\Engine.props" />
 
 </Project>

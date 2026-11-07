@@ -199,7 +199,7 @@ internal sealed partial class EditorApp
         var name = _scenePath != null ? Path.GetFileName(_scenePath) : "(new scene)";
         var dirty = _undo.State != _savedState ? "*" : "";
         var state = _playing ? (_paused ? " [Paused]" : " [Playing]") : "";
-        var title = $"GameEngine Editor - {name}{dirty}{state}";
+        var title = $"{EngineInfo.Name} Editor - {name}{dirty}{state}";   // 以前は "GameEngine Editor"
         if (title == _title) return;   // Window.Text を読むと毎フレーム Win32 を呼ぶので、自分で覚えた値と比べる
         _title = title;
         _engine.Window.Text = title;
@@ -394,7 +394,7 @@ internal sealed partial class EditorApp
         {
             ImGui.MenuItem("Script Reference", "Ctrl+H", ref _showReference);
             ImGui.Separator();
-            ImGui.TextDisabled($"GameEngine Editor {EditorVersion.Display}");
+            ImGui.TextDisabled($"{EngineInfo.Name} Editor {EditorVersion.Display}");
             ImGui.EndMenu();
         }
         ImGui.TextDisabled(_scenePath != null ? $"   {Path.GetFileName(_scenePath)}{(_undo.State != _savedState ? " *" : "")}" : "   (new scene)");

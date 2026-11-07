@@ -131,20 +131,10 @@ internal sealed class ScriptHost : IDisposable
         try
         {
             // エディターの拡張は、今動いているエディターの GameEngine.Editor.dll / ImGui.NET.dll を参照してビルドする
+            // dotnet は DotnetTool (Package では同梱の SDK。エンジンの DLL の場所 EngineAssemblyDir も渡す。以前は PATH の dotnet だけ)
             var target = hasEditorProject ? _editorProject : _project;
-            var editorDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var info = new ProcessStartInfo("dotnet")
-            {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-                WorkingDirectory = _folder,
-            };
-            foreach (var argument in new[] { "build", target, "-c", "Debug", "-nologo", "-v", "q", "-clp:NoSummary", $"-p:EditorAssemblyDir={editorDir}" })
-                info.ArgumentList.Add(argument);   // 引数は 1 つずつ渡す (空白や \ を含むパスでも引用符を気にしなくてよい)
-            using var process = Process.Start(info)!;
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            return (process.ExitCode == 0, output.Result + error, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+            var (ok, log) = DotnetTool.Build(target, "Debug", $"-p:EditorAssemblyDir={DotnetTool.EditorDir}");
+            return (ok, log, Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
         catch (Exception ex)
         {

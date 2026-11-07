@@ -11,7 +11,8 @@ namespace GameEngine.Editor;
 //   手順 : 1. 使っているアセットを探す (AssetDependencies。メインのスレッド)
 //          2. Player と Game を Release でビルド (dotnet build。別のスレッド)
 //          3. 書き出し先を空にして写す (前に書き出したフォルダ (Data/player.json がある) か、空のフォルダだけ。他の物は消さない)
-//   書き出したフォルダ : <名前>.exe ... / Shader / Data (player.json / ProjectSettings.json / Assets)
+//   書き出したフォルダ : <名前>.exe ... / Shader / Data (player.json / ProjectSettings.json / Assets) /
+//                        dotnet (.NET の動かすだけの物。exe はまずここを探す。.NET を入れていない PC でも動かすため。Package 化で足した)
 // ==========================================================================
 
 // 書き出しの設定 (プロジェクトのフォルダの BuildSettings.json に覚える)
@@ -27,6 +28,7 @@ internal sealed class BuildSettings
     public List<string> Scenes       { get; set; } = new();   // 入れるシーン (アセットのパス。0 番が最初のシーン)
     public string       OutputFolder { get; set; } = "Build"; // プロジェクトのフォルダからの相対パスか絶対パス
     public bool         DebugSymbols { get; set; }            // .pdb も入れるか
+    public bool         IncludeDotnet { get; set; } = true;   // .NET (動かすだけの物) を exe の隣の dotnet に入れるか (.NET を入れていない PC でも動く。約 100 MB)
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public static BuildSettings Load(string file)
@@ -69,8 +71,8 @@ internal sealed class GameBuilder
     {
         _database = database;
         GameProject = Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj");
-        // エディターの exe から上に辿って CSharp_console/GameEngine.Player を探す
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        // エディターの exe から上に辿って CSharp_console/GameEngine.Player を探す (Package のエディターは探さない : 同梱のビルド済みの Player を使う)
+        for (var dir = DotnetTool.IsPackaged ? null : new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
             var candidate = Path.Combine(dir.FullName, "CSharp_console", "GameEngine.Player", "GameEngine.Player.csproj");
             if (File.Exists(candidate)) { PlayerProject = candidate; break; }
@@ -143,6 +145,12 @@ internal sealed class GameBuilder
             copyFile(file, Path.Combine(output, name.Equals("GameEngine.Player.exe", StringComparison.OrdinalIgnoreCase) ? exeName : name));
         }
         result.ExePath = Path.Combine(output, exeName);
+        // .NET (エディターが今使っている物と同じ版。Player の exe は隣の dotnet を先に探す)
+        if (settings.IncludeDotnet)
+        {
+            progress?.Invoke("Copying .NET...");
+            if (copyDotnetRuntime(Path.Combine(output, "dotnet")) is { } dotnetWarning) result.Warnings.Add(dotnetWarning);
+        }
         // ゲームのコード (Game.dll と、ゲームが使うライブラリ。エンジンは Player の物を使う)
         if (gameOutput != null)
         {
@@ -275,6 +283,33 @@ internal sealed class GameBuilder
         return hash;
     }
 
+    // .NET の動かすだけの物 (host/fxr + shared の Microsoft.NETCore.App と Microsoft.WindowsDesktop.App) を写す
+    //   元 : エディターが今動いている .NET (Package では同梱の dotnet、開発では PC の dotnet)。戻り値 = 警告 (写せなかった時)
+    private static string? copyDotnetRuntime(string target)
+    {
+        var core    = Path.GetDirectoryName(typeof(object).Assembly.Location)!;                    // <root>/shared/Microsoft.NETCore.App/<版>
+        var desktop = Path.GetDirectoryName(typeof(System.Windows.Forms.Form).Assembly.Location)!; // <root>/shared/Microsoft.WindowsDesktop.App/<版>
+        var root    = Path.GetFullPath(Path.Combine(core, "..", "..", ".."));
+        var fxrRoot = Path.Combine(root, "host", "fxr");
+        if (!Directory.Exists(fxrRoot) || !File.Exists(Path.Combine(core, "coreclr.dll")))
+            return $"The .NET runtime was not copied (not found next to {core}). The game needs .NET 9 installed.";
+        // hostfxr は今の .NET と同じ版 (無ければ一番新しい物)
+        var version = Path.GetFileName(core);
+        var fxr = Directory.Exists(Path.Combine(fxrRoot, version)) ? Path.Combine(fxrRoot, version)
+            : Directory.EnumerateDirectories(fxrRoot).OrderByDescending(d => System.Version.TryParse(Path.GetFileName(d), out var v) ? v : new System.Version()).First();
+        void copyTree(string from, string to)
+        {
+            foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+                copyFile(file, Path.Combine(to, Path.GetRelativePath(from, file)));
+        }
+        copyTree(fxr, Path.Combine(target, "host", "fxr", Path.GetFileName(fxr)));
+        copyTree(core, Path.Combine(target, "shared", "Microsoft.NETCore.App", Path.GetFileName(core)));
+        copyTree(desktop, Path.Combine(target, "shared", "Microsoft.WindowsDesktop.App", Path.GetFileName(desktop)));
+        foreach (var notice in new[] { "LICENSE.txt", "ThirdPartyNotices.txt" })
+            if (File.Exists(Path.Combine(root, notice))) copyFile(Path.Combine(root, notice), Path.Combine(target, notice));
+        return null;
+    }
+
     private static void copyFile(string source, string target)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
@@ -288,27 +323,8 @@ internal sealed class GameBuilder
         return safe.Length > 0 ? safe : "Game";
     }
 
-    private static (bool Ok, string Log) dotnetBuild(string project)
-    {
-        try
-        {
-            var info = new ProcessStartInfo("dotnet")
-            {
-                RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
-                WorkingDirectory = Path.GetDirectoryName(project)!,
-            };
-            foreach (var argument in new[] { "build", project, "-c", "Release", "-nologo", "-v", "q", "-clp:NoSummary" }) info.ArgumentList.Add(argument);
-            using var process = Process.Start(info)!;
-            var output = process.StandardOutput.ReadToEndAsync();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            return (process.ExitCode == 0, output.Result + error);
-        }
-        catch (Exception ex)
-        {
-            return (false, $"dotnet build could not run : {ex.Message}");
-        }
-    }
+    // Release でビルド (dotnet は DotnetTool : Package では同梱の SDK。以前は PATH の dotnet)
+    private static (bool Ok, string Log) dotnetBuild(string project) => DotnetTool.Build(project, "Release");
 
     private static string errorsOf(string log)
     {

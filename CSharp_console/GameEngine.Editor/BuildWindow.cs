@@ -118,6 +118,10 @@ internal sealed class BuildWindow
         ImGui.SameLine();
         var symbols = Settings.DebugSymbols;
         if (ImGui.Checkbox("Debug Symbols (.pdb)", ref symbols)) { Settings.DebugSymbols = symbols; changed = true; }
+        ImGui.SameLine();
+        var dotnet = Settings.IncludeDotnet;   // .NET を入れていない PC でも動くように .NET を入れる (Package 化で足した)
+        if (ImGui.Checkbox("Include .NET", ref dotnet)) { Settings.IncludeDotnet = dotnet; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy the .NET runtime next to the exe (about 100 MB).\nThe game then runs on PCs without .NET installed.");
 
         // ---------- シーン ----------
         ImGui.SeparatorText("Scenes (the first one starts)");

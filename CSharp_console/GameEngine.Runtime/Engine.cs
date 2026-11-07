@@ -10,7 +10,7 @@ namespace GameEngine;
 // ==========================================================================
 public sealed class EngineSettings
 {
-    public string Title  { get; init; } = "GameEngine";
+    public string Title  { get; init; } = EngineInfo.Name;   // 以前は "GameEngine"
     public int    Width  { get; init; } = 1280;   // 描画領域 (クライアント領域) の大きさ
     public int    Height { get; init; } = 720;
     public bool   VSync  { get; init; } = false;  // false : 対応環境ではテアリングを許可して上限なしで描く
@@ -422,6 +422,7 @@ public sealed class Engine : IDisposable
             ClientSize = new Size(settings.Width, settings.Height),
             Text       = settings.Title,
         };
+        if (EngineInfo.ExeIcon() is { } icon) _window.Icon = icon;   // exe のアイコンを窓にも (以前は WinForms の既定のアイコン)
         _window.FormClosed += (_, _) => _closed = true;
         _window.Show();
 

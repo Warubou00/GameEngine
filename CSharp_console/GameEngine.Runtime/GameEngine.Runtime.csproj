@@ -22,4 +22,7 @@
     <AssemblyName>GameEngine.Runtime</AssemblyName>
   </PropertyGroup>
 
+  <!-- エンジンの名前 / 版 (EngineInfo が読む。Package 化で足した) -->
+  <Import Project="..\Engine.props" />
+
 </Project>
