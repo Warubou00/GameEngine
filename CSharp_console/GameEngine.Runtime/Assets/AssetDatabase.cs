@@ -15,7 +15,7 @@ namespace GameEngine;
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 //   - 表示名 : .meta の "displayName" (エディターの Project に出す名前だけ。ファイル / フォルダの名前とパスはそのまま)
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation }
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script }
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -68,6 +68,7 @@ public sealed class AssetDatabase
             ".png" or ".jpg" or ".jpeg" or ".bmp" or ".tga" or ".dds" => AssetKind.Texture,
             ".wav"                                        => AssetKind.Sound,
             ".hlsl"                                       => AssetKind.Shader,   // 自分のシェーダー (SH2)
+            ".cs"                                         => AssetKind.Script,   // ゲームのコード (Assets の .cs も Game.csproj がビルドする。v1.1)
             ".txt" or ".mtl" or ".json" or ".md"          => AssetKind.Text,
             _                                             => AssetKind.Other,
         };
@@ -257,6 +258,33 @@ public sealed class AssetDatabase
     //   newName は拡張子を除いた名前 (拡張子は前のまま。".scene.json" のような 2 つの拡張子も)。戻り値 = 新しいアセットのパス
     // ---------------------------------------------------------------------
     public event Action<string, string>? Renamed;   // (前のパス, 新しいパス)。フォルダは中の物ごとには呼ばない
+
+    // ---------------------------------------------------------------------
+    // 消す (v1.1。エディターの Project の右クリック > Delete)
+    //   ファイル / フォルダ (中の物ごと) と .meta、テクスチャの DDS キャッシュを消す。toRecycleBin = ごみ箱へ (Windows の元に戻すで戻せる)
+    //   Assets は消せない。戻り値 = 消したアセットの数 (フォルダは中の物も数える)
+    // ---------------------------------------------------------------------
+    public int Delete(string assetPath, bool toRecycleBin = true)
+    {
+        var entry = Find(assetPath) ?? throw new FileNotFoundException($"Not an asset : {assetPath}");
+        assetPath = entry.Path;
+        if (assetPath == AssetsFolder) throw new InvalidOperationException("The Assets folder cannot be deleted");
+        var count = _byPath.Keys.Count(p => p.Equals(assetPath, StringComparison.OrdinalIgnoreCase) || p.StartsWith(assetPath + "/", StringComparison.OrdinalIgnoreCase));
+        var full = FullPath(assetPath);
+        var recycle = toRecycleBin ? Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin : Microsoft.VisualBasic.FileIO.RecycleOption.DeletePermanently;
+        var ui = Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs;
+        void deleteFile(string file) { if (File.Exists(file)) Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(file, ui, recycle); }
+        if (entry.Kind == AssetKind.Folder) Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(full, ui, recycle);
+        else
+        {
+            foreach (var cache in Directory.EnumerateFiles(Path.GetDirectoryName(full)!, Path.GetFileName(full) + ".v*.dds")) deleteFile(cache);
+            deleteFile(full);
+        }
+        deleteFile(full + ".meta");
+        Refresh();
+        Version++;
+        return count;
+    }
 
     private readonly Dictionary<string, Guid> _moved = new(StringComparer.OrdinalIgnoreCase);
 

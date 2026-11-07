@@ -55,6 +55,10 @@ internal sealed partial class EditorApp
     private Vector3 _cameraPosition = new(0, 5, -10);
     private float   _yaw, _pitch = 20.0f;
     private float   _cameraSpeed = 8.0f;
+    // 注視点までの距離 (v1.1)。注視点 = 位置 + 前 x 距離。ホイールはこの距離を変える (注視点へ寄る / 離れる)
+    //   以前は注視点が無く、ホイールは移動の速さを変えていた (今は右ボタンを押している間だけ速さ)
+    private float   _pivotDistance = 10.0f;
+    private const float MinPivotDistance = 0.2f, MaxPivotDistance = 5000.0f;
     private const float FieldOfView = 57.29578f;
     private bool    _sceneHovered;
     private bool    _flying;
@@ -81,6 +85,9 @@ internal sealed partial class EditorApp
         database.Renamed += onAssetRenamed;   // ED10
         _project.PrefabChanged = SyncPrefab;   // ED8
         _scripts = new ScriptHost(engine, Path.Combine(database.ProjectRoot, "Scripts", "Game.csproj"));
+        // IDE でゲームの csproj をビルドする時の、エンジン / エディターの DLL の場所 (v1.1。Library/EngineReferences.props)
+        try { ScriptEditor.WriteReferences(database.ProjectRoot); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.WriteLine($"[Scripts] Cannot write EngineReferences.props : {ex.Message}"); }
         _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
         _graph = new ShaderGraphWindow(engine, database);   // SH4
         _project.OpenShaderGraph = path => OpenShaderGraph(path);
@@ -217,6 +224,7 @@ internal sealed partial class EditorApp
             var f = t.Forward;
             _yaw   = MathF.Atan2(f.X, f.Z) * MathEx.Rad2Deg;
             _pitch = -MathF.Asin(Math.Clamp(f.Y, -1.0f, 1.0f)) * MathEx.Rad2Deg;
+            _pivotDistance = 10.0f;
             return;
         }
     }
@@ -335,6 +343,7 @@ internal sealed partial class EditorApp
         if (ImGui.BeginMenu("Scripts"))
         {
             if (ImGui.MenuItem("Rebuild", null, false, !_scripts.IsBuilding)) _scripts.RequestBuild();
+            if (ImGui.MenuItem("Open C# Project")) Console.WriteLine($"[Scripts] {ScriptEditor.Open(_database.ProjectRoot, null)}");   // v1.1 : sln を作って開く
             if (ImGui.MenuItem("Open Scripts Folder")) System.Diagnostics.Process.Start("explorer.exe", $"\"{Path.Combine(_database.ProjectRoot, "Scripts")}\"");
             ImGui.Separator();
             ImGui.TextDisabled($"Game.dll #{_scripts.LoadCount}, {_scripts.SystemCount} systems, last build {_scripts.LastBuildMs:F0} ms");
@@ -428,7 +437,8 @@ internal sealed partial class EditorApp
             if (ImGui.IsKeyPressed(ImGuiKey.H)) _showReference = !_showReference;   // ED9 (F1 は C++ のプロファイラーが使う)
             return;
         }
-        if (ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected)) DeleteSelected();
+        // Delete : Project にフォーカスがある時はアセットを消す方 (ProjectPanel)。以前はシーンの物も一緒に消えた (v1.1)
+        if (ImGui.IsKeyPressed(ImGuiKey.Delete) && World.IsAlive(_selected) && !_project.HasFocus) DeleteSelected();
         if (_flying) return;
         if (ImGui.IsKeyPressed(ImGuiKey.W)) _gizmo.Mode = GizmoMode.Translate;
         if (ImGui.IsKeyPressed(ImGuiKey.E)) _gizmo.Mode = GizmoMode.Rotate;
@@ -488,7 +498,7 @@ internal sealed partial class EditorApp
                     var mouse = ImGui.GetIO().MousePos;
                     Selected = _picker.Pick(_cameraPosition, camera.RayDirection(mouse), out _);
                 }
-                draw.AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Click : select / Right drag : look / WASD QE : move / W E R : gizmo / F : focus");
+                draw.AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Click : select / Right drag : look (+ WASD QE : move) / Wheel : zoom / W E R : gizmo / F : focus");
             }
             else
             {
@@ -645,7 +655,42 @@ internal sealed partial class EditorApp
             radius = Math.Max((Vector3.TransformNormal(max - min, matrix)).Length() * 0.5f, 0.1f);
         }
         var forward = Vector3.Transform(Vector3.UnitZ, cameraRotation);
-        _cameraPosition = center - forward * (radius / MathF.Tan(FieldOfView * MathEx.Deg2Rad * 0.5f) * 1.3f);
+        _pivotDistance = Math.Clamp(radius / MathF.Tan(FieldOfView * MathEx.Deg2Rad * 0.5f) * 1.3f, MinPivotDistance, MaxPivotDistance);
+        _cameraPosition = center - forward * _pivotDistance;   // 注視点 = 選んだ物の中心 (v1.1)
+    }
+
+    // ---------------------------------------------------------------------
+    // エディターのカメラの位置 / 注視点 (v1.1。確認 (EditorTest) からも使う)
+    // ---------------------------------------------------------------------
+    public Vector3 CameraPosition => _cameraPosition;
+    public Vector3 CameraForward  => Vector3.Transform(Vector3.UnitZ, cameraRotation);
+    public Vector3 CameraPivot    => _cameraPosition + CameraForward * _pivotDistance;
+    public float   CameraPivotDistance => _pivotDistance;
+
+    /// <summary>
+    /// カメラの軸 (右 / 上 / 前) の向きに、位置と注視点を一緒に平行移動する (move はそれぞれの軸の量 (メートル))
+    /// 右ボタンを押している間の W S (前後) / A D (左右) / Q E (下上)
+    /// </summary>
+    public void MoveCamera(Vector3 move)
+    {
+        var rotation = cameraRotation;
+        _cameraPosition += Vector3.Transform(Vector3.UnitX, rotation) * move.X + Vector3.Transform(Vector3.UnitY, rotation) * move.Y +
+                           Vector3.Transform(Vector3.UnitZ, rotation) * move.Z;
+    }
+
+    /// <summary>
+    /// ズーム : 注視点へ寄る (wheel > 0) / 離れる。1 目盛りで距離が 0.85 倍 (近いほど細かく動く)
+    /// 一番近くまで寄った後も回すと、注視点ごと前へ進む (止まって動けなくならないように)
+    /// </summary>
+    public void ZoomCamera(float wheel)
+    {
+        if (wheel == 0.0f) return;
+        var forward = CameraForward;
+        var wanted = _pivotDistance * MathF.Pow(0.85f, wheel);
+        var distance = Math.Clamp(wanted, MinPivotDistance, MaxPivotDistance);
+        // 位置は (前の距離 - 欲しい距離) だけ前へ。距離が一番近くで止まった分は注視点も前へ進む
+        _cameraPosition += forward * (_pivotDistance - wanted);
+        _pivotDistance = distance;
     }
 
     // エディターのカメラ : シーンビューの上で右ボタンを押している間だけ動く (FreeCamera と同じ操作)
@@ -653,7 +698,12 @@ internal sealed partial class EditorApp
     {
         var flying = Input.GetMouseButton(MouseButtons.Right) && (_sceneHovered || _flying);
         _flying = flying;
-        if (_sceneHovered && Input.ScrollDelta != 0.0f) _cameraSpeed = Math.Clamp(_cameraSpeed * MathF.Pow(1.2f, Input.ScrollDelta), 0.5f, 500.0f);
+        // ホイール : ズーム (注視点へ寄る / 離れる。v1.1)。右ボタンを押している間は移動の速さ (以前はいつも速さだった)
+        if (_sceneHovered && Input.ScrollDelta != 0.0f)
+        {
+            if (flying) _cameraSpeed = Math.Clamp(_cameraSpeed * MathF.Pow(1.2f, Input.ScrollDelta), 0.5f, 500.0f);
+            else ZoomCamera(Input.ScrollDelta);
+        }
         if (flying)
         {
             var delta = Input.MouseDelta;
@@ -671,7 +721,8 @@ internal sealed partial class EditorApp
             if (Input.GetKey(Keys.E)) move.Y += 1;
             if (Input.GetKey(Keys.Q)) move.Y -= 1;
             var speed = _cameraSpeed * (Input.GetKey(Keys.ShiftKey) ? 4.0f : 1.0f) * Time.DeltaTime;
-            _cameraPosition += (Vector3.Transform(Vector3.UnitX, rotation) * move.X + Vector3.UnitY * move.Y + Vector3.Transform(Vector3.UnitZ, rotation) * move.Z) * speed;
+            // カメラの軸の向きに、位置と注視点を一緒に動かす (v1.1。以前の Q / E はワールドの上下だった)
+            MoveCamera(move * speed);
         }
         _engine.Graphics.CameraOverride = _gameView ? null : new CameraOverride
         {

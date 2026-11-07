@@ -1842,6 +1842,89 @@ internal sealed class EditorTest
         File.Delete(database.FullPath(dnRoot) + ".meta");
         database.Refresh();
 
+        // ---------- v1.1 : Create > Scripts > Behaviour / .cs を開く sln / Delete ----------
+        var scRoot = "Assets/_ScriptTest";
+        Directory.CreateDirectory(database.FullPath(scRoot));
+        database.Refresh();
+        var scLoads = _app.Scripts.LoadCount;
+        // 1. 作る : 今のフォルダに NewBehaviour.cs ができ、すぐ名前を書く欄になる → "Mover Test" と書くと、型の名前は Mover_Test
+        ImGui.SetWindowFocus("Project");
+        _app.Project.CreateFolderForTest(scRoot);
+        var scCreated = _app.Project.CreateBehaviour();
+        check(scCreated == $"{scRoot}/NewBehaviour.cs" && database.Find(scCreated)?.Kind == AssetKind.Script && _app.Project.IsRenaming &&
+              File.ReadAllText(database.FullPath(scCreated)).Contains("public struct NewBehaviour : IComponent"),
+              $"Create > Scripts > Behaviour makes {scCreated} (Script) and starts renaming");
+        foreach (var _ in typeAndPress("Mover Test", ImGuiKey.Enter)) yield return 0;
+        var scPath = $"{scRoot}/Mover Test.cs";
+        var scText = File.Exists(database.FullPath(scPath)) ? File.ReadAllText(database.FullPath(scPath)) : "";
+        check(!File.Exists(database.FullPath(scCreated)) && scText.Contains("public struct Mover_Test : IComponent") && scText.Contains("class Mover_TestSystem : ISystem") &&
+              File.ReadAllBytes(database.FullPath(scPath)).Take(3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }),
+              "naming the new script renames the types too (Mover Test -> Mover_Test, UTF-8 BOM)");
+        // 2. Assets の .cs もビルドされる (Game.csproj)。コンポーネントと System が使える
+        var scWait = Time.TotalTime;
+        while (ComponentRegistry.Find("GameEngine_console.Mover_Test") == null && Time.TotalTime - scWait < 120) yield return 0;
+        check(ComponentRegistry.Find("GameEngine_console.Mover_Test") != null && _app.Scripts.LastError == null && _app.Scripts.LoadCount > scLoads,
+              $"the script in Assets is built and its component is usable ({_app.Scripts.LastBuildMs:F0} ms)");
+        // 3. ダブルクリックで開く sln (Visual Studio は確認では起動しない) : Game / GameEditor の csproj と、IDE 用の DLL の場所
+        var scSln = ScriptEditor.WriteSolution(database.ProjectRoot);
+        var scSlnText = File.ReadAllText(scSln);
+        var scProps = File.ReadAllText(Path.Combine(database.ProjectRoot, "Library", "EngineReferences.props"));
+        check(scSln == ScriptEditor.SolutionPath(database.ProjectRoot) && scSlnText.Contains(@"Scripts\Game.csproj") && scSlnText.Contains(@"Scripts\Editor\GameEditor.csproj") &&
+              scProps.Contains(DotnetTool.EditorDir) && ScriptEditor.WriteSolution(database.ProjectRoot) == scSln && File.ReadAllText(scSln) == scSlnText,
+              $"double-click makes {Path.GetFileName(scSln)} (Game + GameEditor, same ids when written again) and EngineReferences.props");
+        // 4. 消す : 右クリック > Delete / Delete キー → 確かめる窓 → 消す (.meta も)。型も無くなる
+        _app.Project.Select(database.Find(scPath));
+        ImGui.SetWindowFocus("Project");
+        yield return 0;
+        var scEntities = World.EntityCount;
+        io.AddKeyEvent(ImGuiKey.Delete, true);
+        yield return 0;
+        io.AddKeyEvent(ImGuiKey.Delete, false);
+        yield return 0;
+        check(_app.Project.PendingDelete == scPath && File.Exists(database.FullPath(scPath)) && World.EntityCount == scEntities,
+              "Delete key in Project asks before deleting the asset (the file is still there, no scene object deleted)");
+        var scLoads2 = _app.Scripts.LoadCount;
+        check(_app.Project.DeleteAsset(scPath, toRecycleBin: false) && !File.Exists(database.FullPath(scPath)) && !File.Exists(database.FullPath(scPath) + ".meta") &&
+              database.Find(scPath) == null && _app.Project.Selected == null && _app.Project.PendingDelete == null,
+              "Delete removes the file and its .meta");
+        scWait = Time.TotalTime;
+        while (_app.Scripts.LoadCount == scLoads2 && Time.TotalTime - scWait < 120) yield return 0;
+        check(ComponentRegistry.Find("GameEngine_console.Mover_Test") == null && _app.Scripts.LastError == null, "deleting the script removes its type");
+        // フォルダは中の物ごと / Assets は消せない / シーンの物は Project にフォーカスがあると消えない
+        File.WriteAllText(database.FullPath($"{scRoot}/a.txt"), "a");
+        Directory.CreateDirectory(database.FullPath($"{scRoot}/sub"));
+        File.WriteAllText(database.FullPath($"{scRoot}/sub/b.txt"), "b");
+        database.Refresh();
+        check(!_app.Project.DeleteAsset("Assets", toRecycleBin: false) && Directory.Exists(database.AssetsRoot), "the Assets folder cannot be deleted");
+        check(_app.Project.DeleteAsset(scRoot, toRecycleBin: false) && !Directory.Exists(database.FullPath(scRoot)) && !File.Exists(database.FullPath(scRoot) + ".meta") &&
+              !database.Entries.Any(e => e.Path.StartsWith(scRoot, StringComparison.OrdinalIgnoreCase)),
+              "deleting a folder deletes what is in it");
+        yield return 0;
+
+        // ---------- v1.1 : エディターのカメラ (右ボタン + WASD QE = カメラの軸に位置と注視点を平行移動 / ホイール = ズーム) ----------
+        {
+            var camPos = _app.CameraPosition;
+            var camPivot = _app.CameraPivot;
+            var camForward = _app.CameraForward;
+            _app.MoveCamera(new Vector3(1.0f, 0.5f, 2.0f));
+            var camDelta = _app.CameraPosition - camPos;
+            check(Vector3.Distance(_app.CameraPivot - camPivot, camDelta) < 1e-4f && MathF.Abs(Vector3.Dot(camDelta, camForward) - 2.0f) < 1e-3f &&
+                  MathF.Abs(camDelta.Length() - new Vector3(1.0f, 0.5f, 2.0f).Length()) < 1e-3f,
+                  $"WASD QE moves the camera and the pivot together along the camera axes ({camDelta.X:F2}, {camDelta.Y:F2}, {camDelta.Z:F2})");
+            var zoomPivot = _app.CameraPivot;
+            var zoomDistance = _app.CameraPivotDistance;
+            _app.ZoomCamera(1.0f);
+            check(Vector3.Distance(_app.CameraPivot, zoomPivot) < 1e-3f && MathF.Abs(_app.CameraPivotDistance - zoomDistance * 0.85f) < 1e-3f,
+                  $"wheel up zooms in toward the pivot ({zoomDistance:F2} -> {_app.CameraPivotDistance:F2} m)");
+            _app.ZoomCamera(-1.0f);
+            check(Vector3.Distance(_app.CameraPivot, zoomPivot) < 1e-3f && MathF.Abs(_app.CameraPivotDistance - zoomDistance) < 1e-3f, "wheel down zooms out by the same amount");
+            for (int i = 0; i < 60; i++) _app.ZoomCamera(1.0f);
+            var nearPos = _app.CameraPosition;
+            _app.ZoomCamera(1.0f);
+            check(_app.CameraPivotDistance >= 0.199f && Vector3.Dot(_app.CameraPosition - nearPos, camForward) > 0.0f, "zooming in at the nearest distance keeps moving forward");
+            _app.FocusSelected();
+        }
+
         // ---------- ED10 : 保存していない変更を聞く ----------
         var promptScene = _app.ScenePath!;
         var otherScene = database.FullPath("Assets/Scenes/physics.scene.json");

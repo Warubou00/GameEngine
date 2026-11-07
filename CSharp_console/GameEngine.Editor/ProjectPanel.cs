@@ -19,6 +19,10 @@ namespace GameEngine.Editor;
 //   - ファイルが書き換わったら読み直す (ED5 後半) : モデル → 同じ番号のまま読み直す / テクスチャ → 使っているモデルとマテリアル /
 //     マテリアル → 値を読み直す。自分 (エディター) が書いたファイルは読み直さない
 //   - Create Material : 今のフォルダにマテリアルを作る。マテリアルを選ぶとインスペクターで値を変えられる
+//   - 右クリック > Create (v1.1) : Folder / Scripts > Behaviour / Material / Shader / Shader Graph を、そのフォルダに作る
+//     スクリプトは作ってすぐ名前を書く欄になり、決めた名前が中の型の名前にもなる (Unity と同じ)
+//     .cs をダブルクリック : Visual Studio で sln とその .cs を開く (ScriptEditor)
+//   - 右クリック > Delete / Delete キー (v1.1) : 確かめてから、ごみ箱へ (.meta も一緒)
 // ==========================================================================
 internal sealed class ProjectPanel : IDisposable
 {
@@ -41,6 +45,13 @@ internal sealed class ProjectPanel : IDisposable
     // シェーダーグラフをダブルクリックした時 (グラフの窓で開く。SH4)
     public Action<string>? OpenShaderGraph;
     public Action<string>? OpenPreview;   // AN5 : FBX をダブルクリック
+    // Project の窓にフォーカスがあるか (前のフレーム。Delete キーをシーンの物ではなくアセットに使う。v1.1)
+    public bool HasFocus { get; private set; }
+    // 消すか聞いているアセット (v1.1。確かめる窓を出す)
+    public string? PendingDelete { get; private set; }
+    private bool _openDeletePopup;
+    // 作ったばかりのスクリプト (名前を決めたら中の型の名前も変える。v1.1)
+    private string? _newScript;
     public int SelectionVersion { get; private set; }
 
     private string  _folder = AssetDatabase.AssetsFolder;
@@ -150,12 +161,17 @@ internal sealed class ProjectPanel : IDisposable
         uploadThumbnails();
         if (Dragged != null && !ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.GetDragDropPayload().NativePtr == null) Dragged = null;
 
+        HasFocus = false;
         if (ImGui.Begin("Project", ref open))
         {
+            HasFocus = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
             // F2 : 選んでいるアセットの名前を書く (ED10。Project にフォーカスがある時)
             if (_renaming == null && _selected != null && ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) &&
                 !ImGui.GetIO().WantTextInput && ImGui.IsKeyPressed(ImGuiKey.F2, false))
                 BeginRename(_selected);
+            // Delete : 選んでいるアセットを消す (確かめてから。v1.1)
+            if (_renaming == null && _selected != null && HasFocus && !ImGui.GetIO().WantTextInput && ImGui.IsKeyPressed(ImGuiKey.Delete, false))
+                RequestDelete(_selected);
             drawToolbar();
             ImGui.Separator();
             var height = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing();
@@ -170,12 +186,20 @@ internal sealed class ProjectPanel : IDisposable
                 ImGui.TableNextColumn();
                 ImGui.BeginChild("items");
                 drawItems();
+                // 何も無い所の右クリック : 今のフォルダに作る (v1.1)
+                if (ImGui.BeginPopupContextWindow("itemsMenu", ImGuiPopupFlags.MouseButtonRight | ImGuiPopupFlags.NoOpenOverItems))
+                {
+                    createMenu(_folder);
+                    if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(_folder)}\"");
+                    ImGui.EndPopup();
+                }
                 ImGui.EndChild();
                 ImGui.EndTable();
             }
             // 選んだアセットの情報
             if (_selected != null) ImGui.TextDisabled($"{_selected.Path}   ({_selected.Kind}, id {_selected.Guid})");
             else ImGui.TextDisabled($"{_database.Entries.Count()} assets");
+            drawDeletePopup();
         }
         ImGui.End();
     }
@@ -218,17 +242,27 @@ internal sealed class ProjectPanel : IDisposable
         var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
         if (children.Count == 0) flags |= ImGuiTreeNodeFlags.Leaf;
         if (path == AssetDatabase.AssetsFolder) flags |= ImGuiTreeNodeFlags.DefaultOpen;
+        if (_folder.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase)) ImGui.SetNextItemOpen(true, ImGuiCond.Once);   // 今のフォルダまで開く
         if (path == _folder) flags |= ImGuiTreeNodeFlags.Selected;
         var renaming = _renaming == path;
         var entry = _database.Find(path);
         var open = ImGui.TreeNodeEx(renaming ? $"##{path}" : $"{entry?.Label ?? Path.GetFileName(path)}##{path}", flags);
         if (entry?.DisplayName != null && ImGui.IsItemHovered()) ImGui.SetTooltip($"{entry.DisplayName}\n{entry.Path}");   // 表示名の時は本当の名前も
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) { _folder = path; _search = ""; Select(_database.Find(path)); }
+        if (path == AssetDatabase.AssetsFolder && ImGui.BeginPopupContextItem($"folder{path}"))   // Assets : 作るだけ (v1.1)
+        {
+            createMenu(path);
+            ImGui.EndPopup();
+        }
         if (path != AssetDatabase.AssetsFolder && ImGui.BeginPopupContextItem($"folder{path}"))
         {
+            createMenu(path);
+            ImGui.Separator();
             if (ImGui.MenuItem("Rename", "F2") && _database.Find(path) is { } folder) BeginRename(folder);
             displayNameMenu(entry);
             if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(path)}\"");
+            ImGui.Separator();
+            if (ImGui.MenuItem("Delete", "Del") && entry != null) RequestDelete(entry);
             ImGui.EndPopup();
         }
         if (renaming)
@@ -301,9 +335,14 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.BeginPopupContextItem("tile"))
         {
             Select(entry);
+            createMenu(entry.Kind == AssetKind.Folder ? entry.Path : parentOf(entry.Path));   // v1.1 : フォルダならその中に
+            ImGui.Separator();
+            if (entry.Kind == AssetKind.Script && ImGui.MenuItem("Open")) OpenScript(entry.Path);
             if (ImGui.MenuItem("Rename", "F2")) BeginRename(entry);
             displayNameMenu(entry);
             if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", entry.Kind == AssetKind.Folder ? $"\"{_database.FullPath(entry.Path)}\"" : $"/select,\"{_database.FullPath(entry.Path)}\"");
+            ImGui.Separator();
+            if (ImGui.MenuItem("Delete", "Del")) RequestDelete(entry);
             ImGui.EndPopup();
         }
         // 名前 (長ければ切る)。名前を書いている時は入力の欄 (ED10)
@@ -328,6 +367,7 @@ internal sealed class ProjectPanel : IDisposable
             else if (entry.Kind == AssetKind.Scene) _openScene(_database.FullPath(entry.Path));
             else if (entry.Kind == AssetKind.ShaderGraph) OpenShaderGraph?.Invoke(entry.Path);   // SH4
             else if (entry.Kind is AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation) OpenPreview?.Invoke(entry.Path);   // AN5
+            else if (entry.Kind == AssetKind.Script) OpenScript(entry.Path);   // v1.1 : Visual Studio で sln と .cs を開く
             else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
             {
                 try { importer.OnOpen(entry.Path, _database.FullPath(entry.Path)); }
@@ -367,6 +407,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Material => ("Mat", 0xFF3CA0A0u),
         AssetKind.Prefab   => ("Prefab", 0xFFE0A050u),
         AssetKind.Shader   => ("HLSL", 0xFF6040B0u),   // SH2
+        AssetKind.Script   => ("C#", 0xFF9A3C68u),     // v1.1
         AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
         AssetKind.FbxModel     => ("FBX Mod", 0xFF5A7A2Au),   // AN1
         AssetKind.FbxSkeleton  => ("FBX Skl", 0xFF7A5A2Au),
@@ -524,9 +565,16 @@ internal sealed class ProjectPanel : IDisposable
         if (!ImGui.IsItemDeactivated()) return;
         var path = _renaming!;
         _renaming = null;
+        var newScript = _newScript == path;
+        _newScript = null;
         if (ImGui.IsKeyPressed(ImGuiKey.Escape)) return;   // Enter / 外をクリック = 決める
         if (_renamingDisplay) SetDisplayName(path, _renameText);
-        else Rename(path, _renameText);
+        else if (Rename(path, _renameText) is { } renamed && newScript && renamed != path)
+        {
+            // 作ったばかりのスクリプト : 中の型の名前もファイルの名前に (雛形から書き換えていなければ。v1.1)
+            if (ScriptEditor.RenameTemplate(_database.FullPath(renamed), Path.GetFileNameWithoutExtension(path), Path.GetFileNameWithoutExtension(renamed)))
+                Console.WriteLine($"[Assets] {Path.GetFileName(renamed)} : the type is {ScriptEditor.ToTypeName(Path.GetFileNameWithoutExtension(renamed))}");
+        }
     }
 
     /// <summary>アセットの名前を変える (.meta も一緒。Id は変わらない)。戻り値 = 新しいパス (できなければ null。理由は Console)</summary>
@@ -662,5 +710,117 @@ internal sealed class ProjectPanel : IDisposable
         for (int i = 1; Directory.Exists(_database.FullPath($"{_folder}/{name}")); i++) name = $"New Folder {i}";
         Directory.CreateDirectory(_database.FullPath($"{_folder}/{name}"));
         _database.Refresh();
+        if (_database.Find($"{_folder}/{name}") is { } created) BeginRename(created);   // v1.1 : すぐ名前を書く
+    }
+
+    // ---------------------------------------------------------------------
+    // 右クリック > Create (v1.1)。folder に作る (今のフォルダもそこにする)
+    // ---------------------------------------------------------------------
+    private void createMenu(string folder)
+    {
+        if (!ImGui.BeginMenu("Create")) return;
+        if (ImGui.MenuItem("Folder")) { _folder = folder; newFolder(); }
+        if (ImGui.BeginMenu("Scripts"))
+        {
+            if (ImGui.MenuItem("Behaviour")) { _folder = folder; CreateBehaviour(); }
+            ImGui.EndMenu();
+        }
+        ImGui.Separator();
+        if (ImGui.MenuItem("Material")) { _folder = folder; CreateMaterial(); }
+        if (ImGui.MenuItem("Shader")) { _folder = folder; CreateShader(); }
+        if (ImGui.MenuItem("Shader Graph")) { _folder = folder; if (CreateShaderGraph() is { } graph) OpenShaderGraph?.Invoke(graph); }
+        ImGui.EndMenu();
+    }
+
+    /// <summary>
+    /// 今のフォルダに Behaviour (コンポーネント + System) のスクリプトを作り、名前を書く欄にする (v1.1)。
+    /// 名前を決めると中の型の名前も変わる。戻り値 = アセットのパス (できなければ null)
+    /// </summary>
+    public string? CreateBehaviour(string name = ScriptEditor.DefaultBehaviourName, bool rename = true)
+    {
+        try
+        {
+            var path = $"{_folder}/{name}.cs";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name}{i}.cs";
+            ScriptEditor.WriteScript(_database.FullPath(path), ScriptEditor.BehaviourTemplate(ScriptEditor.ToTypeName(Path.GetFileNameWithoutExtension(path))));
+            _database.Refresh();
+            Console.WriteLine($"[Assets] Created {path}");
+            if (_database.Find(path) is { } entry)
+            {
+                Select(entry);
+                if (rename) { BeginRename(entry); _newScript = path; }
+            }
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Failed to create a script : {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>確認用 : 今のフォルダを folder にする (右クリック > Create はそのフォルダに作る)</summary>
+    public void CreateFolderForTest(string folder) { _folder = folder; _search = ""; }
+
+    /// <summary>スクリプトを外のエディター (Visual Studio) で開く (sln も作る。v1.1)</summary>
+    public void OpenScript(string assetPath)
+    {
+        var how = ScriptEditor.Open(_database.ProjectRoot, _database.FullPath(assetPath));
+        Console.WriteLine($"[Scripts] {how}");
+    }
+
+    /// <summary>消すか聞く窓を出す (v1.1。Assets は消せない)</summary>
+    public void RequestDelete(AssetEntry entry)
+    {
+        if (entry.Path == AssetDatabase.AssetsFolder) return;
+        PendingDelete = entry.Path;
+        _openDeletePopup = true;
+    }
+
+    private void drawDeletePopup()
+    {
+        if (_openDeletePopup) { ImGui.OpenPopup("Delete Asset"); _openDeletePopup = false; }
+        if (!ImGui.BeginPopupModal("Delete Asset", ImGuiWindowFlags.AlwaysAutoResize)) return;
+        var path = PendingDelete ?? "";
+        var entry = _database.Find(path);
+        var inside = entry?.Kind == AssetKind.Folder ? _database.Entries.Count(e => e.Path.StartsWith(path + "/", StringComparison.OrdinalIgnoreCase)) : 0;
+        ImGui.Text($"Delete {entry?.Label ?? path}?");
+        ImGui.TextDisabled(path);
+        if (inside > 0) ImGui.Text($"The folder and the {inside} assets in it are deleted.");
+        ImGui.Text("The files go to the Recycle Bin (with their .meta).");
+        ImGui.Spacing();
+        if (ImGui.Button("Delete", new Vector2(110, 0)) || ImGui.IsKeyPressed(ImGuiKey.Enter))
+        {
+            DeleteAsset(path);
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel", new Vector2(110, 0)) || ImGui.IsKeyPressed(ImGuiKey.Escape))
+        {
+            PendingDelete = null;
+            ImGui.CloseCurrentPopup();
+        }
+        ImGui.EndPopup();
+    }
+
+    /// <summary>アセットを消す (確かめない。ごみ箱へ。.meta も)。戻り値 = できたか (できなければ理由は Console)</summary>
+    public bool DeleteAsset(string assetPath, bool toRecycleBin = true)
+    {
+        PendingDelete = null;
+        try
+        {
+            var count = _database.Delete(assetPath, toRecycleBin);
+            bool under(string? p) => p != null && (p.Equals(assetPath, StringComparison.OrdinalIgnoreCase) || p.StartsWith(assetPath + "/", StringComparison.OrdinalIgnoreCase));
+            if (under(_selected?.Path)) Select(null);
+            if (under(_folder)) _folder = parentOf(assetPath);
+            if (under(_renaming)) _renaming = null;
+            Console.WriteLine($"[Assets] Deleted {assetPath}{(count > 1 ? $" ({count} assets)" : "")}{(toRecycleBin ? " (Recycle Bin)" : "")}");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            Console.WriteLine($"[Assets] Cannot delete {assetPath} : {ex.Message}");
+            return false;
+        }
     }
 }
