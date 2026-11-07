@@ -38,7 +38,6 @@ internal static class Program
         // プロジェクト (ED5)
         var projectRoot = options.GetValueOrDefault("--project", root != null ? Path.Combine(root.FullName, "CSharp_console", "Project") : Path.Combine(exeDirectory, "Project"));
         var database = new AssetDatabase(projectRoot);
-        if (workingDirectory != null) seedSampleAssets(Path.GetFullPath(Path.Combine(workingDirectory, "..", "Model")), Path.Combine(database.AssetsRoot, "Models"));
         var created = database.Refresh();
         EditorVersion.WriteProjectVersion(database.ProjectRoot);   // どの版のエディターで開いたか (ED9。ランチャーが出す)
         Console.WriteLine($"[Editor] GameEngine Editor {EditorVersion.Display}");
@@ -80,21 +79,5 @@ internal static class Program
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
 
         engine.Run();
-    }
-
-    // 見本のモデルを Assets/Models へ写す (Assets/Models がまだ無い時だけ。DDS のキャッシュは写さない)
-    private static void seedSampleAssets(string source, string target)
-    {
-        if (Directory.Exists(target) || !Directory.Exists(source)) return;
-        var count = 0;
-        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            if (file.EndsWith(".dds", StringComparison.OrdinalIgnoreCase) && Path.GetFileName(file).Split('.').Length >= 4) continue;
-            var copy = Path.Combine(target, Path.GetRelativePath(source, file));
-            Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
-            File.Copy(file, copy);
-            count++;
-        }
-        Console.WriteLine($"[Assets] Copied {count} sample files : {source} -> {target}");
     }
 }

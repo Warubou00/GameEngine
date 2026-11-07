@@ -18,7 +18,7 @@ internal static class SerializationTest
     public static int Run(Engine engine)
     {
         var assets = engine.Assets;
-        var box    = assets.LoadModel("../Model/obj/box.obj");
+        var box    = assets.LoadModel("Assets/Models/obj/box.obj");
         var mesh   = assets.LoadCollisionMesh(box);
         Sound? sound = null;
         try { sound = assets.LoadSound(@"C:\Windows\Media\chimes.wav"); } catch (Exception e) { Console.WriteLine($"[Test] (no sound : {e.Message})"); }

@@ -323,7 +323,7 @@ public sealed class AudioSettings
 // エンジン本体 : ウィンドウ・C++ の初期化・メインループ・ECS の World と System
 //
 //   using var engine = new Engine(new EngineSettings { Title = "Sample" });
-//   var model = engine.Assets.LoadModel("../Model/box.obj");
+//   var model = engine.Assets.LoadModel("Assets/Models/obj/box.obj");
 //   var e = engine.World.CreateEntity();
 //   engine.World.Add(e, new Transform());
 //   engine.World.Add(e, new MeshRenderer(model));
