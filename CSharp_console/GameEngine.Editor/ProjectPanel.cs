@@ -48,6 +48,7 @@ internal sealed class ProjectPanel : IDisposable
     private AssetEntry? _selected;
     // 名前を書いているアセット (ED10。F2 / 右クリック > Rename)
     private string? _renaming;
+    private bool    _renamingDisplay;   // 書いているのは表示名 (右クリック > Display Name...)。ファイルの名前は変えない
     private string  _renameText = "";
     private bool    _renameFocus;
     private float   _tileSize = 84.0f;
@@ -206,23 +207,27 @@ internal sealed class ProjectPanel : IDisposable
         {
             ImGui.SameLine(0, i == 0 ? 16 : 2);
             if (i > 0) { ImGui.TextDisabled(">"); ImGui.SameLine(0, 2); }
-            if (ImGui.SmallButton($"{parts[i]}##crumb{i}")) _folder = string.Join('/', parts.Take(i + 1));
+            var crumb = string.Join('/', parts.Take(i + 1));
+            if (ImGui.SmallButton($"{_database.Find(crumb)?.Label ?? parts[i]}##crumb{i}")) _folder = crumb;   // 表示名があれば表示名
         }
     }
 
     private void drawFolder(string path)
     {
-        var children = _database.Entries.Where(e => e.Kind == AssetKind.Folder && parentOf(e.Path) == path).OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var children = _database.Entries.Where(e => e.Kind == AssetKind.Folder && parentOf(e.Path) == path).OrderBy(e => e.Label, StringComparer.OrdinalIgnoreCase).ToList();
         var flags = ImGuiTreeNodeFlags.OpenOnArrow | ImGuiTreeNodeFlags.SpanAvailWidth;
         if (children.Count == 0) flags |= ImGuiTreeNodeFlags.Leaf;
         if (path == AssetDatabase.AssetsFolder) flags |= ImGuiTreeNodeFlags.DefaultOpen;
         if (path == _folder) flags |= ImGuiTreeNodeFlags.Selected;
         var renaming = _renaming == path;
-        var open = ImGui.TreeNodeEx(renaming ? $"##{path}" : $"{Path.GetFileName(path)}##{path}", flags);
+        var entry = _database.Find(path);
+        var open = ImGui.TreeNodeEx(renaming ? $"##{path}" : $"{entry?.Label ?? Path.GetFileName(path)}##{path}", flags);
+        if (entry?.DisplayName != null && ImGui.IsItemHovered()) ImGui.SetTooltip($"{entry.DisplayName}\n{entry.Path}");   // 表示名の時は本当の名前も
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) { _folder = path; _search = ""; Select(_database.Find(path)); }
         if (path != AssetDatabase.AssetsFolder && ImGui.BeginPopupContextItem($"folder{path}"))
         {
             if (ImGui.MenuItem("Rename", "F2") && _database.Find(path) is { } folder) BeginRename(folder);
+            displayNameMenu(entry);
             if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", $"\"{_database.FullPath(path)}\"");
             ImGui.EndPopup();
         }
@@ -247,9 +252,10 @@ internal sealed class ProjectPanel : IDisposable
     private void drawItems()
     {
         IEnumerable<AssetEntry> items = _search.Length > 0
-            ? _database.Entries.Where(e => e.Name.Contains(_search, StringComparison.OrdinalIgnoreCase))
+            ? _database.Entries.Where(e => e.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                                           (e.DisplayName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false))   // 表示名でも探す
             : _database.Entries.Where(e => parentOf(e.Path) == _folder);
-        var list = items.OrderBy(e => e.Kind != AssetKind.Folder).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var list = items.OrderBy(e => e.Kind != AssetKind.Folder).ThenBy(e => e.Label, StringComparer.OrdinalIgnoreCase).ToList();
         if (list.Count == 0) { ImGui.TextDisabled(_search.Length > 0 ? "No match" : "(empty folder : drop files into Assets, or Import...)"); return; }
 
         var columns = Math.Max(1, (int)((ImGui.GetContentRegionAvail().X + 8) / (_tileSize + 8)));
@@ -296,6 +302,7 @@ internal sealed class ProjectPanel : IDisposable
         {
             Select(entry);
             if (ImGui.MenuItem("Rename", "F2")) BeginRename(entry);
+            displayNameMenu(entry);
             if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", entry.Kind == AssetKind.Folder ? $"\"{_database.FullPath(entry.Path)}\"" : $"/select,\"{_database.FullPath(entry.Path)}\"");
             ImGui.EndPopup();
         }
@@ -309,10 +316,11 @@ internal sealed class ProjectPanel : IDisposable
         }
         else
         {
-            var name = entry.Name;
+            var name = entry.Label;   // 表示名があれば表示名 (色を少し変えて、ファイルの名前と違うと分かるように)
             while (name.Length > 3 && ImGui.CalcTextSize(name).X > _tileSize) name = name[..^2];
-            if (name != entry.Name) name = name[..^2] + "...";   // 「…」はフォントの字の範囲に無い
-            draw.AddText(start + new Vector2((_tileSize - ImGui.CalcTextSize(name).X) * 0.5f, _tileSize), ImGui.GetColorU32(ImGuiCol.Text), name);
+            if (name != entry.Label) name = name[..^2] + "...";   // 「…」はフォントの字の範囲に無い
+            var nameColor = entry.DisplayName != null ? 0xFFFFD890u : ImGui.GetColorU32(ImGuiCol.Text);
+            draw.AddText(start + new Vector2((_tileSize - ImGui.CalcTextSize(name).X) * 0.5f, _tileSize), nameColor, name);
         }
         if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
         {
@@ -327,7 +335,11 @@ internal sealed class ProjectPanel : IDisposable
             }
         }
         // FBX のエラーも出す (AN1。以前はパスだけで、先に出した FBX のエラーを上書きしていた)
-        if (hovered) ImGui.SetTooltip(fbxError(entry) is { } fbxProblem ? $"{entry.Path}\n{fbxProblem}" : entry.Path);
+        if (hovered)
+        {
+            var tip = entry.DisplayName != null ? $"{entry.DisplayName}\n{entry.Path}" : entry.Path;   // 表示名の時は本当のパスも
+            ImGui.SetTooltip(fbxError(entry) is { } fbxProblem ? $"{tip}\n{fbxProblem}" : tip);
+        }
 
         // ドラッグ (フォルダ以外)
         if (entry.Kind != AssetKind.Folder && ImGui.BeginDragDropSource())
@@ -335,7 +347,7 @@ internal sealed class ProjectPanel : IDisposable
             Dragged = entry;
             int dummy = 0;
             ImGui.SetDragDropPayload(Payload, (IntPtr)(&dummy), sizeof(int));
-            ImGui.Text($"{entry.Name} ({entry.Kind})");
+            ImGui.Text($"{entry.Label} ({entry.Kind})");
             ImGui.EndDragDropSource();
         }
         ImGui.EndGroup();
@@ -459,8 +471,46 @@ internal sealed class ProjectPanel : IDisposable
         // タイルが見えるように、そのアセットのフォルダを出す (今のフォルダの木の欄で書く時はそのまま)
         if (entry.Kind != AssetKind.Folder || _folder != entry.Path) { _folder = parentOf(entry.Path); _search = ""; }
         _renaming    = entry.Path;
+        _renamingDisplay = false;
         _renameText  = AssetDatabase.SplitName(entry.Name, entry.Kind == AssetKind.Folder).Stem;
         _renameFocus = true;
+    }
+
+    // ---------------------------------------------------------------------
+    // 表示名 : Project に出す名前だけを変える (ファイル / フォルダの名前はそのまま。.meta の displayName)
+    // ---------------------------------------------------------------------
+
+    private void displayNameMenu(AssetEntry? entry)
+    {
+        if (entry == null || entry.Path == AssetDatabase.AssetsFolder) return;
+        if (ImGui.MenuItem("Display Name...")) BeginDisplayName(entry);
+        if (entry.DisplayName != null && ImGui.MenuItem($"Clear Display Name ({entry.Name})")) SetDisplayName(entry.Path, null);
+    }
+
+    /// <summary>表示名を書く欄を出す (Enter で決める / Esc でやめる / 空にすると表示名を消す)</summary>
+    public void BeginDisplayName(AssetEntry entry)
+    {
+        BeginRename(entry);
+        if (_renaming == null) return;
+        _renamingDisplay = true;
+        _renameText = entry.DisplayName ?? "";
+    }
+
+    /// <summary>表示名を変える (null / 空 = 消す)。戻り値 = できたか (できなければ理由は Console)</summary>
+    public bool SetDisplayName(string assetPath, string? displayName)
+    {
+        try
+        {
+            var label = _database.SetDisplayName(assetPath, displayName);
+            Select(_database.Find(assetPath));
+            Console.WriteLine(label != null ? $"[Assets] Display name of {assetPath} : {label}" : $"[Assets] Display name of {assetPath} cleared");
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Cannot set the display name of {assetPath} : {ex.Message}");
+            return false;
+        }
     }
 
     public bool IsRenaming => _renaming != null;
@@ -469,11 +519,14 @@ internal sealed class ProjectPanel : IDisposable
     {
         ImGui.SetNextItemWidth(Math.Max(60.0f, width));
         if (_renameFocus) { ImGui.SetKeyboardFocusHere(); _renameFocus = false; }
-        ImGui.InputText("##rename", ref _renameText, 256, ImGuiInputTextFlags.AutoSelectAll);
+        if (_renamingDisplay) ImGui.InputTextWithHint("##rename", "display name (empty = file name)", ref _renameText, 256, ImGuiInputTextFlags.AutoSelectAll);
+        else ImGui.InputText("##rename", ref _renameText, 256, ImGuiInputTextFlags.AutoSelectAll);
         if (!ImGui.IsItemDeactivated()) return;
         var path = _renaming!;
         _renaming = null;
-        if (!ImGui.IsKeyPressed(ImGuiKey.Escape)) Rename(path, _renameText);   // Enter / 外をクリック = 決める
+        if (ImGui.IsKeyPressed(ImGuiKey.Escape)) return;   // Enter / 外をクリック = 決める
+        if (_renamingDisplay) SetDisplayName(path, _renameText);
+        else Rename(path, _renameText);
     }
 
     /// <summary>アセットの名前を変える (.meta も一緒。Id は変わらない)。戻り値 = 新しいパス (できなければ null。理由は Console)</summary>

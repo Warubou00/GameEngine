@@ -1789,6 +1789,49 @@ internal sealed class EditorTest
         check(!_app.Project.IsRenaming && File.Exists(database.FullPath($"{newFolder}/Typed Scene.scene.json")) && _app.ScenePath!.EndsWith("Typed Scene.scene.json"),
               "rename in the project panel : type and Enter (the extension is kept)");
 
+        // ---------- 表示名 : Project に出す名前だけを変える (ファイル / フォルダの名前はそのまま。.meta の displayName) ----------
+        var dnRoot = "Assets/_DisplayNameTest";
+        Directory.CreateDirectory(database.FullPath($"{dnRoot}/aaa"));
+        File.WriteAllText(database.FullPath($"{dnRoot}/aaa/note.txt"), "display name test");
+        database.Refresh();
+        var dnFolder = $"{dnRoot}/aaa";
+        var dnGuid = database.Find(dnFolder)!.Guid;
+        // 右クリック > Display Name... と同じ : 欄に日本語を打って Enter
+        ImGui.SetWindowFocus("Project");
+        _app.Project.BeginDisplayName(database.Find(dnFolder)!);
+        foreach (var _ in typeAndPress("モデル", ImGuiKey.Enter)) yield return 0;
+        var dnEntry = database.Find(dnFolder)!;
+        var dnMeta = File.ReadAllText(database.FullPath(dnFolder) + ".meta");
+        check(!_app.Project.IsRenaming && dnEntry.DisplayName == "モデル" && dnEntry.Label == "モデル" && dnEntry.Name == "aaa" && dnEntry.Guid == dnGuid &&
+              Directory.Exists(database.FullPath(dnFolder)) && dnMeta.Contains("\"displayName\": \"モデル\""),
+              $"display name : type モデル for the folder aaa (the folder stays aaa on disk, the .meta has the name as text)");
+        // ファイルにも / パスを表示名でつなぐ / 表示名でも探せる (一覧の並びも表示名)
+        check(_app.Project.SetDisplayName($"{dnFolder}/note.txt", "  メモ\n ") && database.Find($"{dnFolder}/note.txt")!.DisplayName == "メモ" &&
+              database.LabelPath($"{dnFolder}/note.txt") == $"{dnRoot}/モデル/メモ" && File.Exists(database.FullPath($"{dnFolder}/note.txt")),
+              $"display name of a file (trimmed) : {database.LabelPath($"{dnFolder}/note.txt")}");
+        // 開き直しても残る (.meta から読む)
+        var dnReopened = new AssetDatabase(database.ProjectRoot);
+        dnReopened.Refresh();
+        check(dnReopened.Find(dnFolder)?.DisplayName == "モデル" && dnReopened.Find($"{dnFolder}/note.txt")?.DisplayName == "メモ" && dnReopened.Find(dnFolder)?.Guid == dnGuid,
+              "display names are read back from the .meta files");
+        // 名前を変えても表示名はそのまま (.meta ごと動く)
+        var dnRenamed = _app.Project.Rename(dnFolder, "bbb");
+        check(dnRenamed == $"{dnRoot}/bbb" && database.Find(dnRenamed!)?.DisplayName == "モデル" && database.Find(dnRenamed!)?.Guid == dnGuid,
+              "renaming the folder keeps its display name");
+        // 外で .meta を書き換えた (git で取ってきた) 時も読み直す
+        var dnMetaPath = database.FullPath(dnRenamed!) + ".meta";
+        File.WriteAllText(dnMetaPath, File.ReadAllText(dnMetaPath).Replace("モデル", "外から"));
+        File.SetLastWriteTimeUtc(dnMetaPath, DateTime.UtcNow.AddSeconds(2));
+        database.Refresh();
+        check(database.Find(dnRenamed!)?.DisplayName == "外から", "a display name changed outside the editor (.meta) is read again on refresh");
+        // 消す : 空にするとファイルの名前に戻り、.meta から displayName が無くなる。Assets には付けられない
+        check(_app.Project.SetDisplayName(dnRenamed!, "") && database.Find(dnRenamed!)?.DisplayName == null && database.Find(dnRenamed!)?.Label == "bbb" &&
+              !File.ReadAllText(dnMetaPath).Contains("displayName") && !_app.Project.SetDisplayName("Assets", "全部"),
+              "clearing the display name shows the file name again (and the Assets folder cannot have one)");
+        Directory.Delete(database.FullPath(dnRoot), true);
+        File.Delete(database.FullPath(dnRoot) + ".meta");
+        database.Refresh();
+
         // ---------- ED10 : 保存していない変更を聞く ----------
         var promptScene = _app.ScenePath!;
         var otherScene = database.FullPath("Assets/Scenes/physics.scene.json");

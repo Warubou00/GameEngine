@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace GameEngine;
@@ -12,12 +13,17 @@ namespace GameEngine;
 //     読む時は Id を優先する (動かしたファイルも見つかる)
 //   - 以前のパス (見本の "../Model/...") は Assets/Models/... に同じファイルがあればそちらに読み替える
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
+//   - 表示名 : .meta の "displayName" (エディターの Project に出す名前だけ。ファイル / フォルダの名前とパスはそのまま)
 // ==========================================================================
 public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation }
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
     public string Name => System.IO.Path.GetFileName(Path);
+    /// <summary>表示名 (.meta の displayName。無ければ null)。エディターの表示だけで、ファイルの名前とパスは変わらない</summary>
+    public string? DisplayName { get; init; }
+    /// <summary>画面に出す名前 (表示名があればそれ、無ければファイルの名前)</summary>
+    public string Label => DisplayName ?? Name;
 }
 
 public sealed class AssetDatabase
@@ -33,6 +39,7 @@ public sealed class AssetDatabase
     public string AssetsRoot  { get; }
     private readonly Dictionary<Guid, AssetEntry>   _byGuid = new();
     private readonly Dictionary<string, AssetEntry> _byPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, DateTime>     _metaTimes = new();   // .meta を読んだ時の更新時刻 (外で書き換えられたら表示名を読み直す)
 
     // 一覧が変わった回数 (画面の作り直しに使う)
     public int Version { get; private set; }
@@ -96,49 +103,119 @@ public sealed class AssetDatabase
         foreach (var file in files)
         {
             var path = ToAssetPath(file)!;
-            if (_byPath.ContainsKey(path)) continue;
+            if (_byPath.TryGetValue(path, out var known))
+            {
+                // 表示名 : .meta が外で書き換えられた (git で取ってきた / 手で直した) 時だけ読み直す
+                if (File.Exists(file + ".meta") && File.GetLastWriteTimeUtc(file + ".meta") is var time && (!_metaTimes.TryGetValue(known.Guid, out var seenTime) || seenTime != time))
+                {
+                    _metaTimes[known.Guid] = time;
+                    var display = readMeta(file + ".meta").DisplayName;
+                    if (display != known.DisplayName) { replace(known with { DisplayName = display }); changed = true; }
+                }
+                continue;
+            }
             var isFolder = Directory.Exists(file);
-            var guid = readOrCreateMeta(file, isFolder, ref created);
+            var (guid, displayName) = readOrCreateMeta(file, isFolder, ref created);
             // 同じ Id の .meta が 2 つある (ファイルを .meta ごと複製した) 時は、後の方に新しい Id を付ける
             if (_byGuid.ContainsKey(guid))
             {
                 guid = Guid.NewGuid();
-                writeMeta(file + ".meta", guid, isFolder ? AssetKind.Folder : KindOf(file));
+                writeMeta(file + ".meta", guid, isFolder ? AssetKind.Folder : KindOf(file), displayName);
             }
-            var entry = new AssetEntry(guid, path, isFolder ? AssetKind.Folder : KindOf(file));
+            var entry = new AssetEntry(guid, path, isFolder ? AssetKind.Folder : KindOf(file)) { DisplayName = displayName };
             _byPath[path] = entry;
             _byGuid[guid] = entry;
+            if (File.Exists(file + ".meta")) _metaTimes[guid] = File.GetLastWriteTimeUtc(file + ".meta");
             changed = true;
         }
         if (changed) Version++;
         return created;
     }
 
-    private static Guid readOrCreateMeta(string file, bool isFolder, ref int created)
+    private static (Guid Guid, string? DisplayName) readOrCreateMeta(string file, bool isFolder, ref int created)
     {
         var meta = file + ".meta";
         if (File.Exists(meta))
         {
-            try
-            {
-                using var document = JsonDocument.Parse(File.ReadAllText(meta, Encoding.UTF8));
-                if (document.RootElement.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var guid)) return guid;
-            }
-            catch (Exception ex) when (ex is JsonException or IOException)
-            {
-                Console.WriteLine($"[Assets] Broken meta file (a new id is made) : {meta} ({ex.Message})");
-            }
+            var (guid, displayName, broken) = readMeta(meta);
+            if (guid is { } id) return (id, displayName);
+            if (broken != null) Console.WriteLine($"[Assets] Broken meta file (a new id is made) : {meta} ({broken})");
         }
-        var id = Guid.NewGuid();
-        writeMeta(meta, id, isFolder ? AssetKind.Folder : KindOf(file));
+        var newId = Guid.NewGuid();
+        writeMeta(meta, newId, isFolder ? AssetKind.Folder : KindOf(file), null);
         created++;
-        return id;
+        return (newId, null);
     }
 
-    private static void writeMeta(string meta, Guid guid, AssetKind kind)
+    // .meta を読む (Id / 表示名。読めなければ Id は null と理由)
+    private static (Guid? Guid, string? DisplayName, string? Error) readMeta(string meta)
     {
-        var json = $"{{\r\n  \"guid\": \"{guid}\",\r\n  \"kind\": \"{kind}\"\r\n}}\r\n";
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(meta, Encoding.UTF8));
+            var root = document.RootElement;
+            Guid? guid = root.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var parsed) ? parsed : null;
+            var display = root.TryGetProperty("displayName", out var d) && d.ValueKind == JsonValueKind.String ? CleanDisplayName(d.GetString()) : null;
+            return (guid, display, guid == null ? "no guid" : null);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException)
+        {
+            return (null, null, ex.Message);
+        }
+    }
+
+    // .meta を書く。表示名は日本語をそのまま書く (\u30E2 のようにしない。手で見ても読めるように)
+    private static readonly JsonSerializerOptions MetaJson = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private static void writeMeta(string meta, Guid guid, AssetKind kind, string? displayName)
+    {
+        var json = $"{{\r\n  \"guid\": \"{guid}\",\r\n  \"kind\": \"{kind}\"";
+        if (displayName != null) json += $",\r\n  \"displayName\": {JsonSerializer.Serialize(displayName, MetaJson)}";
+        json += "\r\n}\r\n";
         File.WriteAllText(meta, json, new UTF8Encoding(false));
+    }
+
+    /// <summary>表示名を整える (前後の空白を取り、改行は空白に。空なら null = 表示名なし)</summary>
+    public static string? CleanDisplayName(string? name)
+    {
+        if (name == null) return null;
+        name = name.Replace("\r", " ").Replace("\n", " ").Replace("\t", " ").Trim();
+        return name.Length == 0 ? null : name;
+    }
+
+    // ---------------------------------------------------------------------
+    // 表示名 : エディターの Project に出す名前だけを変える (ファイル / フォルダの名前とパスはそのまま。.meta の displayName)
+    //   null か空 = 表示名を消す (ファイルの名前を出す)。戻り値 = 新しい表示名
+    // ---------------------------------------------------------------------
+    public string? SetDisplayName(string assetPath, string? displayName)
+    {
+        var entry = Find(assetPath) ?? throw new FileNotFoundException($"Not an asset : {assetPath}");
+        if (entry.Path == AssetsFolder) throw new InvalidOperationException("The Assets folder has no display name");
+        displayName = CleanDisplayName(displayName);
+        if (displayName == entry.Name) displayName = null;   // ファイルの名前と同じなら付けない
+        if (displayName == entry.DisplayName) return displayName;
+        var meta = FullPath(entry.Path) + ".meta";
+        writeMeta(meta, entry.Guid, entry.Kind, displayName);
+        _metaTimes[entry.Guid] = File.GetLastWriteTimeUtc(meta);
+        replace(entry with { DisplayName = displayName });
+        Version++;
+        return displayName;
+    }
+
+    private void replace(AssetEntry entry)
+    {
+        _byPath[entry.Path] = entry;
+        _byGuid[entry.Guid] = entry;
+    }
+
+    /// <summary>アセットのパスを、表示名でつないだ文字にする (例 : "Assets/モデル/box.obj"。表示名の無い所はファイルの名前)</summary>
+    public string LabelPath(string assetPath)
+    {
+        var parts = assetPath.Split('/');
+        var labels = (string[])parts.Clone();   // 引くのは元のパスで (書き換えた表示名で次を引かない)
+        for (int i = 1; i < parts.Length; i++)
+            if (Find(string.Join('/', parts.Take(i + 1))) is { DisplayName: { } label }) labels[i] = label;
+        return string.Join('/', labels);
     }
 
     // ---------------------------------------------------------------------
