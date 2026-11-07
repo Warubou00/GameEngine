@@ -183,6 +183,7 @@ public sealed class PhysicsSettings
     internal bool BroadphaseDirty { get; set; }
 
     internal readonly List<CollisionEvent> EventList = new();
+    internal int EventFrame;   // Events を作り直した回数 (同じイベントを 2 回呼ばないため。v1.2)
     public IReadOnlyList<CollisionEvent> Events => EventList;
 
     // 前の Step の計測 (プロファイラーにも出る)

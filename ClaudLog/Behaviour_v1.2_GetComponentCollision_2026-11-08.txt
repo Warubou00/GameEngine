@@ -1,0 +1,64 @@
+﻿v1.2.0.0 : Behaviour<T> の GetComponent と衝突の処理 (OnCollisionEnter / Stay / Exit)  2026-11-08
+ブランチ : feature/behaviour-getcomponent-collision
+
+■ やったこと
+1. Behaviour<T> (GameEngine.Runtime/Ecs/Behaviour.cs) : Unity の MonoBehaviour に当たる書き方
+  - T (自分のコンポーネント) を持つエンティティごとに、Update(ref T data) が毎フレーム呼ばれる System
+    [GameSystem] を付ければエディターが登録する (今までの ISystem と同じ)
+  - GetComponent<U>() : 今のエンティティの U への参照 (ref)
+    書き換えるとそのまま反映される。持っていなければ例外 (struct なので null は返せない)
+    TryGetComponent<U>(out U) / HasComponent<U>() / 他のエンティティ用の GetComponent<U>(entity)
+    Transform プロパティ (= GetComponent<Transform>()。Unity の transform)
+  - Destroy(entity) : この Behaviour の呼び出しが全部終わってから消す (子も一緒。Unity と同じ)
+    Update の途中で World.DestroyEntity を呼ぶと、回している配列が変わるため
+  - 書いていないメソッドは呼ばない。作る時に一度だけ、上書きしたメソッドを調べる
+
+2. 衝突の処理 3 つ : OnCollisionEnter / OnCollisionStay / OnCollisionExit (ref T data, in Collision collision)
+  - トリガー (どちらかが IsTrigger) は OnTriggerEnter / Stay / Exit。Unity と同じく分けた
+  - Collision : Self (自分) / Other (相手) / IsTrigger
+    GetComponent<U>() / TryGetComponent / HasComponent は相手のコンポーネント
+    TryGetContact(out point, out normal) : 接触点と法線。法線は相手から自分へ向く (自分が押し返される向き)
+  - CollisionSystem の Enter / Exit のイベントから、今重なっている組の表を持つ (CollisionCallbackSystem)
+    以前は Enter / Exit のリスト (engine.Physics.Events) を自分で読むだけで、Stay は無かった
+  - 呼ぶ時 : 再生中、毎フレームの System の Update の前 (前のフレームの物理の刻みの結果。Unity と同じ順)
+    Stay は重なっている間、毎フレーム 1 回。Enter と同じフレームには呼ばない
+    組の両方に呼ぶ (自分と相手を入れ替えて)。T を持つ方だけが受け取る
+    消えたエンティティの組は外す (Exit は呼ばない)
+  - 再生を始めた時に表を空にする。編集中のイベントは呼ばない
+  - 雛形 (Create > Scripts > Behaviour) を Behaviour<T> の形にした
+    Update / OnCollisionEnter / Stay / Exit 入り。以前は ISystem と ForEach
+
+3. 速さ
+  - World.GetPool<T>() : 型ごとに最後に引いた入れ物を覚える (static の型ごとの欄)
+    同じ World で入れ物を捨てていなければ (RemovePools の回数で見る)、辞書を引かない
+    以前は毎回 Dictionary<Type> を引いていた
+    GetComponent / World.Get / Has / ForEach が全部速くなる
+  - Behaviour.Update は、T の詰めた配列をそのまま回す (ForEach と同じ)
+  - 衝突 : 衝突のメソッドを上書きした Behaviour が無ければ、組の表を直すだけ
+    Stay を上書きした物が無ければ、Stay の見回りもしない
+    接触点は、TryGetContact で初めて聞かれた時だけ、そのフレームに 1 回 C++ から取る
+  - 持ち続けない : 呼ぶ相手の一覧は毎回空にする (ゲームの DLL を読み直した時に古い DLL が解放されるように)
+  - 計測 (Release、1 万個の物、20 回の一番速い値)
+    Behaviour.Update で GetComponent を 2 回ずつ : 0.282 ms
+    World.ForEach (2 つの型) : 0.188 ms
+    GetPool<Transform> 10 万回 : 0.178 ms (辞書を引く場合 1.058 ms。約 6 倍)
+
+■ 確認 (EditorTest に 9 項目)
+  - Update と GetComponent<Transform>
+  - Enter が両方に 1 回、HasComponent で相手を見る
+  - Stay が 12 フレーム中 10 回 (Enter のフレームは呼ばない)
+  - 法線が相手から自分 (A -1.00 / B 1.00)
+  - Exit が 1 回、その後 Stay は無い
+  - トリガーは OnTrigger* (1 / 5 / 1) で、OnCollision* は呼ばない
+  - Enter の中の Destroy で消える
+  - 再生を止めると確認の物が消える
+  - 速さ
+  - 確かめた時に分かった事
+    1 回目 : テストの途中で版 (Engine.props) を上げたため、テストの中のスクリプトのビルドがエンジンも 1.2 で作り直し、
+             動いている 1.1 のエンジンと合わずに読めなかった (コードの問題ではない。全部ビルドし直して走らせ直した)
+    2 回目 : Destroy の確認で「重なっている組が 0」を見ていたが、見本のシーンの物も再生中は重なっているので 0 にならない。確認の条件を直した
+  - リポジトリ Release : 272 / 0 (以前の 263 項目 + 9)
+  - リポジトリ Debug : 272 / 0 (D3D12 のエラー 0)
+  - Package (環境を外した状態) : 272 / 0
+
+■ 版 : 1.2.0.0。Package を作り直した (Editor/TsumugiEngine_v1.2.0.0。ランチャーもこの版を使う)

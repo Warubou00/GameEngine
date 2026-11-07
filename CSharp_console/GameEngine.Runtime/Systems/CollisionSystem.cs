@@ -66,6 +66,7 @@ internal sealed unsafe partial class CollisionSystem
     public void Update(World world, IReadOnlyList<IFixedSystem> fixedSystems, bool simulate = true)
     {
         _settings.EventList.Clear();
+        _settings.EventFrame++;
         Time.FixedStepsThisFrame = 0;
         TransformsWritten = 0;
         if (!_enabled)

@@ -1857,7 +1857,7 @@ internal sealed class EditorTest
         foreach (var _ in typeAndPress("Mover Test", ImGuiKey.Enter)) yield return 0;
         var scPath = $"{scRoot}/Mover Test.cs";
         var scText = File.Exists(database.FullPath(scPath)) ? File.ReadAllText(database.FullPath(scPath)) : "";
-        check(!File.Exists(database.FullPath(scCreated)) && scText.Contains("public struct Mover_Test : IComponent") && scText.Contains("class Mover_TestSystem : ISystem") &&
+        check(!File.Exists(database.FullPath(scCreated)) && scText.Contains("public struct Mover_Test : IComponent") && scText.Contains("class Mover_TestSystem : Behaviour<Mover_Test>") &&
               File.ReadAllBytes(database.FullPath(scPath)).Take(3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }),
               "naming the new script renames the types too (Mover Test -> Mover_Test, UTF-8 BOM)");
         // 2. Assets の .cs もビルドされる (Game.csproj)。コンポーネントと System が使える
@@ -1923,6 +1923,94 @@ internal sealed class EditorTest
             _app.ZoomCamera(1.0f);
             check(_app.CameraPivotDistance >= 0.199f && Vector3.Dot(_app.CameraPosition - nearPos, camForward) > 0.0f, "zooming in at the nearest distance keeps moving forward");
             _app.FocusSelected();
+        }
+
+        // ---------- v1.2 : Behaviour<T> の GetComponent と OnCollisionEnter / Stay / Exit (OnTrigger*) ----------
+        {
+            var bvEngine = _app.Engine;
+            var probes = new CollisionProbeSystem();
+            _app.TogglePlay();   // 衝突のメソッドは再生中だけ (作る物は再生を止めると消える)
+            yield return 0;
+            bvEngine.AddSystem(probes);
+            // 見本のシーンから離れた高い所に、動く箱 A / 止まっている箱 B / トリガー C / Enter で自分を消す D と相手 E
+            Entity bvMake(string name, Vector3 position, bool trigger, bool probe, bool destroyOnEnter = false)
+            {
+                var e = World.CreateEntity(name);
+                World.Add(e, new Transform(position));
+                var collider = Collider.Box(new Vector3(0.5f));
+                collider.IsTrigger = trigger;
+                World.Add(e, collider);
+                if (probe) World.Add(e, new CollisionProbe { DestroyOnEnter = destroyOnEnter });
+                return e;
+            }
+            var bvA = bvMake("ProbeA", new Vector3(-3, 60, 0), false, true);
+            var bvB = bvMake("ProbeB", new Vector3(0, 60, 0), false, true);
+            var bvC = bvMake("ProbeTrigger", new Vector3(0, 60, 6), true, false);
+            var bvD = bvMake("ProbeD", new Vector3(10, 60, 0), false, true, destroyOnEnter: true);
+            var bvE = bvMake("ProbeE", new Vector3(10.6f, 60, 0), false, false);
+            void bvMove(Entity e, Vector3 p) { ref var t = ref World.Get<Transform>(e); t.Position = p; t.MarkDirty(); }
+            for (int i = 0; i < 5; i++) yield return 0;
+            ref var bvProbeA = ref World.Get<CollisionProbe>(bvA);
+            check(bvProbeA.Updates >= 4 && MathF.Abs(bvProbeA.SeenX + 3.0f) < 1e-4f && bvProbeA.Enter == 0,
+                  $"Behaviour.Update runs for each entity with T, GetComponent<Transform>() reads the entity's transform ({bvProbeA.Updates} updates)");
+            // A を B に重ねる → Enter (両方) → Stay (毎フレーム) → 離す → Exit
+            bvMove(bvA, new Vector3(-0.6f, 60, 0));
+            for (int i = 0; i < 12; i++) yield return 0;
+            var bvA1 = World.Get<CollisionProbe>(bvA);
+            var bvB1 = World.Get<CollisionProbe>(bvB);
+            check(bvA1.Enter == 1 && bvB1.Enter == 1 && bvA1.OtherIsProbe && bvB1.OtherIsProbe && bvA1.Exit == 0 && bvA1.TriggerEnter == 0,
+                  $"OnCollisionEnter is called once on both entities, collision.HasComponent<T>() sees the other ({bvA1.Enter}, {bvB1.Enter})");
+            check(bvA1.Stay >= 9 && bvA1.Stay <= 12 && bvB1.Stay == bvA1.Stay, $"OnCollisionStay is called every frame while touching ({bvA1.Stay} of 12 frames, not on the Enter frame)");
+            check(bvA1.HadContact && bvA1.Normal.X < -0.7f && bvB1.Normal.X > 0.7f,
+                  $"collision.TryGetContact gives the normal from the other to self (A {bvA1.Normal.X:F2}, B {bvB1.Normal.X:F2})");
+            bvMove(bvA, new Vector3(-3, 60, 0));
+            for (int i = 0; i < 4; i++) yield return 0;
+            var bvA2 = World.Get<CollisionProbe>(bvA);
+            var bvB2 = World.Get<CollisionProbe>(bvB);
+            var bvStayAfter = bvA2.Stay;
+            yield return 0;
+            check(bvA2.Exit == 1 && bvB2.Exit == 1 && World.Get<CollisionProbe>(bvA).Stay == bvStayAfter, "OnCollisionExit is called once when they separate (no more Stay)");
+            // トリガー : OnTrigger* だけ (OnCollision* は呼ばない)
+            bvMove(bvA, new Vector3(0, 60, 5.6f));
+            for (int i = 0; i < 6; i++) yield return 0;
+            bvMove(bvA, new Vector3(-3, 60, 0));
+            for (int i = 0; i < 4; i++) yield return 0;
+            var bvA3 = World.Get<CollisionProbe>(bvA);
+            check(bvA3.TriggerEnter == 1 && bvA3.TriggerStay >= 3 && bvA3.TriggerExit == 1 && bvA3.Enter == 1 && bvA3.Exit == 1,
+                  $"a trigger calls OnTriggerEnter / Stay / Exit instead ({bvA3.TriggerEnter} / {bvA3.TriggerStay} / {bvA3.TriggerExit})");
+            // Destroy (Enter の中で自分を消す) : 呼び終わった後で消える
+            // (重なっている組の数は見本のシーンの物 (地面と箱など) も入るので見ない。消した物の組が残らないことは次の再生のフレームが動くことで見る)
+            var bvPairs = bvEngine.CollisionPairCount;
+            yield return 0;
+            check(!World.IsAlive(bvD) && World.IsAlive(bvE) && bvEngine.CollisionPairCount <= bvPairs,
+                  $"Destroy(Entity) in OnCollisionEnter deletes it after the callbacks ({bvEngine.CollisionPairCount} pairs in the scene)");
+            bvEngine.RemoveSystems(new object[] { probes });
+            _app.TogglePlay();
+            yield return 0;
+            check(!World.Entities.Any(e => World.Has<CollisionProbe>(e)), "stopping play removes the test objects");
+            World.RemovePools(t => t == typeof(CollisionProbe));
+        }
+        // 速さ : 1 万個の物の Update で GetComponent を 2 回ずつ (Behaviour) と、World.ForEach (2 つの型) を比べる。別の World で
+        {
+            var bvWorld = new World();
+            for (int i = 0; i < 10000; i++)
+            {
+                var e = bvWorld.CreateEntity();
+                bvWorld.Add(e, new Transform(new Vector3(i, 0, 0)));
+                bvWorld.Add(e, new BenchData());
+            }
+            ISystem bench = new BenchBehaviour();
+            void forEach(World w) => w.ForEach((Entity _, ref Transform t, ref BenchData d) => { t.Position += new Vector3(0.001f, 0, 0); d.Sum += t.Position.X; });
+            for (int i = 0; i < 5; i++) { bench.Update(bvWorld); forEach(bvWorld); }   // JIT
+            double best(Action action) { var b = double.MaxValue; for (int r = 0; r < 20; r++) { var s = System.Diagnostics.Stopwatch.GetTimestamp(); action(); b = Math.Min(b, System.Diagnostics.Stopwatch.GetElapsedTime(s).TotalMilliseconds); } return b; }
+            var behaviourMs = best(() => bench.Update(bvWorld));
+            var forEachMs = best(() => forEach(bvWorld));
+            // 型ごとの入れ物を引く : 覚えた物 (GetPool<T>) と、辞書を引く (GetPool(Type)。以前の GetPool<T> と同じ)
+            var cachedMs = best(() => { for (int i = 0; i < 100000; i++) bvWorld.GetPool<Transform>(); });
+            var dictMs = best(() => { for (int i = 0; i < 100000; i++) bvWorld.GetPool(typeof(Transform)); });
+            check(behaviourMs < Math.Max(forEachMs * 3.0, 1.0),
+                  $"speed : Behaviour.Update with 2 GetComponent x 10000 = {behaviourMs:F3} ms (World.ForEach of 2 types {forEachMs:F3} ms), " +
+                  $"GetPool x 100000 = {cachedMs:F3} ms (dictionary {dictMs:F3} ms)");
         }
 
         // ---------- ED10 : 保存していない変更を聞く ----------
