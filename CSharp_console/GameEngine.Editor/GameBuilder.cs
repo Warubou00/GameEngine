@@ -13,6 +13,8 @@ namespace GameEngine.Editor;
 //          3. 書き出し先を空にして写す (前に書き出したフォルダ (Data/player.json がある) か、空のフォルダだけ。他の物は消さない)
 //   書き出したフォルダ : <名前>.exe ... / Shader / Data (player.json / ProjectSettings.json / Assets) /
 //                        dotnet (.NET の動かすだけの物。exe はまずここを探す。.NET を入れていない PC でも動かすため。Package 化で足した)
+//   v1.3 : Data / Shader / Game.dll を Data.pak (独自の形。Brotli で詰めて混ぜる。Pak.cs) にまとめる (PackAssets)。
+//          .NET は使わない物 (WPF / 言語ごとの文字 / デバッグの道具) を入れない (TrimDotnet)。exe のアイコンは Project Settings の Icon
 // ==========================================================================
 
 // 書き出しの設定 (プロジェクトのフォルダの BuildSettings.json に覚える)
@@ -29,6 +31,8 @@ internal sealed class BuildSettings
     public string       OutputFolder { get; set; } = "Build"; // プロジェクトのフォルダからの相対パスか絶対パス
     public bool         DebugSymbols { get; set; }            // .pdb も入れるか
     public bool         IncludeDotnet { get; set; } = true;   // .NET (動かすだけの物) を exe の隣の dotnet に入れるか (.NET を入れていない PC でも動く。約 100 MB)
+    public bool         PackAssets    { get; set; } = true;   // v1.3 : アセット / シェーダー / Game.dll を Data.pak にまとめる (小さく、外から読みにくく)
+    public bool         TrimDotnet    { get; set; } = true;   // v1.3 : .NET から使わない物 (WPF / 言語ごとの文字 / デバッグの道具) を外す
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     public static BuildSettings Load(string file)
@@ -50,6 +54,11 @@ internal sealed class BuildResult
     public int     ShaderCacheFiles;   // 入れたコンパイル済みのシェーダーの数
     public long    Bytes;
     public long    AssetBytes;
+    public long    PakBytes, PakOriginalBytes;   // v1.3 : Data.pak の大きさ / 詰める前の合計 (同じ物を 1 つにする前)
+    public int     PakFiles, PakUniqueFiles;
+    public double  PackMs;
+    public long    DotnetBytes;                  // 入れた .NET の大きさ
+    public string? IconFile;                     // exe に付けたアイコン (Project Settings の Icon。無ければ null)
     public double  CompileMs, CopyMs, TotalMs;
     public List<string> Assets = new();
     public List<string> Warnings = new();
@@ -149,7 +158,8 @@ internal sealed class GameBuilder
         if (settings.IncludeDotnet)
         {
             progress?.Invoke("Copying .NET...");
-            if (copyDotnetRuntime(Path.Combine(output, "dotnet")) is { } dotnetWarning) result.Warnings.Add(dotnetWarning);
+            if (copyDotnetRuntime(Path.Combine(output, "dotnet"), settings.TrimDotnet) is { } dotnetWarning) result.Warnings.Add(dotnetWarning);
+            result.DotnetBytes = Directory.Exists(Path.Combine(output, "dotnet")) ? Directory.EnumerateFiles(Path.Combine(output, "dotnet"), "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length) : 0;
         }
         // ゲームのコード (Game.dll と、ゲームが使うライブラリ。エンジンは Player の物を使う)
         if (gameOutput != null)
@@ -211,6 +221,41 @@ internal sealed class GameBuilder
                 copyFile(file, Path.Combine(data, "Library", "Noise3D", Path.GetFileName(file)));
         }
         result.AssetCount = result.Assets.Count;
+
+        // ---------- v1.3 : exe のアイコン (Project Settings の Icon) ----------
+        if (File.Exists(projectSettings) && ProjectSettings.Load(projectSettings).Icon is { Length: > 0 } icon)
+        {
+            progress?.Invoke("Setting the icon...");
+            var iconFile = _database.FullPath(icon);
+            if (!File.Exists(iconFile)) result.Warnings.Add($"Icon not found : {icon}");
+            else if (ExeIcon.Apply(result.ExePath, iconFile) is { } iconError) result.Warnings.Add($"Icon : {iconError}");
+            else result.IconFile = icon;
+        }
+
+        // ---------- v1.3 : Data / Shader / Game.dll を Data.pak にまとめる ----------
+        if (settings.PackAssets)
+        {
+            progress?.Invoke("Packing...");
+            var packed = new List<(string Name, string File)>();
+            foreach (var folder in new[] { "Data", "Shader" })
+            {
+                var root = Path.Combine(output, folder);
+                if (!Directory.Exists(root)) continue;
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+                    packed.Add((Path.GetRelativePath(output, file).Replace('\\', '/'), file));
+            }
+            var gameDll = Path.Combine(output, "Game.dll");
+            if (File.Exists(gameDll)) packed.Add(("Game.dll", gameDll));
+            Pak.WriteResult pak;
+            try { pak = Pak.Write(Path.Combine(output, Pak.FileName), packed); }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or AggregateException or UnauthorizedAccessException)
+            {
+                return fail($"Cannot write {Pak.FileName} : {ex.Message}");   // 書き出しを止めるだけ (以前の試しでは例外でエディターが落ちた)
+            }
+            foreach (var folder in new[] { "Data", "Shader" }) if (Directory.Exists(Path.Combine(output, folder))) Directory.Delete(Path.Combine(output, folder), true);
+            if (File.Exists(gameDll)) File.Delete(gameDll);
+            (result.PakBytes, result.PakOriginalBytes, result.PakFiles, result.PakUniqueFiles, result.PackMs) = (pak.PakBytes, pak.OriginalBytes, pak.Files, pak.UniqueFiles, pak.Milliseconds);
+        }
         result.CopyMs = Stopwatch.GetElapsedTime(copy).TotalMilliseconds;
 
         // ---------- 4. 確かめる : エディターの物が入っていない ----------
@@ -222,6 +267,8 @@ internal sealed class GameBuilder
 
         result.Ok = true;
         result.TotalMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+        if (settings.PackAssets)
+            Console.WriteLine($"[Build] Data.pak : {result.PakFiles} files ({result.PakUniqueFiles} unique), {result.PakOriginalBytes / 1024.0 / 1024.0:F1} MB -> {result.PakBytes / 1024.0 / 1024.0:F1} MB, {result.PackMs:F0} ms");
         Console.WriteLine($"[Build] {settings.ProductName} -> {output} : {result.AssetCount} assets ({result.AssetBytes / 1024.0 / 1024.0:F1} MB), " +
                           $"{result.FileCount} files ({result.Bytes / 1024.0 / 1024.0:F1} MB), {result.ShaderCacheFiles} compiled shaders, compile {result.CompileMs:F0} ms, copy {result.CopyMs:F0} ms");
         foreach (var warning in result.Warnings) Console.WriteLine($"[Build] warning : {warning}");
@@ -233,7 +280,7 @@ internal sealed class GameBuilder
     {
         if (Directory.Exists(output) && Directory.EnumerateFileSystemEntries(output).Any())
         {
-            if (!File.Exists(Path.Combine(output, "Data", PlayerSettings.FileName)))
+            if (!File.Exists(Path.Combine(output, "Data", PlayerSettings.FileName)) && !File.Exists(Path.Combine(output, Pak.FileName)))   // v1.3 : まとめた物も前の書き出し
                 return $"The output folder is not empty and is not an earlier build : {output}";
             try
             {
@@ -285,7 +332,52 @@ internal sealed class GameBuilder
 
     // .NET の動かすだけの物 (host/fxr + shared の Microsoft.NETCore.App と Microsoft.WindowsDesktop.App) を写す
     //   元 : エディターが今動いている .NET (Package では同梱の dotnet、開発では PC の dotnet)。戻り値 = 警告 (写せなかった時)
-    private static string? copyDotnetRuntime(string target)
+    // v1.3 : 使わない物 (Player は WinForms だけ。WPF は使わない)。言語ごとの文字 (英語で出る) / デバッグの道具 (ダンプ / デバッガー)
+    private static readonly string[] TrimmedFiles =
+    {
+        "createdump.exe", "mscordbi.dll", "mscordaccore.dll", "mscordaccore_*.dll", "Microsoft.DiaSymReader.Native.*.dll",
+        "Presentation*.dll", "PresentationNative_cor3.dll", "wpfgfx_cor3.dll", "PenImc_cor3.dll", "D3DCompiler_47_cor3.dll",
+        "ReachFramework.dll", "System.Windows.Controls.Ribbon.dll", "System.Xaml.dll", "UIAutomation*.dll", "System.Printing.dll",
+        "DirectWriteForwarder.dll", "WindowsFormsIntegration.dll", "System.Windows.Forms.Design*.dll", "System.Windows.Presentation.dll",
+        "System.Windows.Input.Manipulations.dll", "WindowsBase.dll",
+    };
+
+    // 外した物を、その .NET の deps.json からも外す (書いてある物が無いと .NET が起動しないため)。戻り値 = 外した大きさ
+    private static long trimRuntime(string frameworkFolder)
+    {
+        long removed = 0;
+        var removedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pattern in TrimmedFiles)
+            foreach (var file in Directory.EnumerateFiles(frameworkFolder, pattern))
+            {
+                removed += new FileInfo(file).Length;
+                removedNames.Add(Path.GetFileName(file));
+                File.Delete(file);
+            }
+        // 言語ごとのフォルダ (cs / de / ja ...。中は resources.dll だけ)
+        foreach (var dir in Directory.EnumerateDirectories(frameworkFolder))
+        {
+            var files = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).ToList();
+            if (files.Count == 0 || !files.All(f => f.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase))) continue;
+            foreach (var f in files) { removed += new FileInfo(f).Length; removedNames.Add($"{Path.GetFileName(dir)}/{Path.GetFileName(f)}"); }
+            Directory.Delete(dir, true);
+        }
+        var deps = Directory.EnumerateFiles(frameworkFolder, "*.deps.json").FirstOrDefault();
+        if (deps != null && removedNames.Count > 0)
+        {
+            var root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(deps))!;
+            foreach (var target in root["targets"]!.AsObject())
+                foreach (var library in target.Value!.AsObject())
+                    foreach (var group in new[] { "runtime", "native", "resources" })
+                        if (library.Value?[group] is System.Text.Json.Nodes.JsonObject assets)
+                            foreach (var name in assets.Select(a => a.Key).Where(k => removedNames.Contains(k.Replace("\\", "/")) || removedNames.Contains(Path.GetFileName(k)) && !k.Contains('/')).ToList())
+                                assets.Remove(name);
+            File.WriteAllText(deps, root.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        return removed;
+    }
+
+    private static string? copyDotnetRuntime(string target, bool trim = false)
     {
         var core    = Path.GetDirectoryName(typeof(object).Assembly.Location)!;                    // <root>/shared/Microsoft.NETCore.App/<版>
         var desktop = Path.GetDirectoryName(typeof(System.Windows.Forms.Form).Assembly.Location)!; // <root>/shared/Microsoft.WindowsDesktop.App/<版>
@@ -307,6 +399,12 @@ internal sealed class GameBuilder
         copyTree(desktop, Path.Combine(target, "shared", "Microsoft.WindowsDesktop.App", Path.GetFileName(desktop)));
         foreach (var notice in new[] { "LICENSE.txt", "ThirdPartyNotices.txt" })
             if (File.Exists(Path.Combine(root, notice))) copyFile(Path.Combine(root, notice), Path.Combine(target, notice));
+        if (trim)
+        {
+            var saved = trimRuntime(Path.Combine(target, "shared", "Microsoft.NETCore.App", Path.GetFileName(core))) +
+                        trimRuntime(Path.Combine(target, "shared", "Microsoft.WindowsDesktop.App", Path.GetFileName(desktop)));
+            Console.WriteLine($"[Build] .NET : left out {saved / 1024.0 / 1024.0:F1} MB (WPF / languages / debugging)");
+        }
         return null;
     }
 

@@ -79,8 +79,21 @@ internal static class Program
             var frames = 0;
             engine.LateUpdate += () => { if (++frames == quitFrames) { Console.WriteLine($"[Editor] {frames} frames, quit"); editor.ForceQuit(); } };
         }
-        var scenePath = options.GetValueOrDefault("--scene", Path.Combine(scenes, "showcase.scene.json"));
+        // 既定のシーン : showcase → Scenes の最初のシーン → 1 つも無ければ (新しいプロジェクト。v1.3) 光とカメラだけの Main.scene.json を作る
+        var defaultScene = Path.Combine(scenes, "showcase.scene.json");
+        if (!File.Exists(defaultScene) && Directory.Exists(scenes))
+            defaultScene = Directory.EnumerateFiles(scenes, "*.scene.json").Order(StringComparer.OrdinalIgnoreCase).FirstOrDefault() ?? defaultScene;
+        var scenePath = options.GetValueOrDefault("--scene", defaultScene);
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
+        else if (!options.ContainsKey("--scene") && !Directory.EnumerateFiles(database.AssetsRoot, "*.scene.json", SearchOption.AllDirectories).Any())
+        {
+            var main = Path.Combine(scenes, "Main.scene.json");
+            editor.RequestNewScene();   // 光とカメラだけのシーン (起動したばかりなので聞かずに作る)
+            editor.SaveSceneTo(main);
+            database.Refresh();
+            editor.OpenScene(main);
+            Console.WriteLine($"[Editor] New project : created {main}");
+        }
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
 

@@ -5,6 +5,7 @@ namespace GameEngine.Launcher;
 // ==========================================================================
 // ランチャーの窓 (ED9)
 //   Projects : プロジェクトの一覧 (名前 / 前に開いた版 / 最後に開いた日時 / 場所)。版を選んで Open (ダブルクリックでも)
+//              New Project... (v1.3) : 名前と場所を決めて新しいプロジェクトを作り、一覧に入れる (そのまま開ける)
 //              前に開いた版と違う版で開く時は確かめる (新しい版で保存すると、古い版で開けなくなることがあるため)
 //   Installs : エディターの版の一覧 (入れた版 / 開発版 / 足した版)。Install Current Build / Add Editor... / Remove / Launch
 // ==========================================================================
@@ -71,6 +72,7 @@ internal sealed class LauncherForm : Form
         var page = new TabPage("Projects");
         var label = new Label { Text = "Editor :", AutoSize = true, Margin = new Padding(4, 7, 0, 0) };
         var row = buttonRow(label, _editorChoice, button("Open", (_, _) => openSelected()),
+                            button("New Project...", (_, _) => newProject()),
                             button("Add...", (_, _) => addProject()), button("Remove", (_, _) => removeProject()),
                             button("Show in Explorer", (_, _) => { if (selectedProject() is { } p) explorer(p.Path); }), _closeAfter);
         _closeAfter.Margin = new Padding(12, 6, 0, 0);
@@ -135,6 +137,22 @@ internal sealed class LauncherForm : Form
             if (_closeAfter.Checked) Close();
         }
         catch (Exception ex) { error(ex); }
+    }
+
+    // 新しいプロジェクト (v1.3)
+    private void newProject()
+    {
+        using var dialog = new NewProjectDialog();
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var path = _installs.CreateProject(dialog.Location, dialog.ProjectName);
+            refreshProjects();
+            foreach (ListViewItem item in _projects.Items) item.Selected = item.Tag is LauncherSettings.ProjectEntry p && string.Equals(p.Path, path, StringComparison.OrdinalIgnoreCase);
+            status($"Created {path}");
+            if (dialog.OpenAfter) openSelected();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException) { error(ex); }
     }
 
     private void addProject()

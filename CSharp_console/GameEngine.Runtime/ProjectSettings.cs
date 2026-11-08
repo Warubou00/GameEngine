@@ -22,6 +22,10 @@ public sealed class ProjectSettings
     public static ProjectSettings Current { get; set; } = new();
 
     [Header("Time")]
+    // 書き出した exe のアイコン (v1.3。Unity の Player Settings > Icon)。アセットのパス (png / jpg / bmp / ico)。null = エンジンのアイコン
+    //   Project Settings の窓の Player に出す (インスペクターの部品ではなく、画像を落とす欄)
+    [HideInInspector] public string? Icon;
+
     [Range(0.001f, 0.1f)] public float FixedDeltaTime = 1.0f / 60.0f;
     [Range(1, 20)]        public int   MaxFixedSteps  = 5;
 

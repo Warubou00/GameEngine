@@ -900,6 +900,18 @@ internal sealed partial class EditorApp
             {
                 drawPrefabHeader();
                 _inspector.Draw(_selected);
+                // スクリプト (.cs) をドラッグしている間 : Inspector の残りを全部「落とす所」にする。落とすとそのコンポーネントを付ける (v1.3)
+                if (ProjectPanel.Dragged?.Kind == AssetKind.Script && World.IsAlive(_selected))
+                {
+                    ImGui.Spacing();
+                    var avail = ImGui.GetContentRegionAvail();
+                    ImGui.Button($"Drop {ProjectPanel.Dragged.Label} here to add its component##scriptDrop", new Vector2(Math.Max(avail.X, 60), Math.Max(avail.Y, 80)));
+                    if (ImGui.BeginDragDropTarget())
+                    {
+                        if (ProjectPanel.AcceptDrop(AssetKind.Script) is { } script) _inspector.AttachScript(_selected, _database.FullPath(script.Path));
+                        ImGui.EndDragDropTarget();
+                    }
+                }
             }
         }
         ImGui.End();

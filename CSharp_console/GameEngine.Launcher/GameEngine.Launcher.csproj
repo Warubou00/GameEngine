@@ -21,6 +21,12 @@
     <AppHostRelativeDotNet>dotnet</AppHostRelativeDotNet>
   </PropertyGroup>
 
+  <!-- 新しいプロジェクトの csproj の雛形 (v1.3)。見本のプロジェクトの物をそのまま埋め込む -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Project\Scripts\Game.csproj" LogicalName="ProjectTemplate/Game.csproj" Visible="false" />
+    <EmbeddedResource Include="..\Project\Scripts\Editor\GameEditor.csproj" LogicalName="ProjectTemplate/GameEditor.csproj" Visible="false" />
+  </ItemGroup>
+
   <!-- エンジンの名前 / 版 / アイコン (Package 化で足した) -->
   <Import Project="..\Engine.props" />
 

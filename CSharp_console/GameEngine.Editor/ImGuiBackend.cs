@@ -11,6 +11,9 @@ namespace GameEngine.Editor;
 //   - 描画 : ImGui の頂点 / インデックス / 描画の命令を、まとめて Graphics.SubmitUI で C++ (RHI の UI のパス) へ渡す
 //   - フォント : 日本語が出るように Windows のメイリオを使う (無ければ ImGui の既定の英字フォント)
 //   - 窓の並び (docking) は imgui.ini に保存される (次に開いた時も同じ並び)
+//   - 日本語の入力 (IME。v1.3) : 文字の入力の欄を書いている間だけ、窓に IME を付ける (変換の窓は欄の文字の位置に出す)
+//     以前は WinForms の Form が IME を外していた (文字を受け取らない窓の扱い) ので、日本語を打てなかった
+//     (表示名などに日本語を入れられるのは、貼り付けか確認の中だけだった)。欄の外では外す (W / E / R などのキーを IME に取られないように)
 // ==========================================================================
 internal sealed unsafe class ImGuiBackend : IDisposable
 {
@@ -35,7 +38,60 @@ internal sealed unsafe class ImGuiBackend : IDisposable
         style.WindowRounding = 3.0f;
         style.FrameRounding  = 2.0f;
         buildFont(io);
+        // IME : ImGui が「入力の欄の位置が変わった / 欄を離れた」時に呼ぶ (v1.3)
+        _setImeData = setImeData;
+        ImGui.GetPlatformIO().Platform_SetImeDataFn = Marshal.GetFunctionPointerForDelegate(_setImeData);
     }
+
+    // ---------------------------------------------------------------------
+    // 日本語の入力 (IME。v1.3)
+    // ---------------------------------------------------------------------
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SetImeDataFn(IntPtr context, IntPtr viewport, ImGuiPlatformImeData* data);
+    private readonly SetImeDataFn _setImeData;   // 持っておく (GC に回収されると C++ から呼べなくなる)
+    private bool _imeWanted;
+
+    /// <summary>今、窓に IME が付いているか (文字の入力の欄を書いている間だけ true。確認用)</summary>
+    public bool ImeEnabled
+    {
+        get
+        {
+            var hwnd = _engine.Window.Handle;
+            var context = ImmGetContext(hwnd);
+            if (context == IntPtr.Zero) return false;
+            ImmReleaseContext(hwnd, context);
+            return true;
+        }
+    }
+
+    private void setImeData(IntPtr context, IntPtr viewport, ImGuiPlatformImeData* data)
+    {
+        _imeWanted = data->WantVisible != 0;
+        var hwnd = _engine.Window.Handle;
+        if (!_imeWanted) { ImmAssociateContextEx(hwnd, IntPtr.Zero, 0); return; }   // 外す
+        ImmAssociateContextEx(hwnd, IntPtr.Zero, IACE_DEFAULT);                     // 付ける (窓の既定の IME)
+        var himc = ImmGetContext(hwnd);
+        if (himc == IntPtr.Zero) return;
+        // 変換中の文字と候補の窓を、欄の文字の位置 (クライアントの座標) に出す
+        var x = (int)data->InputPos.X;
+        var y = (int)data->InputPos.Y;
+        var composition = new COMPOSITIONFORM { dwStyle = CFS_FORCE_POSITION, ptCurrentPos = new POINT { x = x, y = y } };
+        ImmSetCompositionWindow(himc, ref composition);
+        var candidate = new CANDIDATEFORM { dwIndex = 0, dwStyle = CFS_CANDIDATEPOS, ptCurrentPos = new POINT { x = x, y = y + (int)data->InputLineHeight } };
+        ImmSetCandidateWindow(himc, ref candidate);
+        ImmReleaseContext(hwnd, himc);
+    }
+
+    private const uint IACE_DEFAULT = 0x0010, CFS_FORCE_POSITION = 0x0020, CFS_CANDIDATEPOS = 0x0040;
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; }
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct COMPOSITIONFORM { public uint dwStyle; public POINT ptCurrentPos; public RECT rcArea; }
+    [StructLayout(LayoutKind.Sequential)] private struct CANDIDATEFORM { public uint dwIndex; public uint dwStyle; public POINT ptCurrentPos; public RECT rcArea; }
+    [DllImport("imm32.dll")] private static extern IntPtr ImmGetContext(IntPtr hwnd);
+    [DllImport("imm32.dll")] private static extern bool ImmReleaseContext(IntPtr hwnd, IntPtr himc);
+    [DllImport("imm32.dll")] private static extern bool ImmAssociateContextEx(IntPtr hwnd, IntPtr himc, uint flags);
+    [DllImport("imm32.dll")] private static extern bool ImmSetCompositionWindow(IntPtr himc, ref COMPOSITIONFORM form);
+    [DllImport("imm32.dll")] private static extern bool ImmSetCandidateWindow(IntPtr himc, ref CANDIDATEFORM form);
 
     private void buildFont(ImGuiIOPtr io)
     {
@@ -103,8 +159,10 @@ internal sealed unsafe class ImGuiBackend : IDisposable
         }
         foreach (var c in Input.TypedCharacters)
         {
-            if (c >= 32 && c != 127) io.AddInputCharacter(c);   // 制御文字 (Backspace など) はキーで渡す
+            if (c >= 32 && c != 127) io.AddInputCharacterUTF16(c);   // 制御文字 (Backspace など) はキーで渡す。UTF-16 (IME の確定した文字。サロゲートの組も)
         }
+        // 欄を書いている間に WinForms が IME を外した時 (窓のフォーカスを戻した時など) は付け直す (v1.3)
+        if (_imeWanted && !ImeEnabled) ImmAssociateContextEx(_engine.Window.Handle, IntPtr.Zero, IACE_DEFAULT);
         ImGui.NewFrame();
     }
 

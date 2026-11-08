@@ -152,6 +152,16 @@ internal sealed class EditorInstalls
     // 起動
     // ---------------------------------------------------------------------
 
+    /// <summary>新しいプロジェクトを作って一覧に入れる (v1.3)。戻り値 = プロジェクトのフォルダ</summary>
+    public string CreateProject(string parent, string name)
+    {
+        var path = NewProject.Create(parent, name);
+        if (!Settings.Projects.Any(p => string.Equals(p.Path, path, StringComparison.OrdinalIgnoreCase)))
+            Settings.Projects.Add(new LauncherSettings.ProjectEntry { Path = path, LastOpened = DateTime.Now });
+        Save();
+        return path;
+    }
+
     public Process Launch(EditorInstall install, string? project, IEnumerable<string>? extraArguments = null)
     {
         var info = new ProcessStartInfo(install.Exe) { WorkingDirectory = install.Folder, UseShellExecute = false };

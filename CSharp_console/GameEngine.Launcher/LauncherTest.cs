@@ -50,9 +50,16 @@ internal static class LauncherTest
         check(installs.All.Count(i => i.Version == source.Version) >= 2 && installs.All[0].Number >= installs.All[^1].Number, "the list has both versions (newest first)");
 
         // ---------- 入れた版で開く (リポジトリの外のエディター) ----------
+        // v1.3 : New Project... と同じ作り方 (Assets / Scripts の csproj / .gitignore)。入れた版で開くと Main.scene.json ができ、スクリプトがビルドされる
         var project = Path.Combine(installs.DataFolder, "TestProject");
         if (Directory.Exists(project)) Directory.Delete(project, true);
-        Directory.CreateDirectory(project);
+        check(NewProject.Validate(installs.DataFolder, "Bad:Name") != null && NewProject.Validate(installs.DataFolder, "") != null, "new project : names that cannot be folders are refused");
+        var created = installs.CreateProject(installs.DataFolder, "TestProject");
+        check(created == Path.GetFullPath(project) && File.Exists(Path.Combine(project, "Scripts", "Game.csproj")) &&
+              File.Exists(Path.Combine(project, "Scripts", "Editor", "GameEditor.csproj")) && Directory.Exists(Path.Combine(project, "Assets", "Scenes")) &&
+              File.Exists(Path.Combine(project, ".gitignore")) && installs.Settings.Projects.Any(p => p.Path == project) &&
+              NewProject.Validate(installs.DataFolder, "TestProject") != null,
+              "new project : Assets, Scripts (Game / GameEditor csproj), .gitignore, added to the list (the same name is refused next time)");
         start = Stopwatch.GetTimestamp();
         var process = installs.Launch(installed, project, new[] { "--quit-after", frames.ToString() });
         var exited = process.WaitForExit(120_000);
@@ -61,6 +68,9 @@ internal static class LauncherTest
         check(exited && process.ExitCode == 0, $"the installed editor opens a project and closes after {frames} frames ({seconds:F1} s, exit {(exited ? process.ExitCode : -1)})");
         check(EditorInstalls.ProjectVersion(project) == installed.Version && Directory.Exists(Path.Combine(project, "Assets")),
               $"the project records the editor version ({EditorInstalls.ProjectVersion(project) ?? "none"})");
+        check(File.Exists(Path.Combine(project, "Assets", "Scenes", "Main.scene.json")) &&
+              Directory.EnumerateFiles(Path.Combine(project, "Scripts"), "Game.dll", SearchOption.AllDirectories).Any(),
+              "new project : the editor makes Main.scene.json and builds the scripts (outside the repository)");
         var entry = installs.Settings.Projects.FirstOrDefault(p => p.Path == project);
         check(entry != null && entry.LastOpened != null && installs.Suggest(entry) == installed, "the launcher remembers the project and its editor");
         if (entry != null)
