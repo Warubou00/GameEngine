@@ -58,3 +58,29 @@ internal sealed class BenchBehaviour : Behaviour<BenchData>
         data.Sum += GetComponent<Transform>().Position.X;
     }
 }
+
+// 確認用 (EditorTest の v1.4) : Awake / Start / Update / FixedUpdate / LateUpdate の順番と回数
+internal struct LifecycleProbe : IComponent
+{
+    public int Awake, Start, Updates, Fixed, Late;
+    public int OrderErrors;   // 順番が違った回数 (Start の前の Update など)
+}
+
+internal sealed class LifecycleProbeSystem : Behaviour<LifecycleProbe>
+{
+    public readonly List<string> Log = new();   // 最初の呼び出しの順 ("Awake" / "Start")
+
+    protected override void Awake(ref LifecycleProbe d) { if (d.Start > 0 || d.Updates > 0) d.OrderErrors++; d.Awake++; Log.Add("Awake"); }
+    protected override void Start(ref LifecycleProbe d) { if (d.Awake == 0 || d.Updates > 0) d.OrderErrors++; d.Start++; Log.Add("Start"); }
+    protected override void Update(ref LifecycleProbe d) { if (d.Start == 0) d.OrderErrors++; d.Updates++; }
+    protected override void FixedUpdate(ref LifecycleProbe d) { if (d.Start == 0) d.OrderErrors++; d.Fixed++; }
+
+    // 全部の Update の後。ここで動かした Transform は、このフレームの行列に入る
+    protected override void LateUpdate(ref LifecycleProbe d)
+    {
+        if (d.Late >= d.Updates) d.OrderErrors++;
+        d.Late++;
+        ref var transform = ref Transform;
+        transform.Position = new Vector3(transform.Position.X, 100.0f + d.Late, transform.Position.Z);
+    }
+}

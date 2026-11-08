@@ -48,6 +48,14 @@ public sealed class LayerMaskAttribute : Attribute
 {
 }
 
+/// <summary>インスペクターで、この string をアセットのパスとして出す (Project から落とせる。v1.4)</summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class AssetPathAttribute : Attribute
+{
+    public AssetKind Kind { get; }
+    public AssetPathAttribute(AssetKind kind) => Kind = kind;
+}
+
 /// <summary>インスペクターで、このフィールドの前に見出しを出す</summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class HeaderAttribute : Attribute

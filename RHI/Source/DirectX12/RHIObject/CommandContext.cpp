@@ -1458,7 +1458,12 @@ namespace RHI
 			{
 				const uint32_t index = command.Inputs[i];
 				constants[i] = 0;   // 無い時は既定テクスチャ (白)
-				if (index == RHI::RenderTargetHandle::SCENE_DEPTH)
+				if (index < 0x80000000u && (index & RHI::RenderTargetHandle::TEXTURE_INPUT) != 0)
+				{
+					// v1.4 : 普通のテクスチャ (読むだけ。状態はいつも PIXEL_SHADER_RESOURCE なので、バリアは要らない)
+					constants[i] = index & ~RHI::RenderTargetHandle::TEXTURE_INPUT;
+				}
+				else if (index == RHI::RenderTargetHandle::SCENE_DEPTH)
 				{
 					if (!ensureDepthSrv(buffer)) continue;
 					if (_boundDepth == RHI::RenderTargetHandle::SCENE_DEPTH)

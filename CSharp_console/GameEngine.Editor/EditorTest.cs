@@ -2106,6 +2106,82 @@ internal sealed class EditorTest
             yield return 0;
         }
 
+        // ---------- v1.4 : Behaviour の Awake / Start / FixedUpdate / LateUpdate ----------
+        {
+            var lcScene = _app.ScenePath!;
+            var lcSystem = new LifecycleProbeSystem();
+            _app.TogglePlay();
+            yield return 0;
+            _app.Engine.AddSystem(lcSystem);
+            Entity lcMake(string name, bool active)
+            {
+                var e = World.CreateEntity(name);
+                World.Add(e, new Transform(new Vector3(0, 0, 50)));
+                World.Add(e, new LifecycleProbe());
+                if (!active) World.SetActive(e, false);
+                return e;
+            }
+            var lcA = lcMake("LifecycleA", true);
+            var lcB = lcMake("LifecycleB", true);
+            var lcC = lcMake("LifecycleOff", false);
+            var lcStart = Time.TotalTime;
+            for (int i = 0; i < 30 || Time.TotalTime - lcStart < 0.1; i++) yield return 0;
+            var lcPa = World.Get<LifecycleProbe>(lcA);
+            var lcPb = World.Get<LifecycleProbe>(lcB);
+            check(lcPa.Awake == 1 && lcPa.Start == 1 && lcPb.Awake == 1 && lcPb.Start == 1 && lcPa.OrderErrors == 0 && lcPb.OrderErrors == 0 &&
+                  lcSystem.Log.Take(4).SequenceEqual(new[] { "Awake", "Awake", "Start", "Start" }),
+                  $"Awake then Start once each, before the first Update (all Awake before any Start : {string.Join(" ", lcSystem.Log.Take(4))})");
+            check(lcPa.Updates >= 30 && lcPa.Late == lcPa.Updates && lcPa.Fixed > 0 && lcPa.Fixed < lcPa.Updates,
+                  $"Update every frame, LateUpdate after it every frame, FixedUpdate per fixed step ({lcPa.Updates} / {lcPa.Late} / {lcPa.Fixed})");
+            check(MathF.Abs(World.Get<Transform>(lcA).WorldPosition.Y - (100.0f + lcPa.Late)) < 1e-3f,
+                  $"a Transform moved in LateUpdate is in this frame's matrix (y {World.Get<Transform>(lcA).WorldPosition.Y:F1})");
+            var lcPc = World.Get<LifecycleProbe>(lcC);
+            World.SetActive(lcC, true);
+            yield return 0;
+            yield return 0;
+            var lcPc2 = World.Get<LifecycleProbe>(lcC);
+            check(lcPc.Awake == 0 && lcPc.Updates == 0 && lcPc2.Awake == 1 && lcPc2.Start == 1 && lcPc2.Updates >= 1 && lcPc2.OrderErrors == 0,
+                  "an inactive object gets Awake / Start when it becomes active");
+            _app.Engine.RemoveSystems(new object[] { lcSystem });
+            _app.TogglePlay();
+            yield return 0;
+            World.RemovePools(t => t == typeof(LifecycleProbe));
+
+            // ---------- v1.4 : Skybox (既定の空) ----------
+            var skyGraphics = _app.Engine.Graphics;
+            var skyPass = skyGraphics.Pipeline!.Sky;
+            var defaultTexture = skyPass.TextureOf(null);
+            check(skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Texture == null && defaultTexture != 0xFFFFFFFFu && skyPass.TextureOf("Assets/NoSuchSky.png") == defaultTexture,
+                  "the sky is on by default with the built-in image (a missing image falls back to it)");
+            var skyDrawn = skyPass.DrawCount;
+            for (int i = 0; i < 3; i++) yield return 0;
+            var drawnOn = skyPass.DrawCount - skyDrawn;
+            skyGraphics.Skybox.Enabled = false;
+            yield return 0;
+            skyDrawn = skyPass.DrawCount;
+            for (int i = 0; i < 3; i++) yield return 0;
+            check(drawnOn >= 3 && skyPass.DrawCount == skyDrawn, $"the sky is drawn every frame, and not when turned off ({drawnOn} draws in 3 frames)");
+            skyGraphics.Skybox.Enabled = true;
+            // RenderSettings の Skybox (シーンに保存する値) が engine.Graphics へ
+            var skyRs = World.CreateEntity("SkyTest Render Settings");
+            World.Add(skyRs, new RenderSettings { Skybox = false, SkyboxIntensity = 2.0f, SkyboxRotation = 90.0f });
+            yield return 0;
+            yield return 0;
+            check(!skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == 2.0f && skyGraphics.Skybox.Rotation == 90.0f, "RenderSettings sets the skybox (on / intensity / rotation)");
+            // ディファードでも描く (ライティングは背景に触らない)
+            var skyForward = skyGraphics.Pipeline;
+            World.Get<RenderSettings>(skyRs).Skybox = true;
+            World.Get<RenderSettings>(skyRs).Path = RenderPath.Deferred;
+            for (int i = 0; i < 3; i++) yield return 0;
+            var deferredSky = skyGraphics.Pipeline!.Sky;
+            var deferredDrawn = deferredSky.DrawCount;
+            for (int i = 0; i < 3; i++) yield return 0;
+            check(skyGraphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline && deferredSky.DrawCount - deferredDrawn >= 3, "the deferred pipeline draws the sky too");
+            _app.OpenScene(lcScene);   // RenderSettings も消える (シーンを開き直す)
+            for (int i = 0; i < 3; i++) yield return 0;
+            check(skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == 1.0f, "a scene without the test RenderSettings goes back to the default sky");
+        }
+
         // ---------- ED10 : 保存していない変更を聞く ----------
         var promptScene = _app.ScenePath!;
         var otherScene = database.FullPath("Assets/Scenes/physics.scene.json");

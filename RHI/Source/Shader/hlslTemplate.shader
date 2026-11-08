@@ -597,7 +597,11 @@ float4 PSDeferredLighting(FullscreenOutput input) : SV_TARGET
 {
     const int3  pixel = int3(input.Position.xy, 0);
     const float depth = g_Textures[g_Inputs[0].w].Load(pixel).r;
-    if (depth >= 1.0f) return float4(g_Params[0].rgb, 1.0f);   // 背景
+    if (depth >= 1.0f)   // 背景
+    {
+        if (g_Params[0].w > 0.5f) discard;   // v1.4 : 空 (Skybox) を先に描いてある時は触らない
+        return float4(g_Params[0].rgb, 1.0f);
+    }
 
     const float3 albedo   = g_Textures[g_Inputs[0].x].Load(pixel).rgb;   // sRGB の RT から読むと線形に戻る
     const float3 normal   = normalize(g_Textures[g_Inputs[0].y].Load(pixel).xyz);

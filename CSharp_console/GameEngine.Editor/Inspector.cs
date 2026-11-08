@@ -211,6 +211,14 @@ internal sealed class Inspector
             return false;
         case string s:
             if (ImGui.InputText(label, ref s, 512)) { value = s; return true; }
+            // v1.4 : [AssetPath] の欄は Project からアセットを落とせる
+            if (field?.AssetPathKind is { } kind && ImGui.BeginDragDropTarget())
+            {
+                var dropped = ProjectPanel.AcceptDrop(kind);
+                ImGui.EndDragDropTarget();
+                if (dropped != null) { value = dropped.Path; return true; }
+            }
+            if (field?.AssetPathKind != null && ImGui.IsItemHovered()) ImGui.SetTooltip($"Drop a {field.AssetPathKind} from Project (empty = default)");
             return false;
         case Enum e:
             return drawEnum(label, type, ref value, e);

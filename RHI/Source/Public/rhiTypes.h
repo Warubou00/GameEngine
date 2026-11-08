@@ -249,6 +249,9 @@ namespace RHI
 		static constexpr uint32_t INVALID     = 0xFFFFFFFFu;
 		static constexpr uint32_t BACK_BUFFER = 0xFFFFFFFEu;   // 画面 (スワップチェーン)
 		static constexpr uint32_t SCENE_DEPTH = 0xFFFFFFFDu;   // シーンの深度 (GPU カリングのオクルージョンもこれを使う)
+		// v1.4 : 全画面シェーダーの入力に、レンダーターゲットではない普通のテクスチャ (CreateUITexture などの番号) を渡す印。
+		//        下の 30 bit がテクスチャの番号 (g_Textures の番号)。Skybox の空の画像に使う
+		static constexpr uint32_t TEXTURE_INPUT = 0x40000000u;
 		uint32_t Index = INVALID;
 	};
 

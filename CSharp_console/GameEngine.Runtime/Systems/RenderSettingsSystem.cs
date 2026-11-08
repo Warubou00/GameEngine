@@ -118,6 +118,11 @@ internal sealed class RenderSettingsSystem
         if (force || s.AntiAliasing != last.AntiAliasing)       g.AntiAliasing    = s.AntiAliasing;
         if (force || s.AmbientColor != last.AmbientColor)       g.AmbientColor    = s.AmbientColor;
         if (force || s.BackgroundColor != last.BackgroundColor) g.BackgroundColor = s.BackgroundColor;
+        // 空 (v1.4)
+        if (force || s.Skybox != last.Skybox)                   g.Skybox.Enabled   = s.Skybox;
+        if (force || s.SkyboxTexture != last.SkyboxTexture)     g.Skybox.Texture   = string.IsNullOrWhiteSpace(s.SkyboxTexture) ? null : s.SkyboxTexture;
+        if (force || s.SkyboxIntensity != last.SkyboxIntensity) g.Skybox.Intensity = s.SkyboxIntensity;
+        if (force || s.SkyboxRotation != last.SkyboxRotation)   g.Skybox.Rotation  = s.SkyboxRotation;
         if (force || s.Exposure != last.Exposure)               g.Exposure        = s.Exposure;
         if (force || s.Tonemapper != last.Tonemapper)           g.Tonemapper      = s.Tonemapper;
         if (force || s.Gamma != last.Gamma)                     g.Gamma           = s.Gamma;

@@ -22,6 +22,12 @@
     <AssemblyName>GameEngine.Runtime</AssemblyName>
   </PropertyGroup>
 
+  <!-- 既定の空 (v1.4。Resources/make_sky.py で作った画像。SkyboxPass が読む) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\DefaultSky.png" LogicalName="Sky/DefaultSky.png" />
+    <None Remove="Resources\make_sky.py" />
+  </ItemGroup>
+
   <!-- エンジンの名前 / 版 (EngineInfo が読む。Package 化で足した) -->
   <Import Project="..\Engine.props" />
 
