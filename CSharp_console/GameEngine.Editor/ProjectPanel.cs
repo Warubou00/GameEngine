@@ -23,6 +23,8 @@ namespace GameEngine.Editor;
 //     スクリプトは作ってすぐ名前を書く欄になり、決めた名前が中の型の名前にもなる (Unity と同じ)
 //     .cs をダブルクリック : Visual Studio で sln とその .cs を開く (ScriptEditor)
 //   - 右クリック > Delete / Delete キー (v1.1) : 確かめてから、ごみ箱へ (.meta も一緒)
+//   - ドラッグで動かす (v1.3) : アセット / フォルダを、フォルダのタイル / 左の木 / 上のパンくずへ落とすと、そのフォルダへ動く
+//     (.meta も一緒で Id は変わらないので、シーンやマテリアルからの参照はそのまま)。スクリプトは Inspector へ落とすと付く
 // ==========================================================================
 internal sealed class ProjectPanel : IDisposable
 {
@@ -233,6 +235,7 @@ internal sealed class ProjectPanel : IDisposable
             if (i > 0) { ImGui.TextDisabled(">"); ImGui.SameLine(0, 2); }
             var crumb = string.Join('/', parts.Take(i + 1));
             if (ImGui.SmallButton($"{_database.Find(crumb)?.Label ?? parts[i]}##crumb{i}")) _folder = crumb;   // 表示名があれば表示名
+            dropToMove(crumb);   // v1.3 : 上のフォルダへ動かす
         }
     }
 
@@ -249,6 +252,8 @@ internal sealed class ProjectPanel : IDisposable
         var open = ImGui.TreeNodeEx(renaming ? $"##{path}" : $"{entry?.Label ?? Path.GetFileName(path)}##{path}", flags);
         if (entry?.DisplayName != null && ImGui.IsItemHovered()) ImGui.SetTooltip($"{entry.DisplayName}\n{entry.Path}");   // 表示名の時は本当の名前も
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) { _folder = path; _search = ""; Select(_database.Find(path)); }
+        if (path != AssetDatabase.AssetsFolder && entry != null) dragSource(entry);   // v1.3 : フォルダもドラッグで動かせる
+        dropToMove(path);
         if (path == AssetDatabase.AssetsFolder && ImGui.BeginPopupContextItem($"folder{path}"))   // Assets : 作るだけ (v1.1)
         {
             createMenu(path);
@@ -381,15 +386,9 @@ internal sealed class ProjectPanel : IDisposable
             ImGui.SetTooltip(fbxError(entry) is { } fbxProblem ? $"{tip}\n{fbxProblem}" : tip);
         }
 
-        // ドラッグ (フォルダ以外)
-        if (entry.Kind != AssetKind.Folder && ImGui.BeginDragDropSource())
-        {
-            Dragged = entry;
-            int dummy = 0;
-            ImGui.SetDragDropPayload(Payload, (IntPtr)(&dummy), sizeof(int));
-            ImGui.Text($"{entry.Label} ({entry.Kind})");
-            ImGui.EndDragDropSource();
-        }
+        // ドラッグ (v1.3 : フォルダも。以前はフォルダ以外だけ)。フォルダのタイルへ落とすと、その中へ動かす
+        dragSource(entry);
+        if (entry.Kind == AssetKind.Folder) dropToMove(entry.Path);
         ImGui.EndGroup();
         ImGui.PopID();
     }
@@ -415,6 +414,49 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Other when entry.Path.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) => ("FBX ?", 0xFF3030A0u),   // 種類の分からない .fbx
         _                  => (Path.GetExtension(entry.Path).TrimStart('.').ToUpperInvariant(), 0xFF404040u),
     };
+
+    private unsafe void dragSource(AssetEntry entry)
+    {
+        if (!ImGui.BeginDragDropSource()) return;
+        Dragged = entry;
+        int dummy = 0;
+        ImGui.SetDragDropPayload(Payload, (IntPtr)(&dummy), sizeof(int));
+        ImGui.Text($"{entry.Label} ({entry.Kind})");
+        ImGui.EndDragDropSource();
+    }
+
+    // 今の項目 (フォルダ) へ落とされたら、そこへ動かす (v1.3)。自分の中 / 今と同じフォルダへは落とせない
+    private unsafe void dropToMove(string folder)
+    {
+        if (Dragged is not { } dragged || !CanMove(dragged.Path, folder) || !ImGui.BeginDragDropTarget()) return;
+        var payload = ImGui.AcceptDragDropPayload(Payload);
+        if (payload.NativePtr != null) MoveAsset(dragged.Path, folder);
+        ImGui.EndDragDropTarget();
+    }
+
+    /// <summary>assetPath を folder へ動かせるか (自分の中 / 今いるフォルダ / Assets そのものは不可)</summary>
+    public bool CanMove(string assetPath, string folder) =>
+        assetPath != AssetDatabase.AssetsFolder && !parentOf(assetPath).Equals(folder, StringComparison.OrdinalIgnoreCase) &&
+        !folder.Equals(assetPath, StringComparison.OrdinalIgnoreCase) && !folder.StartsWith(assetPath + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>アセットを folder へ動かす (v1.3。.meta も一緒)。戻り値 = 新しいパス (できなければ null。理由は Console)</summary>
+    public string? MoveAsset(string assetPath, string folder)
+    {
+        try
+        {
+            var newPath = _database.Move(assetPath, folder);
+            if (_folder.Equals(assetPath, StringComparison.OrdinalIgnoreCase) || _folder.StartsWith(assetPath + "/", StringComparison.OrdinalIgnoreCase))
+                _folder = newPath + _folder[assetPath.Length..];
+            Select(_database.Find(newPath));
+            Console.WriteLine($"[Assets] Moved {assetPath} -> {newPath}");
+            return newPath;
+        }
+        catch (Exception ex) when (ex is IOException or ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Cannot move {assetPath} : {ex.Message}");
+            return null;
+        }
+    }
 
     // ドラッグで落とせる所が呼ぶ : 落とされたアセット (kind が合わなければ null)
     public static unsafe AssetEntry? AcceptDrop(params AssetKind[] kinds)

@@ -312,11 +312,39 @@ public sealed class AssetDatabase
         var parent = assetPath[..assetPath.LastIndexOf('/')];
         var newPath = $"{parent}/{newName}{extension}";
         if (newPath == assetPath) return assetPath;
+        return relocate(entry, newPath);
+    }
+
+    // ---------------------------------------------------------------------
+    // 動かす (v1.3。Project の窓でフォルダへドラッグ)。名前はそのまま、targetFolder の中へ (.meta も一緒。Id は変わらない)
+    //   フォルダは中の物ごと。自分の中 (子孫) へは動かせない。同じ名前の物があれば IOException。戻り値 = 新しいパス
+    //   前のパスは名前を変えた時と同じく覚えておく (読み込んだ物のパス → 今のパス) / Renamed が呼ばれる
+    // ---------------------------------------------------------------------
+    public string Move(string assetPath, string targetFolder)
+    {
+        var entry = Find(assetPath) ?? throw new FileNotFoundException($"Not an asset : {assetPath}");
+        assetPath = entry.Path;
+        if (assetPath == AssetsFolder) throw new InvalidOperationException("The Assets folder cannot be moved");
+        var folder = targetFolder == AssetsFolder ? null : Find(targetFolder);
+        if (targetFolder != AssetsFolder && folder?.Kind != AssetKind.Folder) throw new ArgumentException($"Not a folder : {targetFolder}");
+        targetFolder = folder?.Path ?? AssetsFolder;
+        if (targetFolder.Equals(assetPath, StringComparison.OrdinalIgnoreCase) || targetFolder.StartsWith(assetPath + "/", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{assetPath} cannot be moved into itself");
+        var newPath = $"{targetFolder}/{entry.Name}";
+        if (newPath.Equals(assetPath, StringComparison.OrdinalIgnoreCase)) return assetPath;   // 同じフォルダ
+        return relocate(entry, newPath);
+    }
+
+    // ファイル / フォルダ (と .meta / DDS キャッシュ) を newPath へ動かし、一覧を書き換える (名前を変える / 動かすの共通)
+    private string relocate(AssetEntry entry, string newPath)
+    {
+        var assetPath = entry.Path;
+        var isFolder = entry.Kind == AssetKind.Folder;
         var source = FullPath(assetPath);
         var target = FullPath(newPath);
         // 大文字 / 小文字だけ違う時は、Windows では同じファイルなので「もうある」にしない
         var caseOnly = string.Equals(newPath, assetPath, StringComparison.OrdinalIgnoreCase);
-        if (!caseOnly && (File.Exists(target) || Directory.Exists(target))) throw new IOException($"{newName}{extension} already exists");
+        if (!caseOnly && (File.Exists(target) || Directory.Exists(target))) throw new IOException($"{Path.GetFileName(target)} already exists in {newPath[..newPath.LastIndexOf('/')]}");
 
         if (isFolder)
         {

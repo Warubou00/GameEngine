@@ -3,8 +3,8 @@
 # Package を作る (Visual Studio / .NET / DirectX の SDK を入れていない PC へ持っていくためのフォルダ)
 #   python Tools/make_package.py [--skip-build] [--out <フォルダ>]
 #     --skip-build : ビルドしない (前にビルドした物を写すだけ)
-#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher / Editor は作り直す
-#                    (Luncher/Data と Project/SampleProject は残す。--fresh-project で SampleProject を写し直す)
+#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher (Data 以外) / Editor は作り直す
+#                    (Project の中は消さない。--fresh-project で SampleProject だけ写し直す)
 #
 #   Package/
 #     Luncher/                        ランチャー (GameEngine.Launcher.exe) + dotnet (.NET の動かすだけの物)
@@ -133,26 +133,23 @@ def main():
     if not args.skip_build:
         build()
 
-    # 作り直す (Package の中の 3 つのフォルダだけ。Package の他の物は消さない)
-    #   Editor : 前の版のフォルダも消す (いつも一番新しい版だけ。ランチャーもその版を使う)
-    #   Luncher/Data (ランチャーの設定) と Project/SampleProject (Package の中で作った物) は残す (v1.1。以前は作り直すたびに消えた)
+    # 作り直す (v1.3 : 動かさない。以前は Luncher/Data と SampleProject を一度 _keep へ動かしていたが、
+    #   Visual Studio が SampleProject を開いていると途中で止まり、Luncher/Data が _keep に残った。また Project の他の物 (ランチャーで
+    #   作ったプロジェクト) を消していた)
+    #   Luncher : Data (ランチャーの設定) 以外を作り直す / Editor : 全部作り直す (前の版も消す。いつも一番新しい版だけ)
+    #   Project : 消さない (SampleProject が無い時か --fresh-project の時だけ写す。ある時は csproj だけ新しくする)
     os.makedirs(out, exist_ok=True)
-    keep = os.path.join(out, "_keep")
-    if os.path.isdir(keep):
-        shutil.rmtree(keep)
-    os.makedirs(keep)
-    kept = {}
-    for name, rel in [("Data", os.path.join("Luncher", "Data")), ("SampleProject", os.path.join("Project", "SampleProject"))]:
-        if os.path.isdir(os.path.join(out, rel)):
-            shutil.move(os.path.join(out, rel), os.path.join(keep, name))
-            kept[name] = rel
-    for sub in ["Luncher", "Editor", "Project"]:
-        path = os.path.join(out, sub)
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-        os.makedirs(path)
-    if "Data" in kept:
-        shutil.move(os.path.join(keep, "Data"), os.path.join(out, kept["Data"]))
+    launcher_dir = os.path.join(out, "Luncher")
+    os.makedirs(launcher_dir, exist_ok=True)
+    for entry in os.listdir(launcher_dir):
+        if entry.lower() == "data":
+            continue
+        path = os.path.join(launcher_dir, entry)
+        shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
+    if os.path.isdir(os.path.join(out, "Editor")):
+        shutil.rmtree(os.path.join(out, "Editor"))
+    os.makedirs(os.path.join(out, "Editor"))
+    os.makedirs(os.path.join(out, "Project"), exist_ok=True)
 
     no_pdb = lambda rel: rel.lower().endswith(".pdb")
 
@@ -186,16 +183,17 @@ def main():
                 ("scripts" in parts[:1] and ("bin" in parts or "obj" in parts)) or
                 any(p.startswith("_determinismtest") or p.startswith("_displaynametest") for p in parts))
     sample = os.path.join(out, "Project", "SampleProject")
-    if "SampleProject" in kept and not args.fresh_project:
+    if os.path.isdir(sample) and not args.fresh_project:
         # 前の Package の SampleProject を残し、リポジトリの Scripts の csproj だけ新しくする (ビルドの仕方が版で変わるため)
-        shutil.move(os.path.join(keep, "SampleProject"), sample)
         for rel in [os.path.join("Scripts", "Game.csproj"), os.path.join("Scripts", "Editor", "GameEditor.csproj")]:
+            os.makedirs(os.path.dirname(os.path.join(sample, rel)), exist_ok=True)
             shutil.copy2(os.path.join(CS, "Project", rel), os.path.join(sample, rel))
         print("SampleProject : kept (csproj updated. --fresh-project to copy it again)")
     else:
+        if os.path.isdir(sample):
+            shutil.rmtree(sample)   # --fresh-project の時だけ
         n = copy_tree(os.path.join(CS, "Project"), sample, project_skip)
         print(f"SampleProject : {n} files")
-    shutil.rmtree(keep, ignore_errors=True)
 
     write_text(os.path.join(out, "README.txt"), f"""{name} {version}
 

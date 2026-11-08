@@ -1,0 +1,77 @@
+﻿v1.3.0.0 : 新しいプロジェクト / Data.pak / exe のアイコン / ドラッグで動かす / 日本語の入力  2026-11-08
+ブランチ : feature/v13-project-pack-icon-dragdrop
+
+■ 1. ランチャーから新しいプロジェクト (NewProject.cs)
+  - Projects の New Project... : 名前と場所を決める窓 (既定の場所 : Package では Package/Project、それ以外はドキュメント/Tsumugi Engine Projects)
+    使えない名前 / 空 / 中身のある同じ名前のフォルダは断る。「作ったら開く」 (既定でオン)
+  - 作る物 : Assets/Scenes / Scripts/Game.csproj / Scripts/Editor/GameEditor.csproj / .gitignore
+    csproj は見本のプロジェクトの物をランチャーに埋め込んで写す (リポジトリの外ではエディターが渡すエンジンの DLL を参照する)
+  - エディター : シーンが 1 つも無いプロジェクトを開くと、光とカメラだけの Assets/Scenes/Main.scene.json を作って開く
+    既定のシーンは showcase → Scenes の最初のシーン → Main (以前は showcase が無いと何も開かなかった)
+
+■ 2. 書き出しを独自の形 (Data.pak) に (Pak.cs / UnpackedData.cs)
+  - Data (シーン / アセット / 設定 / キャッシュ) と Shader と Game.dll を Data.pak 1 つにまとめる
+    ファイルごとに Brotli で詰める。詰めても小さくならない物 (jpg / png など) はそのまま
+    同じ中身のファイルは 1 回だけ入れる
+    中身と一覧を鍵の流れで混ぜる。開いても名前やシーンの文字が読めない
+    CRC32 で壊れていないか確かめる
+  - Player は起動の時に %TEMP%\TsumugiPlayer\<番号> (隠し) へ展開し、終わる時に消す
+    Game.dll はファイルにせずメモリから読む
+    落ちて残った一時フォルダは、次の起動の時に消す (使っていない物だけ)
+  - .NET の使わない物を外す (TrimDotnet)
+    WPF / 言語ごとの文字 / デバッグの道具。.NET の deps.json からも外す
+  - 書き出しの窓に Trim .NET / Pack Assets を足した (既定でオン)
+  - 計測 (見本の 11 シーン)
+    書き出したフォルダ : 280 MB → 153.1 MB
+    Data.pak : 200 ファイル (197 種類) 93.3 MB → 40.6 MB。まとめる時間 10.1 秒
+    .NET : 74.3 MB 減って 94.3 MB
+    Player の展開 : 0.6 秒 (93.2 MB)
+  - 注意 : 混ぜるのは「開けばすぐ読める」のを防ぐため (暗号ではない)
+    鍵は Player の中にあるので、本気で解析されれば読める
+    また、遊んでいる間は一時フォルダに展開した物がある
+  - 確かめた時に分かって直した事
+    空のファイルで Brotli が失敗し、例外で書き出しとエディターが止まった
+    詰められない物はそのまま入れ、まとめに失敗した時は書き出しの失敗として返すようにした
+
+■ 3. exe のアイコン (Project Settings > Player > Icon。ExeIcon.cs)
+  - Project の画像 (png / jpg / bmp) か .ico を落とす。見本の絵を出す。Clear でエンジンのアイコンに戻す
+  - 書き出しの時に、exe の今のアイコンを消して入れ替える (Windows の UpdateResource)
+    画像は 256 / 128 / 64 / 48 / 32 / 24 / 16 の大きさを作る (正方形でなければ透明の余白)
+  - 書き出したゲームの窓のアイコンも同じになる (exe のアイコンを使うため)
+
+■ 4. ドラッグで動かす / スクリプトを Inspector へ
+  - アセットとフォルダを、フォルダのタイル / 左の木 / 上のパンくずへ落とすと、そのフォルダへ動く
+    以前はフォルダはドラッグできなかった
+    AssetDatabase.Move を足した。.meta も一緒で Id は変わらない。前のパスでも見つかる (名前を変えた時と同じ仕組み)
+    自分の中 / 今と同じフォルダへは落とせない
+  - スクリプト (.cs) をドラッグしている間、Inspector の残りが「落とす所」になる
+    落とすと、.cs の中の struct ... : IComponent (ビルド済みの型) を選んでいる物に付ける (元に戻せる)
+
+■ 5. Display Name の日本語
+  - 原因 : WinForms の Form は文字を受け取らない窓の扱いで、IME を外していた
+    そのため、日本語は (貼り付け以外では) 打てなかった。表示は前からできていた
+  - 文字の入力の欄を書いている間だけ、窓に IME を付けるようにした
+    変換の窓と候補の窓は、欄の文字の位置に出す。欄の外では外す (W / E / R などを IME に取られないように)
+  - 確定した文字は UTF-16 のまま ImGui へ渡す (サロゲートの組も)
+
+■ 確認
+  - EditorTest に 13 項目を足した
+    pak の中身と大きさ / pak を開いても読めない / .NET を外した / exe のアイコン (7 つの大きさ、真ん中が赤) /
+    書き出したゲームが pak を展開する / 動かす (Id と .meta) / フォルダごと動かす / 自分の中へは動かせない /
+    スクリプトを付ける (1 回だけ) / 選んでいない時は付けない / 元に戻せる / IME が欄を書いている間だけ付く
+  - 書き出したゲームは、pak と .NET を外した状態で 11 シーンともエディターの再生と同じ動きだった
+  - LauncherTest に新しいプロジェクトの確かめを足した
+    作る物 / 一覧に入る / 使えない名前を断る / 入れた版のエディターで開くと Main.scene.json ができてスクリプトがビルドされる
+  - 確かめた時に分かった事 : 足した確かめが最後にシーンを「変わった」状態のまま残し、次の ED10 の確かめが 2 つ落ちた
+    確かめの最後にシーンを開き直すようにした
+  - リポジトリ Release : 285 / 0 (以前の 272 項目 + 13) / Debug : 285 / 0 (D3D12 のエラー 0) / LauncherTest : 11 / 0
+  - Package (環境を外した状態) : 285 / 0
+  - 画面で確かめた (PrintWindow / PostMessage) : ランチャーの New Project の窓 / Project Settings の Player > Icon
+  - Package を作り直す時の事
+    make_package.py は、ランチャーの設定と SampleProject を一度 _keep へ動かしていた
+    Visual Studio が Package の SampleProject を開いていたため、途中で止まった
+    元の SampleProject は無事 (写しを途中まで作っただけ)。_keep へ動いた Luncher/Data は元へ戻した
+    また、Project の他の物 (ランチャーで作ったプロジェクト) も消してしまう作りだった
+    動かさず、Project の中は消さない作りに直した (SampleProject は csproj だけ新しくする)
+
+■ 版 : 1.3.0.0。Package を作り直した

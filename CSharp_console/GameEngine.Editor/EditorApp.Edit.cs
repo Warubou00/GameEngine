@@ -195,6 +195,8 @@ internal sealed partial class EditorApp
     public void WatchShaders(string runtimeFolder, string? sourceFolder) => _shaders = new ShaderHotReload(_engine, runtimeFolder, sourceFolder);
     public ShaderHotReload? Shaders => _shaders;
     public ProjectPanel Project => _project;
+    public Inspector Inspector => _inspector;   // v1.3 : スクリプトを付ける (確認用)
+    public ImGuiBackend Backend => _imgui;        // v1.3 : IME (確認用)
     public string? ScenePath => _scenePath;   // 開いているシーンのファイル (ED10)
 
     // シーンビューの光線の先で物を置く所 : 当たった物の表面 / 無ければ高さ 0 の地面 / それも無ければ 10 m 先

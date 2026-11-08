@@ -1641,12 +1641,50 @@ internal sealed class EditorTest
               $"dependencies : models, .mtl and pmx textures ({included.Count} assets)");
         check(!included.Any(a => a.EndsWith("ReadMe.txt") || a.EndsWith(".vmd")), "dependencies : unused assets are not included");
         check(!dependencies.Warnings.Any(w => w.Contains("builtin:")), "dependencies : primitives need no files (no warnings)");   // SH1
+        // v1.3 : exe のアイコン (Project Settings の Icon)。赤い 40x30 の画像 (正方形でない : 透明の余白を足して正方形にする)
+        var iconAsset = "Assets/_IconTest/red.png";
+        Directory.CreateDirectory(database.FullPath("Assets/_IconTest"));
+        using (var red = new System.Drawing.Bitmap(40, 30))
+        {
+            using (var g = System.Drawing.Graphics.FromImage(red)) g.Clear(System.Drawing.Color.FromArgb(255, 230, 20, 20));
+            red.Save(database.FullPath(iconAsset), System.Drawing.Imaging.ImageFormat.Png);
+        }
+        database.Refresh();
+        var settingsFile = Path.Combine(database.ProjectRoot, ProjectSettings.FileName);
+        var settingsBackup = File.Exists(settingsFile) ? File.ReadAllBytes(settingsFile) : null;
+        var iconSettings = settingsBackup != null ? ProjectSettings.Load(settingsFile) : new ProjectSettings();
+        iconSettings.Icon = iconAsset;
+        iconSettings.Save(settingsFile);
         var buildTask = Task.Run(() => builder.Build(buildSettings, dependencies));
         while (!buildTask.IsCompleted) yield return 0;
         var build = buildTask.Result;
+        if (settingsBackup != null) File.WriteAllBytes(settingsFile, settingsBackup); else File.Delete(settingsFile);   // 元に戻す
         check(build.Ok && File.Exists(build.ExePath), $"build the game ({(build.Ok ? $"{build.FileCount} files, {build.Bytes / 1024 / 1024} MB, {build.TotalMs / 1000:F1} s" : build.Error)})");
         if (!build.Ok) yield break;
-        var builtFiles = Directory.EnumerateFiles(buildFolder, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(buildFolder, f).Replace('\\', '/')).ToList();
+        var diskFiles = Directory.EnumerateFiles(buildFolder, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(buildFolder, f).Replace('\\', '/')).ToList();
+        // v1.3 : Data / Shader / Game.dll は Data.pak の中 (ディスクには無い)。下の確かめは pak の中の名前も入れて行う
+        List<string> pakNames;
+        using (var pak = new Pak.Reader(Path.Combine(buildFolder, Pak.FileName))) pakNames = pak.Entries.Select(e => e.Name).ToList();
+        check(diskFiles.Contains(Pak.FileName) && !diskFiles.Any(f => f.StartsWith("Data/") || f.StartsWith("Shader/") || f == "Game.dll") &&
+              pakNames.Contains("Game.dll") && pakNames.Contains("Data/player.json") && build.PakBytes < build.PakOriginalBytes,
+              $"Data / Shader / Game.dll are packed into Data.pak ({build.PakFiles} files, {build.PakUniqueFiles} unique, " +
+              $"{build.PakOriginalBytes / 1024.0 / 1024.0:F1} MB -> {build.PakBytes / 1024.0 / 1024.0:F1} MB, {build.PackMs:F0} ms)");
+        var pakBytes = File.ReadAllBytes(Path.Combine(buildFolder, Pak.FileName));
+        check(System.Text.Encoding.UTF8.GetString(pakBytes).IndexOf("GameEngineScene", StringComparison.Ordinal) < 0 &&
+              System.Text.Encoding.UTF8.GetString(pakBytes).IndexOf("showcase", StringComparison.Ordinal) < 0,
+              "Data.pak does not show file names or scene text when opened directly");
+        check(!diskFiles.Any(f => f.StartsWith("dotnet/") && (f.Contains("PresentationFramework") || f.Contains("/ja/") || f.EndsWith("createdump.exe"))),
+              $".NET is trimmed (no WPF / translations / debugging tools) : {build.DotnetBytes / 1024.0 / 1024.0:F1} MB");
+        // アイコン : 7 つの大きさ。真ん中は赤 (正方形にした余白の外)
+        var iconSizes = ExeIcon.ReadSizes(build.ExePath);
+        System.Drawing.Color iconCenter;
+        using (var extracted = System.Drawing.Icon.ExtractIcon(build.ExePath, 0, 48)!) using (var bitmap = extracted.ToBitmap()) iconCenter = bitmap.GetPixel(24, 24);
+        check(build.IconFile == iconAsset && iconSizes.Order().SequenceEqual(ExeIcon.Sizes.Order()) && iconCenter.R > 200 && iconCenter.G < 60 && iconCenter.A > 200,
+              $"the exe has the icon from Project Settings ({string.Join("/", iconSizes)} px, center {iconCenter.R},{iconCenter.G},{iconCenter.B})");
+        Directory.Delete(database.FullPath("Assets/_IconTest"), true);
+        File.Delete(database.FullPath("Assets/_IconTest") + ".meta");
+        database.Refresh();
+        var builtFiles = diskFiles.Concat(pakNames).ToList();
         // dotnet (同梱の .NET) は除いて調べる (.NET の WinForms に System.Windows.Forms.Design.Editors.dll があるため。Package 化で足した)
         check(!builtFiles.Where(f => !f.StartsWith("dotnet/")).Any(f => f.Contains("Editor", StringComparison.OrdinalIgnoreCase) || f.Contains("ImGui", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".pdb")) &&
               builtFiles.Contains("Game.dll") && builtFiles.Contains("RHI.dll") && builtFiles.Contains("Shader/hlslTemplate.shader") && builtFiles.Contains("Data/player.json"),
@@ -1679,6 +1717,9 @@ internal sealed class EditorTest
             check(player.ExitCode == 0 && playerDump.Length > 0 && playerLog.Contains($"{_app.Scripts.SystemCount} systems"),
                   $"the built game runs {Path.GetFileName(compareScene)} ({System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalSeconds:F1} s, exit {player.ExitCode})");
             if (playerDump.Length == 0) { Console.WriteLine(playerLog); continue; }
+            if (compareScene == buildSettings.Scenes[0])   // v1.3 : Data.pak を一時フォルダへ展開し、Game.dll はメモリから
+                check(playerLog.Contains($"[Player] Unpacked {Pak.FileName}") && playerLog.Contains("(Game.dll in memory)"),
+                      $"the built game unpacks Data.pak ({System.Text.RegularExpressions.Regex.Match(playerLog, @"Unpacked [^\r\n]*").Value})");
             if (compareScene == buildSettings.Scenes[0])   // 書き出したゲームは exe の隣の dotnet の .NET で動く (PC の .NET ではない。Package 化で足した)
                 check(playerLog.Contains($".NET {Environment.Version} : {Path.Combine(buildFolder, "dotnet")}", StringComparison.OrdinalIgnoreCase),
                       "the built game runs on the .NET next to the exe");
@@ -2011,6 +2052,58 @@ internal sealed class EditorTest
             check(behaviourMs < Math.Max(forEachMs * 3.0, 1.0),
                   $"speed : Behaviour.Update with 2 GetComponent x 10000 = {behaviourMs:F3} ms (World.ForEach of 2 types {forEachMs:F3} ms), " +
                   $"GetPool x 100000 = {cachedMs:F3} ms (dictionary {dictMs:F3} ms)");
+        }
+
+        // ---------- v1.3 : アセットをドラッグで動かす / スクリプトを Inspector へ / 日本語の入力 (IME) ----------
+        {
+            var v13Scene = _app.ScenePath!;   // 最後に開き直す (物を足して消すとシーンが変わった扱いになり、次の ED10 の確かめが変わるため)
+            var mvRoot = "Assets/_MoveTest";
+            Directory.CreateDirectory(database.FullPath($"{mvRoot}/a"));
+            Directory.CreateDirectory(database.FullPath($"{mvRoot}/c"));
+            File.WriteAllText(database.FullPath($"{mvRoot}/b.txt"), "b");
+            database.Refresh();
+            var mvGuid = database.Find($"{mvRoot}/b.txt")!.Guid;
+            var mvMoved = _app.Project.MoveAsset($"{mvRoot}/b.txt", $"{mvRoot}/a");
+            check(mvMoved == $"{mvRoot}/a/b.txt" && database.Find(mvMoved)?.Guid == mvGuid && File.Exists(database.FullPath(mvMoved) + ".meta") &&
+                  !File.Exists(database.FullPath($"{mvRoot}/b.txt")) && database.Find($"{mvRoot}/b.txt")?.Guid == mvGuid,
+                  "moving an asset into a folder keeps its id and .meta (the old path still finds it)");
+            var mvFolder = _app.Project.MoveAsset($"{mvRoot}/a", $"{mvRoot}/c");
+            check(mvFolder == $"{mvRoot}/c/a" && database.Find($"{mvRoot}/c/a/b.txt")?.Guid == mvGuid, "moving a folder moves what is in it");
+            check(!_app.Project.CanMove($"{mvRoot}/c", $"{mvRoot}/c/a") && !_app.Project.CanMove($"{mvRoot}/c/a", $"{mvRoot}/c") &&
+                  _app.Project.MoveAsset($"{mvRoot}/c", $"{mvRoot}/c/a") == null && Directory.Exists(database.FullPath($"{mvRoot}/c")),
+                  "a folder cannot be moved into itself (or into the folder it is already in)");
+            Directory.Delete(database.FullPath(mvRoot), true);
+            File.Delete(database.FullPath(mvRoot) + ".meta");
+            database.Refresh();
+
+            // スクリプト (.cs) を Inspector へ落とした時と同じ : 中のコンポーネントを付ける (2 回目は何もしない)
+            var atEntity = _app.CreateEntity(Entity.Null);
+            var spinFile = Path.Combine(database.ProjectRoot, "Scripts", "Spin.cs");
+            var atAdded = _app.Inspector.AttachScript(atEntity, spinFile);
+            check(atAdded.Count == 1 && atAdded[0].Name == "Spin" && has(atEntity, "Spin") && _app.Inspector.AttachScript(atEntity, spinFile).Count == 0,
+                  "dropping a script on the Inspector adds its component (once)");
+            var noComponent = Path.Combine(database.ProjectRoot, "Scripts", "CollisionGame.cs");
+            check(_app.Inspector.AttachScript(Entity.Null, spinFile).Count == 0, "a script dropped with nothing selected adds nothing");
+            _app.Undo();   // 足したのを元に戻せる
+            check(!has(atEntity, "Spin"), "attaching a script can be undone");
+            _app.Selected = atEntity;
+            _app.DeleteSelected();
+
+            // 日本語の入力 : 名前の欄を書いている間だけ IME を付ける (欄の外では外す)
+            check(!_app.Backend.ImeEnabled, "IME is off while no text field is active");
+            var imeTarget = database.Find("Assets/Scenes")!;
+            ImGui.SetWindowFocus("Project");
+            _app.Project.BeginDisplayName(imeTarget);
+            for (int i = 0; i < 4; i++) yield return 0;
+            var imeOn = _app.Backend.ImeEnabled;
+            io.AddKeyEvent(ImGuiKey.Escape, true);
+            yield return 0;
+            io.AddKeyEvent(ImGuiKey.Escape, false);
+            for (int i = 0; i < 3; i++) yield return 0;
+            check(imeOn && !_app.Backend.ImeEnabled && database.Find("Assets/Scenes")?.DisplayName == null,
+                  "IME is on while typing a display name (Japanese can be typed) and off again after");
+            _app.OpenScene(v13Scene);
+            yield return 0;
         }
 
         // ---------- ED10 : 保存していない変更を聞く ----------

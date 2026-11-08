@@ -121,6 +121,14 @@ internal sealed class BuildWindow
         ImGui.SameLine();
         var dotnet = Settings.IncludeDotnet;   // .NET を入れていない PC でも動くように .NET を入れる (Package 化で足した)
         if (ImGui.Checkbox("Include .NET", ref dotnet)) { Settings.IncludeDotnet = dotnet; changed = true; }
+        ImGui.SameLine();
+        var trim = Settings.TrimDotnet;   // v1.3
+        if (ImGui.Checkbox("Trim .NET", ref trim)) { Settings.TrimDotnet = trim; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Leave out the parts of .NET the game does not use (WPF, translations, debugging tools).");
+        ImGui.SameLine();
+        var pack = Settings.PackAssets;   // v1.3
+        if (ImGui.Checkbox("Pack Assets", ref pack)) { Settings.PackAssets = pack; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Pack the assets, shaders and Game.dll into one compressed Data.pak.\nSmaller, and the files cannot be opened directly. The game unpacks it when it starts.");
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy the .NET runtime next to the exe (about 100 MB).\nThe game then runs on PCs without .NET installed.");
 
         // ---------- シーン ----------
@@ -219,6 +227,8 @@ internal sealed class BuildWindow
         }
         ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1), $"Built {Path.GetFileName(result.ExePath)}");
         ImGui.Text($"{result.AssetCount} assets ({result.AssetBytes / 1024.0 / 1024.0:F1} MB) / {result.FileCount} files ({result.Bytes / 1024.0 / 1024.0:F1} MB)");
+        if (result.PakBytes > 0) ImGui.Text($"Data.pak : {result.PakOriginalBytes / 1024.0 / 1024.0:F1} MB -> {result.PakBytes / 1024.0 / 1024.0:F1} MB ({result.PakFiles} files)");
+        if (result.IconFile != null) ImGui.Text($"Icon : {result.IconFile}");
         ImGui.Text($"compile {result.CompileMs / 1000:F1} s, copy {result.CopyMs:F0} ms, total {result.TotalMs / 1000:F1} s");
         if (result.Warnings.Count > 0 && ImGui.TreeNode($"Warnings ({result.Warnings.Count})##warnings"))
         {

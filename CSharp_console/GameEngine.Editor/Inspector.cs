@@ -151,6 +151,37 @@ internal sealed class Inspector
         }
     }
 
+    // ---------------------------------------------------------------------
+    // スクリプトを付ける (v1.3。Project の .cs を Inspector へドラッグ。Unity と同じ)
+    //   .cs の中の「struct 名前 : ... IComponent」を探し、ビルド済みの同じ型 (名前空間も同じ) を足す (元に戻せる)
+    //   戻り値 = 足した型。持っている物は足さない。まだビルドされていない / コンポーネントが無い時は Console に出す
+    // ---------------------------------------------------------------------
+    public List<Type> AttachScript(Entity entity, string scriptFile)
+    {
+        var added = new List<Type>();
+        var name = Path.GetFileName(scriptFile);
+        if (!World.IsAlive(entity)) { Console.WriteLine($"[Inspector] Select an object to attach {name}"); return added; }
+        string text;
+        try { text = File.ReadAllText(scriptFile); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Console.WriteLine($"[Inspector] Cannot read {name} : {ex.Message}"); return added; }
+        var ns = System.Text.RegularExpressions.Regex.Match(text, @"^\s*namespace\s+([\w.]+)", System.Text.RegularExpressions.RegexOptions.Multiline) is { Success: true } m ? m.Groups[1].Value : null;
+        var names = System.Text.RegularExpressions.Regex.Matches(text, @"\bstruct\s+(\w+)\s*:[^{]*\bIComponent\b").Select(x => x.Groups[1].Value).Distinct().ToList();
+        if (names.Count == 0) { Console.WriteLine($"[Inspector] {name} has no component (struct ... : IComponent)"); return added; }
+        var known = ComponentRegistry.KnownComponents().ToList();
+        foreach (var typeName in names)
+        {
+            var type = known.FirstOrDefault(t => t.Type.Name == typeName && (ns == null || t.Type.Namespace == ns));
+            if (type == null) { Console.WriteLine($"[Inspector] {typeName} is not built yet (wait for the scripts to compile)"); continue; }
+            if (World.GetPool(type.Type).Has(entity.Id)) continue;
+            World.GetPool(type.Type).SetBoxed(entity, type.CreateDefault());
+            var id = EditorWorld.IdOf(World, entity);
+            _undo.Record(new ComponentEdit(id, type.Type, null, SceneSerializer.SaveComponent(World, entity, type.Type)));
+            added.Add(type.Type);
+            Console.WriteLine($"[Inspector] Added {type.DisplayName} from {name}");
+        }
+        return added;
+    }
+
     // 値 1 つ分の部品。戻り値 : 変えたか
     private bool drawValue(string label, Type type, ref object? value, RangeAttribute? range, Entity owner, ComponentField? field = null)
     {

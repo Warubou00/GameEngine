@@ -11,6 +11,8 @@ namespace GameEngine.Player;
 //     <名前>.exe / GameEngine.Player.dll / GameEngine.Runtime.dll / Game.dll / C++ の DLL
 //     Shader/        : シェーダー (RHI は作業フォルダの ../Shader から読む)
 //     Data/          : 作業フォルダ = プロジェクトのフォルダ (player.json / ProjectSettings.json / Assets (使っている物だけ))
+//     Data.pak       : v1.3 : Data / Shader / Game.dll をまとめた物 (Pak.cs)。あれば起動の時に一時フォルダ (隠し) へ展開して、
+//                      そこを Data として使う (Game.dll はファイルにせずメモリから読む)。終わる時に一時フォルダを消す
 //   起動 : player.json → ProjectSettings → Game.dll の型と [GameSystem] → 最初のシーン → 再生 (エディターの再生と同じ順)
 //
 // 引数 (確かめる時用。普通は付けない)
@@ -54,7 +56,10 @@ internal static class Program
     private static int run(Dictionary<string, string> options, string exeDirectory)
     {
         var start = Stopwatch.GetTimestamp();
-        var data = Path.GetFullPath(options.GetValueOrDefault("--data", Path.Combine(exeDirectory, "Data")));
+        // v1.3 : Data.pak があれば展開する (--data を付けた時は使わない)
+        var pakFile = Path.Combine(exeDirectory, Pak.FileName);
+        using var unpacked = !options.ContainsKey("--data") && File.Exists(pakFile) ? UnpackedData.Open(pakFile) : null;
+        var data = unpacked?.Data ?? Path.GetFullPath(options.GetValueOrDefault("--data", Path.Combine(exeDirectory, "Data")));
         if (!Directory.Exists(data)) throw new DirectoryNotFoundException($"Data folder not found : {data}");
         var settings = PlayerSettings.Load(Path.Combine(data, PlayerSettings.FileName));
         Console.WriteLine($"[Player] {settings.ProductName} : data {data}");
@@ -79,11 +84,11 @@ internal static class Program
         // プロジェクトの設定 (時間 / 物理 / レイヤー / 入力)
         ProjectSettings.Load(Path.Combine(data, ProjectSettings.FileName)).Apply(engine);
 
-        // ゲームのコード : exe の隣の Game.dll (型を先に知らせてからシーンを読む)
+        // ゲームのコード : exe の隣の Game.dll (型を先に知らせてからシーンを読む)。v1.3 : Data.pak の中にあればメモリから
         var gameDll = Path.Combine(exeDirectory, "Game.dll");
-        if (File.Exists(gameDll))
+        if (unpacked?.GameDll != null || File.Exists(gameDll))
         {
-            var game = Assembly.LoadFrom(gameDll);
+            var game = unpacked?.GameDll is { } bytes ? loadFromMemory(bytes, exeDirectory) : Assembly.LoadFrom(gameDll);
             ComponentRegistry.KnownComponents(rescan: true).ToList();
             var systems = engine.AddGameSystems(game);
             Console.WriteLine($"[Player] Game.dll : {game.GetTypes().Count(t => typeof(IComponent).IsAssignableFrom(t))} components, {systems.Count} systems " +
@@ -146,6 +151,17 @@ internal static class Program
         engine.Run();
         Console.WriteLine("[Player] Exit");
         return 0;
+    }
+
+    // メモリから読んだ Game.dll が使う他の DLL (ゲームが使うライブラリ) は exe の隣から探す
+    private static Assembly loadFromMemory(byte[] bytes, string exeDirectory)
+    {
+        AppDomain.CurrentDomain.AssemblyResolve += (_, e) =>
+        {
+            var file = Path.Combine(exeDirectory, new AssemblyName(e.Name).Name + ".dll");
+            return File.Exists(file) ? Assembly.LoadFrom(file) : null;
+        };
+        return Assembly.Load(bytes);
     }
 
     // ログ (Console の出力) をファイルにも書く。書けない場所 (読み取り専用) なら書かない
