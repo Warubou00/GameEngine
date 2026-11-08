@@ -1,0 +1,49 @@
+﻿v1.4.0.0 : Behaviour の Awake / Start / LateUpdate / FixedUpdate、既定の空 (Skybox)  2026-11-08
+ブランチ : feature/v14-lifecycle-skybox
+
+■ 1. Behaviour<T> に Awake / Start / LateUpdate / FixedUpdate
+  - 呼ばれる順 (Unity と同じ)
+    新しい物 : Awake → Start (最初の Update / FixedUpdate / LateUpdate の前に 1 回ずつ)
+      この System の新しい物の Awake を全部終えてから、Start を呼ぶ
+    毎フレーム : OnCollision* → Update → (物理の刻みごとに FixedUpdate) → LateUpdate
+  - 無効な物は呼ばない。有効になったら Awake / Start から始める
+  - Awake / Start を呼んだかは、エンティティの番号で引く表 (版も見る。番号が使い回されたら新しい物)
+    書いていないメソッドは見回らない。Update は前と同じく、デリゲートを通さず配列を回す
+  - LateUpdate : ILateSystem を足した (エンジンが全部の Update / アニメーション / 物理の後に呼ぶ)
+    呼んだ後に Transform の行列を計算し直すので、LateUpdate で動かした物 (カメラなど) はそのフレームの描画に入る
+  - FixedUpdate : Behaviour が IFixedSystem も実装する (物理の固定の刻みごと)
+  - 雛形 (Create > Scripts > Behaviour) に Start を足した
+
+■ 2. 既定の空 (Skybox)
+  - 画像は Resources/make_sky.py で作った (Python の標準ライブラリだけ。4.5 秒)
+    DefaultSky.png : 2048 x 1024 の正距円筒、445 KB。GameEngine.Runtime に埋め込んだ
+    中身 : 天頂の青 → 地平の明るい水色 / 太陽 (方位 40 度・高さ 35 度) と光の輪 / 値のノイズを重ねた雲 / 地平より下は霞んだ地面
+  - 描き方 : skybox.shader (全画面)
+    カメラの逆行列で向きを出し、正距円筒の画像を読む (sRGB を線形に戻し、明るさの倍率と方位の回転を掛ける)
+    不透明の物より先に HDR へ描く。深度を使わないので MSAA でも正しく、物はこの上に描かれる
+    Forward / Forward + SSAO / Deferred の全部で描く
+    Deferred のライティングは、空を描いた時は背景に触らない (前は背景の 1 色で塗っていた)
+  - C++ : 全画面のシェーダーの入力に、普通のテクスチャを渡せる印 (RenderTargetHandle::TEXTURE_INPUT) を足した
+    空の画像は UI のテクスチャと同じ作り方で GPU に置く
+  - 設定
+    engine.Graphics.Skybox (既定でオン。画像が無ければ既定の空)
+    シーンの RenderSettings に Skybox / SkyboxTexture / SkyboxIntensity / SkyboxRotation を足した
+    SkyboxTexture : Project から画像を落とせる ([AssetPath] を足した)。書き出す時は、シーンに書いたパスの画像も入る
+    Skybox を切ると、今まで通り BackgroundColor の 1 色
+  - 新しいシーン / RenderSettings の無いシーン / 前からあるシーンも、既定で空が出る (以前は青の 1 色)
+
+■ 確認
+  - EditorTest に 9 項目を足した
+    Awake → Start の順と回数 (全部の Awake の後に Start) / Update と LateUpdate の回数と FixedUpdate /
+    LateUpdate で動かした Transform がそのフレームの行列に入る / 無効な物は有効になってから Awake / Start /
+    既定の空と、無い画像の時の既定 / 毎フレーム描く・切ると描かない / RenderSettings の値 / Deferred でも描く / シーンを開き直すと既定に戻る
+  - リポジトリ Release : 294 / 0 (以前の 285 項目 + 9)
+  - リポジトリ Debug : 294 / 0 (D3D12 のエラー 0)
+  - Package (環境を外した状態) : 294 / 0
+  - 画面で確かめた (PrintWindow) : showcase と新しいシーンの後ろに空が出る
+    カメラが下を向いているので、主に地平の近くの霞と地面が見える
+  - 確かめていない事 : 上を向いたカメラで、太陽や雲がどう見えるか (画像そのものは確かめた)
+
+■ 版 : 1.4.0.0。Package を作り直した
+
+■ Package : Package/Project の ActionGame (自分で作ったプロジェクト) は作り直しても残った (v1.3 で直した作り方)

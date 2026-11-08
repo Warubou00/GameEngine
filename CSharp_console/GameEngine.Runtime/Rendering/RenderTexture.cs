@@ -33,6 +33,12 @@ public sealed class RenderTexture : IDisposable
     public static RenderTexture BackBuffer { get; } = new(0xFFFFFFFEu, owned: false, RenderTextureFormat.RGBA8, 1.0f);
     public static RenderTexture SceneDepth { get; } = new(0xFFFFFFFDu, owned: false, RenderTextureFormat.R32F, 1.0f);
 
+    /// <summary>
+    /// 普通のテクスチャ (UI のテクスチャの番号) を、全画面シェーダーの入力として渡す (v1.4。Skybox の空の画像)
+    /// 読むだけ (描画先にはできない)。テクスチャの持ち主は呼んだ側
+    /// </summary>
+    internal static RenderTexture WrapTexture(uint texture) => new(0x40000000u | texture, owned: false, RenderTextureFormat.RGBA8, 0.0f);
+
     private readonly bool _owned;
 
     internal uint Handle { get; private set; }

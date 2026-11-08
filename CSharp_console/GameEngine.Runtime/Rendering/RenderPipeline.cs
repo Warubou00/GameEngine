@@ -24,6 +24,8 @@ public abstract class RenderPipeline : IDisposable
     protected SsaoPass Ssao { get; } = new();
     // 影 (Forward / Deferred 共通の部品。カメラの描画の前にシャドーマップを描く)
     protected ShadowPass Shadows { get; } = new();
+    // 空 (v1.4。Forward / Deferred 共通。不透明の物の前に HDR へ描く)
+    public SkyboxPass Sky { get; } = new();
 
     public abstract string Name { get; }
 
@@ -147,6 +149,7 @@ internal static class ShaderPaths
     public const string Scene       = "../Shader/hlslTemplate.shader";
     public const string PostProcess = "../Shader/postProcess.shader";
     public const string AntiAliasing = "../Shader/antiAliasing.shader";
+    public const string Skybox       = "../Shader/skybox.shader";   // v1.4
 }
 
 // ==========================================================================
@@ -200,8 +203,10 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F, 1.0f, default, _samples);
             cmd.SetRenderTarget(_ambient);
             cmd.ClearColor(Vector4.Zero);
-            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+            cmd.SetRenderTarget(hdr);
             cmd.ClearColor(hdr.ClearColor);
+            Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く。遮蔽は掛からない)
+            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
             cmd.ClearDepth();
             cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
             cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
@@ -220,8 +225,10 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             return;
         }
 
-        cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+        cmd.SetRenderTarget(hdr);
         cmd.ClearColor(hdr.ClearColor);
+        Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く)
+        cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
         cmd.ClearDepth();
         cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
         cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2)
@@ -291,13 +298,15 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         // 3. ライティング (全画面。背景もここで塗る)
         var background = ToLinear(settings.BackgroundColor);
         cmd.SetRenderTarget(hdr);
+        // v1.4 : 空を先に描き、ライティングは背景 (何も描かれていない所) に触らない (Params[0].w = 1)
+        var sky = Sky.Draw(cmd, settings) ? 1.0f : 0.0f;
         if (ao != null)
         {
-            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth, ao], [background.X, background.Y, background.Z]);
+            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth, ao], [background.X, background.Y, background.Z, sky]);
         }
         else
         {
-            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth], [background.X, background.Y, background.Z]);
+            cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth], [background.X, background.Y, background.Z, sky]);
         }
 
         // 4. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)

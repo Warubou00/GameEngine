@@ -26,10 +26,17 @@ public struct RenderSettings : IComponent
 
     [Header("Color")]
     public Vector3    AmbientColor    = new(0.25f, 0.27f, 0.30f);   // 環境光 (線形)
-    public Vector3    BackgroundColor = new(0.1f, 0.2f, 0.4f);      // 何も無い所の色 (sRGB)
+    public Vector3    BackgroundColor = new(0.1f, 0.2f, 0.4f);      // 何も無い所の色 (sRGB)。Skybox を切った時
     [Range(0.05f, 8.0f)] public float Exposure = 1.0f;
     public Tonemapper Tonemapper = Tonemapper.ACES;
     [Range(1.0f, 3.0f)] public float Gamma = 2.2f;
+
+    // 空 (v1.4)。正距円筒の画像 (png / jpg / bmp)。空にするとエンジンの既定の空。切ると BackgroundColor の 1 色
+    [Header("Skybox")]
+    public bool   Skybox = true;
+    [AssetPath(AssetKind.Texture)] public string SkyboxTexture = "";
+    [Range(0.0f, 8.0f)]   public float SkyboxIntensity = 1.0f;
+    [Range(0.0f, 360.0f)] public float SkyboxRotation  = 0.0f;
 
     public SsaoValues     Ssao     = new();
     public ShadowValues   Shadows  = new();

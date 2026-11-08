@@ -39,7 +39,8 @@ internal static class ScriptEditor
         // ==========================================================================
         // {{typeName}}
         //   コンポーネント : Inspector の Add Component で物に付ける。public の値は Inspector で変えられ、シーンに保存される
-        //   Behaviour : 再生中、{{typeName}} を持つ物ごとに Update が毎フレーム呼ばれる ([GameSystem] でエディターが登録する)
+        //   Behaviour : 再生中、{{typeName}} を持つ物ごとに呼ばれる ([GameSystem] でエディターが登録する)
+        //     Awake → Start (最初に 1 回ずつ) → 毎フレーム Update → 物理の刻みごとに FixedUpdate → LateUpdate
         //     GetComponent<T>() : 同じ物の T への参照 (Transform は Transform で) / TryGetComponent / HasComponent
         //     OnCollisionEnter / Stay / Exit : 押し返す Collider と当たった時 (OnTriggerEnter / Stay / Exit : トリガー)
         //       collision.Other が相手、collision.GetComponent<T>() で相手のコンポーネント
@@ -53,6 +54,10 @@ internal static class ScriptEditor
         [GameSystem]
         public sealed class {{typeName}}System : Behaviour<{{typeName}}>
         {
+            protected override void Start(ref {{typeName}} data)
+            {
+            }
+
             protected override void Update(ref {{typeName}} data)
             {
                 // 例 : Transform.Position += Vector3.UnitZ * data.Speed * Time.DeltaTime;

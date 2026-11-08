@@ -89,7 +89,8 @@ public sealed class GraphicsSettings
     public float      Exposure        { get; set; } = 1.0f;     // HDR の明るさの倍率
     public Tonemapper Tonemapper      { get; set; } = Tonemapper.ACES;
     public float      Gamma           { get; set; } = 2.2f;
-    public Vector3    BackgroundColor { get; set; } = new(0.1f, 0.2f, 0.4f);   // 何も無い所の色 (sRGB。以前のクリア色)
+    public Vector3    BackgroundColor { get; set; } = new(0.1f, 0.2f, 0.4f);   // 何も無い所の色 (sRGB。以前のクリア色)。Skybox を切った時
+    public SkyboxSettings Skybox { get; } = new();   // v1.4 : 空 (既定で出す。画像が無ければエンジンの既定の空)
 
     // SSAO (環境光の遮蔽。Forward / Deferred の両方で使える。Unlit では使わない)
     public SsaoSettings Ssao { get; } = new();
@@ -340,6 +341,7 @@ public sealed class Engine : IDisposable
     private readonly Form _window;
     private readonly List<ISystem> _systems = new();
     private readonly List<IFixedSystem> _fixedSystems = new();   // 固定の刻みで呼ぶ (物理の前。P1)
+    private readonly List<ILateSystem>  _lateSystems  = new();   // Update と物理の後に呼ぶ (v1.4。Unity の LateUpdate)
     private readonly TransformSystem  _transformSystem = new();
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
@@ -535,6 +537,7 @@ public sealed class Engine : IDisposable
     {
         _systems.Add(system);
         if (system is IFixedSystem fixedSystem) _fixedSystems.Add(fixedSystem);
+        if (system is ILateSystem lateSystem) _lateSystems.Add(lateSystem);   // v1.4
     }
 
     /// <summary>
@@ -575,6 +578,12 @@ public sealed class Engine : IDisposable
         foreach (var system in _systems) system.Update(World);
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void updateLateSystems()
+    {
+        foreach (var system in _lateSystems) system.LateUpdate(World);
+    }
+
     /// <summary>System を外す (ED7 : ゲームの DLL を読み直す前)</summary>
     public void RemoveSystems(IEnumerable<object> systems)
     {
@@ -582,6 +591,7 @@ public sealed class Engine : IDisposable
         {
             if (system is ISystem s) _systems.Remove(s);
             if (system is IFixedSystem f) _fixedSystems.Remove(f);
+            if (system is ILateSystem l) _lateSystems.Remove(l);
         }
     }
 
@@ -622,6 +632,12 @@ public sealed class Engine : IDisposable
             // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
             _animationSystem.DrawBones(World);   // AN3 : ShowBones の骨を線で (行列ができた後)
+            // v1.4 : ゲームの LateUpdate (Update / アニメーション / 物理の後)。変えた Transform の行列を計算し直して、このフレームの描画に間に合わせる
+            if (IsPlaying && _lateSystems.Count > 0)
+            {
+                updateLateSystems();
+                _transformSystem.Update(World);
+            }
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
             _cameraSystem.Update(World, Graphics.CameraOverride);
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)

@@ -20,6 +20,7 @@ public sealed class ComponentField
     public string?   Header    { get; }
     public bool      IsLayer     { get; }   // [Layer] (ED6)
     public bool      IsLayerMask { get; }   // [LayerMask] (ED6)
+    public AssetKind? AssetPathKind { get; } // [AssetPath] (v1.4。アセットのパスの string)
 
     internal ComponentField(FieldInfo info)
     {
@@ -32,6 +33,7 @@ public sealed class ComponentField
         Header          = info.GetCustomAttribute<HeaderAttribute>()?.Text;
         IsLayer         = info.GetCustomAttribute<LayerAttribute>() != null;
         IsLayerMask     = info.GetCustomAttribute<LayerMaskAttribute>() != null;
+        AssetPathKind   = info.GetCustomAttribute<AssetPathAttribute>()?.Kind;
     }
 
     public object? GetValue(object boxedComponent) => Info.GetValue(boxedComponent);
