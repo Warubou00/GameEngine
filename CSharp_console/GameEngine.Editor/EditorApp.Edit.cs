@@ -458,7 +458,7 @@ internal sealed partial class EditorApp
     private void stop()
     {
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
-        _engine.IsPlaying = false;
+        _engine.EndPlay();   // v1.6 : 音も止める (以前は IsPlaying = false だけで、AudioSource の音が鳴り続けた)
         _playing  = false;
         _paused   = false;
         _stepRequest = false;

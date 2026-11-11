@@ -10,13 +10,14 @@
          1.2.0.0 : Behaviour<T> の GetComponent と OnCollisionEnter / Stay / Exit /
          1.3.0.0 : 新しいプロジェクト / Data.pak / exe のアイコン / ドラッグで動かす / 日本語の入力 /
          1.4.0.0 : Behaviour の Awake / Start / FixedUpdate / LateUpdate、既定の空 (Skybox) /
-         1.5.0.0 : 1 Mesh / 1 Material (マテリアルの自動生成)、物ごとの影、シェーダーの雛形、複数のカメラ)
+         1.5.0.0 : 1 Mesh / 1 Material (マテリアルの自動生成)、物ごとの影、シェーダーの雛形、複数のカメラ /
+         1.6.0.0 : エクスプローラーからのドラッグ & ドロップ、Stop で音を止める、AudioSource のコピーからの Play)
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>1.5.0.0</EngineVersion>
+    <EngineVersion>1.6.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

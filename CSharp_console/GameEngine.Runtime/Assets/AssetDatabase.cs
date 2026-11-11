@@ -400,7 +400,69 @@ public sealed class AssetDatabase
     // ---------------------------------------------------------------------
     public string Import(string sourceFile, string targetFolder)
     {
-        var folder = FullPath(targetFolder);
+        var target = importFile(sourceFile, FullPath(targetFolder));
+        Refresh();
+        return ToAssetPath(target)!;
+    }
+
+    // ---------------------------------------------------------------------
+    // まとめて持ってくる (v1.6 : エクスプローラーからのドラッグ & ドロップ。Unity と同じく写す。元のファイルはそのまま)
+    //   ファイル : Import と同じ (OBJ は .mtl とテクスチャも)。フォルダ : 中身ごと写す (PMX のテクスチャのフォルダなど)
+    //   .meta / 隠しファイル / DDS キャッシュは写さない (Id は新しく付ける。同じ Id のアセットが 2 つにならないように)
+    //   Assets そのもの / 写す先の中のフォルダは写さない (自分の中へ写し続けてしまうため)
+    //   戻り値 = 写したアセットのパス (一番上の物だけ)。失敗した物は errors へ。見回り (Refresh) は最後に 1 回だけ
+    // ---------------------------------------------------------------------
+    public List<string> ImportMany(IEnumerable<string> sources, string targetFolder, List<string> errors)
+    {
+        var folder = Path.GetFullPath(FullPath(targetFolder));
+        var imported = new List<string>();
+        foreach (var source in sources)
+        {
+            try
+            {
+                if (Directory.Exists(source))
+                {
+                    var full = Path.GetFullPath(source).TrimEnd('\\', '/');
+                    if ((folder + "\\").StartsWith(full + "\\", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("cannot copy a folder into itself");
+                    var name = Path.GetFileName(full);
+                    var target = Path.Combine(folder, name);
+                    for (int i = 1; Directory.Exists(target) || File.Exists(target); i++) target = Path.Combine(folder, $"{name} {i}");
+                    copyDirectory(full, target);
+                    imported.Add(ToAssetPath(target)!);
+                }
+                else if (File.Exists(source))
+                {
+                    if (ignored(source)) continue;
+                    imported.Add(ToAssetPath(importFile(source, folder))!);
+                }
+                else errors.Add($"{source} : not found");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+            {
+                errors.Add($"{source} : {ex.Message}");
+            }
+        }
+        if (imported.Count > 0) Refresh();
+        return imported;
+    }
+
+    private static void copyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            if (!ignored(file)) File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            if (!Path.GetFileName(directory).StartsWith('.')) copyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+    }
+
+    // 1 つのファイルを folder (フルパス) へ写す。戻り値 = 写した先のフルパス (見回りはしない)
+    private static string importFile(string sourceFile, string folder)
+    {
         Directory.CreateDirectory(folder);
         var name = Path.GetFileNameWithoutExtension(sourceFile);
         var extension = Path.GetExtension(sourceFile);
@@ -421,7 +483,6 @@ public sealed class AssetDatabase
                 }
             }
         }
-        Refresh();
-        return ToAssetPath(target)!;
+        return target;
     }
 }

@@ -2335,5 +2335,67 @@ internal sealed class EditorTest
         File.Delete(database.FullPath(newFolder!) + ".meta");
         database.Refresh();
         yield return 0;
+
+        foreach (var step in dropAndAudio()) yield return step;
+    }
+
+    // v1.6 : エクスプローラーからのドロップ (写す) / AudioSource のコピーからの Play / Stop で音が止まる
+    private IEnumerable<int> dropAndAudio()
+    {
+        var database = _app.Database;
+        const string dropRoot = "Assets/_DropTest";
+        var source = Path.Combine(Path.GetTempPath(), "TsumugiDropTest");
+        if (Directory.Exists(source)) Directory.Delete(source, true);
+        Directory.CreateDirectory(Path.Combine(source, "pack", "tex"));
+        var wav = Directory.EnumerateFiles(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Media"), "*.wav").FirstOrDefault();
+        var sourceWav = Path.Combine(source, "drop.wav");
+        if (wav != null) File.Copy(wav, sourceWav); else File.WriteAllBytes(sourceWav, new byte[44]);
+        File.WriteAllText(Path.Combine(source, "pack", "note.txt"), "pack");
+        File.WriteAllText(Path.Combine(source, "pack", "note.txt.meta"), "SOURCE-META");
+        File.WriteAllText(Path.Combine(source, "pack", "tex", "a.txt"), "a");
+        Directory.CreateDirectory(database.FullPath(dropRoot));
+        database.Refresh();
+
+        var imported = _app.Project.ImportFiles(new[] { sourceWav, Path.Combine(source, "pack"), Path.Combine(source, "missing.png") }, dropRoot);
+        var again = _app.Project.ImportFiles(new[] { sourceWav, Path.Combine(source, "pack") }, dropRoot);
+        var noteMeta = database.FullPath($"{dropRoot}/pack/note.txt.meta");
+        check(imported.SequenceEqual(new[] { $"{dropRoot}/drop.wav", $"{dropRoot}/pack" }) && again.SequenceEqual(new[] { $"{dropRoot}/drop 1.wav", $"{dropRoot}/pack 1" }) &&
+              File.Exists(sourceWav) && database.Find($"{dropRoot}/pack/tex/a.txt") != null && File.Exists(noteMeta) && !File.ReadAllText(noteMeta).Contains("SOURCE-META"),
+              "dropped files and folders are copied into the folder (new names, new ids, originals kept)");
+        check(_app.Project.ImportFiles(new[] { database.FullPath(dropRoot) }, $"{dropRoot}/pack").Count == 0, "a folder is not copied into itself");
+
+        if (wav != null && _app.Engine.Audio.Available)
+        {
+            var speaker = World.CreateEntity();
+            World.Add(speaker, new EntityInfo("Drop Speaker"));
+            World.Add(speaker, new AudioSource(_app.Engine.Assets.LoadSound($"{dropRoot}/drop.wav")) { Loop = true, PlayOnStart = false, Volume = 0.0f });
+            _app.TogglePlay();
+            yield return 0;
+            yield return 0;
+            var speakerNow = find("Drop Speaker");
+            AudioSource copy = World.Get<AudioSource>(speakerNow);   // Behaviour のフィールドに取っておくのと同じ (コピー)
+            check(!copy.IsPlaying && _app.Engine.Audio.PlayingCount == 0, "AudioSource with PlayOnStart off is silent");
+            copy.Play();
+            yield return 0;
+            yield return 0;
+            check(copy.IsPlaying && World.Get<AudioSource>(speakerNow).IsPlaying && _app.Engine.Audio.PlayingCount == 1, $"Play() on a copy of AudioSource plays the sound (copy {copy.IsPlaying}, real {World.Get<AudioSource>(speakerNow).IsPlaying}, count {_app.Engine.Audio.PlayingCount})");
+            copy.Stop();
+            yield return 0;
+            check(!copy.IsPlaying && _app.Engine.Audio.PlayingCount == 0, "Stop() on a copy stops the sound");
+            copy.Play();
+            yield return 0;
+            _app.TogglePlay();   // Stop
+            yield return 0;
+            yield return 0;
+            check(_app.Engine.Audio.PlayingCount == 0 && !World.Get<AudioSource>(find("Drop Speaker")).IsPlaying, "stopping the editor play stops the sound");
+            World.DestroyEntity(find("Drop Speaker"));
+        }
+        else Console.WriteLine("[Test] (audio checks skipped : no sound device or no wav)");
+
+        Directory.Delete(database.FullPath(dropRoot), true);
+        File.Delete(database.FullPath(dropRoot) + ".meta");
+        Directory.Delete(source, true);
+        database.Refresh();
+        yield return 0;
     }
 }

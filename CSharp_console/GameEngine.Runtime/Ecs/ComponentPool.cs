@@ -28,6 +28,8 @@ public sealed class ComponentPool<T> : IComponentPool where T : struct
 
     // 外されたときに呼ばれる (例 : MeshRenderer が外れたら C++ の描画オブジェクトを削除する)
     public event Action<Entity, T>? Removed;
+    // 付けられたときに呼ばれる (v1.6。例 : AudioSource に持ち主のエンティティを書く)。置き換え (SetBoxed / Get への代入) では呼ばれない
+    public event Action<Entity>? Added;
 
     public Type ComponentType => typeof(T);
     public int  Count => _count;
@@ -68,6 +70,7 @@ public sealed class ComponentPool<T> : IComponentPool where T : struct
         _entities[_count]   = entity;
         _count++;
         _sparse[entity.Id]  = _count;
+        Added?.Invoke(entity);
     }
 
     public object GetBoxed(int entityId) => Get(entityId);

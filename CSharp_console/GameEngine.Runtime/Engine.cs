@@ -484,6 +484,10 @@ public sealed class AudioSettings
     // 音を鳴らせるか (Audio.dll が無い / 音の出る機器が無い時は false。その時 AudioSource は何もしない)
     public bool Available { get; }
 
+    // 鳴っている AudioSource の数 (v1.6。最後の更新の時。確認 / プロファイラー用)
+    public int PlayingCount => System?.PlayingCount ?? 0;
+    internal AudioSystem? System;
+
     // 全体の音量 (1 = そのまま)
     public float MasterVolume
     {
@@ -648,6 +652,7 @@ public sealed class Engine : IDisposable
         Audio = new AudioSettings(_audioLoaded, audioAvailable);
         Assets.AudioLoaded = _audioLoaded;
         _audioSystem = new AudioSystem(World, _audioLoaded);
+        Audio.System = _audioSystem;
 
         // 衝突判定 (Physics.dll)。無い時も描画はそのまま動かす (衝突判定だけしない)
         try
@@ -694,6 +699,16 @@ public sealed class Engine : IDisposable
         _collisionSystem.ResetForPlay();
         _collisionCallbacks.Reset(Physics);
         IsPlaying = true;
+    }
+
+    /// <summary>
+    /// 再生を終える (v1.6)。鳴っている音を全部止めて、ボイスを削除する (エディターの Stop が、シーンを作り直す前に呼ぶ)
+    /// 以前は Stop でシーンを消しても、音の削除が再生中の更新でしか行われず、鳴ったままになった
+    /// </summary>
+    public void EndPlay()
+    {
+        IsPlaying = false;
+        _audioSystem.StopAll();
     }
 
     /// <summary>System と物理の後、カメラと描画への反映の前に毎フレーム呼ばれる (エディターの GUI はここで作る)</summary>
@@ -824,6 +839,7 @@ public sealed class Engine : IDisposable
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)
+            else           _audioSystem.UpdateStopped();   // v1.6 : 外された AudioSource のボイスは編集中も消す (以前は Stop 後も鳴り続けた)
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
             Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;
