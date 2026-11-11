@@ -948,7 +948,23 @@ namespace RHI
 		D3D12_GPU_VIRTUAL_ADDRESS Buffer::GetViewConstants(uint32_t frameIndex, uint32_t view)const
 		{
 			if (!_commonCB || frameIndex >= CommandContext::FRAME_COUNT || view >= VIEW_COUNT) return 0;
-			return _commonCB->GetGPUVirtualAddress() + FRAME_SLOT_SIZE * (static_cast<uint64_t>(frameIndex) * VIEW_COUNT + view);
+			// v1.5 : フレーム → カメラ → 視点 の順に並べる
+			return _commonCB->GetGPUVirtualAddress() + FRAME_SLOT_SIZE * ((static_cast<uint64_t>(frameIndex) * RHI::MAX_CAMERAS + _cameraSlot) * VIEW_COUNT + view);
+		}
+
+		void Buffer::SetCameraViews(const RHI::CameraView* views, uint32_t count)
+		{
+			_cameraCount = (std::min)(count, RHI::MAX_CAMERAS);
+			for (uint32_t i = 0; i < _cameraCount; ++i) _cameraViews[i] = views[i];
+			if (_cameraSlot >= _cameraCount) _cameraSlot = 0;
+		}
+
+		bool Buffer::SelectCamera(uint32_t camera)
+		{
+			if (camera >= _cameraCount) return false;
+			_cameraSlot = camera;
+			SetViewProjection(_cameraViews[camera].View, _cameraViews[camera].Projection);   // 影のカスケード / 視錐台も作り直す
+			return true;
 		}
 
 		D3D12_GPU_VIRTUAL_ADDRESS Buffer::WriteFrameConstants(uint32_t frameIndex)
@@ -960,11 +976,11 @@ namespace RHI
 
 			// フレームごとに 視点の数 × FRAME_SLOT_SIZE ずつ領域を分けている (Root CBV は 256byte 境界が必須)
 			// 以前はフレームごとに 256byte (カメラだけ)
-			const uint64_t offset = FRAME_SLOT_SIZE * VIEW_COUNT * frameIndex;
+			const uint64_t offset = FRAME_SLOT_SIZE * VIEW_COUNT * (static_cast<uint64_t>(frameIndex) * RHI::MAX_CAMERAS + _cameraSlot);   // v1.5 : カメラごとの枠
 
 			// 何も変わっていなければ書き込みを省く (UPLOAD ヒープは書き込みが遅いメモリなので、無駄に書かない)
 			// 以前は View / Projection だけだった。ライティングの情報も足した (シェーダーの cbuffer FrameData と同じ並び)
-			if (_writtenVersion[frameIndex] != _frameConstantsVersion)
+			if (_writtenVersion[frameIndex][_cameraSlot] != _frameConstantsVersion)
 			{
 				FrameConstants constants = {};
 				constants.View             = _viewMatrix;
@@ -1016,7 +1032,7 @@ namespace RHI
 
 				if (written)
 				{
-					_writtenVersion[frameIndex] = _frameConstantsVersion;
+					_writtenVersion[frameIndex][_cameraSlot] = _frameConstantsVersion;
 				}
 				else
 				{

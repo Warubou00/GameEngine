@@ -208,6 +208,9 @@ namespace Renderer
                 size_t index = std::distance(_newmtlName.begin(), it);
                 if (index < materials.size() && materials[index] != nullptr)
                 {
+                    // v1.5 : 名前 (UTF-8 として読む。読めなければシステムの文字コード)
+                    try { materials[index]->Name = std::filesystem::path(std::u8string(name.begin(), name.end())).wstring(); }
+                    catch (...) { materials[index]->Name = std::filesystem::path(name).wstring(); }
                     mesh->Materials[matIndex] = materials[index];
                     // mesh側に所有権を渡したため、解放されないようnullptrにする
                     materials[index] = nullptr;

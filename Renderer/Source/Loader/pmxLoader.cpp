@@ -194,10 +194,10 @@ namespace Renderer
         size_t indexCursor = 0;
         for (int32_t m = 0; m < materialCount && ifs; ++m)
         {
-            skipText(ifs);   // 名前
+            auto material = new Material();
+            readText(ifs, material->Name);   // 名前 (v1.5 : マテリアルのアセットの名前に使う。以前は読み飛ばした)
             skipText(ifs);   // 英名
 
-            auto material = new Material();
             float diffuse[4] = {}, specular[3] = {}, specularity = 0.0f, ambient[3] = {};
             readValue(ifs, diffuse);
             readValue(ifs, specular);

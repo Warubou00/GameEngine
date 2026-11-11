@@ -59,3 +59,4 @@ CSharp_console/GameEngine.Editor/assets/*.pptx
 !CSharp_console/Project/Assets/**/*.cs
 # エディターがダブルクリックで作る sln (v1.1。いつでも作り直せる)
 CSharp_console/Project/*.sln
+!CSharp_console/Project/Assets/Samples/Fbx/*_Materials/*.bmp

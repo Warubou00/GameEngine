@@ -46,7 +46,8 @@ public sealed class ShadowPass : IDisposable
     private NativeMethods.ShadowSettings _sent;
     private bool _hasSent;
     private long _frame;
-    private bool _drawAll = true;   // 作り直した直後は全段を描く (間引くと前の内容が無い)
+    private bool _drawAll = true;
+    internal bool DrawEveryCascade { get; set; }   // v1.5 : 複数のカメラで使い回す時は全段を毎回描く   // 作り直した直後は全段を描く (間引くと前の内容が無い)
 
     public RenderTexture? ShadowMap => _map;
 
@@ -76,7 +77,8 @@ public sealed class ShadowPass : IDisposable
 
         // このフレームで描き直さない段 (間引き) : 3 段目は偶数フレーム、4 段目は 4 フレームに 1 回 (3 段目と重ならないように)
         uint frozen = 0;
-        if (settings.ThrottleFarCascades && !_drawAll)
+        // v1.5 : カメラが複数の時は間引かない (前のカメラの段が残っているので)
+        if (settings.ThrottleFarCascades && !_drawAll && !DrawEveryCascade)
         {
             if (cascades >= 3 && (_frame & 1) != 0) frozen |= 1u << 2;
             if (cascades >= 4 && (_frame & 3) != 1) frozen |= 1u << 3;

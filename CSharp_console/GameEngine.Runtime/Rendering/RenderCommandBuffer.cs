@@ -150,6 +150,23 @@ public sealed unsafe class RenderCommandBuffer
         command.Arg0 = (uint)view;
     }
 
+    /// <summary>v1.5 : この後の描画をカメラ camera (Graphics の今のフレームのカメラの番号) で行う (影のカスケード / カリングも)</summary>
+    public void SetCamera(int camera)
+    {
+        ref var command = ref Add(9);
+        command.Arg0 = (uint)camera;
+    }
+
+    /// <summary>v1.5 : 次の SetRenderTarget までの描画を、今の描画先の一部 (ピクセル) だけにする</summary>
+    public void SetViewport(float x, float y, float width, float height)
+    {
+        ref var command = ref Add(10);
+        command.Params[0] = x;
+        command.Params[1] = y;
+        command.Params[2] = width;
+        command.Params[3] = height;
+    }
+
     // 1 フレーム分を C++ へ渡して描く
     internal void Submit()
     {

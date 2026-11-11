@@ -3,26 +3,65 @@ using GameEngine.Native;
 
 namespace GameEngine;
 
+// このフレームに描くカメラ 1 台 (CameraSystem が Depth の順に並べる。v1.5)
+internal struct CameraFrame
+{
+    public Entity  Entity;     // エディターのカメラの時は、設定を借りたシーンのカメラ (無ければ Entity.Null)
+    public Camera  Camera;     // 部品の値 (Volume を混ぜた後の値は RenderSettingsSystem が Graphics へ)
+    public Vector3 Position;   // ワールドの位置 (Volume の効きを決めるのに使う)
+}
+
 // ==========================================================================
-// カメラを C++ へ送る (エンジン組み込み)。最初に見つかった Camera + Transform を使う
-// 前のフレームと同じなら送らない (Projection はリサイズ時に C++ 側で作り直される)
+// カメラを C++ へ送る (エンジン組み込み)
+//   v1.5 : 有効な Camera + Transform を全部 (最大 8 台)、Depth の小さい順に (同じ Depth なら見つかった順)
+//     (以前は最初に見つかったカメラ 1 台だけ)
+//     範囲 (ViewportRect) が画面全体でないカメラは、範囲の縦横の比で投影を作る (Aspect)
+//   エディターのカメラ (CameraOverride) がある時は 1 台だけ。描き方の設定は一番目のシーンのカメラの物を使う
+//   前のフレームと同じなら送らない (Projection はリサイズ時に C++ 側で作り直される)
 // ==========================================================================
 internal sealed class CameraSystem : ISystem
 {
-    private NativeMethods.CameraDesc _last;
+    private readonly NativeMethods.CameraDesc[] _descs = new NativeMethods.CameraDesc[NativeMethods.MaxCameras];
+    private readonly NativeMethods.CameraDesc[] _last  = new NativeMethods.CameraDesc[NativeMethods.MaxCameras];
+    private int  _lastCount;
     private bool _sent;
+    private readonly List<(int Depth, int Order)> _order = new();
 
-    // 最後に送ったカメラの位置 (Volume の効きを決めるのに使う。ED6)
-    public Vector3 Position => _last.Position;
+    // このフレームに描くカメラ (Depth の順。0 番がメインのカメラ)
+    public List<CameraFrame> Cameras { get; } = new();
 
-    public void Update(World world) => Update(world, null);
+    // メインのカメラの位置 (Volume / 音を聞く位置。ED6)。カメラが無ければ最後に送った位置
+    public Vector3 Position => _last[0].Position;
+
+    public void Update(World world) => Update(world, null, (0, 0));
 
     // cameraOverride : エディターのカメラ (あればシーンのカメラの代わりに使う。ED3)
-    public void Update(World world, CameraOverride? cameraOverride)
+    // screen : シーンを描く大きさ (範囲の比を求める)
+    public void Update(World world, CameraOverride? cameraOverride, (int Width, int Height) screen)
     {
+        Cameras.Clear();
+        var cameras    = world.GetPool<Camera>();
+        var transforms = world.GetPool<Transform>();
+        var entities   = cameras.Entities;
+
+        // 有効なカメラを Depth の順に
+        _order.Clear();
+        for (int i = 0; i < entities.Length; i++)
+        {
+            if (!transforms.Has(entities[i].Id) || !world.IsActive(entities[i])) continue;   // 無効なカメラは使わない (ED2)
+            _order.Add((cameras.Components[i].Depth, i));
+        }
+        _order.Sort((a, b) => a.Depth != b.Depth ? a.Depth.CompareTo(b.Depth) : a.Order.CompareTo(b.Order));
+
         if (cameraOverride is { } editor)
         {
-            send(new NativeMethods.CameraDesc
+            // エディターのカメラ : 画面全体に 1 台。描き方は一番目のシーンのカメラ (無ければ既定の値)
+            var settings = _order.Count > 0 ? cameras.Components[_order[0].Order] : new Camera();
+            settings.ViewportRect = new Vector4(0.0f, 0.0f, 1.0f, 1.0f);
+            settings.CullingMask  = 0xFFFFFFFFu;   // エディターでは全部のレイヤーを見せる
+            if (settings.ClearFlags == CameraClearFlags.DepthOnly) settings.ClearFlags = CameraClearFlags.Skybox;
+            Cameras.Add(new CameraFrame { Entity = _order.Count > 0 ? entities[_order[0].Order] : Entity.Null, Camera = settings, Position = editor.Position });
+            _descs[0] = new NativeMethods.CameraDesc
             {
                 Position     = editor.Position,
                 Forward      = Vector3.Transform(Vector3.UnitZ, editor.Rotation),
@@ -30,38 +69,67 @@ internal sealed class CameraSystem : ISystem
                 FieldOfViewY = editor.FieldOfView * MathEx.Deg2Rad,
                 NearZ        = editor.NearClip,
                 FarZ         = editor.FarClip,
-            });
+                CullingMask  = 0xFFFFFFFFu,
+            };
+            send(1);
             return;
         }
-        var cameras    = world.GetPool<Camera>();
-        var transforms = world.GetPool<Transform>();
-        var entities   = cameras.Entities;
-        for (int i = 0; i < entities.Length; i++)
-        {
-            ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
-            if (!found || !world.IsActive(entities[i])) continue;   // 無効なカメラは使わない (ED2)
-            ref var camera = ref cameras.Components[i];
 
-            var desc = new NativeMethods.CameraDesc
+        var count = Math.Min(_order.Count, NativeMethods.MaxCameras);
+        for (int c = 0; c < count; c++)
+        {
+            var index = _order[c].Order;
+            ref var camera    = ref cameras.Components[index];
+            ref var transform = ref transforms.Get(entities[index].Id);
+            var position = transform.WorldPosition;   // 以前はローカル (Position)。親が無ければ同じ
+            Cameras.Add(new CameraFrame { Entity = entities[index], Camera = camera, Position = position });
+            _descs[c] = new NativeMethods.CameraDesc
             {
-                Position     = transform.WorldPosition,   // 以前はローカル (Position)。親が無ければ同じ
+                Position     = position,
                 Forward      = transform.Forward,
                 Up           = transform.Up,
                 FieldOfViewY = camera.FieldOfView * MathEx.Deg2Rad,
                 NearZ        = camera.NearClip,
                 FarZ         = camera.FarClip,
                 Orthographic = camera.Orthographic ? 1u : 0u,
+                Aspect       = AspectOf(camera.ViewportRect, screen),
+                CullingMask  = camera.CullingMask,
             };
-            send(desc);
-            return;   // 今は 1 台だけ
         }
+        if (count > 0) send(count);
     }
 
-    private void send(NativeMethods.CameraDesc desc)
+    // 範囲の縦横の比 (画面全体なら 0 = C++ が画面の比を使う。リサイズしても送り直さなくてよい)
+    internal static float AspectOf(Vector4 rect, (int Width, int Height) screen)
     {
-        if (_sent && desc.Equals(_last)) return;
-        NativeMethods.Renderer_SetCamera(ref desc);
-        _last = desc;
+        var r = ClampRect(rect);
+        if (IsFullRect(r) || screen.Width <= 0 || screen.Height <= 0) return 0.0f;
+        return (r.Z * screen.Width) / Math.Max(r.W * screen.Height, 1.0f);
+    }
+
+    // 範囲を画面の中 (0〜1) に収める (幅 / 高さは最低 1%)
+    internal static Vector4 ClampRect(Vector4 rect)
+    {
+        var x = Math.Clamp(rect.X, 0.0f, 0.99f);
+        var y = Math.Clamp(rect.Y, 0.0f, 0.99f);
+        var w = Math.Clamp(rect.Z, 0.01f, 1.0f - x);
+        var h = Math.Clamp(rect.W, 0.01f, 1.0f - y);
+        return new Vector4(x, y, w, h);
+    }
+
+    internal static bool IsFullRect(Vector4 r) => r.X <= 0.0f && r.Y <= 0.0f && r.Z >= 1.0f && r.W >= 1.0f;
+
+    private unsafe void send(int count)
+    {
+        if (_sent && count == _lastCount)
+        {
+            var same = true;
+            for (int i = 0; i < count && same; i++) same = _descs[i].Equals(_last[i]);
+            if (same) return;
+        }
+        fixed (NativeMethods.CameraDesc* p = _descs) NativeMethods.Renderer_SetCameras(p, (uint)count);
+        Array.Copy(_descs, _last, count);
+        _lastCount = count;
         _sent = true;
     }
 }

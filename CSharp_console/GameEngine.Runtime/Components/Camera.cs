@@ -1,16 +1,49 @@
+using System.Numerics;
+using GameEngine.Rendering;
+
 namespace GameEngine;
 
 // ==========================================================================
 // カメラ (Transform と一緒に付ける。位置と向きは Transform から取る)
-//   今は最初に見つかったカメラ 1 台で描く (複数のカメラ / 画面分割は描画パスを C# で組む段階で)
+//   v1.5 : 複数のカメラ (Unity と同じ)。有効なカメラを Depth の小さい順に描き、画面の ViewportRect の範囲に重ねる (最大 8 台)
+//     ClearFlags : Skybox (空) / SolidColor (BackgroundColor の 1 色) / DepthOnly (前のカメラの絵の上に、物だけを重ねる)
+//     CullingMask : 写すレイヤー (エンティティのレイヤー = EntityInfo.Layer)
+//     描き方 (Forward / Deferred / アンチエイリアス / SSAO / 露出など) もカメラごと
+//     (以前は最初に見つかったカメラ 1 台だけで、描き方はシーンの RenderSettings に 1 つだった)
+//   プロジェクト全体の描画の設定 (光の計算 / 環境光 / 空の画像 / 影 / パーティクル) は Project Settings の Rendering
 // ==========================================================================
+public enum CameraClearFlags : uint
+{
+    Skybox     = 0,   // 空 (Project Settings の Rendering の空の画像)
+    SolidColor = 1,   // BackgroundColor の 1 色
+    DepthOnly  = 2,   // 消さない : 前のカメラの絵の上に、写した物だけを重ねる (武器 / ミニマップの枠など)
+}
+
 [ComponentInfo(Category = "Camera")]
 public struct Camera : IComponent
 {
     public float FieldOfView  = 57.29578f;   // 縦の視野角 (度)。既定は以前の C++ と同じ 1.0 ラジアン
     public float NearClip     = 1.0f;
     public float FarClip      = 10000.0f;
-    public bool  Orthographic = false;       // 平行投影 (幅 / 高さ = 画面のピクセル数)
+    public bool  Orthographic = false;       // 平行投影 (高さ = 画面のピクセル数。幅は範囲の比)
+
+    [Header("Output")]
+    [Tooltip("Cameras are drawn from the smallest Depth to the largest (larger ones are drawn on top).")]
+    public int     Depth = 0;
+    [Tooltip("x, y, width, height on the screen (0 to 1. x, y = bottom left, like Unity).")]
+    public Vector4 ViewportRect = new(0.0f, 0.0f, 1.0f, 1.0f);
+    public CameraClearFlags ClearFlags = CameraClearFlags.Skybox;
+    public Vector3 BackgroundColor = new(0.1f, 0.2f, 0.4f);   // SolidColor の色 (sRGB)
+    [LayerMask] public uint CullingMask = 0xFFFFFFFFu;        // 写すレイヤー
+
+    [Header("Rendering")]
+    public RenderPath   RenderPath   = RenderPath.Forward;
+    public AntiAliasing AntiAliasing = AntiAliasing.Fxaa;
+    public SsaoValues   Ssao         = new();
+    public FxaaValues   Fxaa         = new();
+    [Range(0.05f, 8.0f)] public float Exposure = 1.0f;
+    public Tonemapper Tonemapper = Tonemapper.ACES;
+    [Range(1.0f, 3.0f)] public float Gamma = 2.2f;
 
     public Camera()
     {

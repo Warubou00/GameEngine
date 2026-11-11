@@ -53,12 +53,15 @@ internal static unsafe class NativeMethods
         public float   NearZ;
         public float   FarZ;
         public uint    Orthographic;
+        public float   Aspect;        // v1.5 : 幅 / 高さ (0 = 画面の比)
+        public uint    CullingMask;   // v1.5 : 写すレイヤーのビット (0 / 0xFFFFFFFF = 全部)
 
         public readonly bool Equals(CameraDesc o) =>
             Position == o.Position && Forward == o.Forward && Up == o.Up &&
-            FieldOfViewY == o.FieldOfViewY && NearZ == o.NearZ && FarZ == o.FarZ && Orthographic == o.Orthographic;
+            FieldOfViewY == o.FieldOfViewY && NearZ == o.NearZ && FarZ == o.FarZ && Orthographic == o.Orthographic &&
+            Aspect == o.Aspect && CullingMask == o.CullingMask;
         public override readonly bool Equals(object? obj) => obj is CameraDesc o && Equals(o);
-        public override readonly int GetHashCode() => HashCode.Combine(Position, Forward, Up, FieldOfViewY, NearZ, FarZ, Orthographic);
+        public override readonly int GetHashCode() => HashCode.Combine(Position, Forward, Up, FieldOfViewY, NearZ, FarZ, Orthographic, HashCode.Combine(Aspect, CullingMask));
     }
 
     // ---------- 描画パス (C++ の RHI::RenderTargetDesc / RenderCommand と同じ並び) ----------
@@ -356,6 +359,11 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetCamera(ref CameraDesc camera);
 
+    // v1.5 : 複数のカメラ (描画パスの SetCamera(番号) で切り替える。最大 MaxCameras)
+    public const int MaxCameras = 8;
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern unsafe void Renderer_SetCameras(CameraDesc* cameras, uint count);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetIndirectDraw([MarshalAs(UnmanagedType.I1)] bool enabled);
 
@@ -418,6 +426,20 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Renderer_IsProfilerVisible();
+
+    // v1.5 : C++ の Renderer::ModelMaterialInfo と同じ並び (28 byte)。読み込んだモデルのサブメッシュのマテリアル
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ModelMaterialInfo
+    {
+        public Vector4 Color;
+        public float   Metallic;
+        public float   Roughness;
+        public uint    Flags;   // 1 半透明 / 2 両面
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_GetModelMaterialInfo(uint model, uint subMesh, out ModelMaterialInfo info, char* texture, uint textureCapacity, char* name, uint nameCapacity);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
@@ -504,6 +526,12 @@ internal static unsafe class NativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetRenderObjectMaterial(uint renderObject, uint material);
+
+    // v1.5 : サブメッシュごとのマテリアル (0xFFFFFFFF = モデルのマテリアル) / 物ごとの印 (1 影を落とさない / 2 影を受けない) とレイヤーのビット
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern unsafe void Renderer_SetRenderObjectMaterials(uint renderObject, uint* materials, uint count);
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetRenderObjectFlags(uint renderObject, uint flags, uint layerMask);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern ulong Renderer_GetMeshBytesUsed();

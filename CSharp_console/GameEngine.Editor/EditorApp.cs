@@ -335,7 +335,7 @@ internal sealed partial class EditorApp
                 ImGui.EndMenu();
             }
             ImGui.Separator();
-            if (ImGui.MenuItem("Render Settings")) SelectRenderSettings();
+            if (ImGui.MenuItem("Camera"))          CreateCamera();   // v1.5 (以前は Render Settings。描き方はカメラごとになった)
             if (ImGui.MenuItem("Volume (Box)"))    CreateVolume(VolumeShape.Box);
             if (ImGui.MenuItem("Volume (Global)")) CreateVolume(VolumeShape.Global);
             ImGui.EndMenu();

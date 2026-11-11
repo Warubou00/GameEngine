@@ -368,6 +368,8 @@ namespace RHI
                 uint32_t ResetVisibility;    // 1 : 可視の記録が使えない (描画リストが変わった / 前のフレームでオクルージョンしていない)
                 uint32_t AlphaDrawStart;     // 半透明の描画の先頭 (無ければ 0xFFFFFFFF)
                 uint32_t DoubleSidedDrawStart;   // 両面の不透明の描画の先頭 (無ければ 0xFFFFFFFF)
+                uint32_t CullingMask;        // v1.5 : 写すレイヤー (カメラの視点だけ。物の LayerMask と & して 0 なら外す)
+                uint32_t ShadowView;         // v1.5 : 1 = 影の視点 (影を落とさない物を外す。レイヤーは見ない)
             };
 
             // フレームごとの DrawData と ExecuteIndirect の引数 (GPU が前のフレームで読んでいる間に書き換えないよう分ける)
@@ -535,6 +537,7 @@ namespace RHI
             Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
             // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)
             uint32_t                                             _culledView      = 0xFFFFFFFFu;
+            bool                                                 _cullShadowView  = false;   // v1.5 : 今のカリングは影の視点 (影を落とさない物を外す)
             D3D12_RESOURCE_STATES                                _culledState     = D3D12_RESOURCE_STATE_COMMON;
             RHI::DirectX12::DescriptorHeapManager*               _heapManager = nullptr;   // SRV の置き場 (Buffer が持つ。所有しない)
 

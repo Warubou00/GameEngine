@@ -57,6 +57,7 @@ struct DrawData
 struct ObjectData
 {
     matrix World;
+    uint4  Info;   // v1.5 : x = 印 (1 影を落とさない / 2 影を受けない) / y = レイヤーのビット (RHI::ObjectConstants と同じ並び : 80byte)
 };
 
 // マテリアル (Buffer::MaterialData と同じ並び : 32byte)
@@ -93,7 +94,11 @@ struct VSOutput
     //   RTX 2070 / 負荷テスト 20002 個 / Forward : ワールド座標を渡すと 0.336 ms → 戻すと 0.265 ms
     //   (ライティング前は 0.245 ms。法線は戻せないので、その分は増える)
     nointerpolation uint MaterialIndex : MATERIAL;
+    nointerpolation uint ObjectFlags   : OBJECTFLAGS;   // v1.5 : 物の印 (ObjectData.Info.x。2 = 影を受けない)
 };
+
+// v1.5 : 今描いている物が影を受けるか (ピクセルシェーダーの始めに決める。shadeLights が見る)
+static bool g_ReceiveShadows = true;
 
 // ==============================================================
 // リソースバインディング (Pipeline.cpp の Root Signature と一致)
@@ -357,7 +362,7 @@ float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, 
         const float NoL = saturate(dot(N, L));
         if (NoL <= 0.0f) continue;
         // 影 : 影を付けるライトだけ (光が当たっていない面は上で飛ばすので、シャドーマップを読むのは当たる面だけ)
-        if (i == g_ShadowLightIndex)
+        if (i == g_ShadowLightIndex && g_ReceiveShadows)   // v1.5 : 影を受けない物は読まない
         {
             attenuation *= shadowFactor(P, N);
             if (attenuation <= 0.0f) continue;
@@ -403,6 +408,7 @@ VSOutput VSMain(uint vertexID : SV_VertexID, uint drawID : DRAWID)
     const DrawData   draw   = g_Draws[drawID];
     const ObjectData object = g_Objects[draw.ObjectIndex];
     Vertex v = g_MegaVB[draw.BaseVertex + vertexID];
+    output.ObjectFlags = object.Info.x;   // v1.5
 
     // ローカル → ワールド → ビュー → クリップ の順に変換する
     // (以前は行列を使わず、頂点座標をそのままクリップ空間として扱っていた : 2-7)
@@ -454,6 +460,7 @@ float3 worldPosition(float4 svPosition)
 
 Surface getSurface(VSOutput input)
 {
+    g_ReceiveShadows = (input.ObjectFlags & 2u) == 0;   // v1.5 : 全部の物のピクセルシェーダーがここを通る
     Surface surface;
     // 頂点カラー × テクスチャカラー × マテリアルの色
     // (頂点カラーとマテリアルが白ならテクスチャそのままの色、既定テクスチャ(白)なら色だけになる)
@@ -566,7 +573,7 @@ GBufferOutput PSGBuffer(VSOutput input)
     GBufferOutput output;
     output.Albedo   = float4(surface.Albedo, 1.0f);
     output.Normal   = float4(surface.Normal, 1.0f);
-    output.Material = float4(surface.Metallic, surface.Roughness, 0.0f, 1.0f);
+    output.Material = float4(surface.Metallic, surface.Roughness, (input.ObjectFlags & 2u) != 0 ? 1.0f : 0.0f, 1.0f);   // v1.5 : z = 影を受けない
     return output;
 }
 
@@ -605,7 +612,8 @@ float4 PSDeferredLighting(FullscreenOutput input) : SV_TARGET
 
     const float3 albedo   = g_Textures[g_Inputs[0].x].Load(pixel).rgb;   // sRGB の RT から読むと線形に戻る
     const float3 normal   = normalize(g_Textures[g_Inputs[0].y].Load(pixel).xyz);
-    const float2 material = g_Textures[g_Inputs[0].z].Load(pixel).xy;
+    const float3 material = g_Textures[g_Inputs[0].z].Load(pixel).xyz;
+    g_ReceiveShadows = material.z < 0.5f;   // v1.5 : G-Buffer の z = 影を受けない
 
     // 深度からワールド座標を戻す (UV の y は下向き、クリップ空間の y は上向き)
     const float2 ndc   = float2(input.UV.x * 2.0f - 1.0f, 1.0f - input.UV.y * 2.0f);

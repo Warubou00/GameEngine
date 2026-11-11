@@ -75,10 +75,10 @@ public sealed class SsaoPass : IDisposable
     }
 
     /// <summary>確認用 : 遮蔽を白黒で画面に出す</summary>
-    public void Show(RenderCommandBuffer cmd, RenderTexture ao)
+    public void Show(RenderCommandBuffer cmd, RenderTexture ao, RenderTexture? target = null)
     {
         _showAo ??= FullscreenShader.Load(ShaderPath, "PSShowAo");
-        cmd.SetRenderTarget(RenderTexture.BackBuffer);
+        cmd.SetRenderTarget(target ?? RenderTexture.BackBuffer);   // v1.5 : カメラの描き込み先
         cmd.DrawFullscreen(_showAo, [ao], []);
     }
 

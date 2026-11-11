@@ -97,7 +97,7 @@ namespace RHI
             // 以前は描画ごとに Root CBV で指していたため 256byte 間隔が必須だった (1-9)。
             // 詰めたことで、1 フレームの領域に入るオブジェクトの数が約 3 倍になり、GPU が読むメモリも減る
             static constexpr uint64_t OBJECT_DATA_STRIDE = (sizeof(RHI::ObjectConstants) + 15) & ~15ull;
-            static_assert(OBJECT_DATA_STRIDE == 64, "OBJECT_DATA_STRIDE must match HLSL struct ObjectData (64 bytes)");
+            static_assert(OBJECT_DATA_STRIDE == 80, "OBJECT_DATA_STRIDE must match HLSL struct ObjectData (80 bytes : World + Info)");   // v1.5 : 以前は 64
 
             // ---------- マテリアル ----------
             // シェーダーの struct MaterialData と同じ並び (32byte)
@@ -338,6 +338,14 @@ namespace RHI
             // 視点の定数のアドレス (WriteFrameConstants の後。0 はカメラ = WriteFrameConstants の戻り値と同じ)
             D3D12_GPU_VIRTUAL_ADDRESS GetViewConstants(uint32_t frameIndex, uint32_t view)const;
 
+            // v1.5 : 複数のカメラ。SetCameraViews で覚え、SelectCamera で今のカメラ (行列 / 定数の枠) を切り替える
+            //        定数はカメラごとに別の枠に書く (前のカメラの定数を GPU が読んでいる間に上書きしないため)
+            void     SetCameraViews(const RHI::CameraView* views, uint32_t count);
+            bool     SelectCamera(uint32_t camera);   // 戻り値 = そのカメラがあるか
+            uint32_t GetCameraCount()const { return _cameraCount; }
+            uint32_t GetCameraSlot()const { return _cameraSlot; }
+            uint32_t GetCullingMask()const { return _cameraCount > 0 ? _cameraViews[_cameraSlot].CullingMask : 0xFFFFFFFFu; }
+
             // 影 (shadowMapTexture : シャドーマップの g_Textures の番号 / resolution : その大きさ)
             void SetShadowSettings(const RHI::ShadowSettings& settings, uint32_t shadowMapTexture, uint32_t resolution);
             uint32_t GetShadowViewCount()const { return _shadowViewCount; }   // 今のフレームで描く影の視点の数 (0 なら影なし)
@@ -406,7 +414,7 @@ namespace RHI
             const uint64_t _SCENE_CB_SIZE  = SCENE_CB_SIZE;
             // フレームごとの定数 (View / Projection) : 1 フレーム 256byte × フレーム数
             // 以前は 1 フレーム 256byte (カメラだけ)。今は 視点の数 × FRAME_SLOT_SIZE
-            const uint64_t _COMMON_CB_SIZE = FRAME_SLOT_SIZE * VIEW_COUNT * CommandContext::FRAME_COUNT;
+            const uint64_t _COMMON_CB_SIZE = FRAME_SLOT_SIZE * VIEW_COUNT * RHI::MAX_CAMERAS * CommandContext::FRAME_COUNT;   // v1.5 : カメラごと
             const uint64_t _GLOBAL_IB_SIZE = 16ull * 1024ull * 1024ull;
             const uint64_t _SCENE_IB_SIZE  = 64ull * 1024ull * 1024ull;
 
@@ -416,7 +424,10 @@ namespace RHI
             ::DirectX::XMFLOAT4X4               _projMatrix     = {};
             // 行列を更新した回数。各フレームの領域に書いた時の値と比べて、変わっていなければ書き込みを省く
             uint64_t                            _frameConstantsVersion = 1;
-            uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT] = {};
+            uint64_t                            _writtenVersion[CommandContext::FRAME_COUNT][RHI::MAX_CAMERAS] = {};
+            RHI::CameraView                     _cameraViews[RHI::MAX_CAMERAS] = {};   // v1.5
+            uint32_t                            _cameraCount = 0;
+            uint32_t                            _cameraSlot  = 0;
 
             // ---------- GPU カリング用 ----------
             std::unordered_map<uint32_t, ::DirectX::XMFLOAT4> _vertexBounds;

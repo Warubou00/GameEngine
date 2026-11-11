@@ -56,6 +56,7 @@ namespace Renderer
         bool DoubleSided;               // 裏面も描く (PMX の材質のフラグ)
         bool Transparent;               // 半透明として描く (不透明な物の後に、ブレンドして描く。PMX は全部)
         uint32_t TextureIndex;          // テクスチャインデックス(SRVIndex)
+        std::wstring Name;              // v1.5 : 材質の名前 (OBJ の newmtl / PMX の材質名。マテリアルのアセットの名前に使う)
     };
 
 }

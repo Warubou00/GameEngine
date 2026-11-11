@@ -47,6 +47,16 @@ namespace Renderer
 	// 行列は C++ 側で作る (アスペクト比は描画先のサイズから決めるので、リサイズしても C# は何もしなくてよい)
 	// 座標系は左手系 (+X 右 / +Y 上 / +Z 奥)
 	// ==========================================================================
+	// v1.5 : 読み込んだモデルのサブメッシュのマテリアル (C# の NativeMethods.ModelMaterialInfo と同じ並び : 28byte)
+	struct ModelMaterialInfo
+	{
+		float    Color[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
+		float    Metallic  = 0.0f;
+		float    Roughness = 0.6f;
+		uint32_t Flags     = 0;   // 1 半透明 / 2 両面
+	};
+	static_assert(sizeof(ModelMaterialInfo) == 28, "ModelMaterialInfo must match C#");
+
 	struct CameraDesc
 	{
 		float    Position[3];
@@ -56,6 +66,8 @@ namespace Renderer
 		float    NearZ;
 		float    FarZ;
 		uint32_t Orthographic;     // 1 : 平行投影 (幅 / 高さ = 描画先のピクセル数)
+		float    Aspect;           // v1.5 : 幅 / 高さ (0 = 画面の比。カメラの範囲 Viewport Rect の比)
+		uint32_t CullingMask;      // v1.5 : 写すレイヤーのビット (0xFFFFFFFF = 全部)
 	};
 
 	class SceneRenderer
@@ -147,6 +159,8 @@ namespace Renderer
 		// モデルの形 (位置とインデックス) を写す。positions / indices が nullptr なら数だけ返す (衝突判定のメッシュ用)
 		bool GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
 		                      uint32_t* outVertexCount, uint32_t* outIndexCount) const;
+		// v1.5 : サブメッシュ s の読み込んだマテリアル (色 / 金属 / 粗さ / 印 / テクスチャのフルパス / 名前)。C# がマテリアルのアセットを作る
+		bool GetModelMaterialInfo(uint32_t model, uint32_t subMesh, ModelMaterialInfo* info, std::wstring& texture, std::wstring& name) const;
 
 		// ---------- ED5 : エディターの読み直し / 解放 / マテリアル (GPU を待つ物があるので、毎フレーム呼ぶ物ではない) ----------
 		// 同じファイルを読み直す (番号は同じまま。置いてある物は次のフレームから新しい形で描かれる)。読めなければ前の物のまま
@@ -196,6 +210,12 @@ namespace Renderer
 
 		// カメラの設定 (View / Projection 行列を作って RHI に渡す)
 		void SetCamera(const CameraDesc& camera);
+		// v1.5 : 複数のカメラ (描画パスの SetCamera(番号) で切り替える。0 番がフレームの始めのカメラ)
+		void SetCameras(const CameraDesc* cameras, uint32_t count);
+		// v1.5 : 物ごとの印 (RHI::OBJECT_FLAG_*) と、レイヤーのビット (カメラの Culling Mask と比べる)
+		void SetRenderObjectFlags(uint32_t object, uint32_t flags, uint32_t layerMask);
+		// v1.5 : サブメッシュごとのマテリアル (materials[s] が s 番のサブメッシュ。0xFFFFFFFF = モデルのマテリアル)
+		void SetRenderObjectMaterials(uint32_t object, const uint32_t* materials, uint32_t count);
 
 		/***********************************************************************************
 		 * @brief 1 フレーム描画する (描画オブジェクトが増減していたら、描画リストを作り直してから渡す)
@@ -256,6 +276,14 @@ namespace Renderer
 			std::vector<RHI::MaterialHandle> Materials;
 			std::vector<RHI::TextureHandle>  Textures;
 			std::vector<std::wstring>        TexturePaths;
+			// v1.5 : サブメッシュごとの読み込んだマテリアル (SubMeshes と同じ並び)
+			struct SubMeshMaterial
+			{
+				ModelMaterialInfo Info;
+				std::wstring      Texture;   // フルパス (無ければ空)
+				std::wstring      Name;
+			};
+			std::vector<SubMeshMaterial>     SubMeshMaterials;
 			// AN4 : 骨と重み (曲げるモデルだけ)
 			RHI::SkinRange                   Skin;
 			uint32_t                         SkinBones = 0;
@@ -269,6 +297,8 @@ namespace Renderer
 			uint32_t          MaterialOverride = INVALID_HANDLE;   // ED5 : マテリアルのアセット (INVALID_HANDLE ならモデルのマテリアル)
 			RHI::SkinHandle   Skin;                                // AN4 : 曲げる物 (有効なら、その物専用の頂点の場所で描く)
 			uint32_t          View = 0;                            // AN5 : 0 = シーン / 1〜 = プレビューの窓 (シーンには描かない)
+			std::vector<uint32_t> MaterialOverrides;               // v1.5 : サブメッシュごと (無い所は MaterialOverride か、モデルのマテリアル)
+			RHI::ObjectConstants  Constants;                       // v1.5 : 最後に送った行列と印 (印だけ変えた時にも行列を送り直すため)
 		};
 
 		// テクスチャのファイルが無ければ、拡張子を変えて探す (見つからなければそのまま返す)
@@ -286,6 +316,7 @@ namespace Renderer
 		RHI::IRenderHardwareInterface* _rhi = nullptr;          // RHI_CreateRenderHardwareInterface で作り、Shutdown で破棄する
 
 		std::vector<ModelResource>     _models;
+		static ModelResource::SubMeshMaterial subMeshMaterialOf(const RHI::MaterialDesc& desc, const std::wstring& texture, const std::wstring& name);   // v1.5
 		std::vector<uint32_t>          _freeModels;             // 解放したモデルの番号 (ED5)
 		std::vector<RenderObject>      _renderObjects;
 		std::vector<uint32_t>          _freeRenderObjects;      // 削除されて使い回せるハンドル
@@ -296,6 +327,7 @@ namespace Renderer
 		bool                           _drawListDirty = false;  // 描画オブジェクトが増減した
 
 		CameraDesc                     _camera    = {};
+		std::vector<CameraDesc>        _cameras;                // v1.5 : 全部のカメラ (0 番 = _camera)
 		bool                           _hasCamera = false;
 	};
 }

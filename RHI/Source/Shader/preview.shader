@@ -26,6 +26,7 @@ struct Vertex
 struct ObjectData
 {
     matrix World;
+    uint4  Info;   // v1.5 : x = 印 (1 影を落とさない / 2 影を受けない) / y = レイヤーのビット (RHI::ObjectConstants と同じ並び : 80byte)
 };
 
 struct MaterialData

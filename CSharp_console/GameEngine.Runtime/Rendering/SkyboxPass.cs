@@ -24,7 +24,7 @@ public sealed class SkyboxPass
     public bool Draw(RenderCommandBuffer cmd, GraphicsSettings settings)
     {
         var sky = settings.Skybox;
-        if (!sky.Enabled) return false;
+        if (!sky.Enabled || settings.ClearFlags != CameraClearFlags.Skybox) return false;   // v1.5 : 空はカメラの ClearFlags が Skybox の時だけ
         var texture = textureOf(sky.Texture);
         if (texture == NativeMethods.InvalidHandle) return false;
         _shader ??= FullscreenShader.Load(ShaderPaths.Skybox, "PSSkybox");

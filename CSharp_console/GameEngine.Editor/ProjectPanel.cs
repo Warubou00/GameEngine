@@ -645,13 +645,14 @@ internal sealed class ProjectPanel : IDisposable
     }
 
     // 今のフォルダにシェーダー (.hlsl) の雛形を作って選ぶ (SH2)。書き方の例が入っている
-    public string? CreateShader(string name = "New Shader")
+    //   v1.5 : template で Unlit / PBR の雛形も選べる (Create > Shader > Unlit / PBR。書き方のヘルプをコメントで入れてある)
+    public string? CreateShader(string name = "New Shader", string? template = null)
     {
         try
         {
             var path = $"{_folder}/{name}.hlsl";
             for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}.hlsl";
-            File.WriteAllText(_database.FullPath(path), ShaderTemplate, new System.Text.UTF8Encoding(false));
+            File.WriteAllText(_database.FullPath(path), template ?? ShaderTemplate, new System.Text.UTF8Encoding(false));
             _database.Refresh();
             Select(_database.Find(path));
             Console.WriteLine($"[Assets] Created {path}");
@@ -706,11 +707,98 @@ internal sealed class ProjectPanel : IDisposable
         }
     }
 
+    // v1.5 : Unlit の雛形 (ライトを使わず、色 × テクスチャをそのまま出す)
+    public const string UnlitShaderTemplate = """
+        // ==========================================================================
+        // Unlit シェーダー (ライトも影も使わず、色 × テクスチャをそのまま出す。UI 風の物 / 光る物 / 背景など)
+        //
+        //   使い方 : マテリアルの Shader にこのファイルを入れる (インスペクターのマテリアル)。保存するとコンパイルし直す
+        //            コンパイルのエラーは Console に「ファイル(行)」で出る (前にコンパイルできた物で描き続ける)
+        //   影     : 影を落とす / 受けるかは、物の MeshRenderer の Cast Shadows / Receive Shadows で物ごとに選ぶ
+        //            (シェーダーには何も書かなくてよい。Lit() は Receive Shadows を切った物では影を読まない)
+        //
+        //   ---- 書き方 (行の始めが // @ の行がエンジンへの指示。下の - @ の行は説明なので効かない) ----
+        //   - @queue  opaque | transparent                         描く順番 (transparent は不透明の物の後に、遠い順)
+        //   - @blend  opaque | alpha | additive | premultiplied    重ね方 (transparent の既定は alpha)
+        //   - @cull   back | front | none                          消す面 (none = 両面を描く)
+        //   - @zwrite on | off                                     深度を書くか (既定 : opaque は on / transparent は off)
+        //   - @depth  test | read                                  read : SceneDepth(uv) / SceneWorldPosition(uv) でシーンの深度を読む (雲など)
+        //   - @param  float | color | vector | texture | texture3d  名前  既定の値  range(最小, 最大)
+        //           例 : // @param float Speed 1 range(0, 4)    // @param color Tint (1, 0.5, 0.2, 1)    // @param texture Noise white
+        //           インスペクターのマテリアルに出る。シェーダーでは名前でそのまま使う (テクスチャは 名前.Sample(g_Sampler, uv))
+        //
+        //   ---- Surface(IN) : 1 ピクセルの色 (線形の HDR) と不透明度を返す ----
+        //   IN.UV / IN.Color (頂点の色) / IN.WorldPosition / IN.LocalPosition / IN.Normal (カメラ側を向いたワールドの法線)
+        //   IN.ViewDirection (カメラ → 点) / IN.CameraPosition / IN.ScreenUV / IN.Time (秒) / IN.LocalToWorld / IN.WorldToLocal
+        //   ToLinear(c)  : sRGB → 線形 (色のパラメーターとテクスチャの色は sRGB なので、計算の前に線形にする)
+        //   Lit(albedo, normal, position, metallic, roughness) : シーンと同じライティング (ライト / 環境光 / 影)
+        //   MainLight(out direction, out color) : 一番目の平行光源 (光の進む向き / 色 × 強さ)。無ければ false
+        //   g_Sampler (線形・繰り返し) / g_LinearClamp (線形・端で止める)
+        // ==========================================================================
+        // @queue opaque
+        // @param color   BaseColor   (1, 1, 1, 1)
+        // @param texture MainTexture white
+        // @param float   Intensity   1 range(0, 8)
+        float4 Surface(SurfaceInput IN)
+        {
+            float4 texel = MainTexture.Sample(g_Sampler, IN.UV);
+            float3 color = ToLinear(BaseColor.rgb * texel.rgb) * Intensity;   // 明るさを 1 より上げると、トーンマップの前の HDR で光って見える
+            return float4(color, BaseColor.a * texel.a);                      // 不透明度は @queue transparent の時に使われる
+        }
+        """;
+
+    // v1.5 : PBR の雛形 (シーンと同じ物理ベースのライティング)
+    public const string PbrShaderTemplate = """
+        // ==========================================================================
+        // PBR シェーダー (シーンと同じ物理ベースのライティング : 平行光源 / 点光源 / 環境光 / 影)
+        //   金属らしさ (Metallic 0 = 非金属 / 1 = 金属) と粗さ (Roughness 0 = つるつる / 1 = ざらざら) で光り方を決める
+        //
+        //   使い方 : マテリアルの Shader にこのファイルを入れる (インスペクターのマテリアル)。保存するとコンパイルし直す
+        //            コンパイルのエラーは Console に「ファイル(行)」で出る (前にコンパイルできた物で描き続ける)
+        //   影     : 影を落とす / 受けるかは、物の MeshRenderer の Cast Shadows / Receive Shadows で物ごとに選ぶ
+        //            (シェーダーには何も書かなくてよい。Lit() は Receive Shadows を切った物では影を読まない)
+        //
+        //   ---- 書き方 (行の始めが // @ の行がエンジンへの指示。下の - @ の行は説明なので効かない) ----
+        //   - @queue  opaque | transparent                         描く順番 (transparent は不透明の物の後に、遠い順)
+        //   - @blend  opaque | alpha | additive | premultiplied    重ね方 (transparent の既定は alpha)
+        //   - @cull   back | front | none                          消す面 (none = 両面を描く)
+        //   - @zwrite on | off                                     深度を書くか (既定 : opaque は on / transparent は off)
+        //   - @depth  test | read                                  read : SceneDepth(uv) / SceneWorldPosition(uv) でシーンの深度を読む (雲など)
+        //   - @param  float | color | vector | texture | texture3d  名前  既定の値  range(最小, 最大)
+        //           例 : // @param float Speed 1 range(0, 4)    // @param color Tint (1, 0.5, 0.2, 1)    // @param texture Noise white
+        //           インスペクターのマテリアルに出る。シェーダーでは名前でそのまま使う (テクスチャは 名前.Sample(g_Sampler, uv))
+        //
+        //   ---- Surface(IN) : 1 ピクセルの色 (線形の HDR) と不透明度を返す ----
+        //   IN.UV / IN.Color (頂点の色) / IN.WorldPosition / IN.LocalPosition / IN.Normal (カメラ側を向いたワールドの法線)
+        //   IN.ViewDirection (カメラ → 点) / IN.CameraPosition / IN.ScreenUV / IN.Time (秒) / IN.LocalToWorld / IN.WorldToLocal
+        //   ToLinear(c)  : sRGB → 線形 (色のパラメーターとテクスチャの色は sRGB なので、計算の前に線形にする)
+        //   Lit(albedo, normal, position, metallic, roughness) : シーンと同じライティング (ライト / 環境光 / 影)
+        //   MainLight(out direction, out color) : 一番目の平行光源 (光の進む向き / 色 × 強さ)。無ければ false
+        //   g_Sampler (線形・繰り返し) / g_LinearClamp (線形・端で止める)
+        // ==========================================================================
+        // @queue opaque
+        // @param color   BaseColor         (1, 1, 1, 1)
+        // @param texture MainTexture       white
+        // @param float   Metallic          0   range(0, 1)
+        // @param float   Roughness         0.5 range(0.02, 1)
+        // @param color   EmissionColor     (0, 0, 0, 1)
+        // @param float   EmissionIntensity 0   range(0, 8)
+        float4 Surface(SurfaceInput IN)
+        {
+            float4 texel  = MainTexture.Sample(g_Sampler, IN.UV);
+            float3 albedo = ToLinear(BaseColor.rgb * texel.rgb);
+            // ライト / 環境光 / 影 (影は物の MeshRenderer の Receive Shadows を切ると読まない)
+            float3 color  = Lit(albedo, IN.Normal, IN.WorldPosition, Metallic, Roughness);
+            color += ToLinear(EmissionColor.rgb) * EmissionIntensity;   // 自分で光る分 (ライトに関係なく足す)
+            return float4(color, 1.0f);
+        }
+        """;
+
     public const string ShaderTemplate = """
         // ==========================================================================
         // 自分のシェーダー (マテリアルの Shader に入れて使う。保存するとコンパイルし直す)
-        //   @queue opaque | transparent / @blend opaque | alpha | additive | premultiplied / @cull back | front | none / @zwrite on | off
-        //   @param float | color | vector | texture | texture3d  名前  既定の値  range(最小, 最大)
+        //   - @queue opaque | transparent / @blend opaque | alpha | additive | premultiplied / @cull back | front | none / @zwrite on | off
+        //   - @param float | color | vector | texture | texture3d  名前  既定の値  range(最小, 最大)
         //   IN : WorldPosition / LocalPosition / Normal / ViewDirection / CameraPosition / UV / Color / ScreenUV / Time / LocalToWorld / WorldToLocal
         //   Lit(albedo, normal, position, metallic, roughness) : シーンと同じライティング (戻り値は線形の色)
         // ==========================================================================
@@ -769,7 +857,13 @@ internal sealed class ProjectPanel : IDisposable
         }
         ImGui.Separator();
         if (ImGui.MenuItem("Material")) { _folder = folder; CreateMaterial(); }
-        if (ImGui.MenuItem("Shader")) { _folder = folder; CreateShader(); }
+        if (ImGui.BeginMenu("Shader"))   // v1.5 : 雛形を選ぶ (以前は例の 1 つだけ)
+        {
+            if (ImGui.MenuItem("Unlit Shader")) { _folder = folder; CreateShader("New Unlit Shader", UnlitShaderTemplate); }
+            if (ImGui.MenuItem("PBR Shader"))   { _folder = folder; CreateShader("New PBR Shader", PbrShaderTemplate); }
+            if (ImGui.MenuItem("Example (Pulse)")) { _folder = folder; CreateShader(); }
+            ImGui.EndMenu();
+        }
         if (ImGui.MenuItem("Shader Graph")) { _folder = folder; if (CreateShaderGraph() is { } graph) OpenShaderGraph?.Invoke(graph); }
         ImGui.EndMenu();
     }

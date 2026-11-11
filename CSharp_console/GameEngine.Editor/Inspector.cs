@@ -82,6 +82,11 @@ internal sealed class Inspector
         var name = info.Name ?? "";
         ImGui.SetNextItemWidth(-1);
         if (ImGui.InputText("##name", ref name, 256)) write(entity, typeof(EntityInfo), info with { Name = name }, null);
+        // v1.5 : レイヤー (Unity の GameObject の Layer。カメラの Culling Mask で写すかが決まる)
+        object? layerValue = info.Layer;
+        ImGui.SetNextItemWidth(180.0f);
+        if (drawLayer("Layer", ref layerValue, info.Layer) && layerValue is int newLayer) write(entity, typeof(EntityInfo), info with { Layer = newLayer }, null);
+        ImGui.SameLine();
         ImGui.TextDisabled($"Id {info.Id}");
         ImGui.Separator();
 

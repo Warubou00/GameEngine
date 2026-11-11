@@ -1,0 +1,17 @@
+{
+  "format": "GameEngineMaterial",
+  "version": 1,
+  "color": [
+    1.0,
+    0.78,
+    0.3,
+    1
+  ],
+  "texture": null,
+  "metallic": 1.0,
+  "roughness": 0.25,
+  "transparent": false,
+  "doubleSided": false,
+  "shader": null,
+  "values": {}
+}

@@ -40,16 +40,49 @@ internal sealed unsafe class RenderSyncSystem : ISystem
         };
     }
 
-    private static void syncMaterials(Span<MeshRenderer> components)
+    private uint[] _materialSlots = new uint[16];
+
+    // v1.5 : マテリアル (サブメッシュごと) / 影の印 / レイヤーを C++ へ (変わった物だけ。C# の中で比べるだけなので P/Invoke は変わった時だけ)
+    //   以前の Material (全部のサブメッシュに 1 つ) は、ここで Materials へ移す
+    private void syncObjectSettings(World world, ReadOnlySpan<Entity> entities, Span<MeshRenderer> components)
     {
+        var infos = world.GetPool<EntityInfo>();
         for (int i = 0; i < components.Length; i++)
         {
             ref var renderer = ref components[i];
+            if (renderer.Material != null && (renderer.Materials == null || renderer.Materials.Length == 0) && renderer.Model.IsValid)
+            {
+                renderer.Materials = Enumerable.Repeat<Material?>(renderer.Material, Math.Max(1, renderer.Model.SubMeshCount)).ToArray();
+                renderer.Material = null;
+            }
             if (!renderer.Created) continue;
-            var wanted = renderer.Material is { IsValid: true } material ? material.Handle + 1 : 0u;
-            if (wanted == renderer.AppliedMaterialPlusOne) continue;
-            NativeMethods.Renderer_SetRenderObjectMaterial(renderer.Handle, wanted == 0 ? NativeMethods.InvalidHandle : wanted - 1);
-            renderer.AppliedMaterialPlusOne = wanted;
+
+            // 以前の 1 つのマテリアル (C++ の全部のサブメッシュ) を外す (Materials に移したので)
+            if (renderer.AppliedMaterialPlusOne != 0)
+            {
+                NativeMethods.Renderer_SetRenderObjectMaterial(renderer.Handle, NativeMethods.InvalidHandle);
+                renderer.AppliedMaterialPlusOne = 0;
+            }
+
+            // サブメッシュごとのマテリアル
+            var materials = renderer.Materials;
+            var hash = MeshRenderer.materialsHash(materials);
+            if (hash != renderer.AppliedMaterialsHash)
+            {
+                var count = materials?.Length ?? 0;
+                if (_materialSlots.Length < count) _materialSlots = new uint[Math.Max(count, _materialSlots.Length * 2)];
+                for (int s = 0; s < count; s++) _materialSlots[s] = materials![s] is { IsValid: true } m ? m.Handle : NativeMethods.InvalidHandle;
+                fixed (uint* slots = _materialSlots) NativeMethods.Renderer_SetRenderObjectMaterials(renderer.Handle, slots, (uint)count);
+                renderer.AppliedMaterialsHash = hash;
+            }
+
+            // 影の印とレイヤー (既定 : 影を落とす / 受ける / レイヤー 0)
+            var layer = infos.Has(entities[i].Id) ? Math.Clamp(infos.Get(entities[i].Id).Layer, 0, 31) : 0;
+            var flags = (renderer.CastShadows ? 0u : 1u) | (renderer.ReceiveShadows ? 0u : 2u);
+            var wanted = (flags | ((uint)layer << 8)) + 1;
+            if (wanted == renderer.AppliedFlagsPlusOne || (renderer.AppliedFlagsPlusOne == 0 && wanted == 1)) continue;
+            NativeMethods.Renderer_SetRenderObjectFlags(renderer.Handle, flags, 1u << layer);
+            renderer.AppliedFlagsPlusOne = wanted;
         }
     }
 
@@ -62,9 +95,9 @@ internal sealed unsafe class RenderSyncSystem : ISystem
         var entities   = renderers.Entities;
         var components = renderers.Components;
 
-        // マテリアルのアセット (ED5) : 1 つでもあれば、付け替えた物を探して C++ へ送る
-        // (マテリアルを使っていないシーンでは見回らない。使っている時は 1 万個で 0.054 ms / フレーム (計測))
-        if (Material.LiveCount > 0) syncMaterials(components);
+        // マテリアル / 影の印 / レイヤー (v1.5) : 変わった物を探して C++ へ送る
+        //   (以前はマテリアルのアセットがある時だけ見回った。印とレイヤーも見るので毎フレーム。C# の中で比べるだけ)
+        syncObjectSettings(world, entities, components);
 
         // 何も増えず、どの行列も変わっていなければ何もしない (止まっているシーンでは全部の物を見て回らない)
         // ※MeshRenderer を外して付け直すと数が同じになるので、外された時も _knownRenderers を減らしている
@@ -114,7 +147,9 @@ internal sealed unsafe class RenderSyncSystem : ISystem
                     ref var renderer = ref components[list[n]];
                     renderer.Handle  = _created[n];
                     renderer.Created = true;
-                    renderer.AppliedMaterialPlusOne = 0;   // 新しい描画オブジェクトはモデルのマテリアル (次のフレームで syncMaterials が付ける)
+                    renderer.AppliedMaterialPlusOne = 0;   // 新しい描画オブジェクトはモデルのマテリアル (次のフレームで syncObjectSettings が付ける)
+                    renderer.AppliedMaterialsHash   = 0;
+                    renderer.AppliedFlagsPlusOne    = 0;
                     // 作ったばかりの物は、行列が変わっていなくても送る
                     if (transforms.Has(entities[list[n]].Id)) transforms.Get(entities[list[n]].Id).Changed = true;
                 }

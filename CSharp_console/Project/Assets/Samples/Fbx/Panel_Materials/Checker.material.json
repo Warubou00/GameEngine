@@ -1,0 +1,17 @@
+{
+  "format": "GameEngineMaterial",
+  "version": 1,
+  "color": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "texture": {
+    "path": "Assets/Samples/Fbx/Panel_Materials/Panel.mod_checker.bmp"
+  },
+  "metallic": 0,
+  "roughness": 0.6,
+  "transparent": false,
+  "doubleSided": false
+}

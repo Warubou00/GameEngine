@@ -13,6 +13,7 @@ public struct EntityInfo : IComponent
     [HideInInspector] public Guid Id;
     public string Name;
     public bool   Active;
+    [Layer] public int Layer;   // v1.5 : レイヤー (カメラの Culling Mask で写すかを決める。Unity の GameObject.layer。名前は Project Settings)
 
     public EntityInfo(string name)
     {

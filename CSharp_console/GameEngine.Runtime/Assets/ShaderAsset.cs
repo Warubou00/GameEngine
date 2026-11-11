@@ -368,6 +368,8 @@ public sealed class ShaderAsset : IDisposable
         b.AppendLine("    const uint w = g_Inputs[0].y;");
         b.AppendLine("    IN.LocalToWorld   = transpose(float4x4(g_CustomData[w], g_CustomData[w + 1], g_CustomData[w + 2], g_CustomData[w + 3]));");
         b.AppendLine("    IN.WorldToLocal   = _inverse(IN.LocalToWorld);");
+        // v1.5 : 物の印 (行列の後の 1 個。RHI::ObjectConstants の Flags)。2 = 影を受けない (Lit が見る)
+        b.AppendLine("    g_ReceiveShadows = (asuint(g_CustomData[w + 4].x) & 2u) == 0;");
         b.AppendLine("    IN.WorldPosition  = worldPosition(input.Position);");
         b.AppendLine("    IN.LocalPosition  = mul(float4(IN.WorldPosition, 1.0f), IN.WorldToLocal).xyz;");
         b.AppendLine("    IN.CameraPosition = g_CameraPosition;");

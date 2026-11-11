@@ -86,6 +86,50 @@ public sealed class GraphicsSettings
         set { _ambient = value; _lightingDirty = true; }
     }
 
+    // ---------- 複数のカメラ (v1.5) ----------
+    //   メインのカメラ (Depth が一番小さい) の値は、このクラスの値 (Exposure / Ssao など) そのもの
+    //   2 台目からは、描く間だけ、そのカメラの値に入れ替える (パイプラインはカメラごとに 1 つ。メインは Pipeline)
+
+    /// <summary>このフレームに描くカメラの数 (シーンにカメラが無ければ 1 = 前のカメラのまま)</summary>
+    public int CameraCount => Math.Max(1, RenderCameras.Count);
+
+    /// <summary>今描いているカメラの消し方 (パイプラインが見る。DepthOnly なら背景を描かず、透明のまま前のカメラに重ねる)</summary>
+    public CameraClearFlags ClearFlags { get; internal set; } = CameraClearFlags.Skybox;
+
+    /// <summary>今描いているカメラの描き込み先 (トーンマップ / FXAA の行き先。画面全体のカメラならバックバッファ)</summary>
+    public RenderTexture CameraTarget { get; internal set; } = RenderTexture.BackBuffer;
+
+    /// <summary>今描いているカメラの番号 (0 = メイン)</summary>
+    public int CurrentCamera { get; private set; }
+
+    /// <summary>カメラ i の画面の範囲 (ピクセル。左上が原点。Viewport Rect は左下が原点)</summary>
+    public (int X, int Y, int Width, int Height) GetCameraViewport(int index)
+    {
+        var rect = index >= 0 && index < RenderCameras.Count ? CameraSystem.ClampRect(RenderCameras[index].ViewportRect) : new Vector4(0, 0, 1, 1);
+        var (w, h) = ScreenSize;
+        var x0 = (int)MathF.Round(rect.X * w);
+        var x1 = (int)MathF.Round((rect.X + rect.Z) * w);
+        var y0 = (int)MathF.Round((1.0f - rect.Y - rect.W) * h);
+        var y1 = (int)MathF.Round((1.0f - rect.Y) * h);
+        return (x0, y0, Math.Max(1, x1 - x0), Math.Max(1, y1 - y0));
+    }
+
+    /// <summary>カメラ i の描き方の値 (Volume を混ぜた後。確認用)</summary>
+    public Camera GetCameraSettings(int index) => index >= 0 && index < RenderCameras.Count ? RenderCameras[index] : new Camera();
+
+    /// <summary>カメラ i のパイプライン (0 = Pipeline。2 台目からはカメラの RenderPath で作った物。まだ描いていなければ null)</summary>
+    public RenderPipeline? GetCameraPipeline(int index) => index == 0 ? _pipeline : index > 0 && index < _cameraPipelines.Length ? _cameraPipelines[index] : null;
+
+    /// <summary>最後のフレームで、自分の絵に描いてから画面の範囲に重ねたカメラの数 (範囲が一部 / DepthOnly)</summary>
+    public int CompositedCameras { get; private set; }
+
+    internal readonly List<Camera> RenderCameras = new();   // このフレームのカメラ (Volume を混ぜた値。RenderSettingsSystem が入れる)
+    internal (int Width, int Height) ScreenSize { get; set; }
+    private readonly RenderPipeline?[] _cameraPipelines = new RenderPipeline?[NativeMethods.MaxCameras];   // 2 台目から
+    private readonly RenderTexture?[]  _cameraTargets   = new RenderTexture?[NativeMethods.MaxCameras];   // 範囲が一部 / DepthOnly のカメラの絵
+    private FullscreenShader? _composite;
+    private int _shownCameraCount = 1;
+
     public float      Exposure        { get; set; } = 1.0f;     // HDR の明るさの倍率
     public Tonemapper Tonemapper      { get; set; } = Tonemapper.ACES;
     public float      Gamma           { get; set; } = 2.2f;
@@ -139,11 +183,13 @@ public sealed class GraphicsSettings
         var ssaoState = !Ssao.Enabled ? 0 : Ssao.ShowOnly ? 2 : 1;
         var shadowState = Shadows.Enabled && ShadowLightIndex >= 0 && _lightingModel != LightingModel.Unlit ? Shadows.Resolution * 8 + Shadows.CascadeCount : 0;
         var antiAliasing = _pipeline!.AntiAliasingName(this);   // 定数の文字列 (毎フレーム作らない)
-        if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing || shadowState != _shownShadowState)
+        if (_infoDirty || ssaoState != _shownSsaoState || antiAliasing != _shownAntiAliasing || shadowState != _shownShadowState || CameraCount != _shownCameraCount)
         {
             var ssao   = ssaoState switch { 0 => "", 1 => " / SSAO", _ => " / SSAO (AO only)" };
             var shadow = shadowState > 0 ? $" / Shadows {Shadows.Resolution} x{Shadows.CascadeCount}" : "";
-            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}{shadow} / {antiAliasing}");
+            var count  = CameraCount > 1 ? $" / {CameraCount} cameras" : "";   // v1.5
+            NativeMethods.Renderer_SetProfilerInfo("Render pipeline", $"{_pipeline!.Name} / {_lightingModel}{ssao}{shadow} / {antiAliasing}{count}");
+            _shownCameraCount  = CameraCount;
             _infoDirty         = false;
             _shownSsaoState    = ssaoState;
             _shownAntiAliasing = antiAliasing;
@@ -213,13 +259,141 @@ public sealed class GraphicsSettings
     internal void RenderFrame(RenderCommandBuffer commands)
     {
         commands.Clear();
-        _pipeline!.Render(commands, this);
+        renderCameras(commands);
         foreach (var preview in _previews) preview.Submit(commands);   // AN5 : プレビューの窓 (シーンの後、UI の前)
         commands.Submit();
         // AN5 : 窓を閉じた / 大きさを変えたレンダーターゲットは、このフレームを描いた後で消す
         //       (以前はその場で消していたので、同じフレームの UI がもう消えたテクスチャを読み、GPU が止まった (デバイスの削除))
         foreach (var texture in _retiredTextures) texture.Dispose();
         _retiredTextures.Clear();
+    }
+
+    // v1.5 : カメラを Depth の順に描く (以前はパイプラインを 1 回だけ描いた)
+    //   画面全体で背景を消すカメラ : バックバッファへ直接 (1 台だけの時は以前と同じ)
+    //   範囲が一部 / DepthOnly のカメラ : 自分の絵 (RGBA8。画面と同じ大きさ) に描いてから、範囲に重ねる
+    //     (DepthOnly は透明の所 (何も写っていない所) が前のカメラの絵のまま)
+    private void renderCameras(RenderCommandBuffer cmd)
+    {
+        var count = Math.Min(CameraCount, NativeMethods.MaxCameras);
+        var main  = RenderCameras.Count > 0 ? RenderCameras[0] : new Camera();
+        var mainClear = RenderCameras.Count > 0 ? main.ClearFlags : CameraClearFlags.Skybox;
+
+        // 使わなくなったカメラのパイプライン / 絵を片付ける
+        for (int i = count; i < _cameraPipelines.Length; i++)
+        {
+            _cameraPipelines[i]?.Dispose();
+            _cameraPipelines[i] = null;
+        }
+        for (int i = count; i < _cameraTargets.Length; i++)
+        {
+            RetireTexture(_cameraTargets[i]);
+            _cameraTargets[i] = null;
+        }
+
+        // 1 台目が画面全体を塗らない時は、先にバックバッファを黒で消す
+        if (!CameraSystem.IsFullRect(CameraSystem.ClampRect(main.ViewportRect)) || mainClear == CameraClearFlags.DepthOnly)
+        {
+            cmd.SetRenderTarget(RenderTexture.BackBuffer);
+            cmd.ClearColor(new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        }
+
+        // メインの値 (2 台目からの間、入れ替えるので覚えておく)
+        var saved = count > 1 ? captureValues() : default;
+        var composited = 0;
+        for (int i = 0; i < count; i++)
+        {
+            var camera   = i < RenderCameras.Count ? RenderCameras[i] : main;
+            var pipeline = i == 0 ? _pipeline! : pipelineOf(i, camera.RenderPath);
+            pipeline.SharedShadows = i == 0 ? null : _pipeline!.OwnShadows;   // v1.5 : シャドーマップは 1 つを使い回す
+            _pipeline!.OwnShadows.DrawEveryCascade = count > 1;
+            if (i > 0)
+            {
+                applyValues(camera);
+                cmd.SetCamera(i);   // C++ : このカメラの行列 / 定数に替えて、見える物を選び直す
+            }
+            CurrentCamera = i;
+            ClearFlags = i == 0 ? mainClear : camera.ClearFlags;
+            var rect   = CameraSystem.ClampRect(camera.ViewportRect);
+            var direct = CameraSystem.IsFullRect(rect) && ClearFlags != CameraClearFlags.DepthOnly;
+            CameraTarget = direct ? RenderTexture.BackBuffer : (_cameraTargets[i] ??= RenderTexture.Create(RenderTextureFormat.RGBA8));
+            pipeline.Render(cmd, this);
+            if (!direct)
+            {
+                // 範囲へ重ねる (UV で読むので、画面の大きさの絵が範囲に縮む。投影は範囲の比で作ってある)
+                _composite ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSComposite");
+                var (x, y, w, h) = GetCameraViewport(i);
+                cmd.SetRenderTarget(RenderTexture.BackBuffer);
+                cmd.SetViewport(x, y, w, h);
+                cmd.DrawFullscreen(_composite, [CameraTarget], [],
+                                   ClearFlags == CameraClearFlags.DepthOnly ? FullscreenBlend.Premultiplied : FullscreenBlend.None);
+                cmd.SetRenderTarget(RenderTexture.BackBuffer);   // 範囲を画面全体に戻す
+                composited++;
+            }
+        }
+        if (count > 1)
+        {
+            restoreValues(saved);
+            cmd.SetCamera(0);   // この後の線 / プレビュー / UI はメインのカメラで
+        }
+        CompositedCameras = composited;
+        CurrentCamera = 0;
+        ClearFlags    = mainClear;
+        CameraTarget  = RenderTexture.BackBuffer;
+    }
+
+    private RenderPipeline pipelineOf(int index, RenderPath path)
+    {
+        var pipeline = _cameraPipelines[index];
+        var deferred = path == RenderPath.Deferred;
+        if (pipeline != null && (pipeline is DeferredRenderPipeline) == deferred) return pipeline;
+        pipeline?.Dispose();
+        pipeline = deferred ? new DeferredRenderPipeline() : new ForwardRenderPipeline();
+        pipeline.Initialize(this);
+        _cameraPipelines[index] = pipeline;
+        return pipeline;
+    }
+
+    // カメラごとの値 (入れ替える物だけ)
+    private struct CameraValues
+    {
+        public AntiAliasing AntiAliasing;
+        public Vector3 Background;
+        public float Exposure, Gamma;
+        public Tonemapper Tonemapper;
+        public bool Sky;
+        public SsaoValues Ssao;
+        public FxaaValues Fxaa;
+    }
+
+    private CameraValues captureValues() => new()
+    {
+        AntiAliasing = AntiAliasing, Background = BackgroundColor, Exposure = Exposure, Gamma = Gamma, Tonemapper = Tonemapper, Sky = Skybox.Enabled,
+        Ssao = new SsaoValues { Enabled = Ssao.Enabled, Radius = Ssao.Radius, Intensity = Ssao.Intensity, Bias = Ssao.Bias, SampleCount = Ssao.SampleCount, ResolutionScale = Ssao.ResolutionScale },
+        Fxaa = new FxaaValues { Subpixel = Fxaa.Subpixel, EdgeThreshold = Fxaa.EdgeThreshold, EdgeThresholdMin = Fxaa.EdgeThresholdMin },
+    };
+
+    private void applyValues(in Camera c)
+    {
+        AntiAliasing    = c.AntiAliasing;
+        BackgroundColor = c.BackgroundColor;
+        Exposure        = c.Exposure;
+        Gamma           = c.Gamma;
+        Tonemapper      = c.Tonemapper;
+        Skybox.Enabled  = c.ClearFlags == CameraClearFlags.Skybox;
+        RenderSettingsSystem.ApplySsao(Ssao, c.Ssao, default, force: true);
+        RenderSettingsSystem.ApplyFxaa(Fxaa, c.Fxaa, default, force: true);
+    }
+
+    private void restoreValues(in CameraValues v)
+    {
+        AntiAliasing    = v.AntiAliasing;
+        BackgroundColor = v.Background;
+        Exposure        = v.Exposure;
+        Gamma           = v.Gamma;
+        Tonemapper      = v.Tonemapper;
+        Skybox.Enabled  = v.Sky;
+        RenderSettingsSystem.ApplySsao(Ssao, v.Ssao, default, force: true);
+        RenderSettingsSystem.ApplyFxaa(Fxaa, v.Fxaa, default, force: true);
     }
 
     private readonly List<RenderTexture> _retiredTextures = new();
@@ -260,6 +434,8 @@ public sealed class GraphicsSettings
     {
         _pipeline?.Dispose();
         _pipeline = null;
+        for (int i = 0; i < _cameraPipelines.Length; i++) { _cameraPipelines[i]?.Dispose(); _cameraPipelines[i] = null; }
+        for (int i = 0; i < _cameraTargets.Length; i++)   { _cameraTargets[i]?.Dispose();   _cameraTargets[i] = null; }
     }
 
     // ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)
@@ -346,7 +522,7 @@ public sealed class Engine : IDisposable
     private readonly CameraSystem     _cameraSystem    = new();
     private readonly RenderSyncSystem _renderSyncSystem;
     private readonly LightSystem      _lightSystem     = new();
-    private readonly RenderSettingsSystem _renderSettingsSystem = new();   // RenderSettings / Volume → Graphics (ED6)
+    private readonly RenderSettingsSystem _renderSettingsSystem = new();   // カメラ / Project Settings / Volume → Graphics (ED6 / v1.5)
     private readonly ParticleSystem   _particleSystem;
     private readonly AnimationSystem  _animationSystem = new();   // AN3
     private readonly SkinningSystem   _skinningSystem = new();    // AN4
@@ -639,8 +815,9 @@ public sealed class Engine : IDisposable
                 _transformSystem.Update(World);
             }
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
-            _cameraSystem.Update(World, Graphics.CameraOverride);
-            _renderSettingsSystem.Update(World, Graphics, _cameraSystem.Position);   // カメラの位置で Volume を混ぜる (ED6)
+            Graphics.ScreenSize = Graphics.RenderSize is { Width: > 0 } size ? size : ClientSize;   // v1.5 : カメラの範囲の比 / 描く範囲のピクセル
+            _cameraSystem.Update(World, Graphics.CameraOverride, Graphics.ScreenSize);   // v1.5 : 全部のカメラ (Depth の順)
+            _renderSettingsSystem.Update(World, Graphics, _cameraSystem);   // カメラの描き方 / Project Settings + Volume (ED6 / v1.5)
             _renderSyncSystem.Update(World);
             _skinningSystem.Update(World, Assets);   // AN4 : 曲げる物の骨の行列を C++ へ (描画オブジェクトができた後)
             Graphics.UpdatePreviews(Time.DeltaTime);   // AN5 : プレビューの窓の世界 (骨 / 行列 / 描画オブジェクト / 曲げる)

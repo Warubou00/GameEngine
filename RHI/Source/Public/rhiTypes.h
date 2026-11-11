@@ -72,6 +72,21 @@ namespace RHI
 	struct ObjectConstants
 	{
 		::DirectX::XMFLOAT4X4 World = {};   // ワールド行列
+		// v1.5 : 物ごとの印 (OBJECT_FLAG_*) と、写すカメラを選ぶレイヤーのビット (1 << レイヤー)。以前は行列だけ (64byte)
+		uint32_t Flags     = 0;
+		uint32_t LayerMask = 1;
+		uint32_t Padding[2] = {};
+	};
+	constexpr uint32_t OBJECT_FLAG_NO_CAST_SHADOWS    = 1u;   // 影を落とさない (影の視点のカリングで外す)
+	constexpr uint32_t OBJECT_FLAG_NO_RECEIVE_SHADOWS = 2u;   // 影を受けない (シェーダーがシャドーマップを読まない)
+
+	// v1.5 : 複数のカメラ。SetCameraViews で全部を渡し、描画パスの SetCamera で切り替える
+	constexpr uint32_t MAX_CAMERAS = 8;
+	struct CameraView
+	{
+		::DirectX::XMFLOAT4X4 View       = {};   // 普通の行列 (転置は RHI の中で行う)
+		::DirectX::XMFLOAT4X4 Projection = {};
+		uint32_t CullingMask = 0xFFFFFFFFu;     // 写すレイヤー (ObjectConstants::LayerMask と & して 0 なら写さない)
 	};
 
 	// ==========================================================================
@@ -291,6 +306,8 @@ namespace RHI
 		                        //   Arg0 bit0 = シーンの深度を読む物だけを描く (SH3。深度は描画先から外し、テクスチャとして渡す)
 		DrawPreview      = 8,   // プレビューの窓 (AN5) : Arg0 = 視点の番号 (1〜) の物と線を今の描画先へ描く (色 RGBA8 1 枚 + 深度 Depth32)
 		                        //   描いた色の描画先は、この後 UI が読めるようにする (UI の Texture に GetRenderTargetTexture の番号)
+		SetCamera        = 9,   // v1.5 : Arg0 = カメラの番号 (SetCameraViews の何番目か)。この後の描画はそのカメラで (影のカスケード / カリングも)
+		SetViewport      = 10,  // v1.5 : Params[0..3] = x / y / 幅 / 高さ (ピクセル)。次の SetRenderTargets までの描画を、その範囲だけにする
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
