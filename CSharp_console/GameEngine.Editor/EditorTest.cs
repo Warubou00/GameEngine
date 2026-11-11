@@ -292,6 +292,14 @@ internal sealed class EditorTest
         var countBefore = World.EntityCount;
         var placedModel = _app.PlaceModel(added, new Vector3(0, 0, 3), Entity.Null);
         check(!placedModel.IsNull && World.Get<MeshRenderer>(placedModel).Model.Path == "Assets/_EditorTest/box.obj", "place model asset");
+        // v1.5 : 1 Mesh / 1 Material : サブメッシュごとのマテリアルのアセットが <モデル名>_Materials にでき、置いた物に入る
+        var placedMaterials = World.Get<MeshRenderer>(placedModel).Materials;
+        check(placedMaterials.Length == World.Get<MeshRenderer>(placedModel).Model.SubMeshCount && placedMaterials.All(m => m != null && m.Path.StartsWith("Assets/_EditorTest/box_Materials/")) &&
+              placedMaterials.All(m => File.Exists(database.FullPath(m!.Path))),
+              $"placing a model creates a material asset per sub mesh ({string.Join(", ", placedMaterials.Select(m => m?.Path))})");
+        var modelMaterials = _app.Engine.Assets.GetModelMaterials(World.Get<MeshRenderer>(placedModel).Model);
+        check(modelMaterials.Count == placedMaterials.Length && placedMaterials.Select((m, i) => m!.Color == modelMaterials[i].Color && m.Texture == modelMaterials[i].Texture).All(x => x),
+              "the material assets copy the model's colors and textures");
         _app.Undo();
         check(World.EntityCount == countBefore, "undo place");
         _app.Redo();
@@ -345,7 +353,7 @@ internal sealed class EditorTest
         check(reread.Color == material.Color && reread.Texture == material.Texture && reread.Roughness == 0.25f, "material file round trip");
         check(File.ReadAllText(database.FullPath(material.Path)).Contains(database.Find("Assets/_EditorTest2/gravel.jpg")!.Guid.ToString()), "material stores the texture id");
         _app.Undo();
-        check(World.Get<MeshRenderer>(SceneSerializer.FindEntity(World, placedBoxId)).Material == null, "undo assign material");
+        check(World.Get<MeshRenderer>(SceneSerializer.FindEntity(World, placedBoxId)).Materials.All(m => m != material), "undo assign material");
         _app.Redo();
         placedBox = SceneSerializer.FindEntity(World, placedBoxId);
         var materialScene = Path.Combine(Path.GetTempPath(), "ge_editor_test_material.scene.json");
@@ -353,7 +361,7 @@ internal sealed class EditorTest
         _app.OpenScene(materialScene);
         yield return 0;
         placedBox = SceneSerializer.FindEntity(World, placedBoxId);
-        check(World.Get<MeshRenderer>(placedBox).Material == material, "reopened scene uses the same material (by id)");
+        check(World.Get<MeshRenderer>(placedBox).Materials.Length > 0 && World.Get<MeshRenderer>(placedBox).Materials.All(m => m == material), "reopened scene uses the same material (by id)");
         yield return 0;
         yield return 0;
         check(World.Get<MeshRenderer>(placedBox).IsMaterialApplied, "material applied after reopen");
@@ -399,27 +407,35 @@ internal sealed class EditorTest
         database.Refresh();
         yield return 0;
 
-        // ---------- ED6 : RenderSettings / Volume / ProjectSettings ----------
+        // ---------- ED6 / v1.5 : カメラの描き方 / Volume / ProjectSettings ----------
+        //   v1.5 : 以前はシーンの RenderSettings の部品で試した。描き方はメインのカメラ (Depth が一番小さい)、全体の値は Project Settings
         var countBeforeSettings = World.EntityCount;
-        var settingsEntity = _app.SelectRenderSettings();
-        check(World.EntityCount == countBeforeSettings + 1 && World.Has<RenderSettings>(settingsEntity), "create render settings");
-        check(_app.SelectRenderSettings() == settingsEntity, "render settings is selected, not created twice");
-        ref var rs = ref World.Get<RenderSettings>(settingsEntity);
+        var settingsEntity = _app.CreateCamera();
+        check(World.EntityCount == countBeforeSettings + 1 && World.Has<Camera>(settingsEntity) && World.Has<Transform>(settingsEntity), "create camera");
+        ref var rs = ref World.Get<Camera>(settingsEntity);
+        rs.Depth = -100;   // メインのカメラにする
         rs.Exposure = 2.0f;
-        rs.Path = RenderPath.Deferred;
+        rs.RenderPath = RenderPath.Deferred;
         rs.Ssao.Intensity = 0.7f;
-        rs.Shadows.CascadeCount = 2;
         rs.BackgroundColor = new Vector3(0.5f, 0.1f, 0.1f);
+        var savedRendering = ProjectSettings.Current.Rendering;
+        ProjectSettings.Current.Rendering.Shadows.CascadeCount = 2;   // 全体の値は Project Settings の Rendering
         yield return 0;
         yield return 0;
         check(graphics.Exposure == 2.0f && graphics.Ssao.Intensity == 0.7f && graphics.Shadows.CascadeCount == 2 && graphics.BackgroundColor == new Vector3(0.5f, 0.1f, 0.1f),
-              "render settings are applied to Graphics");
+              "the main camera and project rendering settings are applied to Graphics");
         check(graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline, "render path switches to Deferred");
         graphics.Exposure = 3.0f;   // キーやコードで変えた値は、設定を変えるまでそのまま
         yield return 0;
         check(graphics.Exposure == 3.0f, "code changes stay until the settings change");
-        World.Get<RenderSettings>(settingsEntity).Exposure = 2.0f;
+        World.Get<Camera>(settingsEntity).Exposure = 2.5f;
         yield return 0;
+        World.Get<Camera>(settingsEntity).Exposure = 2.0f;
+        yield return 0;
+        check(graphics.Exposure == 2.0f, "changing the camera writes the value again");
+        ProjectSettings.Current.Rendering = savedRendering;
+        yield return 0;
+        check(graphics.Shadows.CascadeCount == savedRendering.Shadows.CascadeCount, "project rendering settings go back");
 
         // 保存して開き直すと同じ (入れ子の値も)
         var settingsScene = Path.Combine(Path.GetTempPath(), "ge_editor_test_settings.scene.json");
@@ -428,11 +444,11 @@ internal sealed class EditorTest
         _app.OpenScene(settingsScene);
         yield return 0;
         yield return 0;
-        settingsEntity = World.Entities.First(e => World.Has<RenderSettings>(e));
-        var reopenedSettings = World.Get<RenderSettings>(settingsEntity);
-        check(reopenedSettings.Exposure == 2.0f && reopenedSettings.Path == RenderPath.Deferred && reopenedSettings.Ssao.Intensity == 0.7f && reopenedSettings.Shadows.CascadeCount == 2,
-              "render settings round trip (nested values)");
-        check(graphics.Exposure == 2.0f && graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline, "reopened scene applies its render settings");
+        settingsEntity = World.Entities.First(e => World.Has<Camera>(e) && World.Get<Camera>(e).Depth == -100);
+        var reopenedSettings = World.Get<Camera>(settingsEntity);
+        check(reopenedSettings.Exposure == 2.0f && reopenedSettings.RenderPath == RenderPath.Deferred && reopenedSettings.Ssao.Intensity == 0.7f && reopenedSettings.BackgroundColor == new Vector3(0.5f, 0.1f, 0.1f),
+              "camera settings round trip (nested values)");
+        check(graphics.Exposure == 2.0f && graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline, "reopened scene applies its camera settings");
         File.Delete(settingsScene);
 
         // Volume : 箱 (原点、辺 10 m、外側 4 m で混ざる)。中 → 上書き、混ざる所 → 間、外 → 元の値
@@ -460,13 +476,15 @@ internal sealed class EditorTest
         yield return 0;
         check(MathF.Abs(graphics.Exposure - 6.0f) < 1e-4f, "global volume works everywhere");
 
-        // 設定と Volume を消すと既定の値に戻る
+        // カメラと Volume を消すと、次のメインのカメラ (無ければ既定) の値に戻る
         World.DestroyEntity(volumeEntity);
         World.DestroyEntity(settingsEntity);
         yield return 0;
         yield return 0;
-        check(graphics.Exposure == 1.0f && graphics.Pipeline is GameEngine.Rendering.ForwardRenderPipeline && graphics.Ssao.Intensity == 1.5f,
-              "removing the settings returns to defaults");
+        var nextMain = World.Entities.Where(e => World.Has<Camera>(e) && World.Has<Transform>(e) && World.IsActive(e))
+                                     .Select(e => World.Get<Camera>(e)).OrderBy(c => c.Depth).DefaultIfEmpty(new Camera()).First();
+        check(graphics.Exposure == nextMain.Exposure && (graphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline) == (nextMain.RenderPath == RenderPath.Deferred) && graphics.Ssao.Intensity == nextMain.Ssao.Intensity,
+              "removing the camera returns to the next camera's values");
 
         // ProjectSettings : engine へ書く / JSON の読み書き (プロジェクトのファイルには書かない)
         var project = new ProjectSettings();
@@ -1288,6 +1306,9 @@ internal sealed class EditorTest
         _app.OpenScene(database.FullPath(fbxScene));
         for (int i = 0; i < 2; i++) yield return 0;
         var fbxReopened = World.Entities.Where(e => World.Has<MeshRenderer>(e)).Select(e => World.Get<MeshRenderer>(e).Model).ToList();
+        var robotMaterials = World.Entities.Where(e => World.Has<MeshRenderer>(e) && World.Get<MeshRenderer>(e).Model.Path.EndsWith("Robot.mod.fbx")).Select(e => World.Get<MeshRenderer>(e).Materials).FirstOrDefault();
+        check(robotMaterials is { Length: 2 } && robotMaterials.All(m => m != null && m.Path.StartsWith($"{FbxSamples.Folder}/Robot_Materials/")),
+              $"FBX models get a material asset per sub mesh too ({(robotMaterials == null ? "none" : string.Join(", ", robotMaterials.Select(m => m?.Path)))})");
         check(fbxPlaced.All(e => e != Entity.Null) && fbxPlacedNames.SequenceEqual(new[] { "Robot", "Crate", "Panel", "Arm" }) && fbxReopened.Count == 4 &&
               fbxReopened.All(m => m.IsValid && m.Path.EndsWith(".mod.fbx")) && fbxReopened.First(m => m.Path.EndsWith("Robot.mod.fbx")).SubMeshCount == 2,
               $"FBX models are placed (names {string.Join(", ", fbxPlacedNames)}), saved and reopened");
@@ -1830,7 +1851,7 @@ internal sealed class EditorTest
         yield return 0;
         var repainted = SceneSerializer.FindEntity(World, paintedId);
         check(_app.ScenePath == database.FullPath(renamedScene) && World.IsAlive(repainted) &&
-              World.Get<MeshRenderer>(repainted).Material?.Path == $"{newFolder}/Stone Paint.material.json",
+              World.Get<MeshRenderer>(repainted).MaterialOf(0)?.Path == $"{newFolder}/Stone Paint.material.json",
               "rename the open scene; the saved scene still finds the renamed material");
 
         // Project で F2 と同じ : タイルの欄に打って Enter
@@ -2162,24 +2183,103 @@ internal sealed class EditorTest
             for (int i = 0; i < 3; i++) yield return 0;
             check(drawnOn >= 3 && skyPass.DrawCount == skyDrawn, $"the sky is drawn every frame, and not when turned off ({drawnOn} draws in 3 frames)");
             skyGraphics.Skybox.Enabled = true;
-            // RenderSettings の Skybox (シーンに保存する値) が engine.Graphics へ
-            var skyRs = World.CreateEntity("SkyTest Render Settings");
-            World.Add(skyRs, new RenderSettings { Skybox = false, SkyboxIntensity = 2.0f, SkyboxRotation = 90.0f });
+            // v1.5 : 空を出すかはカメラの ClearFlags、空の明るさ / 回転は Project Settings の Rendering
+            //        (以前はシーンの RenderSettings の Skybox)
+            var skyRs = _app.CreateCamera();
+            World.Get<Camera>(skyRs).Depth = -1000;
+            World.Get<Camera>(skyRs).ClearFlags = CameraClearFlags.SolidColor;
+            var skySaved = ProjectSettings.Current.Rendering;
+            ProjectSettings.Current.Rendering.SkyboxIntensity = 2.0f;
+            ProjectSettings.Current.Rendering.SkyboxRotation  = 90.0f;
             yield return 0;
             yield return 0;
-            check(!skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == 2.0f && skyGraphics.Skybox.Rotation == 90.0f, "RenderSettings sets the skybox (on / intensity / rotation)");
+            check(!skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == 2.0f && skyGraphics.Skybox.Rotation == 90.0f, "camera clear flags and project settings set the skybox (on / intensity / rotation)");
             // ディファードでも描く (ライティングは背景に触らない)
             var skyForward = skyGraphics.Pipeline;
-            World.Get<RenderSettings>(skyRs).Skybox = true;
-            World.Get<RenderSettings>(skyRs).Path = RenderPath.Deferred;
+            World.Get<Camera>(skyRs).ClearFlags = CameraClearFlags.Skybox;
+            World.Get<Camera>(skyRs).RenderPath = RenderPath.Deferred;
             for (int i = 0; i < 3; i++) yield return 0;
             var deferredSky = skyGraphics.Pipeline!.Sky;
             var deferredDrawn = deferredSky.DrawCount;
             for (int i = 0; i < 3; i++) yield return 0;
             check(skyGraphics.Pipeline is GameEngine.Rendering.DeferredRenderPipeline && deferredSky.DrawCount - deferredDrawn >= 3, "the deferred pipeline draws the sky too");
-            _app.OpenScene(lcScene);   // RenderSettings も消える (シーンを開き直す)
+            ProjectSettings.Current.Rendering = skySaved;
+            _app.OpenScene(lcScene);   // 試しのカメラも消える (シーンを開き直す)
             for (int i = 0; i < 3; i++) yield return 0;
-            check(skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == 1.0f, "a scene without the test RenderSettings goes back to the default sky");
+            check(skyGraphics.Skybox.Enabled && skyGraphics.Skybox.Intensity == skySaved.SkyboxIntensity, "a scene without the test camera goes back to the default sky");
+
+            // ---------- v1.5 : 複数のカメラ / 影の印 / レイヤー / マテリアルの配列 / シェーダーの雛形 ----------
+            var mcEntry = database.Find("Assets/Scenes/multicamera.scene.json");
+            check(mcEntry != null, "the multi camera test scene exists");
+            if (mcEntry != null)
+            {
+                _app.OpenScene(database.FullPath(mcEntry.Path));
+                for (int i = 0; i < 3; i++) yield return 0;
+                var mg = _app.Engine.Graphics;
+                Entity named(string name) => World.Entities.First(e => World.Get<EntityInfo>(e).Name == name);
+                check(mg.CameraCount == 1, $"edit mode draws only the editor camera ({mg.CameraCount})");
+                var noCast    = named("Cube (Cast Shadows Off)");
+                var noReceive = named("Sphere (Receive Shadows Off)");
+                var marker    = World.Entities.First(e => World.Get<EntityInfo>(e).Name.StartsWith("Minimap Marker"));
+                check(World.Get<EntityInfo>(marker).Layer == 8, "the entity layer is read from the scene");
+                check(World.Get<MeshRenderer>(noCast).AppliedObjectFlags == 1u && World.Get<MeshRenderer>(noReceive).AppliedObjectFlags == 2u &&
+                      World.Get<MeshRenderer>(marker).AppliedObjectFlags == (1u | 8u << 8) && World.Get<MeshRenderer>(named("Pillar")).AppliedObjectFlags == 0u,
+                      "cast / receive shadows and the layer are sent per object");
+                World.Get<MeshRenderer>(noCast).CastShadows = true;
+                yield return 0;
+                yield return 0;
+                check(World.Get<MeshRenderer>(noCast).AppliedObjectFlags == 0u, "turning cast shadows back on is sent");
+                World.Get<MeshRenderer>(noCast).CastShadows = false;
+
+                // 以前の Material (1 つ) は Materials (サブメッシュごと) に移る
+                var pillar = named("Pillar");
+                var pillarMaterial = World.Get<MeshRenderer>(pillar).MaterialOf(0);
+                World.Get<MeshRenderer>(pillar).Materials = [];
+                World.Get<MeshRenderer>(pillar).Material  = pillarMaterial;
+                yield return 0;
+                yield return 0;
+                var pr = World.Get<MeshRenderer>(pillar);
+                check(pillarMaterial != null && pr.Material == null && pr.Materials.Length == 1 && pr.Materials[0] == pillarMaterial && pr.IsMaterialApplied,
+                      "a legacy Material moves into Materials and is applied");
+
+                // 再生 : シーンのカメラ 4 台を Depth の順に
+                _app.TogglePlay();
+                for (int i = 0; i < 6; i++) yield return 0;
+                var full = mg.GetCameraViewport(0);
+                var mini = mg.GetCameraViewport(1);
+                var pip  = mg.GetCameraViewport(2);
+                check(mg.CameraCount == 4 && mg.GetCameraSettings(0).Depth == 0 && mg.GetCameraSettings(1).Depth == 1 && mg.GetCameraSettings(3).ClearFlags == CameraClearFlags.DepthOnly,
+                      $"playing draws the scene cameras in Depth order ({mg.CameraCount})");
+                check(mini.X > full.Width / 2 && mini.Y < full.Height / 2 && mini.Width < full.Width / 2 && pip.X < full.Width / 4 && pip.Y > full.Height / 2,
+                      $"viewport rects use a bottom-left origin like Unity (minimap {mini}, small window {pip}, screen {full})");
+                check(mg.GetCameraPipeline(1) is GameEngine.Rendering.DeferredRenderPipeline && mg.GetCameraPipeline(2) is GameEngine.Rendering.ForwardRenderPipeline &&
+                      mg.Pipeline is GameEngine.Rendering.ForwardRenderPipeline, "each camera uses its own render path");
+                check(mg.CompositedCameras == 3, $"cameras with a part of the screen or Depth Only are composited ({mg.CompositedCameras})");
+                check(mg.ClearFlags == CameraClearFlags.Skybox && mg.CameraTarget == GameEngine.Rendering.RenderTexture.BackBuffer && mg.Exposure == 1.0f,
+                      "the main camera's values are back after the other cameras are drawn");
+                foreach (var e in World.Entities.Where(e => World.Has<Camera>(e) && World.Get<Camera>(e).Depth > 0).ToList()) World.SetActive(e, false);
+                for (int i = 0; i < 3; i++) yield return 0;
+                check(mg.CameraCount == 1 && mg.CompositedCameras == 0, "inactive cameras are not drawn");
+                _app.TogglePlay();
+                for (int i = 0; i < 2; i++) yield return 0;
+
+                // シェーダーの雛形 (Unlit / PBR) がコンパイルできる
+                var templateFolder = "Assets/_TemplateTest";
+                Directory.CreateDirectory(database.FullPath(templateFolder));
+                File.WriteAllText(database.FullPath($"{templateFolder}/Unlit.hlsl"), ProjectPanel.UnlitShaderTemplate, new System.Text.UTF8Encoding(false));
+                File.WriteAllText(database.FullPath($"{templateFolder}/Pbr.hlsl"), ProjectPanel.PbrShaderTemplate, new System.Text.UTF8Encoding(false));
+                database.Refresh();
+                var unlitShader = _app.Engine.Assets.LoadShader($"{templateFolder}/Unlit.hlsl");
+                var pbrShader   = _app.Engine.Assets.LoadShader($"{templateFolder}/Pbr.hlsl");
+                check(unlitShader.IsValid && unlitShader.Error == null && unlitShader.Parameters.Count == 3, $"the Unlit shader template compiles ({unlitShader.Error})");
+                check(pbrShader.IsValid && pbrShader.Error == null && pbrShader.Parameters.Count == 6, $"the PBR shader template compiles ({pbrShader.Error})");
+                _app.OpenScene(lcScene);
+                for (int i = 0; i < 2; i++) yield return 0;
+                _app.Engine.Assets.UnloadUnused(World);
+                Directory.Delete(database.FullPath(templateFolder), true);
+                File.Delete(database.FullPath(templateFolder) + ".meta");
+                database.Refresh();
+            }
         }
 
         // ---------- ED10 : 保存していない変更を聞く ----------

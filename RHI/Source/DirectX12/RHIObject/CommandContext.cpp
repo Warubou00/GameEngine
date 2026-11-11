@@ -449,6 +449,7 @@ namespace RHI
 
 			// Global定数バッファ (b1) : このフレーム専用の領域に View / Projection を書いてからセットする
 			// (GPU が前のフレームで読んでいる領域を CPU が上書きしないよう、フレームごとに領域を分けている)
+			buffer->SelectCamera(0);   // v1.5 : フレームの始めは 0 番のカメラ (カメラが 1 台も無ければ今の行列のまま)
 			_frameConstantsAddress = buffer->WriteFrameConstants(_frameIndex);   // AN5 : プレビューの後に戻す
 			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
 
@@ -761,6 +762,28 @@ namespace RHI
 				case RHI::RenderCommandType::DrawPreview:
 					drawPreview(buffer, command.Arg0);   // AN5 : Arg0 = 視点の番号
 					break;
+
+				case RHI::RenderCommandType::SetCamera:
+					// v1.5 : カメラを切り替える。そのカメラの定数 (影のカスケードも) を書いて、カリングをやり直させる
+					if (buffer->SelectCamera(command.Arg0))
+					{
+						_frameConstantsAddress = buffer->WriteFrameConstants(_frameIndex);
+						cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
+						_scene.Culled = false;
+						_culledView   = 0xFFFFFFFFu;
+					}
+					break;
+
+				case RHI::RenderCommandType::SetViewport:
+				{
+					// v1.5 : 今の描画先の一部だけに描く (カメラの範囲 Viewport Rect)。次の SetRenderTargets で全体に戻る
+					const D3D12_VIEWPORT viewport = { command.Params[0], command.Params[1], command.Params[2], command.Params[3], 0.0f, 1.0f };
+					const D3D12_RECT scissor = { static_cast<LONG>(command.Params[0]), static_cast<LONG>(command.Params[1]),
+					                             static_cast<LONG>(command.Params[0] + command.Params[2]), static_cast<LONG>(command.Params[1] + command.Params[3]) };
+					cmdList->RSSetViewports(1, &viewport);
+					cmdList->RSSetScissorRects(1, &scissor);
+					break;
+				}
 				}
 			}
 
@@ -1363,8 +1386,10 @@ namespace RHI
 					const uint32_t cullKey      = unionCulling ? SHADOW_UNION_VIEW : view;
 					if (_culledView != cullKey)
 					{
+						_cullShadowView = true;   // v1.5 : 影を落とさない物を外す
 						recordCulling(frame, buffer, _scene.ObjectData, 0, true,
 							unionCulling ? buffer->GetShadowUnionPlanes() : buffer->GetFrustumPlanes(view), false);
+						_cullShadowView = false;
 						_culledView = cullKey;
 					}
 					if (opaque) drawOpaque(drawCulled);
@@ -1379,6 +1404,8 @@ namespace RHI
 					{
 						const auto* settings = _currentPipeline->GetCustomShaderSettings(buffer->GetMaterialShader(draw.Material));
 						if (!settings || settings->Transparent || !settings->DepthWrite) continue;
+						const RHI::ObjectConstants* object = buffer->GetObjectConstants(draw.Object);   // v1.5 : 影を落とさない物
+						if (object && (object->Flags & RHI::OBJECT_FLAG_NO_CAST_SHADOWS)) continue;
 						cmdList->DrawIndexedInstanced(draw.IndexCount, 1, draw.FirstIndex, 0, draw.Slot);
 					}
 				}
@@ -2281,6 +2308,8 @@ namespace RHI
 			constants.Phase           = phase;
 			constants.ResetVisibility = resetVisibility ? 1 : 0;
 			constants.AlphaDrawStart  = frame.GroupCount[Pipeline::PIPELINE_ALPHA_BLEND] > 0 ? frame.GroupStart[Pipeline::PIPELINE_ALPHA_BLEND] : 0xFFFFFFFFu;
+			constants.CullingMask = _cullShadowView ? 0xFFFFFFFFu : buffer->GetCullingMask();   // v1.5
+			constants.ShadowView  = _cullShadowView ? 1u : 0u;
 			constants.DoubleSidedDrawStart = frame.GroupCount[Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED] > 0
 				? frame.GroupStart[Pipeline::PIPELINE_OPAQUE_DOUBLE_SIDED] : 0xFFFFFFFFu;
 			static_assert(sizeof(CullConstants) == Pipeline::CULL_CONSTANT_COUNT * sizeof(uint32_t), "CullConstants size mismatch");

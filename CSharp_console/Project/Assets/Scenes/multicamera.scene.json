@@ -1,0 +1,808 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "9000cdcf-b56f-5176-8e22-65aad18e6efc",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "Intensity": 1.8,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.36,
+            -0.28,
+            0.11,
+            0.88
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "6a4984e5-e91c-5b95-8da4-1bde247f234c",
+      "name": "Main Camera (Depth 0)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "Depth": 0,
+          "ViewportRect": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "ClearFlags": "Skybox",
+          "CullingMask": 4294966527,
+          "RenderPath": "Forward",
+          "AntiAliasing": "Fxaa"
+        },
+        {
+          "type": "GameEngine.FreeCamera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            6,
+            -18
+          ],
+          "Rotation": [
+            0.13053,
+            0,
+            0,
+            0.99144
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e05b1959-eded-5a18-8f18-15e740c8d543",
+      "name": "Minimap Camera (Depth 1)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "FieldOfView": 50,
+          "Depth": 1,
+          "ViewportRect": [
+            0.73,
+            0.6,
+            0.25,
+            0.37
+          ],
+          "ClearFlags": "SolidColor",
+          "BackgroundColor": [
+            0.05,
+            0.07,
+            0.1
+          ],
+          "CullingMask": 4294966783,
+          "RenderPath": "Deferred",
+          "Exposure": 1.2,
+          "Ssao": {
+            "Enabled": false
+          }
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            45,
+            0
+          ],
+          "Rotation": [
+            0.70711,
+            0,
+            0,
+            0.70711
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "8b059b0a-7a82-55cc-a812-e8e7540c105e",
+      "name": "Orbit Camera (Depth 2)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "Depth": 2,
+          "ViewportRect": [
+            0.02,
+            0.03,
+            0.3,
+            0.3
+          ],
+          "ClearFlags": "Skybox",
+          "CullingMask": 4294966527,
+          "RenderPath": "Forward",
+          "Tonemapper": "Reinhard"
+        },
+        {
+          "type": "GameEngine.OrbitCamera",
+          "Target": [
+            0,
+            1.5,
+            0
+          ],
+          "Radius": 14,
+          "Height": 5,
+          "DegreesPerSecond": 25
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            6,
+            -14
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e105eb05-60bd-5da9-8534-fa11e41f7221",
+      "name": "Overlay Camera (Depth 3, Depth Only)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera",
+          "FieldOfView": 40,
+          "NearClip": 0.1,
+          "FarClip": 50,
+          "Depth": 3,
+          "ViewportRect": [
+            0,
+            0,
+            1,
+            1
+          ],
+          "ClearFlags": "DepthOnly",
+          "CullingMask": 512,
+          "RenderPath": "Forward"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            -200,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e7f2ca40-df35-54c6-addc-f1e5ed829494",
+      "name": "Overlay Gem",
+      "active": true,
+      "layer": 9,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Sphere"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Gold.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            1.55,
+            -200.85,
+            3.2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.45,
+            0.45,
+            0.45
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "ff1d4613-df2b-5ca0-a554-806e40e02998",
+      "name": "Overlay Bar",
+      "active": true,
+      "layer": 9,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -1.55,
+            -200.95,
+            3.2
+          ],
+          "Rotation": [
+            0.0,
+            0.0,
+            0.17,
+            0.985
+          ],
+          "Scale": [
+            0.9,
+            0.12,
+            0.12
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "1b6f8da5-5bd7-5df8-9f48-94f2da98f8bf",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Ground.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            40,
+            1,
+            40
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "053a654d-1458-547d-9354-5c0763ec0473",
+      "name": "Pillar",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            3,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.5,
+            6,
+            1.5
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "6d27ed12-d22e-55ec-9abd-7c41845ade84",
+      "name": "Cube (Cast Shadows Off)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Green.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -6,
+            2.5,
+            0
+          ],
+          "Rotation": [
+            0.0,
+            0.38,
+            0.0,
+            0.925
+          ],
+          "Scale": [
+            2,
+            2,
+            2
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "e023c0b1-ebf3-551d-a930-8fdcf5df25a4",
+      "name": "Cube (Casts Shadows)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Green.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -6,
+            2.5,
+            6
+          ],
+          "Rotation": [
+            0.0,
+            0.38,
+            0.0,
+            0.925
+          ],
+          "Scale": [
+            2,
+            2,
+            2
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "2244300d-ed7f-51a4-a0d9-681793534cdd",
+      "name": "Sphere (Receive Shadows Off)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Sphere"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            3,
+            1.2,
+            3
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            2.4,
+            2.4,
+            2.4
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "95099949-beb9-5ca8-94dd-b93199f0eace",
+      "name": "Sphere (Receives Shadows)",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Sphere"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            3,
+            1.2,
+            -3
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            2.4,
+            2.4,
+            2.4
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "53b297d6-b619-56e8-bead-1427aebadcab",
+      "name": "Wall",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            8,
+            3,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.5,
+            6,
+            12
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "df2f7362-fbf2-5d88-8234-c5ed7da78f22",
+      "name": "Minimap Marker (Pillar)",
+      "active": true,
+      "layer": 8,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Marker.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            14,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.6,
+            0.2,
+            1.6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "3f7e6653-6980-5ac3-ac00-9a16ef4e0967",
+      "name": "Minimap Marker (Cube A)",
+      "active": true,
+      "layer": 8,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Marker.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -6,
+            14,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.6,
+            0.2,
+            1.6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "505e83ef-250a-5222-b9a1-ef40adff0df3",
+      "name": "Minimap Marker (Cube B)",
+      "active": true,
+      "layer": 8,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Marker.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -6,
+            14,
+            6
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.6,
+            0.2,
+            1.6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "9cab6e19-4df6-51e9-ae58-7899ec1c4a0a",
+      "name": "Minimap Marker (Sphere A)",
+      "active": true,
+      "layer": 8,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Marker.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            3,
+            14,
+            3
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.6,
+            0.2,
+            1.6
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "836ee610-3824-5bb5-8103-b56ec311b1ce",
+      "name": "Minimap Marker (Sphere B)",
+      "active": true,
+      "layer": 8,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Marker.material.json"
+            }
+          ],
+          "CastShadows": false,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            3,
+            14,
+            -3
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1.6,
+            0.2,
+            1.6
+          ],
+          "Parent": null
+        }
+      ]
+    }
+  ]
+}

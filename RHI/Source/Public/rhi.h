@@ -144,6 +144,9 @@ namespace RHI
 		// カメラ (DirectXMath の普通の行列のまま渡す。転置は RHI の中で行う)
 		virtual void SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection) = 0;
 
+		// v1.5 : 複数のカメラ (最大 MAX_CAMERAS)。描画パスの SetCamera(番号) で切り替える。0 番はフレームの始めのカメラにもなる
+		virtual void SetCameraViews(const CameraView* views, uint32_t count) = 0;
+
 		// ======================================================================
 		// 描画
 		// ======================================================================

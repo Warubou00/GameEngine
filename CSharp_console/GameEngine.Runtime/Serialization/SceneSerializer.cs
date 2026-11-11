@@ -139,6 +139,7 @@ public static class SceneSerializer
                 w.WriteString("id", info.Id.ToString());
                 w.WriteString("name", info.Name ?? "");
                 w.WriteBoolean("active", info.Active);
+                if (info.Layer != 0) w.WriteNumber("layer", info.Layer);   // v1.5 : レイヤー (0 なら書かない。以前のファイルと同じ中身のまま)
                 w.WriteStartArray("components");
                 foreach (var (pool, type) in pools)
                 {
@@ -270,6 +271,7 @@ public static class SceneSerializer
                 Id     = freshIds || (existing.ContainsKey(fileId) && world.IsAlive(existing[fileId])) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
                 Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                 Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
+                Layer  = element.TryGetProperty("layer", out var layer) && layer.TryGetInt32(out var layerValue) ? Math.Clamp(layerValue, 0, 31) : 0,   // v1.5
             };
             var entity = world.CreateEntity();
             world.Add(entity, info);

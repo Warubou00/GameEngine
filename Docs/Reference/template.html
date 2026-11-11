@@ -245,7 +245,7 @@ public sealed class SpinSystem : ISystem
 <p>1 フレームの描き方は C# で組み立てる (<a href="#/t/GameEngine.Rendering.RenderPipeline">RenderPipeline</a>。Unity の SRP に当たる)。<code>Render</code> は <a href="#/t/GameEngine.Rendering.RenderCommandBuffer">RenderCommandBuffer</a> に命令を<b>積むだけ</b>。エンジンが 1 フレーム分を 1 回の P/Invoke (<code>Renderer_Render</code>) で C++ に渡し、RHI の <code>CommandContext</code> が順に実行する。</p>
 <ol class="steps">
   <li><b>C# : パイプライン</b><small><a href="#/t/GameEngine.Rendering.ForwardRenderPipeline">ForwardRenderPipeline</a> / <a href="#/t/GameEngine.Rendering.DeferredRenderPipeline">DeferredRenderPipeline</a> が例。Initialize でレンダーターゲット (<a href="#/t/GameEngine.Rendering.RenderTexture">RenderTexture</a>) と全画面のシェーダー (<a href="#/t/GameEngine.Rendering.FullscreenShader">FullscreenShader</a>.Load) を作る</small></li>
-  <li><b>C# : 命令</b><small>SetRenderTarget(s) / ClearColor / ClearDepth / DrawScene / DrawFullscreen / UpdateParticles / DrawParticles / DrawCustom</small></li>
+  <li><b>C# : 命令</b><small>SetRenderTarget(s) / ClearColor / ClearDepth / DrawScene / DrawFullscreen / UpdateParticles / DrawParticles / DrawCustom / SetCamera / SetViewport (v1.5)</small></li>
   <li><b>C++ : 実行</b><small>RHI/Source/DirectX12/RHIObject/CommandContext.cpp の <code>switch (RenderCommandType)</code></small></li>
 </ol>
 <h3>全画面のパス (ポストエフェクト) を足す</h3>
@@ -358,6 +358,45 @@ float4 Surface(SurfaceInput IN)
   <li>一時の変数 : <code>c.Temp("float4", expr)</code> / 文 : <code>c.Line(...)</code> / マテリアルのパラメーター : <code>c.Parameter("float Name 1")</code> / エラー : <code>c.Fail("...")</code></li>
   <li>共通の HLSL の関数は <code>Helpers</code> に書く (名前は <code>_sg</code> で始める)</li>
   <li>EditorTest の「every node type generates HLSL that compiles」が全部のノードを 1 回でコンパイルして確かめる</li>
+</ul>
+</article>
+
+<article data-id="camera" data-title="カメラ / 描画の設定 / マテリアル (v1.5)">
+<h2>複数のカメラ / 描画の設定 / マテリアル (v1.5)</h2>
+<h3>複数のカメラ (Unity と同じ)</h3>
+<p>有効な <a href="#/t/GameEngine.Camera">Camera</a> + Transform を全部 (最大 8 台)、<code>Depth</code> の小さい順に描き、画面の <code>ViewportRect</code> の範囲に重ねる。一番小さい Depth のカメラがメインのカメラ (Volume / 音を聞く位置 / 影の距離の基準)。</p>
+<table>
+<tr><th>Camera の値</th><th>意味</th></tr>
+<tr><td><code>Depth</code></td><td>描く順番 (大きい方が上に重なる)</td></tr>
+<tr><td><code>ViewportRect</code></td><td>画面の範囲 (x, y, 幅, 高さ を 0〜1。x, y は<b>左下</b>が原点 = Unity と同じ)。投影はこの範囲の縦横の比で作る</td></tr>
+<tr><td><code>ClearFlags</code></td><td>Skybox (空) / SolidColor (<code>BackgroundColor</code> の 1 色) / DepthOnly (消さない : 前のカメラの絵の上に、写った物だけを重ねる)</td></tr>
+<tr><td><code>CullingMask</code></td><td>写すレイヤーのビット。物のレイヤーはエンティティの <code>EntityInfo.Layer</code> (インスペクターの名前の下の Layer。名前は Project Settings)</td></tr>
+<tr><td><code>RenderPath</code> / <code>AntiAliasing</code> / <code>Ssao</code> / <code>Fxaa</code> / <code>Exposure</code> / <code>Tonemapper</code> / <code>Gamma</code></td><td>描き方 (カメラごと。以前はシーンの RenderSettings に 1 つだった)</td></tr>
+</table>
+<ul>
+  <li>編集中のシーンビューはエディターのカメラ 1 台だけ (描き方は一番目のシーンのカメラの物)。再生するか「Game Camera」にすると、シーンのカメラが全部描かれる</li>
+  <li>見本 : <code>Assets/Scenes/multicamera.scene.json</code> (メイン / 右上のミニマップ (Deferred・1 色の背景・レイヤー 8 の印) / 左下の小窓 (回る) / 重ねるカメラ (DepthOnly・レイヤー 9 の物だけ))</li>
+</ul>
+<h3>描く流れ (GraphicsSettings.RenderFrame)</h3>
+<ol class="steps">
+  <li><b>CameraSystem</b><small>カメラを Depth の順に並べて <code>Renderer_SetCameras</code> (変わった時だけ)。C++ は全部のカメラの行列と Culling Mask を RHI に持つ</small></li>
+  <li><b>RenderSettingsSystem</b><small>メインのカメラの値と Project Settings の Rendering を、違う物だけ <a href="#/t/GameEngine.GraphicsSettings">Graphics</a> へ (キー / コードで変えた値は残る)。Volume は各カメラの位置で混ぜる</small></li>
+  <li><b>カメラごとに</b><small>2 台目からは Graphics の値をそのカメラの物に入れ替え、<code>cmd.SetCamera(i)</code> (C++ が行列 / 定数を替え、GPU カリングをやり直す)。パイプラインはカメラごとに 1 つ (メインは <code>Graphics.Pipeline</code>)</small></li>
+  <li><b>重ねる</b><small>画面全体で背景を消すカメラはバックバッファへ直接。範囲が一部 / DepthOnly のカメラは自分の絵 (RGBA8) に描き、<code>SetViewport</code> + <code>PSComposite</code> で範囲に重ねる (DepthOnly は乗算済みアルファ)</small></li>
+</ol>
+<p>自分のパイプラインは、最後の色を <code>settings.CameraTarget</code> へ描く (<code>Tonemap</code> はそうしている)。<code>settings.ClearFlags == DepthOnly</code> なら背景を描かず、透明 (0) のまま残す。</p>
+<h3>Project Settings の Rendering (プロジェクト全体)</h3>
+<p><a href="#/t/GameEngine.RenderingProjectValues">RenderingProjectValues</a> : 光の計算 (LightingModel) / 環境光 / 空の画像・明るさ・回転 / 影 / GPU パーティクル。全部のシーンで同じ値。シーンに置く RenderSettings の部品は無くした。</p>
+<h3>1 Mesh / 1 Material (MeshRenderer.Materials)</h3>
+<ul>
+  <li><a href="#/t/GameEngine.MeshRenderer">MeshRenderer</a>.Materials[s] がサブメッシュ s のマテリアル (null / 足りない所はモデルに付いているマテリアル)</li>
+  <li>エディターで Obj / Pmx / Fbx を置くと、<code>&lt;モデルのフォルダ&gt;/&lt;モデル名&gt;_Materials/&lt;材質名&gt;.material.json</code> をサブメッシュごとに作って入れる (<code>AssetManager.CreateModelMaterialAssets</code>。もうあるファイルは書き換えない)</li>
+  <li>以前の <code>Material</code> (全部のサブメッシュに 1 つ) は読み込んだ時に Materials へ移る。マテリアルを物にドロップすると全部のサブメッシュに入る</li>
+</ul>
+<h3>物ごとの影 / シェーダーの雛形</h3>
+<ul>
+  <li><code>MeshRenderer.CastShadows</code> (切るとシャドーマップに描かない) / <code>ReceiveShadows</code> (切るとシャドーマップを読まない)。C++ の ObjectData.Info に印とレイヤーを入れ、GPU カリング (gpuCulling.shader) が影の視点 / Culling Mask で外す</li>
+  <li>自分のシェーダーも何も書かずに効く (<code>Lit()</code> が見る)。Project の右クリック &gt; Create &gt; Shader &gt; Unlit Shader / PBR Shader で、書き方のヘルプ付きの雛形を作れる</li>
 </ul>
 </article>
 
@@ -711,9 +750,9 @@ function overview() {
       <li><b>ウィンドウのメッセージ / Time / ゲームパッド</b><small><a href="#/t/GameEngine.Engine">Engine</a>.Run のループ。<a href="#/t/GameEngine.Time">Time</a>.Tick、<a href="#/t/GameEngine.Input">Input</a></small></li>
       <li><b>登録した System (登録順) と FixedUpdate → 物理</b><small><a href="#/t/GameEngine.ISystem">ISystem</a> / <a href="#/t/GameEngine.IFixedSystem">IFixedSystem</a> → <a href="#/t/GameEngine.CollisionSystem">CollisionSystem</a> (Physics.dll)</small></li>
       <li><b>LateUpdate</b><small>エディターの GUI (ImGui) はここで作る</small></li>
-      <li><b>Transform の行列 → カメラ → 描画オブジェクトへ反映</b><small><a href="#/t/GameEngine.TransformSystem">TransformSystem</a> / <a href="#/t/GameEngine.CameraSystem">CameraSystem</a> / <a href="#/t/GameEngine.RenderSyncSystem">RenderSyncSystem</a> (変わった物だけまとめて C++ へ)</small></li>
+      <li><b>Transform の行列 → カメラ (全部。Depth の順) → 描き方の設定 → 描画オブジェクトへ反映</b><small><a href="#/t/GameEngine.TransformSystem">TransformSystem</a> / <a href="#/t/GameEngine.CameraSystem">CameraSystem</a> / <a href="#/t/GameEngine.RenderSettingsSystem">RenderSettingsSystem</a> / <a href="#/t/GameEngine.RenderSyncSystem">RenderSyncSystem</a> (変わった物だけまとめて C++ へ)</small></li>
       <li><b>ライト / パーティクル / 音</b><small><a href="#/t/GameEngine.LightSystem">LightSystem</a> / <a href="#/t/GameEngine.ParticleSystem">ParticleSystem</a> / <a href="#/t/GameEngine.AudioSystem">AudioSystem</a></small></li>
-      <li><b>描画パイプラインが命令を積む</b><small><a href="#/t/GameEngine.Rendering.RenderPipeline">RenderPipeline</a>.Render → <a href="#/t/GameEngine.Rendering.RenderCommandBuffer">RenderCommandBuffer</a></small></li>
+      <li><b>描画パイプラインが命令を積む (カメラごと)</b><small><a href="#/t/GameEngine.Rendering.RenderPipeline">RenderPipeline</a>.Render → <a href="#/t/GameEngine.Rendering.RenderCommandBuffer">RenderCommandBuffer</a>。2 台目からは SetCamera で切り替え、範囲に重ねる</small></li>
       <li><b>C++ で描く</b><small>Renderer_Render → <a href="#/t/RHI%3A%3AIRenderHardwareInterface">IRenderHardwareInterface</a> → CommandContext (GPU カリング / ExecuteIndirect / 影 / SSAO / パーティクル / 全画面のパス / UI)</small></li>
     </ol>
     <h2>モジュール</h2>

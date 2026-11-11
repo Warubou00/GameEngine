@@ -39,7 +39,7 @@ namespace
 
 	// C# の Native.InitializeResult と同じ並び (int × 5)。RHI::InitializeResult もこの並び
 	static_assert(sizeof(RHI::InitializeResult) == sizeof(int) * 5, "InitializeResult must match C# Native.InitializeResult");
-	static_assert(sizeof(Renderer::CameraDesc) == sizeof(float) * 12 + sizeof(uint32_t), "CameraDesc must match C# Native.CameraDesc");
+	static_assert(sizeof(Renderer::CameraDesc) == sizeof(float) * 13 + sizeof(uint32_t) * 2, "CameraDesc must match C# Native.CameraDesc");   // v1.5 : Aspect / CullingMask を足した
 
 	Renderer::SceneRenderer* g_renderer = nullptr;
 }
@@ -357,6 +357,18 @@ extern "C"
 		if (g_renderer) g_renderer->SetRenderObjectMaterial(object, material);
 	}
 
+	// v1.5 : サブメッシュごとのマテリアル (materials[s]。0xFFFFFFFF = モデルのマテリアル)
+	RENDERER_API void Renderer_SetRenderObjectMaterials(uint32_t object, const uint32_t* materials, uint32_t count)
+	{
+		if (g_renderer) g_renderer->SetRenderObjectMaterials(object, materials, count);
+	}
+
+	// v1.5 : 物ごとの印 (1 影を落とさない / 2 影を受けない) とレイヤーのビット
+	RENDERER_API void Renderer_SetRenderObjectFlags(uint32_t object, uint32_t flags, uint32_t layerMask)
+	{
+		if (g_renderer) g_renderer->SetRenderObjectFlags(object, flags, layerMask);
+	}
+
 	RENDERER_API uint64_t Renderer_GetMeshBytesUsed()
 	{
 		return g_renderer ? g_renderer->GetMeshBytesUsed() : 0;
@@ -451,6 +463,24 @@ extern "C"
 		return g_renderer ? g_renderer->GetModelGeometry(model, positions, maxVertices, indices, maxIndices, outVertexCount, outIndexCount) : false;
 	}
 
+	// v1.5 : サブメッシュ s の読み込んだマテリアル。texture / name は書く先の文字数 (終わりの 0 を含む) まで。戻り値 = あったか
+	RENDERER_API bool Renderer_GetModelMaterialInfo(uint32_t model, uint32_t subMesh, Renderer::ModelMaterialInfo* info,
+	                                                wchar_t* texture, uint32_t textureCapacity, wchar_t* name, uint32_t nameCapacity)
+	{
+		std::wstring texturePath, materialName;
+		if (!g_renderer || !g_renderer->GetModelMaterialInfo(model, subMesh, info, texturePath, materialName)) return false;
+		auto copy = [](const std::wstring& source, wchar_t* destination, uint32_t capacity)
+		{
+			if (!destination || capacity == 0) return;
+			const size_t count = (std::min)(source.size(), static_cast<size_t>(capacity - 1));
+			std::wmemcpy(destination, source.c_str(), count);
+			destination[count] = L'\0';
+		};
+		copy(texturePath, texture, textureCapacity);
+		copy(materialName, name, nameCapacity);
+		return true;
+	}
+
 	// モデルを置く描画オブジェクトを count 個まとめて作る (原点に置かれる)
 	RENDERER_API void Renderer_CreateRenderObjects(uint32_t model, uint32_t count, uint32_t* outHandles)
 	{
@@ -476,6 +506,12 @@ extern "C"
 	RENDERER_API void Renderer_SetCamera(const Renderer::CameraDesc* camera)
 	{
 		if (g_renderer && camera) g_renderer->SetCamera(*camera);
+	}
+
+	// v1.5 : 複数のカメラ (描画パスの SetCamera(番号) で切り替える)
+	RENDERER_API void Renderer_SetCameras(const Renderer::CameraDesc* cameras, uint32_t count)
+	{
+		if (g_renderer && cameras) g_renderer->SetCameras(cameras, count);
 	}
 
 	// ExecuteIndirect で描くか (false なら描画ごとに DrawIndexedInstanced)

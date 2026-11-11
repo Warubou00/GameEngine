@@ -4,11 +4,11 @@ using GameEngine.Rendering;
 namespace GameEngine;
 
 // ==========================================================================
-// 描画の設定 (ED6)。シーンに 1 つ置く (エディターの GameObject > Render Settings)。シーンと一緒に保存される
-//   以前は engine.Graphics をコードで設定するだけだった (見本は起動の引数とキーで切り替えていた)
-//   RenderSettingsSystem が値の変わった時だけ engine.Graphics へ書く (キーで変えた値は、この値を変えるまでそのまま)
-//   シーンに無ければ engine.Graphics はコードの値のまま (前のシーンの物があった時は既定の値に戻す)
-//   既定の値は engine.Graphics の既定の値と同じ (置いただけでは見た目は変わらない)
+// 描画の設定の値 (ED6 / v1.5)
+//   v1.5 : シーンに置く RenderSettings の部品は無くした (Unity と同じく、描き方はカメラごと、全体の設定は Project Settings)
+//     カメラ (Camera) : 描き方 (RenderPath) / アンチエイリアス / SSAO / FXAA / 露出 / トーンマップ / ガンマ / 背景
+//     Project Settings の Rendering (RenderingProjectValues) : 光の計算 / 環境光 / 空の画像 / 影 / パーティクル
+//   ここにはその値の型 (SsaoValues など) と、場所で効く上書き (Volume) を置く
 // ==========================================================================
 public enum RenderPath : uint
 {
@@ -16,34 +16,21 @@ public enum RenderPath : uint
     Deferred = 1,
 }
 
-[ComponentInfo(DisplayName = "Render Settings", Category = "Rendering")]
-public struct RenderSettings : IComponent
+// Project Settings の Rendering (プロジェクトの全部のシーンで同じ値。v1.5)
+public struct RenderingProjectValues
 {
-    [Header("Pipeline")]
-    public RenderPath    Path          = RenderPath.Forward;
     public LightingModel LightingModel = LightingModel.PBR;
-    public AntiAliasing  AntiAliasing  = AntiAliasing.Fxaa;
+    public Vector3       AmbientColor  = new(0.25f, 0.27f, 0.30f);   // 環境光 (線形)
 
-    [Header("Color")]
-    public Vector3    AmbientColor    = new(0.25f, 0.27f, 0.30f);   // 環境光 (線形)
-    public Vector3    BackgroundColor = new(0.1f, 0.2f, 0.4f);      // 何も無い所の色 (sRGB)。Skybox を切った時
-    [Range(0.05f, 8.0f)] public float Exposure = 1.0f;
-    public Tonemapper Tonemapper = Tonemapper.ACES;
-    [Range(1.0f, 3.0f)] public float Gamma = 2.2f;
-
-    // 空 (v1.4)。正距円筒の画像 (png / jpg / bmp)。空にするとエンジンの既定の空。切ると BackgroundColor の 1 色
-    [Header("Skybox")]
-    public bool   Skybox = true;
+    // 空 (カメラの ClearFlags が Skybox の時)。正距円筒の画像 (png / jpg / bmp)。空ならエンジンの既定の空
     [AssetPath(AssetKind.Texture)] public string SkyboxTexture = "";
     [Range(0.0f, 8.0f)]   public float SkyboxIntensity = 1.0f;
     [Range(0.0f, 360.0f)] public float SkyboxRotation  = 0.0f;
 
-    public SsaoValues     Ssao     = new();
-    public ShadowValues   Shadows  = new();
-    public FxaaValues     Fxaa     = new();
+    public ShadowValues   Shadows   = new();
     public ParticleValues Particles = new();
 
-    public RenderSettings()
+    public RenderingProjectValues()
     {
     }
 }
@@ -95,7 +82,8 @@ public struct ParticleValues
 
 // ==========================================================================
 // 場所で効く描画の上書き (ED6。Unity の Volume / Post-process volume)
-//   カメラが範囲に入ると、Override... を付けた値を RenderSettings の値に混ぜる (入っている深さ = 重み)
+//   カメラが範囲に入ると、Override... を付けた値をカメラ / Project Settings の値に混ぜる (入っている深さ = 重み)
+//   露出 / 背景 / SSAO はカメラごと (そのカメラの位置で)。環境光 / 影の距離は全体の値なので、一番目のカメラの位置で
 //   範囲 : Global (どこでも) / Box (Transform の位置と回転、Size × 拡大縮小) / Sphere (半径 Size.X × 拡大縮小の X)
 //   BlendDistance : 範囲の外側のこの距離から、だんだん効き始める。Priority の小さい物から順に混ぜる (大きい物が勝つ)
 // ==========================================================================

@@ -153,7 +153,7 @@ namespace RHI
             // float4 ×6 + uint ×9
             // ルートシグネチャの上限は 64 DWORD : 33 + ルート CBV / SRV / UAV 10 個 × 2 = 53
             // (以前は Hi-Z のカメラの行列もルート定数で渡していて 63 だった。今はフレームの定数を Root CBV で読む)
-            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 10;   // 以前は + 9 (両面の不透明の先頭を足した)
+            static constexpr uint32_t CULL_CONSTANT_COUNT = 6 * 4 + 12;   // v1.5 : + 12 (カメラのレイヤー / 影の視点か を足した。以前は + 10)
             static constexpr uint32_t CULL_THREAD_GROUP   = 64;          // numthreads(64, 1, 1)
 
             // ----------------------------------------------------------

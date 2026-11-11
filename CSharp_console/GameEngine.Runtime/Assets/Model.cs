@@ -216,6 +216,7 @@ public sealed class AssetManager
             handle = NativeMethods.Renderer_CreateModel(v, (uint)vertices.Length, i, (uint)indices.Length, s, (uint)subMeshes.Length, textures, path, replace, out subMeshCount);
         if (handle == NativeMethods.InvalidHandle) throw new InvalidDataException($"{path} : the renderer could not create the model");
         if (node == null) asset.ModelData = data;   // Inspector に出すのはモデル全体の形
+        _subMeshNames[path] = data.SubMeshes.Select(sub => data.Materials[sub.Material].Name).ToArray();   // v1.5 : マテリアルのアセットの名前
         // AN4 : スキン (部品の時だけ) → C++ に骨の番号と重み、こちらに骨の名前と休みの姿勢の逆行列
         if (data.HasSkin)
         {
@@ -383,6 +384,112 @@ public sealed class AssetManager
         return prefab;
     }
 
+    // =====================================================================
+    // v1.5 : 1 Mesh / 1 Material (モデルを読み込んだ時に、サブメッシュごとのマテリアルのアセットを作る)
+    // =====================================================================
+
+    private readonly Dictionary<string, string[]> _subMeshNames = new(StringComparer.OrdinalIgnoreCase);   // FBX のサブメッシュのマテリアルの名前
+
+    /// <summary>読み込んだモデルのサブメッシュ s のマテリアル (ファイルに書いてあった色 / テクスチャなど)</summary>
+    public readonly record struct ModelMaterial(string Name, Vector4 Color, float Metallic, float Roughness, bool Transparent, bool DoubleSided, string? Texture);
+
+    /// <summary>モデルのサブメッシュごとのマテリアル (読み込んだ時の値)。テクスチャはアセットのパス (Assets の外ならフルパス)</summary>
+    public unsafe IReadOnlyList<ModelMaterial> GetModelMaterials(Model model)
+    {
+        var result = new List<ModelMaterial>();
+        if (!model.IsValid) return result;
+        _subMeshNames.TryGetValue(model.Path ?? "", out var names);
+        var texture = stackalloc char[1024];
+        var name    = stackalloc char[256];
+        for (int s = 0; s < model.SubMeshCount; s++)
+        {
+            if (!NativeMethods.Renderer_GetModelMaterialInfo(model.Handle, (uint)s, out var info, texture, 1024, name, 256)) break;
+            var texturePath = new string(texture);
+            var materialName = names != null && s < names.Length && !string.IsNullOrWhiteSpace(names[s]) ? names[s] : new string(name);
+            result.Add(new ModelMaterial(materialName, info.Color, info.Metallic, info.Roughness, (info.Flags & 1) != 0, (info.Flags & 2) != 0,
+                                         texturePath.Length == 0 ? null : _database?.ToAssetPath(texturePath) ?? texturePath));
+        }
+        return result;
+    }
+
+    /// <summary>モデルのマテリアルのアセットのフォルダ ("Assets/Models/Robot.obj" → "Assets/Models/Robot_Materials")</summary>
+    public static string ModelMaterialFolder(string modelPath)
+    {
+        var hash = modelPath.IndexOf('#');
+        if (hash >= 0) modelPath = modelPath[..hash];
+        var slash = modelPath.LastIndexOf('/');
+        var folder = slash >= 0 ? modelPath[..slash] : "Assets";
+        var stem = AssetDatabase.SplitName(slash >= 0 ? modelPath[(slash + 1)..] : modelPath, false).Stem;
+        return $"{folder}/{stem}_Materials";
+    }
+
+    /// <summary>
+    /// v1.5 : モデルのサブメッシュごとのマテリアルのアセットを作る (Unity のモデルの Materials の取り出しと同じ)
+    ///   &lt;モデルのフォルダ&gt;/&lt;モデル名&gt;_Materials/&lt;マテリアル名&gt;.material.json に、読み込んだ色 / テクスチャ / 金属 / 粗さ / 半透明 / 両面を書く
+    ///   もうあるファイルは書き換えない (エディターで変えた値を残す)。同じ名前の材質は 1 つのアセットを使う
+    ///   戻り値 = サブメッシュごとの Material (MeshRenderer.Materials に入れる)。アセットのデータベースが無い / プリミティブなら空
+    /// </summary>
+    public Material?[] CreateModelMaterialAssets(Model model)
+    {
+        if (_database == null || !model.IsValid || string.IsNullOrEmpty(model.Path) || Primitives.IsPrimitive(model.Path) ||
+            !model.Path.StartsWith(AssetDatabase.AssetsFolder + "/", StringComparison.OrdinalIgnoreCase)) return [];
+        var sources = GetModelMaterials(model);
+        if (sources.Count == 0) return [];
+        var folder = ModelMaterialFolder(model.Path);
+        var paths = new string[sources.Count];
+        var wrote = false;
+        for (int s = 0; s < sources.Count; s++)
+        {
+            var source = sources[s];
+            var name = safeFileName(source.Name);
+            if (name.Length == 0) name = $"Material {s}";
+            paths[s] = $"{folder}/{name}.material.json";
+            var file = _database.FullPath(paths[s]);
+            if (File.Exists(file)) continue;
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            // Assets の外のテクスチャ (FBX に埋め込まれていて Library に出した物など) は、マテリアルの隣に写して使う
+            // (Library は書き出したゲームに入らないので、そのままだとゲームでテクスチャが無くなる)
+            var texture = source.Texture;
+            if (texture != null && !texture.StartsWith(AssetDatabase.AssetsFolder + "/", StringComparison.OrdinalIgnoreCase))
+            {
+                var from = Path.IsPathRooted(texture) ? texture : _database.FullPath(texture);
+                if (File.Exists(from))
+                {
+                    var copied = $"{folder}/{Path.GetFileName(from)}";
+                    if (!File.Exists(_database.FullPath(copied))) { NoteOwnWrite(_database.FullPath(copied)); File.Copy(from, _database.FullPath(copied)); }
+                    texture = copied;
+                }
+            }
+            using var material = new Material(paths[s], null)
+            {
+                Color = source.Color, Texture = texture, Metallic = source.Metallic, Roughness = source.Roughness,
+                Transparent = source.Transparent, DoubleSided = source.DoubleSided,
+            };
+            NoteOwnWrite(file);
+            File.WriteAllText(file, material.ToJson(), new System.Text.UTF8Encoding(false));
+            wrote = true;
+        }
+        if (wrote)
+        {
+            _database.Refresh();
+            Console.WriteLine($"[Assets] Created materials for {model.Path} in {folder}");
+        }
+        var result = new Material?[paths.Length];
+        for (int s = 0; s < paths.Length; s++)
+        {
+            try { result[s] = LoadMaterial(paths[s]); }
+            catch (FileNotFoundException ex) { Console.WriteLine($"[Assets] {ex.Message}"); }
+        }
+        return result;
+    }
+
+    private static string safeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = name.Trim().Select(c => invalid.Contains(c) || c == '#' ? '_' : c).ToArray();
+        return new string(chars).Trim().TrimEnd('.');
+    }
+
     /// <summary>新しいマテリアルのファイルを作る (folder はアセットのパス)。戻り値 = 読み込んだ Material</summary>
     public Material CreateMaterialAsset(string folder, string name = "New Material")
     {
@@ -455,6 +562,7 @@ public sealed class AssetManager
         {
             if (renderer.Model.IsValid) usedModels.Add(renderer.Model.Handle);
             if (renderer.Material != null) usedMaterials.Add(renderer.Material);
+            if (renderer.Materials != null) foreach (var m in renderer.Materials) if (m != null) usedMaterials.Add(m);   // v1.5 : サブメッシュごと
         }
         var models = 0;
         foreach (var (path, model) in _models.ToList())

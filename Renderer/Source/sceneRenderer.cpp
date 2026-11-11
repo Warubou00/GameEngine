@@ -232,6 +232,8 @@ namespace Renderer
 			item.Material   = _rhi->CreateMaterial(desc);
 			model.Materials.push_back(item.Material);
 			model.SubMeshes.push_back(item);
+			model.SubMeshMaterials.push_back(subMeshMaterialOf(desc, material && desc.Texture.Index != RHI::TextureHandle::DEFAULT ? resolveTexturePath(material->TexturePath) : std::wstring(),
+			                                                   material ? material->Name : std::wstring()));   // v1.5
 		}
 		if (model.SubMeshes.empty())
 		{
@@ -312,6 +314,7 @@ namespace Renderer
 		item.Material   = _rhi->CreateMaterial(desc);
 		model.Materials.push_back(item.Material);
 		model.SubMeshes.push_back(item);
+		model.SubMeshMaterials.push_back(subMeshMaterialOf(desc, std::wstring(), std::wstring()));   // v1.5
 
 		model.Positions.reserve(static_cast<size_t>(vertexCount) * 3);
 		for (uint32_t i = 0; i < vertexCount; ++i)
@@ -415,6 +418,7 @@ namespace Renderer
 			item.Material   = _rhi->CreateMaterial(desc);
 			model.Materials.push_back(item.Material);
 			model.SubMeshes.push_back(item);
+			model.SubMeshMaterials.push_back(subMeshMaterialOf(desc, textured && texturePaths && texturePaths[s] ? resolveTexturePath(texturePaths[s]) : std::wstring(), std::wstring()));   // v1.5
 		}
 		if (model.SubMeshes.empty())
 		{
@@ -559,6 +563,7 @@ namespace Renderer
 		for (auto& object : _renderObjects)
 		{
 			if (object.MaterialOverride == material) { object.MaterialOverride = INVALID_HANDLE; _drawListDirty = true; }
+			for (auto& m : object.MaterialOverrides) if (m == material) { m = INVALID_HANDLE; _drawListDirty = true; }   // v1.5
 		}
 		RHI::MaterialHandle handle;
 		handle.Index = material;
@@ -651,14 +656,14 @@ namespace Renderer
 		{
 			const uint32_t handle = handles[n];
 			if (handle >= _renderObjects.size()) continue;
-			const RenderObject& object = _renderObjects[handle];
+			RenderObject& object = _renderObjects[handle];
 			if (object.Model == INVALID_HANDLE) continue;
 
 			// C# の Matrix4x4 と XMFLOAT4X4 は同じ並び (行優先・行ベクトル) なのでそのまま写す
 			// (オブジェクトは全サブメッシュで共有しているので 1 回で済む。以前はサブメッシュの数だけ書いていた)
-			RHI::ObjectConstants constants;
-			std::memcpy(&constants.World, matrices + static_cast<size_t>(n) * 16, sizeof(constants.World));
-			_rhi->UpdateObject(object.Object, constants);
+			// v1.5 : 印 (影 / レイヤー) はそのまま (覚えている物を使う)
+			std::memcpy(&object.Constants.World, matrices + static_cast<size_t>(n) * 16, sizeof(object.Constants.World));
+			_rhi->UpdateObject(object.Object, object.Constants);
 		}
 	}
 
@@ -819,11 +824,15 @@ namespace Renderer
 			auto& list = object.View == 0 ? _drawItems : _previewItems[object.View];
 			// AN4 : 曲げる物はその物専用の頂点の場所 (インデックスは同じ)
 			const RHI::VertexRange skinned = object.Skin.IsValid() ? _rhi->GetSkinOutput(object.Skin) : RHI::VertexRange();
-			for (RHI::DrawItem item : _models[object.Model].SubMeshes)
+			const auto& subMeshes = _models[object.Model].SubMeshes;
+			for (size_t s = 0; s < subMeshes.size(); ++s)
 			{
+				RHI::DrawItem item = subMeshes[s];
 				item.Object = object.Object;
 				if (skinned.IsValid()) item.BaseVertex = skinned.BaseVertex;
 				if (object.MaterialOverride != INVALID_HANDLE) item.Material.Index = object.MaterialOverride;   // ED5 : マテリアルのアセット
+				// v1.5 : サブメッシュごとのマテリアル (1 Mesh / 1 Material。MeshRenderer.Materials[s])
+				if (s < object.MaterialOverrides.size() && object.MaterialOverrides[s] != INVALID_HANDLE) item.Material.Index = object.MaterialOverrides[s];
 				list.push_back(item);
 			}
 		}
@@ -867,9 +876,35 @@ namespace Renderer
 
 	void SceneRenderer::SetCamera(const CameraDesc& camera)
 	{
-		_camera    = camera;
+		SetCameras(&camera, 1);
+	}
+
+	void SceneRenderer::SetCameras(const CameraDesc* cameras, uint32_t count)
+	{
+		if (!cameras || count == 0) return;
+		_cameras.assign(cameras, cameras + (std::min)(count, RHI::MAX_CAMERAS));
+		_camera    = _cameras[0];
 		_hasCamera = true;
 		updateViewProjection();
+	}
+
+	void SceneRenderer::SetRenderObjectFlags(uint32_t handle, uint32_t flags, uint32_t layerMask)
+	{
+		if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE || !IsInitialized()) return;
+		RenderObject& object = _renderObjects[handle];
+		if (object.Constants.Flags == flags && object.Constants.LayerMask == layerMask) return;
+		object.Constants.Flags     = flags;
+		object.Constants.LayerMask = layerMask;
+		_rhi->UpdateObject(object.Object, object.Constants);
+	}
+
+	void SceneRenderer::SetRenderObjectMaterials(uint32_t handle, const uint32_t* materials, uint32_t count)
+	{
+		if (handle >= _renderObjects.size() || _renderObjects[handle].Model == INVALID_HANDLE) return;
+		std::vector<uint32_t> overrides(materials, materials + (materials ? count : 0));
+		if (_renderObjects[handle].MaterialOverrides == overrides) return;
+		_renderObjects[handle].MaterialOverrides = std::move(overrides);
+		_drawListDirty = true;
 	}
 
 	bool SceneRenderer::Render(const RHI::RenderCommand* commands, uint32_t commandCount)
@@ -880,6 +915,30 @@ namespace Renderer
 		// RHI は描画リストが前回と同じなら、GPU 用の描画データも書き直さない
 		if (_drawListDirty) rebuildDrawList();
 		return _rhi->Render(_drawItems.data(), static_cast<uint32_t>(_drawItems.size()), commands, commandCount);
+	}
+
+	// v1.5 : 読み込んだマテリアルを覚える形にする
+	SceneRenderer::ModelResource::SubMeshMaterial SceneRenderer::subMeshMaterialOf(const RHI::MaterialDesc& desc, const std::wstring& texture, const std::wstring& name)
+	{
+		ModelResource::SubMeshMaterial result;
+		for (int c = 0; c < 4; ++c) result.Info.Color[c] = desc.Color[c];
+		result.Info.Metallic  = desc.Metallic;
+		result.Info.Roughness = desc.Roughness;
+		result.Info.Flags     = (desc.Blend == RHI::BlendMode::AlphaBlend ? 1u : 0u) | (desc.DoubleSided ? 2u : 0u);
+		result.Texture = texture;
+		result.Name    = name;
+		return result;
+	}
+
+	bool SceneRenderer::GetModelMaterialInfo(uint32_t model, uint32_t subMesh, ModelMaterialInfo* info, std::wstring& texture, std::wstring& name) const
+	{
+		if (model >= _models.size()) return false;
+		const auto& materials = _models[model].SubMeshMaterials;
+		if (subMesh >= materials.size()) return false;
+		if (info) *info = materials[subMesh].Info;
+		texture = materials[subMesh].Texture;
+		name    = materials[subMesh].Name;
+		return true;
 	}
 
 	bool SceneRenderer::GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
@@ -994,18 +1053,30 @@ namespace Renderer
 
 		// 左手系 (+Z が奥)。どちらも転置しない普通の行列 (転置は RHI の中で行う)
 		// 以前は Renderer::View / Projection クラスで、注視点 (Target) と固定の視野角 1.0 から作っていた
-		const ::DirectX::XMVECTOR position = ::DirectX::XMVectorSet(_camera.Position[0], _camera.Position[1], _camera.Position[2], 1.0f);
-		const ::DirectX::XMVECTOR forward  = ::DirectX::XMVectorSet(_camera.Forward[0],  _camera.Forward[1],  _camera.Forward[2],  0.0f);
-		const ::DirectX::XMVECTOR up       = ::DirectX::XMVectorSet(_camera.Up[0],       _camera.Up[1],       _camera.Up[2],       0.0f);
-		const ::DirectX::XMMATRIX view     = ::DirectX::XMMatrixLookToLH(position, forward, up);
+		// v1.5 : 全部のカメラの行列を作って RHI へ (0 番はフレームの始めのカメラにもする)
+		if (_cameras.empty()) _cameras.push_back(_camera);
+		RHI::CameraView views[RHI::MAX_CAMERAS];
+		const uint32_t count = static_cast<uint32_t>((std::min)(_cameras.size(), static_cast<size_t>(RHI::MAX_CAMERAS)));
+		for (uint32_t c = 0; c < count; ++c)
+		{
+			const CameraDesc& camera = _cameras[c];
+			const ::DirectX::XMVECTOR position = ::DirectX::XMVectorSet(camera.Position[0], camera.Position[1], camera.Position[2], 1.0f);
+			const ::DirectX::XMVECTOR forward  = ::DirectX::XMVectorSet(camera.Forward[0],  camera.Forward[1],  camera.Forward[2],  0.0f);
+			const ::DirectX::XMVECTOR up       = ::DirectX::XMVectorSet(camera.Up[0],       camera.Up[1],       camera.Up[2],       0.0f);
+			const ::DirectX::XMMATRIX view     = ::DirectX::XMMatrixLookToLH(position, forward, up);
 
-		const float nearZ = (std::max)(_camera.NearZ, 0.0001f);
-		const float farZ  = (std::max)(_camera.FarZ, nearZ + 0.001f);
-		const ::DirectX::XMMATRIX projection = _camera.Orthographic != 0
-			? ::DirectX::XMMatrixOrthographicLH(width, height, nearZ, farZ)
-			: ::DirectX::XMMatrixPerspectiveFovLH(_camera.FieldOfViewY, width / height, nearZ, farZ);
-
-		_rhi->SetViewProjection(toFloat4x4(view), toFloat4x4(projection));
+			const float nearZ  = (std::max)(camera.NearZ, 0.0001f);
+			const float farZ   = (std::max)(camera.FarZ, nearZ + 0.001f);
+			const float aspect = camera.Aspect > 0.0f ? camera.Aspect : width / height;   // v1.5 : カメラの範囲の比
+			const ::DirectX::XMMATRIX projection = camera.Orthographic != 0
+				? ::DirectX::XMMatrixOrthographicLH(height * aspect, height, nearZ, farZ)
+				: ::DirectX::XMMatrixPerspectiveFovLH(camera.FieldOfViewY, aspect, nearZ, farZ);
+			views[c].View        = toFloat4x4(view);
+			views[c].Projection  = toFloat4x4(projection);
+			views[c].CullingMask = camera.CullingMask != 0 ? camera.CullingMask : 0xFFFFFFFFu;
+		}
+		_rhi->SetCameraViews(views, count);
+		_rhi->SetViewProjection(views[0].View, views[0].Projection);
 	}
 }
 

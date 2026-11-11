@@ -83,7 +83,25 @@ float4 PSTonemap(FullscreenOutput input) : SV_TARGET
     // 線形 → 画面 (バックバッファは UNORM なので自分でガンマをかける)
     color = pow(saturate(color), 1.0f / max(g_Params[0].z, 0.01f));
     const float luma = dot(color, float3(0.299f, 0.587f, 0.114f));   // ガンマを掛けた後 (人の目の感じ方に近い)
+    // v1.5 : DepthOnly のカメラ (g_Params[1].y = 1) : アルファ = 写った所 (深度 g_Inputs[0].w が奥でない / HDR のアルファ)
+    //        背景は HDR を 0 で消してあるので、色も 0 (乗算済みアルファのまま前のカメラの絵に重ねられる)
+    if (g_Params[1].y > 0.5f)
+    {
+        const float depth = g_Textures[g_Inputs[0].w].Load(pixel).r;
+        const float alpha = depth < 1.0f ? 1.0f : saturate(g_Textures[g_Inputs[0].x].Load(pixel).a);
+        return float4(color, alpha);
+    }
     return float4(color, g_Params[0].w > 0.5f ? luma : 1.0f);
+}
+
+// ==============================================================
+// v1.5 : カメラの絵を画面の範囲 (Viewport Rect) に重ねる
+//   g_Inputs[0].x : カメラの絵 (画面と同じ大きさ。UV で読むので範囲の大きさに縮む)
+//   DepthOnly のカメラは乗算済みアルファで重ねる (C# の FullscreenBlend.Premultiplied)
+// ==============================================================
+float4 PSComposite(FullscreenOutput input) : SV_TARGET
+{
+    return g_Textures[g_Inputs[0].x].SampleLevel(g_LinearClamp, input.UV, 0);
 }
 
 // ==============================================================

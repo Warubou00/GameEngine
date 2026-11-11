@@ -92,6 +92,7 @@ namespace RHI
         void         DestroyObject(ObjectHandle object)override;
         void         UpdateObject(ObjectHandle object, const ObjectConstants& constants)override;
         void         SetViewProjection(const ::DirectX::XMFLOAT4X4& view, const ::DirectX::XMFLOAT4X4& projection)override;
+        void         SetCameraViews(const CameraView* views, uint32_t count)override;
 
         bool Render(const DrawItem* items, uint32_t count, const RenderCommand* commands, uint32_t commandCount)override;
 

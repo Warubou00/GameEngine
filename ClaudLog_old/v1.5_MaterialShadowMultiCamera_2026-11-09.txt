@@ -1,0 +1,61 @@
+﻿v1.5.0.0 : 1 Mesh / 1 Material、物ごとの影、シェーダーの雛形、複数のカメラ  2026-11-09
+ブランチ : feature/v15-material-shadow-multicamera
+
+■ 1. 1 Mesh / 1 Material (Unity の MeshRenderer.materials と同じ)
+  - MeshRenderer.Materials (サブメッシュごとのマテリアルの配列) を足した
+    Materials[s] がサブメッシュ s のマテリアル。null / 足りない所はモデルに付いているマテリアル
+    以前の Material (全部のサブメッシュに 1 つ) は、読み込んだ時に Materials へ移す (古いシーン / コードのため。インスペクターには出さない)
+  - エディターで Obj / Pmx / Fbx を置くと、<モデルのフォルダ>/<モデル名>_Materials/<材質名>.material.json をサブメッシュごとに作って入れる
+    色 / テクスチャ / 金属 / 粗さ / 半透明 / 両面を、読み込んだモデルから写す (もうあるファイルは書き換えない)
+    名前 : OBJ の newmtl / PMX の材質名 (以前は読み飛ばしていた) / FBX のマテリアル名
+    FBX に埋め込まれたテクスチャ (Library に出した物) はマテリアルの隣に写して使う (Library は書き出したゲームに入らないので)
+  - C++ : 読み込んだモデルにサブメッシュごとのマテリアルの値を覚え、Renderer_GetModelMaterialInfo で返す
+    Renderer_SetRenderObjectMaterials (サブメッシュごとのマテリアル) を足した
+  - マテリアルを物にドロップすると、全部のサブメッシュに入る
+
+■ 2. 物ごとの影 / シェーダーの雛形
+  - MeshRenderer.CastShadows (影を落とす) / ReceiveShadows (影を受ける)。既定はどちらもオン
+    C++ の物の定数 (ObjectData) に印とレイヤーを足した (64 → 80 byte)
+    影を落とさない物 : GPU カリングが影の視点で外す / 影を受けない物 : シェーダーがシャドーマップを読まない (Forward / Deferred / 自分のシェーダー)
+    自分のシェーダーは何も書かずに効く
+  - Project の右クリック > Create > Shader > Unlit Shader / PBR Shader で雛形を作れる (書き方のヘルプをコメントで入れた)
+    ヘルプの行は「- @queue ...」と書いた (行の始めが // @ だと指示として読まれるので)
+
+■ 3. 複数のカメラ (Unity と同じ)
+  - Camera に Depth / ViewportRect (左下が原点) / ClearFlags (Skybox / SolidColor / DepthOnly) / BackgroundColor / CullingMask を足した
+    描き方 (RenderPath / AntiAliasing / SSAO / FXAA / 露出 / トーンマップ / ガンマ) もカメラごと
+  - 有効なカメラを全部 (最大 8 台)、Depth の順に描く (以前は最初のカメラ 1 台だけ)
+    C++ : カメラごとの行列 / 定数 / Culling Mask を持ち、描画の命令 SetCamera で切り替える (見える物の選び直し、影の段の作り直し)
+          SetViewport を足した
+    C# : 2 台目からは Graphics の値をそのカメラの物に入れ替えて、カメラごとのパイプラインで描く (メインは Graphics.Pipeline)
+         画面全体で背景を消すカメラはバックバッファへ直接。範囲が一部 / DepthOnly のカメラは自分の絵に描いて範囲に重ねる (PSComposite)
+         DepthOnly は写った所をアルファに入れ、乗算済みアルファで前のカメラの絵に重ねる
+  - レイヤー : エンティティの EntityInfo.Layer (インスペクターの名前の下)。カメラの Culling Mask と比べる。シーンには 0 以外の時だけ書く
+  - シャドーマップは全部のカメラで 1 つを使い回す
+    (最初は、パイプラインごとに別のシャドーマップを持っていた。影の設定はすぐに C++ へ送るので、最後のカメラのマップがフレーム全体で使われ、
+     再生すると影が消えた。窓を撮って見つけた)
+  - 編集中のシーンビューはエディターのカメラ 1 台 (描き方は一番目のシーンのカメラの物)。再生か Game Camera でシーンのカメラが全部出る
+
+■ 4. RenderSettings を無くした
+  - シーンに置く RenderSettings の部品を無くした。描き方はカメラ、プロジェクト全体の値は Project Settings の Rendering
+    Rendering : 光の計算 / 環境光 / 空の画像・明るさ・回転 / 影 / GPU パーティクル
+  - Volume はそのまま。露出 / 背景 / SSAO はカメラごと (そのカメラの位置で)、環境光 / 影の距離はメインのカメラの位置で混ぜる
+  - エディターの GameObject の「Render Settings」は「Camera」(カメラを作る) にした
+
+■ 5. テストのシーン
+  - Assets/Scenes/multicamera.scene.json (マテリアル MC_*.material.json)
+    メイン (画面全体・空・Forward・右ボタン + WASD) / 右上のミニマップ (真上から・1 色・Deferred・レイヤー 8 の印も写す) /
+    左下の小窓 (回る・Reinhard) / 重ねるカメラ (DepthOnly・レイヤー 9 の物だけ = 右下の金の玉と左下の青い棒)
+    影を落とさない箱 / 影を受けない球も置いた
+
+■ 6. リファレンス
+  - Docs/Reference : 「複数のカメラ / 描画の設定 / マテリアル (v1.5)」の説明を足し、1 フレームの流れと命令の一覧を直した。make_reference.py で作り直した
+
+■ 確認
+  - EditorTest に 18 項目を足し、RenderSettings の項目をカメラ / Project Settings に書き直した
+    置いたモデルのマテリアルのアセット (OBJ / FBX) / 値を写す / 以前の Material が Materials に移る /
+    影の印とレイヤーが C++ へ / 再生でカメラ 4 台を Depth の順に / 範囲 (左下が原点) / カメラごとの描き方 / 重ねたカメラの数 /
+    メインの値に戻る / 無効なカメラは描かない / Unlit / PBR の雛形がコンパイルできる
+  - リポジトリ Release : 312 / 0、Debug (D3D12 の検証) : 312 / 0
+  - 窓を撮って確かめた (PrintWindow) : 4 台のカメラが範囲に出る / 全部のカメラに影 / 影を落とさない箱だけ影が無い
+  - 速さ (エディターのテストの最後の集計。カメラ 1 台) : Release 497 FPS / GPU 0.457 ms (v1.4 と同じくらい)

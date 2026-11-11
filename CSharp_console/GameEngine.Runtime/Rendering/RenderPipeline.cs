@@ -23,7 +23,13 @@ public abstract class RenderPipeline : IDisposable
     // SSAO (Forward / Deferred 共通の部品)
     protected SsaoPass Ssao { get; } = new();
     // 影 (Forward / Deferred 共通の部品。カメラの描画の前にシャドーマップを描く)
-    protected ShadowPass Shadows { get; } = new();
+    //   v1.5 : 2 台目からのカメラのパイプラインは、メインのパイプラインの物を使う (SharedShadows)
+    //          影の設定 (読むシャドーマップ) は命令でなくすぐに C++ へ送るので、カメラごとに別のマップを持つと
+    //          最後のカメラのマップがフレーム全体で使われた (GPU では命令の順に描き直すので、1 つを使い回せばカメラごとに正しい)
+    private readonly ShadowPass _ownShadows = new();
+    internal ShadowPass? SharedShadows { get; set; }
+    protected ShadowPass Shadows => SharedShadows ?? _ownShadows;
+    internal ShadowPass OwnShadows => _ownShadows;
     // 空 (v1.4。Forward / Deferred 共通。不透明の物の前に HDR へ描く)
     public SkyboxPass Sky { get; } = new();
 
@@ -35,7 +41,7 @@ public abstract class RenderPipeline : IDisposable
     public virtual void Dispose()
     {
         Ssao.Dispose();
-        Shadows.Dispose();
+        _ownShadows.Dispose();
         _ldr?.Dispose();
         _ldr = null;
         _particleTarget?.Dispose();
@@ -48,9 +54,14 @@ public abstract class RenderPipeline : IDisposable
     protected virtual int MsaaSamples(GraphicsSettings settings) => 1;
 
     // FXAA を掛けるか。既定は FXAA の時と、MSAA を頼まれたが使えない時 (代わりに FXAA)
+    //   v1.5 : DepthOnly のカメラには掛けない (アルファに写った所の印を入れるので、FXAA の明るさを入れられない)
     protected virtual bool UseFxaa(GraphicsSettings settings) =>
-        settings.AntiAliasing == AntiAliasing.Fxaa ||
-        (settings.AntiAliasing.SampleCount() > 1 && MsaaSamples(settings) <= 1);
+        settings.ClearFlags != CameraClearFlags.DepthOnly &&
+        (settings.AntiAliasing == AntiAliasing.Fxaa ||
+         (settings.AntiAliasing.SampleCount() > 1 && MsaaSamples(settings) <= 1));
+
+    // v1.5 : 今のカメラが背景を描かない (DepthOnly : 前のカメラの絵の上に重ねる) か
+    protected static bool IsDepthOnly(GraphicsSettings settings) => settings.ClearFlags == CameraClearFlags.DepthOnly;
 
     // 表示用 : 実際に使っているアンチエイリアス (毎フレーム呼ばれるので、文字列は作らず定数を返す)
     public string AntiAliasingName(GraphicsSettings settings)
@@ -69,14 +80,17 @@ public abstract class RenderPipeline : IDisposable
     protected static bool UseSsao(GraphicsSettings settings) =>
         settings.Ssao.Enabled && settings.LightingModel != LightingModel.Unlit;
 
-    // HDR (線形) → 画面 (露出 / トーンマップ / ガンマ)。最後にバックバッファへ描く
+    // HDR (線形) → 画面 (露出 / トーンマップ / ガンマ)。最後にカメラの描き込み先 (settings.CameraTarget) へ描く
+    //   v1.5 : 以前はいつもバックバッファへ描いた。範囲が一部のカメラは、自分の絵に描いてから範囲に重ねる
+    //          DepthOnly のカメラは、アルファに「写った所 = 1」を書く (深度と、HDR のアルファ (半透明 / パーティクル) から)
     //   ao があり Ssao.ShowOnly なら、代わりに遮蔽を白黒で出す (確認用)
     //   ambient を渡すと「環境光 × 遮蔽 (ao)」を足してからトーンマップする (Forward + SSAO)
     protected void Tonemap(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings, RenderTexture? ao = null, RenderTexture? ambient = null)
     {
+        var output = settings.CameraTarget;
         if (ao != null && settings.Ssao.ShowOnly)
         {
-            Ssao.Show(cmd, ao);
+            Ssao.Show(cmd, ao, output);
             return;
         }
         _tonemap ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSTonemap");
@@ -89,13 +103,18 @@ public abstract class RenderPipeline : IDisposable
         //   (HDR のまま掛けると、明るい所の小さな差を縁と見なしてしまう)
         var fxaa = UseFxaa(settings);
         if (fxaa) _ldr ??= RenderTexture.Create(RenderTextureFormat.RGBA8);
-        cmd.SetRenderTarget(fxaa ? _ldr! : RenderTexture.BackBuffer);
+        cmd.SetRenderTarget(fxaa ? _ldr! : output);
         // FXAA の時はアルファに明るさを書いてもらう (FXAA が 4 ピクセル分をまとめて読む)
         var exposure = unlit ? 1.0f : settings.Exposure;
         var luma     = fxaa ? 1.0f : 0.0f;
+        var coverage = IsDepthOnly(settings) ? 1.0f : 0.0f;   // v1.5 : Params[1].y = アルファに写った所の印 (g_Inputs[0].w = 深度)
         if (ambient != null && ao != null)
         {
-            cmd.DrawFullscreen(_tonemap, [hdr, ambient, ao], [exposure, (float)method, settings.Gamma, luma, 1.0f]);
+            cmd.DrawFullscreen(_tonemap, [hdr, ambient, ao, RenderTexture.SceneDepth], [exposure, (float)method, settings.Gamma, luma, 1.0f, coverage]);
+        }
+        else if (coverage > 0.0f)
+        {
+            cmd.DrawFullscreen(_tonemap, [hdr, hdr, hdr, RenderTexture.SceneDepth], [exposure, (float)method, settings.Gamma, luma, 0.0f, coverage]);
         }
         else
         {
@@ -105,7 +124,7 @@ public abstract class RenderPipeline : IDisposable
 
         _fxaa ??= FullscreenShader.Load(ShaderPaths.AntiAliasing, "PSFxaa");
         var f = settings.Fxaa;
-        cmd.SetRenderTarget(RenderTexture.BackBuffer);
+        cmd.SetRenderTarget(output);
         cmd.DrawFullscreen(_fxaa, [_ldr!], [Math.Clamp(f.Subpixel, 0.0f, 1.0f), f.EdgeThreshold, f.EdgeThresholdMin]);
     }
 
@@ -204,7 +223,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
             cmd.SetRenderTarget(_ambient);
             cmd.ClearColor(Vector4.Zero);
             cmd.SetRenderTarget(hdr);
-            cmd.ClearColor(hdr.ClearColor);
+            cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
             Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く。遮蔽は掛からない)
             cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
             cmd.ClearDepth();
@@ -226,7 +245,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         }
 
         cmd.SetRenderTarget(hdr);
-        cmd.ClearColor(hdr.ClearColor);
+        cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
         Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く)
         cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
         cmd.ClearDepth();
@@ -299,7 +318,9 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         var background = ToLinear(settings.BackgroundColor);
         cmd.SetRenderTarget(hdr);
         // v1.4 : 空を先に描き、ライティングは背景 (何も描かれていない所) に触らない (Params[0].w = 1)
-        var sky = Sky.Draw(cmd, settings) ? 1.0f : 0.0f;
+        // v1.5 : DepthOnly は透明 (0) で消して、背景に触らない (前のカメラの絵が見える)
+        if (IsDepthOnly(settings)) cmd.ClearColor(Vector4.Zero);
+        var sky = Sky.Draw(cmd, settings) || IsDepthOnly(settings) ? 1.0f : 0.0f;
         if (ao != null)
         {
             cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth, ao], [background.X, background.Y, background.Z, sky]);

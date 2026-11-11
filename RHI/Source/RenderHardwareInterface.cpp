@@ -237,6 +237,12 @@ namespace RHI
         _buffer->SetViewProjection(view, projection);
     }
 
+    void RenderHardwareInterface::SetCameraViews(const CameraView* views, uint32_t count)
+    {
+        if (!_isInitialized) return;
+        _buffer->SetCameraViews(views, count);
+    }
+
     RenderTargetHandle RenderHardwareInterface::CreateRenderTarget(const RenderTargetDesc& desc)
     {
         if (!_isInitialized) return RenderTargetHandle();

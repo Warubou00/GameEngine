@@ -73,7 +73,8 @@ internal sealed partial class EditorApp
             transform.Position = Vector3.Transform(position, inverse);
         }
         World.Add(entity, transform);
-        World.Add(entity, new MeshRenderer(model));
+        // v1.5 : 1 Mesh / 1 Material : サブメッシュごとのマテリアルのアセットを (無ければ作って) 入れる
+        World.Add(entity, new MeshRenderer(model) { Materials = _engine.Assets.CreateModelMaterialAssets(model) });
         Selected = entity;
         _undo.Record(new EntitiesEdit($"Place {asset.Name}", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
         Console.WriteLine($"[Editor] Placed {asset.Path} at {position:F2}");
@@ -160,7 +161,8 @@ internal sealed partial class EditorApp
         return true;
     }
 
-    // マテリアルのアセットを物に付ける (MeshRenderer.Material。元に戻せる)
+    // マテリアルのアセットを物に付ける (MeshRenderer.Materials の全部のサブメッシュ。元に戻せる)
+    //   v1.5 : 以前は MeshRenderer.Material (1 つ) に入れた。サブメッシュごとに変えるのはインスペクターの Materials で
     public bool AssignMaterial(Entity entity, AssetEntry asset)
     {
         if (!World.IsAlive(entity) || !World.Has<MeshRenderer>(entity))
@@ -173,7 +175,9 @@ internal sealed partial class EditorApp
         catch (Exception ex) { Console.WriteLine($"[Editor] {ex.Message}"); return false; }
         var id = EditorWorld.IdOf(World, entity);
         var before = SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer));
-        World.Get<MeshRenderer>(entity).Material = material;
+        ref var renderer = ref World.Get<MeshRenderer>(entity);
+        renderer.Material  = null;
+        renderer.Materials = Enumerable.Repeat<Material?>(material, Math.Max(1, renderer.Model.IsValid ? renderer.Model.SubMeshCount : 1)).ToArray();
         var after = SceneSerializer.SaveComponent(World, entity, typeof(MeshRenderer));
         _undo.Record(new ComponentEdit(id, typeof(MeshRenderer), before, after));
         MarkOverrides(entity, typeof(MeshRenderer), before, after);
@@ -207,19 +211,15 @@ internal sealed partial class EditorApp
         return _cameraPosition + direction * 10.0f;
     }
 
-    // シーンの描画の設定を選ぶ (無ければ作る。ED6)
-    public Entity SelectRenderSettings()
+    // カメラを作る (v1.5。エディターのカメラの位置と向きで)
+    //   以前はここで「Render Settings」(シーンの描画の設定) を作った。描き方はカメラごと、全体の値は Project Settings の Rendering になった
+    public Entity CreateCamera()
     {
-        foreach (var e in World.Entities)
-        {
-            if (!World.Has<RenderSettings>(e)) continue;
-            Selected = e;
-            return e;
-        }
-        var entity = World.CreateEntity("Render Settings");
-        World.Add(entity, new RenderSettings());
+        var entity = World.CreateEntity("Camera");
+        World.Add(entity, new Transform(_cameraPosition) { Rotation = cameraRotation });
+        World.Add(entity, new Camera());
         Selected = entity;
-        _undo.Record(new EntitiesEdit("Create Render Settings", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
+        _undo.Record(new EntitiesEdit("Create Camera", SceneSerializer.Save(World, new[] { entity }), new List<Guid> { EditorWorld.IdOf(World, entity) }, create: true));
         return entity;
     }
 

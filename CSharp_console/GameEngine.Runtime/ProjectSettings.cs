@@ -26,6 +26,10 @@ public sealed class ProjectSettings
     //   Project Settings の窓の Player に出す (インスペクターの部品ではなく、画像を落とす欄)
     [HideInInspector] public string? Icon;
 
+    // 描画 (v1.5。全部のシーンで同じ。以前はシーンの RenderSettings にあった。描き方はカメラごと)
+    [Header("Rendering")]
+    public RenderingProjectValues Rendering = new();
+
     [Range(0.001f, 0.1f)] public float FixedDeltaTime = 1.0f / 60.0f;
     [Range(1, 20)]        public int   MaxFixedSteps  = 5;
 

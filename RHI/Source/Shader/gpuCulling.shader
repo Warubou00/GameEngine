@@ -32,10 +32,11 @@ struct DrawData
     uint Padding;
 };
 
-// hlslTemplate.shader / Buffer::OBJECT_DATA_STRIDE と同じ (64byte)
+// hlslTemplate.shader / Buffer::OBJECT_DATA_STRIDE と同じ (80byte)
 struct ObjectData
 {
     matrix World;
+    uint4  Info;   // v1.5 : x = 印 (1 影を落とさない / 2 影を受けない) / y = レイヤーのビット (RHI::ObjectConstants と同じ並び : 80byte)
 };
 
 // CommandContext::CullInstance と同じ (20byte)
@@ -64,6 +65,8 @@ cbuffer CullConstants : register(b0)
                                // 詰め直しも不透明 / 半透明で分ける (カウンターと書く場所が別)
     uint   g_DoubleSidedDrawStart;   // この番号から半透明の先頭までは両面の不透明 (64 の倍数。無ければ 0xFFFFFFFF)
                                      // 詰め直しのカウンターと書く場所を分ける (PSO が違うので別の ExecuteIndirect で描く)
+    uint   g_CullingMask;      // v1.5 : カメラが写すレイヤー (物の Info.y と & して 0 なら外す)
+    uint   g_ShadowView;       // v1.5 : 1 = 影の視点 (影を落とさない物 (Info.x の 1) を外す。レイヤーは見ない)
 };
 
 // [1] フレームの定数 (描画用の GlobalData と同じもの。後段で Hi-Z と比べる時に、このフレームのカメラで投影する)
@@ -225,6 +228,11 @@ void CSCull(uint3 id : SV_DispatchThreadID, uint groupIndex : SV_GroupIndex)
 
             // 後段だけ : 視錐台の中にあるものを、前段の深度 (Hi-Z) に隠れていないか調べる
             if (g_Phase == 2 && inFrustum && isOccluded(center, radius)) occluded = true;
+        }
+        // v1.5 : カメラの Culling Mask / 影を落とさない物 (境界球の無い物も)
+        {
+            const uint4 info = g_Objects[draw.ObjectIndex].Info;
+            if (g_ShadowView != 0 ? (info.x & 1u) != 0 : (info.y & g_CullingMask) == 0) inFrustum = false;
         }
 
         const bool transparent = cull.Draw >= g_AlphaDrawStart;
