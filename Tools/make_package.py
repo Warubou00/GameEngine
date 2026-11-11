@@ -44,7 +44,7 @@ def run(args, **kw):
 
 def msbuild():
     vswhere = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), r"Microsoft Visual Studio\Installer\vswhere.exe")
-    out = subprocess.run([vswhere, "-latest", "-find", r"MSBuild\**\Bin\MSBuild.exe"], capture_output=True, text=True).stdout.split()
+    out = subprocess.run([vswhere, "-latest", "-find", r"MSBuild\**\Bin\MSBuild.exe"], capture_output=True, text=True).stdout.splitlines()   # v1.6 : 行ごと (以前は split() で "C:\Program Files" が切れた)
     if not out:
         sys.exit("MSBuild not found")
     return out[0]

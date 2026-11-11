@@ -25,6 +25,8 @@ namespace GameEngine.Editor;
 //   - 右クリック > Delete / Delete キー (v1.1) : 確かめてから、ごみ箱へ (.meta も一緒)
 //   - ドラッグで動かす (v1.3) : アセット / フォルダを、フォルダのタイル / 左の木 / 上のパンくずへ落とすと、そのフォルダへ動く
 //     (.meta も一緒で Id は変わらないので、シーンやマテリアルからの参照はそのまま)。スクリプトは Inspector へ落とすと付く
+//   - エクスプローラーからドラッグ & ドロップ (v1.6。Unity と同じ) : 画像 / モデル / 音などのファイルやフォルダを Project の窓へ落とすと、
+//     マウスの下のフォルダ (無ければ今のフォルダ) へ写す。同じ名前があれば "名前 1"
 // ==========================================================================
 internal sealed class ProjectPanel : IDisposable
 {
@@ -72,11 +74,21 @@ internal sealed class ProjectPanel : IDisposable
     private readonly ConcurrentQueue<(Guid Guid, int Width, int Height, byte[]? Pixels)> _decoded = new();
     private const int ThumbnailSize = 96;
 
+    // エクスプローラーからのドラッグ & ドロップ (v1.6。WinForms の窓で受け取り、次の Draw で写す)
+    private string[]? _dropFiles;        // 落とされたファイル / フォルダ (フルパス)
+    private Vector2   _dropPoint;        // 落とされた所 (窓の中の座標 = ImGui の座標)
+    private double    _dropTime;
+    private Vector2?  _dragOverPoint;    // ドラッグ中のマウスの位置 (落とす先のフォルダを光らせる)
+    private Vector2?  _dropTestPoint;    // このフレームで落とす先を調べる位置
+    private string?   _dropFolder;       // このフレームでその位置にあったフォルダ
+    private bool      _dropInWindow;     // その位置が Project の窓の中か
+
     public ProjectPanel(Engine engine, AssetDatabase database, Action<string> openScene)
     {
         _engine    = engine;
         _database  = database;
         _openScene = openScene;
+        setupFileDrop();
         try
         {
             _watcher = new FileSystemWatcher(database.AssetsRoot) { IncludeSubdirectories = true, EnableRaisingEvents = true };
@@ -163,9 +175,18 @@ internal sealed class ProjectPanel : IDisposable
         uploadThumbnails();
         if (Dragged != null && !ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.GetDragDropPayload().NativePtr == null) Dragged = null;
 
+        // エクスプローラーから落とされた物 (v1.6)。窓を閉じていて古くなった物は捨てる
+        var drop = _dropFiles;
+        _dropFiles = null;
+        if (drop != null && Time.TotalTime - _dropTime > 1.0) drop = null;
+        _dropTestPoint = drop != null ? _dropPoint : _dragOverPoint;
+        _dropFolder    = null;
+        _dropInWindow  = false;
+
         HasFocus = false;
         if (ImGui.Begin("Project", ref open))
         {
+            if (_dropTestPoint is { } dropPoint) _dropInWindow = inside(dropPoint, ImGui.GetWindowPos(), ImGui.GetWindowPos() + ImGui.GetWindowSize());
             HasFocus = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
             // F2 : 選んでいるアセットの名前を書く (ED10。Project にフォーカスがある時)
             if (_renaming == null && _selected != null && ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows) &&
@@ -204,6 +225,70 @@ internal sealed class ProjectPanel : IDisposable
             drawDeletePopup();
         }
         ImGui.End();
+
+        if (drop != null)
+        {
+            if (_dropInWindow) ImportFiles(drop, _dropFolder ?? _folder);
+            else Console.WriteLine("[Assets] Drop files on the Project window to import them");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // エクスプローラーからのドラッグ & ドロップ (v1.6。Unity と同じ)
+    //   Project の窓へ落とすと、マウスの下のフォルダ (左の木 / フォルダのタイル)、無ければ今のフォルダへ写す (元のファイルはそのまま)
+    //   画像 / モデル / 音など、どのファイルでもよい。フォルダは中身ごと (PMX とテクスチャのフォルダなど)
+    //   ※ エディターを管理者として動かしていると、Windows がエクスプローラーからのドロップを通さない
+    // ---------------------------------------------------------------------
+
+    private void setupFileDrop()
+    {
+        var window = _engine.Window;
+        try { window.AllowDrop = true; }
+        catch (InvalidOperationException ex) { Console.WriteLine($"[Assets] Drag and drop from Explorer is not available : {ex.Message}"); return; }
+        window.DragEnter += onDragOver;
+        window.DragOver  += onDragOver;
+        window.DragLeave += (_, _) => _dragOverPoint = null;
+        window.DragDrop  += (_, e) =>
+        {
+            _dragOverPoint = null;
+            if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return;
+            var point = _engine.Window.PointToClient(new System.Drawing.Point(e.X, e.Y));
+            _dropFiles = files;
+            _dropPoint = new Vector2(point.X, point.Y);
+            _dropTime  = Time.TotalTime;
+        };
+    }
+
+    private void onDragOver(object? sender, DragEventArgs e)
+    {
+        if (e.Data?.GetDataPresent(DataFormats.FileDrop) != true) { e.Effect = DragDropEffects.None; return; }
+        e.Effect = DragDropEffects.Copy;
+        var point = _engine.Window.PointToClient(new System.Drawing.Point(e.X, e.Y));
+        _dragOverPoint = new Vector2(point.X, point.Y);
+    }
+
+    private static bool inside(Vector2 point, Vector2 min, Vector2 max) => point.X >= min.X && point.Y >= min.Y && point.X < max.X && point.Y < max.Y;
+
+    // 今の項目 (フォルダ) の上で落とされた / ドラッグしているか (見えている所だけ)。その時は枠で光らせる
+    private void fileDropTarget(string folder)
+    {
+        if (_dropTestPoint is not { } point) return;
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        if (!inside(point, min, max) || !inside(point, ImGui.GetWindowPos(), ImGui.GetWindowPos() + ImGui.GetWindowSize())) return;
+        _dropFolder = folder;
+        ImGui.GetWindowDrawList().AddRect(min, max, ImGui.GetColorU32(ImGuiCol.DragDropTarget), 2.0f, ImDrawFlags.None, 2.0f);
+    }
+
+    /// <summary>Assets の外のファイル / フォルダを folder へ写す (v1.6。ドロップ / 確認用)。戻り値 = 写したアセットのパス</summary>
+    public List<string> ImportFiles(IEnumerable<string> sources, string folder)
+    {
+        var errors = new List<string>();
+        var imported = _database.ImportMany(sources, folder, errors);
+        foreach (var path in imported) Console.WriteLine($"[Assets] Imported {path}");
+        foreach (var error in errors) Console.WriteLine($"[Assets] Failed to import {error}");
+        if (imported.Count > 0) Select(_database.Find(imported[^1]));
+        return imported;
     }
 
     private unsafe void drawToolbar()
@@ -254,6 +339,7 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) { _folder = path; _search = ""; Select(_database.Find(path)); }
         if (path != AssetDatabase.AssetsFolder && entry != null) dragSource(entry);   // v1.3 : フォルダもドラッグで動かせる
         dropToMove(path);
+        fileDropTarget(path);   // v1.6 : エクスプローラーからのドロップ
         if (path == AssetDatabase.AssetsFolder && ImGui.BeginPopupContextItem($"folder{path}"))   // Assets : 作るだけ (v1.1)
         {
             createMenu(path);
@@ -390,6 +476,7 @@ internal sealed class ProjectPanel : IDisposable
         dragSource(entry);
         if (entry.Kind == AssetKind.Folder) dropToMove(entry.Path);
         ImGui.EndGroup();
+        if (entry.Kind == AssetKind.Folder) fileDropTarget(entry.Path);   // v1.6 : エクスプローラーからのドロップ (タイル全体 = グループ)
         ImGui.PopID();
     }
 

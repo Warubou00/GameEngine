@@ -1,0 +1,60 @@
+v1.6.0.0 : エクスプローラーからのドラッグ & ドロップ / Stop で音を止める / AudioSource のコピーからの Play
+ブランチ : feature/v16-dragdrop-audio (未コミット)
+日付 : 2026-11-12
+
+■ 依頼と対応
+1. 画像 / モデル / 音をエクスプローラーからドラッグ & ドロップで取り込む (Unity 準拠) … 対応
+2. 右クリックでテクスチャ 1 枚のマテリアル / シェーダーを Create … 既存の機能で確認できたためスキップ (ユーザー確認済み)
+3. AudioSource の音が Editor の Stop 後も鳴り続ける … 修正
+4. GetComponent<AudioSource>() の Play() で鳴らない (SoundTest.scene.json) … 修正
+
+■ 原因
+3. Stop は World.Clear() → AudioSource が外れたボイスを「次の AudioSystem の更新で削除」に予約する。
+   ところが AudioSystem.Update は再生中 (IsPlaying) しか呼ばれないため、予約が実行されず鳴り続けた。
+4. SoundController が「AudioSource audioSource = GetComponent<AudioSource>();」でフィールドに保存していた。
+   AudioSource は struct なのでコピーになり、Play() はコピーの Request を書き換えるだけで本物に届かなかった。
+
+■ 変更したファイル
+- GameEngine.Runtime/Systems/AudioSystem.cs
+    Post / IsPlayingOf (コピーからの Play / Stop / IsPlaying を持ち主のエンティティ経由で本物へ)
+    UpdateStopped (編集中 / 一時停止中もボイスの削除だけは行う) / StopAll (全部止めて削除)
+    付けた時 (ComponentPool.Added) と毎フレームの更新で AudioSource.Owner を書く
+- GameEngine.Runtime/Components/AudioSource.cs : internal Owner、Play / Stop / IsPlaying が AudioSystem を通る
+- GameEngine.Runtime/Ecs/ComponentPool.cs : Added イベントを追加 (Add の最後に呼ぶ。置き換えでは呼ばない)
+- GameEngine.Runtime/Engine.cs : Engine.EndPlay() を追加、編集中は AudioSystem.UpdateStopped()、
+    AudioSettings.PlayingCount (鳴っている数。確認用)
+- GameEngine.Editor/EditorApp.Edit.cs : Stop で Engine.EndPlay() を呼ぶ (以前は IsPlaying = false だけ)
+- GameEngine.Runtime/Assets/AssetDatabase.cs : ImportMany (複数のファイル / フォルダをまとめて写す。見回りは 1 回)
+    Import は中身を importFile に分けた (動きは同じ)
+- GameEngine.Editor/ProjectPanel.cs : WinForms の窓の AllowDrop / DragEnter / DragOver / DragDrop。
+    Project の窓へ落とすと、マウスの下のフォルダ (左の木 / フォルダのタイル。ドラッグ中は枠で光る)、無ければ今のフォルダへ写す
+- GameEngine.Editor/EditorTest.cs : dropAndAudio の確認を追加 (6 項目)
+- Engine.props : 1.6.0.0
+- Tools/make_package.py : vswhere の出力を splitlines() で読む (以前は split() で "C:\Program Files" が切れて MSBuild を起動できなかった)
+- Docs/Reference/index.html : make_reference.py で作り直し
+
+■ ドラッグ & ドロップの決まり (Unity と同じ)
+- 写す (元のファイルはそのまま)。同じ名前があれば "名前 1"
+- フォルダは中身ごと (PMX とテクスチャのフォルダなど)。OBJ は今まで通り .mtl とテクスチャも一緒に写す
+- .meta / 隠しファイル / DDS キャッシュは写さない (Id は新しく付ける。同じ Id が 2 つにならないように)
+- 自分の中へフォルダを写すことはできない。Project の窓の外へ落とした時は Console に案内だけ出す
+- エディターを管理者として動かしていると、Windows (UIPI) がエクスプローラーからのドロップを通さない
+
+■ AudioSource の注意
+- コピーから届くのは Play() / Stop() / IsPlaying だけ。Volume / Loop などの書き換えは ref で行う
+  (ref var a = ref GetComponent<AudioSource>(); a.Volume = 0.5f;)
+- 一時停止中の音はこれまで通り鳴り続ける (止めるのは Stop だけ。一時停止の API は C++ 側に無い)
+
+■ ビルド / 確認
+- MSBuild GameEngine.Editor.csproj Release x64 : エラー 0 (警告は既存の物のみ : EditorApp.cs 97/466, EditorTest.cs 1922)
+- GameEngine.Editor.exe --editor-test : pass 318 / fail 0
+    PASS dropped files and folders are copied into the folder (new names, new ids, originals kept)
+    PASS a folder is not copied into itself
+    PASS AudioSource with PlayOnStart off is silent
+    PASS Play() on a copy of AudioSource plays the sound (copy True, real True, count 1)
+    PASS Stop() on a copy stops the sound
+    PASS stopping the editor play stops the sound
+- python Tools/make_package.py : 成功 (86 s)。Package/Editor は TsumugiEngine_v1.6.0.0 のみ。SampleProject は残した
+- 未確認 : 実際にエクスプローラーから手でドロップする操作と、SoundTest シーンで A キーを押して音が聞こえること (耳での確認)
+- 性能 : 再生中に増えたのは、AudioSource 1 つにつき 1 回の Entity の比較と、Post された要求の処理 (無ければ 0)。
+    編集中は削除の予約が無ければ何もしない。描画には影響しない
