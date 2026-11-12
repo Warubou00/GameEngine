@@ -75,6 +75,9 @@ internal sealed partial class EditorApp
     // 自動の確認 (--editor-test)
     public Action<EditorApp>? FrameHook;
 
+    /// <summary>エディターの設定 (v1.8。View > Run In Background を変えた時に保存する)</summary>
+    public EditorPreferences? Preferences { get; set; }
+
     public EditorApp(Engine engine, ImGuiBackend imgui, ConsoleLog log, AssetDatabase database, string scenesDirectory)
     {
         _engine = engine;
@@ -401,6 +404,13 @@ internal sealed partial class EditorApp
             }
             var profiler = _engine.Graphics.ProfilerVisible;
             if (ImGui.MenuItem("Profiler (F1)", null, ref profiler)) _engine.Graphics.ProfilerVisible = profiler;
+            // v1.8 : 後ろにある時も動かすか (切ると、他のアプリが前にある間は再生も描画も止めて CPU / GPU を休ませる)
+            var runInBackground = _engine.RunInBackground;
+            if (ImGui.MenuItem("Run In Background", null, ref runInBackground))
+            {
+                _engine.RunInBackground = runInBackground;
+                if (Preferences != null) { Preferences.RunInBackground = runInBackground; Preferences.Save(); }
+            }
             ImGui.Separator();
             if (ImGui.MenuItem("Reset Layout")) _resetLayout = true;
             ImGui.EndMenu();

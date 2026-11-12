@@ -4,6 +4,7 @@
 // エディター (ED3)
 //   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--open-graph <Assets/....shadergraph.json>] [--editor-test] [--resave-scenes] [--quit-after N]
 //     --open-graph : シェーダーグラフの窓でそのグラフを開いて始める (SH4)
+//     --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (v1.8。クラッシュレポートは %LOCALAPPDATA%\<エンジン>\CrashReports\Editor)
 //     ランチャー (ED9) は --project で開くプロジェクトを渡す
 //     プロジェクト : 既定は CSharp_console/Project (中の Assets フォルダがアセットの置き場。ED5)
 //       最初の 1 回だけ、見本のモデル (見本の出力フォルダの Model) を Assets/Models へ写す (元のファイルは変えない)
@@ -17,6 +18,28 @@ internal static class Program
 {
     [STAThread]
     public static void Main(string[] args)
+    {
+        // v1.8 : クラッシュレポート (%LOCALAPPDATA%\<エンジンの名前>\CrashReports\Editor)。窓を作る前に
+        //   以前はエディターが落ちると何も残らなかった (ゲームのコードの例外は v1.7 から Console に出して続ける)
+        CrashReporter.ShowDialog = !args.Contains("--editor-test") && !args.Contains("--quit-after") && !args.Contains("--resave-scenes");
+        CrashReporter.Install("Editor", continueOnUIException: true);   // WinForms のイベント (ドラッグ & ドロップ 等) の例外は書いて続ける
+        try
+        {
+            run(args);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Editor] Fatal : {ex}");
+            CrashReporter.Report(ex, "Fatal exception (Editor)");
+            Environment.ExitCode = 1;
+        }
+        finally
+        {
+            CrashReporter.Shutdown();
+        }
+    }
+
+    private static void run(string[] args)
     {
         var options = new Dictionary<string, string>();
         for (int i = 0; i + 1 < args.Length; i++) if (args[i].StartsWith("--") && !args[i + 1].StartsWith("--")) options[args[i]] = args[++i];
@@ -54,10 +77,14 @@ internal static class Program
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
         engine.Assets.Database = database;
+        // v1.8 : 後ろにある時も動かすか (View > Run In Background。自動の確認では止めない : 他の窓を使っている間も進めるため)
+        var preferences = EditorPreferences.Load(Path.Combine(exeDirectory, EditorPreferences.FileName));
+        engine.RunInBackground = preferences.RunInBackground || args.Contains("--editor-test") || options.ContainsKey("--quit-after");
         UI.Manager!.AutoSubmit = false;   // v1.7 : ゲームの UI は ImGui の中 (シーンビューの絵の上) に描く (自分で SubmitUI すると ImGui を消してしまう)
 
         using var imgui = new ImGuiBackend(engine, Path.Combine(exeDirectory, "imgui.ini"));
         var editor = new EditorApp(engine, imgui, log, database, scenes);
+        editor.Preferences = preferences;
         // ゲームのコード (ED7) : Project/Scripts/Game.csproj をビルドして読み込む (コンポーネントの型と [GameSystem])。シーンを開く前に
         //   (以前は見本 (GameEngine_console) を参照して型を読み、System をここで 1 つずつ登録していた)
         editor.LoadScripts();
@@ -98,6 +125,12 @@ internal static class Program
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
         if (options.TryGetValue("--open-widget", out var widgetPath)) editor.OpenWidget(widgetPath);   // v1.7 : Widget Designer
+        // v1.8 : --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (クラッシュレポートの確認用)
+        if (options.TryGetValue("--crash-test", out var crashKind))
+        {
+            var crashFrames = 0;
+            engine.LateUpdate += () => { if (++crashFrames == 10) CrashReporter.TestCrash(crashKind); };
+        }
 
         engine.Run();
         DotnetTool.ShutdownBuildServers();   // Package : 同梱の SDK のビルドのサーバーを残さない (フォルダを掴んだままになるため)

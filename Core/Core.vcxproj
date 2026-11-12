@@ -175,6 +175,7 @@
     <ClInclude Include="Source\Controller\diectInput\diGamePadButtonX.h" />
     <ClInclude Include="Source\Controller\diectInput\diGamePadButtonY.h" />
     <ClInclude Include="Source\Controller\gamePad.h" />
+    <ClInclude Include="Source\Crash\crashHandler.h" />
     <ClInclude Include="Source\Controller\xInput\xInput.h" />
   </ItemGroup>
   <ItemGroup>
@@ -207,6 +208,8 @@
     <ClCompile Include="Source\Controller\diectInput\diGamePadButtonY.cpp" />
     <ClCompile Include="Source\Controller\diectInput\diGamePadKeyConfigData.cpp" />
     <ClCompile Include="Source\Controller\gamePad.cpp" />
+    <ClCompile Include="Source\Crash\crashHandler.cpp" />
+    <ClCompile Include="Source\Crash\crashDll.cpp" />
     <ClCompile Include="Source\Controller\xInput\xInput.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

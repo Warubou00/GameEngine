@@ -1,0 +1,98 @@
+v1.8.0.0 : 後ろにある間 / 最小化中は止める (Run In Background)、クラッシュレポートの自動作成
+ブランチ : feature/v18-background-crashreport (未コミット)
+日付 : 2026-11-12
+
+■ 依頼と対応
+1. 最小化 / 後ろにある (バックグラウンド) 間はランタイムの処理を止め、電力と CPU / GPU を使わない … 対応
+   - Engine.Run : 最小化中、または前の窓が自分のプロセスの物でない時は、Update・物理・アニメーション・UI・描画・Present を全部しない
+     (同じプロセスのファイルのダイアログ / 箱が前にある時は止めない)
+   - 止めている間は MsgWaitForMultipleObjectsEx (100 ms) でメッセージが来るまで眠る
+     (以前は最小化中だけ Thread.Sleep(16) で 1 秒に 60 回起き、後ろにある時は全部動いていた)
+   - 音 : Audio.dll に Audio_Suspend / Audio_Resume (XAudio2 の StopEngine / StartEngine) を足し、止めている間は音の処理のスレッドも止める
+     (再開すると続きから鳴る)。パッドの振動も止める
+   - 再開した時は Time.ResetFrameClock で止めていた時間を DeltaTime に入れない (PlayTime も進まない)
+   - 設定 : Engine.RunInBackground (既定 false。Unity の Run In Background と同じ)。true でも最小化中は以前と同じく止める
+       Player : player.json の RunInBackground (Build Game の窓の「Run In Background」)
+       エディター : View > Run In Background (exe の隣の editor_prefs.json に覚える)
+       自動の確認 (--editor-test / --quit-after / Player の --frames) は常に true (他の窓を使っている間も進めるため)
+   - Engine.IsInBackground / Engine.BackgroundChanged、Console に [Engine] Paused (in background / minimized) / Resumed after N s
+
+2. クラッシュした時の原因を調べるためのクラッシュレポートを自動で作る … 対応
+   置き場 : Player = exe の隣の CrashReports (書けなければ %LOCALAPPDATA%\Tsumugi Engine\CrashReports\Player)
+            エディター / ランチャー = %LOCALAPPDATA%\Tsumugi Engine\CrashReports\<Editor|Launcher>
+            1 回も落ちなければフォルダは残さない。新しい 10 個だけ残す
+   中身 : Crash_yyyyMMdd_HHmmss/
+     report.txt : C# の例外 (全文 / 内側 / スタックと行)、エンジンの版、exe / 引数、OS、.NET、CPU、メモリ、起動からの時間、
+                  今のシーン、再生中か、エンジンの様子 (フレーム数 / dt / エンティティ数 / 後ろにあるか 等)、読み込んだ DLL と版 (ドライバーの版も分かる)
+     native.txt : C++ で落ちた時。例外のコード、アドレス (モジュール + オフセット)、アクセス違反の読み書きと番地、
+                  C++ のスタック (PDB があれば関数名と行)、シーン / 再生中か
+     crash.dmp  : ミニダンプ (Visual Studio で開くと落ちた所が見える)
+     log.txt    : そのセッションのログ (Console の出力。C++ のログも)。行ごとにファイルへ書いているので C++ で落ちても残る
+   落ちた後 : 箱でレポートの場所を知らせ、フォルダを開ける (自動の確認では出さない)
+   エディター : WinForms のイベント (ドラッグ & ドロップ 等) の中の例外は、レポートを書いて続ける (落とさない)
+   確認用 : --crash-test managed|native|thread|stackoverflow (Player / エディター / ランチャー。10 フレーム後にわざと落とす)
+
+■ しくみ
+- C# : GameEngine.Runtime/CrashReporter.cs (AppDomain.UnhandledException / WinForms の例外 / 呼ぶ側の catch → Report)
+  ミニダンプは dbghelp.dll の MiniDumpWriteDump。ランチャーは Runtime を参照しないので、このファイルだけ入れている (C# の例外だけ)
+- C++ : Core.dll の Core/Source/Crash/crashHandler.cpp (crashDll.cpp で Crash_* を export)
+  - SetUnhandledExceptionFilter : C++ だけのスレッド等で受け取られなかった例外
+  - ベクター例外ハンドラー : 確認で分かったこと → C# から呼んだ C++ の中 (P/Invoke の先) のアクセス違反 / スタックオーバーフローは、
+    .NET が FailFast で終わらせ、上のフィルターも AppDomain.UnhandledException も呼ばれなかった (最初の実装では何も残らなかった)。
+    なので最初に呼ばれるベクター例外ハンドラーでも受け取る。C# の null 参照なども内部ではアクセス違反として起きるので、
+    「落ちた所がネイティブの DLL (JIT のコード / C# のアセンブリ / coreclr / clrjit / ntdll / kernel32 / kernelbase 以外)」の時だけにした
+  - 書くのは起動時に作っておいた別のスレッド (落ちたスレッドはスタックが残っていない時がある)。落ちたスレッドは頼んで待つだけ
+  - C# が書いた後 (Crash_SetHandled) / 1 回書いた後は書かない (同じクラッシュで 2 つ作らない)
+- 新しく使うライブラリ : dbghelp.dll (Windows に入っている。承認済み)
+
+■ 変更したファイル
+新規
+- Core/Source/Crash/crashHandler.h / crashHandler.cpp / crashDll.cpp (UTF-8 BOM + CRLF)
+- CSharp_console/GameEngine.Runtime/CrashReporter.cs
+- CSharp_console/GameEngine.Runtime/Native/Win32NativeMethods.cs (GetForegroundWindow / GetWindowThreadProcessId / MsgWaitForMultipleObjectsEx)
+- CSharp_console/GameEngine.Editor/EditorPreferences.cs (editor_prefs.json)
+変更
+- Core/Core.vcxproj / .filters : Crash のファイル
+- Audio/Source/XAudio.h / XAudio.cpp / audioDll.cpp : Suspend / Resume、Audio_Suspend / Audio_Resume
+- GameEngine.Runtime/Engine.cs : RunInBackground / IsInBackground / BackgroundChanged、Run の止める所、
+                                 クラッシュレポートの情報 (StateProvider / シーン / 再生中か)。古い Audio.dll でも落ちないように
+- GameEngine.Runtime/Time.cs : ResetFrameClock
+- GameEngine.Runtime/PlayerSettings.cs : RunInBackground
+- GameEngine.Runtime/Native/AudioNativeMethods.cs : Audio_Suspend / Audio_Resume
+- GameEngine.Player/Program.cs : CrashReporter.Install / Report、RunInBackground、--crash-dir / --crash-test / --run-in-background
+- GameEngine.Editor/Program.cs : CrashReporter.Install (UI の例外は続ける)、Main を try / catch、editor_prefs.json、--crash-test
+- GameEngine.Editor/EditorApp.cs : View > Run In Background
+- GameEngine.Editor/BuildWindow.cs / GameBuilder.cs : Run In Background (player.json へ)
+- GameEngine.Launcher/Program.cs / .csproj : CrashReporter (ファイルをリンク)
+- CSharp_console/Engine.props : 1.8.0.0
+- Docs/Reference/template.html (「バックグラウンド / クラッシュレポート (v1.8)」の頁) → make_reference.py で index.html を作り直し
+  エディターの Script Reference は Runtime の public な型とソースのコメントから自動で出る (CrashReporter / Engine.RunInBackground)
+
+■ ビルド
+- Core / Audio (Debug / Release)、GameEngine.sln (Release)、Editor / Player / Launcher / GameEngine_console (Debug / Release) : エラー 0
+- 警告 : 新しいコードからは無し (C4251 / CS8602 / CS8778 / CS8604 / CS0108 は前からある物)
+
+■ 確認 (Release。書き出し済みのゲーム (Project/Build を写し、今の DLL / シェーダーに替えた物))
+クラッシュレポート (Player --crash-test)
+  managed       : report.txt / crash.dmp / log.txt     … 例外の全文とスタック (ファイルと行)、シーン、エンジンの様子
+  native        : native.txt / crash.dmp / log.txt     … ACCESS_VIOLATION write at 0 (null pointer?)、Core.dll+0xCC67 Crash_Test (crashDll.cpp:56)
+  thread        : native.txt / crash.dmp / log.txt     … C++ だけのスレッド (SetUnhandledExceptionFilter の道)
+  stackoverflow : native.txt / crash.dmp / log.txt     … STACK_OVERFLOW、__chkstk ← recurse (crashHandler.cpp)
+  ※ 最初の実装 (フィルターだけ) では native と stackoverflow が何も残らなかった → ベクター例外ハンドラーを足して直した
+  ※ 途中、確認用のフォルダの Audio.dll が古いまま (Audio_Suspend が無い) で落ちた時も、CrashReporter が例外を正しく書いた
+  落ちずに終わった時 : CrashReports のフォルダは残らない
+バックグラウンド (2 つの Player : A = 既定、B を後から起動して前に出す。CPU は 1 コアに対する割合)
+  A 前で動いている : 21.4 %  /  B の後ろ : 0.0 %  /  最小化 (PostMessage SC_MINIMIZE) : 0.0 %
+  A のログ : Paused (in background) → Resumed after 9.7 s → Paused (minimized) → Resumed after 6.0 s、落ちずに終わった
+  止めている間は描画も Present もしないので GPU も使わない
+エディター : --editor-test 363 pass / 0 fail (2 分 32 秒)。誤ったクラッシュレポートは作られなかった (ベクター例外ハンドラーの誤検出なし)
+Package : python Tools/make_package.py → Package/Editor/TsumugiEngine_v1.8.0.0 (Editor / Player の Core.dll・Audio.dll は新しい物)
+          Package のエディター --quit-after 120 : 1.8.0.0 で起動して終了
+
+■ 確かめていない / 制限
+- RunInBackground = true の時に後ろでも動き続けること (コードの分岐だけ。後ろに回す確認は既定 (false) だけ行った)
+- ランチャーのクラッシュレポートは、ビルドだけ (起動して落とす確認はしていない。窓と箱が前に出るため)
+- 受け取れない物 : C# のスタックオーバーフロー (.NET がすぐ終わらせる)、Environment.FailFast、各 DLL の CRT (/MT) の abort / 純粋仮想関数の呼び出し
+- ベクター例外ハンドラーは「最初の機会」の例外を見るので、ネイティブの DLL が自分で __try で受け取るアクセス違反があると、
+  落ちていなくてもレポートを作ることがある (OS の基本の DLL は除いた。エディターのテスト全体では起きなかった)
+- ミニダンプは小さい形 (スタックと参照先のメモリ。約 1〜3 MB)。C# のヒープの中身は入らない (C# の例外の中身は report.txt にある)

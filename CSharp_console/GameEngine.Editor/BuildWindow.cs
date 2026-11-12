@@ -116,6 +116,10 @@ internal sealed class BuildWindow
         var profiler = Settings.ShowProfiler;
         if (ImGui.Checkbox("Show Profiler", ref profiler)) { Settings.ShowProfiler = profiler; changed = true; }
         ImGui.SameLine();
+        var background = Settings.RunInBackground;   // v1.8 : 切ると、後ろにある間はゲームを止めて CPU / GPU を休ませる
+        if (ImGui.Checkbox("Run In Background", ref background)) { Settings.RunInBackground = background; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keep running while another application is in front (off = pause to save power)");
+        ImGui.SameLine();
         var symbols = Settings.DebugSymbols;
         if (ImGui.Checkbox("Debug Symbols (.pdb)", ref symbols)) { Settings.DebugSymbols = symbols; changed = true; }
         ImGui.SameLine();

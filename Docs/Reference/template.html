@@ -439,6 +439,28 @@ if (UI.IsPointerOverUI) { /* ゲームのクリックを無視 */ }</code></pre>
 <p>UWidget (子を持つなら UPanelWidget / UContentWidget) を継ぎ、<code>ComputeDesiredSize</code> / <code>ArrangeChildren</code> / <code>OnPaint</code> を書く。マウスを使うなら <code>HandlesPointer</code> と <code>OnMouseDown / Up / Drag</code>。保存されるのは public なフィールド。引数の無いコンストラクターを付け、ゲームの型なら <code>WidgetTypes.Register(typeof(...))</code> を呼ぶ。</p>
 </article>
 
+<article data-id="background" data-title="バックグラウンド / クラッシュレポート (v1.8)">
+<h2>バックグラウンド / クラッシュレポート (v1.8)</h2>
+<h3>後ろにある間は止める</h3>
+<ul>
+  <li><a href="#/t/GameEngine.Engine">Engine</a>.Run は、最小化中 / 他のアプリが前にある間、Update・物理・アニメーション・UI・描画・Present を全部しない。音は XAudio2 の StopEngine (<code>Audio_Suspend</code> / <code>Audio_Resume</code>)、パッドの振動も止める</li>
+  <li>止めている間は <code>MsgWaitForMultipleObjectsEx</code> でメッセージが来るまで眠る (100 ms ごとにも見直す)。前に戻ると <code>Time.ResetFrameClock</code> で DeltaTime に止めていた時間を入れない (PlayTime も進まない)</li>
+  <li>「前」の判定は前の窓のプロセス。同じプロセスの窓 (ファイルのダイアログ / 箱) が前にある時は止めない</li>
+  <li><code>Engine.RunInBackground = true</code> で後ろでも動かす (最小化中は今まで通り止める)。Player は player.json の <code>RunInBackground</code> (Build Game の窓)、エディターは View &gt; Run In Background (exe の隣の editor_prefs.json)</li>
+  <li>自動の確認 (<code>--editor-test</code> / <code>--quit-after</code> / Player の <code>--frames</code>) は常に動かす。止めた / 再開した時は <code>Engine.BackgroundChanged</code> と Console の <code>[Engine] Paused / Resumed</code></li>
+</ul>
+<h3>クラッシュレポート</h3>
+<ul>
+  <li>Main の最初に <a href="#/t/GameEngine.CrashReporter">CrashReporter</a>.Install(名前, 置き場)。<code>Crash_日時/</code> に report.txt (C# の例外の全文 / 版 / OS / CPU / メモリ / シーン / エンジンの様子 / 読み込んだ DLL)、crash.dmp (ミニダンプ)、native.txt (C++ で落ちた時 : 例外のコード / モジュール + オフセット / 関数と行)、log.txt (そのセッションのログ)。新しい 10 個だけ残す</li>
+  <li>置き場 : Player は exe の隣の CrashReports (書けなければ %LOCALAPPDATA%)、エディター / ランチャーは <code>%LOCALAPPDATA%\Tsumugi Engine\CrashReports\&lt;名前&gt;</code></li>
+  <li>受け取る所 : AppDomain.UnhandledException、WinForms のイベントの例外 (エディターは書いて続ける)、呼ぶ側の catch (<code>CrashReporter.Report</code>)、C++ は Core.dll の <code>Core/Source/Crash/crashHandler.cpp</code> (SetUnhandledExceptionFilter + ベクター例外ハンドラー。ダンプは先に作った別のスレッドが書く)</li>
+  <li>C# から呼んだ C++ で落ちると .NET は FailFast で終わるので、ベクター例外ハンドラーで受け取る (落ちた所がネイティブの DLL の時だけ。C# の null 参照は除く)</li>
+  <li>レポートに足したい情報は <code>CrashReporter.SetInfo("名前", 値)</code> (C++ で落ちた時の native.txt にも出る)</li>
+  <li>確かめ方 : <code>--crash-test managed|native|thread|stackoverflow</code> (Player / エディター。10 フレーム後に落ちる)</li>
+  <li>受け取れない物 : C# のスタックオーバーフロー、Environment.FailFast、各 DLL の CRT (/MT) の abort</li>
+</ul>
+</article>
+
 <article data-id="test" data-title="テストを書く">
 <h2>テストを書く</h2>
 <p><a href="#/t/GameEngine.Editor.EditorTest">EditorTest</a> はフレームを進めるコルーチン。<code>yield return 0</code> で 1 フレーム進み、<code>check(条件, "説明")</code> が PASS / FAIL を出す。</p>

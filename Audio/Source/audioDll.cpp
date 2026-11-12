@@ -57,6 +57,17 @@ extern "C"
 		return g_audio ? g_audio->IsAvailable() : false;
 	}
 
+	// v1.8 : 音の処理を止める / 再開する (ウィンドウが後ろにある間。再開すると続きから鳴る)
+	AUDIO_API void Audio_Suspend()
+	{
+		if (g_audio) g_audio->Suspend();
+	}
+
+	AUDIO_API void Audio_Resume()
+	{
+		if (g_audio) g_audio->Resume();
+	}
+
 	// 全体の音量 (1 = そのまま)
 	AUDIO_API void Audio_SetMasterVolume(float volume)
 	{

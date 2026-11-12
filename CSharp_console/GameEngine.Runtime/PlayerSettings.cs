@@ -17,6 +17,7 @@ public sealed class PlayerSettings
     public int          Height       { get; set; } = 720;
     public bool         VSync        { get; set; } = true;
     public bool         ShowProfiler { get; set; }             // C++ のプロファイラーを最初から出すか (F1 で切り替え)
+    public bool         RunInBackground { get; set; }          // v1.8 : 後ろにある時も動かすか (false = 止めて CPU / GPU を休ませる。Engine.RunInBackground)
     public string       StartScene   { get; set; } = "";
     public List<string> Scenes       { get; set; } = new();     // 入れるシーン (ゲームのコードが engine.LoadScene で切り替える物も)
 
