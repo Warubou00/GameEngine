@@ -1,0 +1,119 @@
+v1.7.0.0 : UI (Widget アセット / UMG 相当の部品 / Widget Designer / シーンの UIWidget)
+ブランチ : feature/v17-ui-widget (未コミット)
+日付 : 2026-11-12
+
+■ 依頼と対応
+1. UE のように Widget アセットとして持ち、Scene と 1 対多 … 対応
+   - Widget アセット (.widget.json。AssetKind.Widget)。基準の解像度 (既定 1920 x 1080) + 部品のツリー
+   - シーンには UIWidget コンポーネント (Widget / ZOrder / Visible)。1 つのシーンにいくつでも、同じ Widget を別のシーンからも使える
+     (作るたびに別の UUserWidget)。再生で出て、シーンを替える / 再生を止めると消える (UE の PIE / レベルの切り替えと同じ)
+   - コードからも : UI.CreateWidget(path) → AddToViewport(z) / RemoveFromParent / IsVisible / SetZOrder / GetWidget<T>(name)
+2. UI の部品は UE 相当 … 対応 (名前は UE の C++ と同じ U 付き : WinForms の Button などとぶつからない)
+   Panel  : CanvasPanel (Anchors / Offsets / Alignment / AutoSize / ZOrder) / HorizontalBox / VerticalBox (Auto / Fill + FillWeight) /
+            Overlay / UniformGridPanel / ScrollBox / SizeBox / ScaleBox / Border / WidgetSwitcher
+   Common : TextBlock (折り返し / 揃え / 影) / Image / Button / ProgressBar / Spacer
+   Input  : CheckBox / Slider / EditableTextBox (日本語の文字も可。Enter / フォーカスで確定)
+   共通   : Visibility (Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible) / IsEnabled / RenderOpacity /
+            RenderTransform (移動 / 拡大 / 回転) / Clipping
+   イベント : OnClicked / OnPressed / OnReleased / OnHovered / OnUnhovered / OnCheckStateChanged / OnValueChanged /
+             OnTextChanged / OnTextCommitted / OnUserScrolled (C# の event)
+3. テストスクリプト (Widget の重ね表示 / on / off) … 対応
+   Project/Scripts/UITest.cs + Assets/Scenes/ui.scene.json + Assets/UI/HUD / Menu / Popup.widget.json
+     1 : HUD の on / off (コンポーネントの Visible)   2 : Menu の on / off (コードで IsVisible)   3 : Popup の on / off
+     4 : コードで組んだトースト (z 30。アセットを使わない)   Z : Menu の重なり順 10 ↔ 30 (Popup の暗い背景の手前 / 奥)
+     Menu : スコア +10 / タブ (WidgetSwitcher) / 箱を回す (CheckBox) / 速さ (Slider) / 名前 (EditableTextBox → HUD に出す) / 色 (UniformGrid)
+4. Editor のバージョンアップ … Engine.props 1.7.0.0、Package を作り直し
+
+■ しくみ (C++ は変えていない)
+- 描画 : 四角を UIDrawList に積む。Player は Graphics.SubmitUI (ImGui と同じ C++ の UI のパス)、
+  エディターは ImGui の描画のリストに足す (再生中のシーンビューの絵の上 / Widget Designer の中)。同じテクスチャ + 切り取りはまとめる
+- 文字 : System.Drawing (Runtime で既に使っている) で Windows のフォントを文字の表に描く。大きさは 12〜128 px の決まった段
+  (間は縮めて使う)。新しい文字はそのフレームの分だけ 1 枚の小さなテクスチャにして送る
+  → C++ に UI のテクスチャを消す API が無いので、表を作り直さない / 拡大縮小で増えない作りにした
+- 並べ方 : UE の Slate と同じ 2 回 (Prepass → Arrange)。変換は Matrix3x2 (RenderTransform / ScaleBox も同じ道)
+  画面の大きさへは基準の解像度の短い方の辺に合わせて拡大縮小
+- 毎フレーム : ゲームの System の後、エディターの GUI の前に UIManager.Update (UIWidget の反映 → 並べる → マウス / キー → 描く)
+  マウスの当たりは手前の UserWidget から。Image / Border (色のある物) / ScrollBox / 押せる物が後ろへ通さない (UI.IsPointerOverUI)
+
+■ 変更したファイル
+新規
+- GameEngine.Runtime/UI/UITypes.cs      : 値の型 (UIVisibility / UIMargin / UIAnchors / UIBrush / UIFont / UIRenderTransform / UIPanelSlot ...)
+- GameEngine.Runtime/UI/UWidget.cs      : UWidget / UPanelWidget / UIContext (並べる / 描く / 当たり / 探す)
+- GameEngine.Runtime/UI/Panels.cs       : Panel の部品
+- GameEngine.Runtime/UI/Controls.cs     : 部品 + UIText (折り返し。空白と日本語の文字の間で折る。句読点は行の頭にしない)
+- GameEngine.Runtime/UI/UIDrawList.cs   : 四角の積み方 / C++ の形への変換 / UIPainter (ブラシ / 9 分割 / 角の丸い四角 / 文字)
+- GameEngine.Runtime/UI/UIResources.cs  : 画像 / 白 / 丸のテクスチャ、文字の表
+- GameEngine.Runtime/UI/WidgetAsset.cs  : WidgetAsset / UUserWidget / WidgetTypes / WidgetSerializer (既定と違う値だけ書く)
+- GameEngine.Runtime/UI/UIManager.cs    : UI (static の入り口) / UIWidget コンポーネント / UIManager
+- GameEngine.Runtime/Assets/AssetManager.Widgets.cs : LoadWidget / ReloadWidget
+- GameEngine.Editor/WidgetDesigner.cs   : Widget Designer (Palette / Hierarchy (ドラッグで親と順番) / 画面 (クリックで選ぶ、
+                                          CanvasPanel の子はドラッグで動かす・右下で大きさ、解像度の切り替え、拡大) / Details /
+                                          自動で保存 / Ctrl+Z・Y / Delete / Ctrl+D)
+- GameEngine.Editor/UIImGui.cs          : UIDrawList → ImGui の描画のリスト
+- Project/Assets/UI/*.widget.json, Project/Assets/Scenes/ui.scene.json, Project/Scripts/UITest.cs : 見本とテスト
+変更
+- GameEngine.Runtime/Engine.cs          : UIManager を作る / 毎フレーム Update / LoadScene・EndPlay で画面の UI を外す / プロファイラーに UI の値
+- GameEngine.Runtime/Input.cs           : GetMouseButtonDown / GetMouseButtonUp (このフレームに押した / 離した)。確認用の Simulate / SimulateTyping
+- GameEngine.Runtime/Assets/AssetDatabase.cs : AssetKind.Widget (.widget.json)
+- GameEngine.Runtime/Assets/Model.cs    : AssetManager を partial に。名前を変えた時に Widget のパスも付け替える
+- GameEngine.Runtime/Serialization/SceneSerializer.cs : WidgetAsset の読み書き (guid + path)
+- GameEngine.Editor/EditorApp.cs / EditorApp.Edit.cs : Widget Designer の窓 (View メニュー / OpenWidget)、再生中のシーンビューにゲームの UI
+- GameEngine.Editor/ProjectPanel.cs     : 右クリック > Create > Widget / ダブルクリックで開く / アイコン / 外で変えたら読み直す
+- GameEngine.Editor/Inspector.cs        : UIWidget の Widget の欄 (Project から落とせる)
+- GameEngine.Editor/Program.cs          : AutoSubmit = false (ImGui の中に描く) / --open-widget <path>
+- GameEngine.Editor/EditorTest.cs       : uiWidgets の確認 (下)
+- Engine.props : 1.7.0.0
+- Docs/Reference/template.html : 「UI (Widget。v1.7)」の説明を追加。index.html は make_reference.py で作り直し
+  (エディターの Script Reference は型とソースのコメントから作られるので、UI の型も出る)
+
+■ ビルド / 確認
+- MSBuild GameEngine.Editor.csproj Release x64 : エラー 0 (警告は既存の物のみ : EditorApp.cs 101/473, EditorTest.cs 1922)
+- Game.csproj (UITest.cs) : エラー 0
+- GameEngine.Editor.exe --editor-test : pass 360 / fail 0 (UI の分 42 項目)
+    並べ方 (アンカー / 伸ばす / Alignment、Box の Auto / Fill / FillWeight / Padding、DPI の倍率、折り返し (英語 / 日本語))
+    サンプルの 3 つの読み書き (保存 → 読む → 保存が同じ)
+    編集中は出ない / 再生で 3 つが Z の順に出る / Visible = false は隠れて作られる / UI.GetWidget(entity) / 1 つのアセットから別の物
+    ボタンのクリック → スクリプト (Score) / 手前の Popup の暗い背景が後ろの Menu のクリックを止める / SetZOrder で手前にすると押せる
+    Popup の「閉じる」/ コンポーネントの Visible で on / off / 無効なエンティティは出ない / コードの AddToViewport / RemoveFromParent
+    CheckBox / Slider のドラッグ / 文字の欄 (フォーカス / 打つ / 確定 → HUD) / タブ (WidgetSwitcher) / 止めると全部消える
+    Widget Designer (作る / 足す / 元に戻す / やり直す / 複製 / 並べ替え / 保存 / 描く / 保存した物から同じツリー)
+    書き出しに Widget アセットが入る / 書き出したゲーム (Player) で UI が出てスクリプトが繋がる (Player.log)
+- 見た目 (ゲームの窓だけを PrintWindow で撮った) : 書き出したゲームで HUD / Menu が出る、本物のクリック (PostMessage) で Popup が開き
+  暗い背景が重なる、Z キーで Menu が手前になりボタンが押せる、4 キーでトースト。エディターの Widget Designer で Menu を開いて選ぶ所
+- python Tools/make_package.py : 成功 (60 s)。Package/Editor は TsumugiEngine_v1.7.0.0 のみ。SampleProject は残した (UI の見本は入っていない)
+- 性能 (RTX 2070 の PC、Release、エディターの再生中) : UI の更新 (反映 + 並べる + 入力 + 描く) 平均 0.196 ms / 最大 0.334 ms
+  (Widget 3 つ、四角 785 個、120 フレーム)。新しい文字を作るフレームだけ数 ms (文字を描いて送る。1 回だけ)
+  UI が無いシーンでは UIWidget の数を見るだけ (何もしない)。C++ の描画は ImGui と同じ 1 つのパス
+
+■ 制限 / 今回やっていないこと
+- UMG Animation、Blueprint のバインディング (C# の event で代わり)、3D 空間の WidgetComponent、ツールチップ、ゲームパッドでの部品の移動 (フォーカスの移動)
+- UI のテクスチャ (画像 / 文字の表) は C++ に消す API が無いので残る (同じ物は使い回す)
+- 文字は 1 文字ずつ (カーニング / 合字 / 絵文字のサロゲートの組は無し)。文字の欄に範囲の選択 / コピー / 貼り付け / IME の変換中の表示は無い
+- エディターでは、再生中にシーンビューがゲームのカメラの時だけゲームの UI を出す (編集中は Widget Designer で見る)
+- 未確認 : 人の手でのエディターの操作 (Designer のドラッグ / 再生中のシーンビューでのクリック) は自動の確認と PostMessage だけ
+
+■ 追加の修正 (2026-11-12) : showcase に空の物 + WidgetController.cs を付けて再生するとエディターが落ちる
+原因は 2 つ
+1. Widget の名前を変えると ".widget" が消えた (v1.7 の不具合)
+   AssetDatabase.SplitName の「2 つ続きの拡張子」の表に .widget.json が無く、"New Widget.widget.json" の拡張子を ".json" と見ていた。
+   名前を "SampleWidget" にすると "SampleWidget.json" (Text) になり、スクリプトの UI.CreateWidget("Assets/UI/SampleWidget.widget.json") が
+   FileNotFoundException を投げた
+2. ゲームのコードの例外を誰も受け取らず、エディターごと落ちた (UI に限らず、どのスクリプトの例外でも同じ)
+修正
+- GameEngine.Runtime/Assets/AssetDatabase.cs : SplitName に .widget.json を足す
+- GameEngine.Runtime/Engine.cs : Engine.GameCodeException を追加。設定されていれば、衝突のメソッド / Update / FixedUpdate (物理) /
+  LateUpdate / UI の更新 (クリックなどのイベント) の例外を受け取ってそこへ渡し、フレームを続ける。
+  null (Player) は今まで通り投げる (Player はログと箱で理由を出して終わる)
+- GameEngine.Editor/EditorApp.cs / EditorApp.Edit.cs : 例外を Console に赤で出し (型 / 内容 / 呼び出しの 12 行)、再生を一時停止する。
+  Pause で続ける (Start で起きた物は呼ばれ直さない) / Stop で終える。GameCodeExceptionCount (確認用)
+- GameEngine.Editor/EditorTest.cs : 名前を変えても .widget.json のまま / 無い Widget を読む System で、エディターが落ちずに一時停止する (+3 項目)
+- Package/Project/SampleProject/Assets/UI/SampleWidget.json (+ .meta) を SampleWidget.widget.json に戻した (Id はそのまま。
+  WidgetController.cs が読むパスと同じ)
+確認
+- MSBuild Editor Release x64 : エラー 0 (警告は既存の物のみ)
+- --editor-test : pass 363 / fail 0
+    PASS renaming a widget keeps the .widget.json extension
+    [Error] Exception in game code : FileNotFoundException : Failed to load widget: Assets/UI/Missing.widget.json → [Editor] Paused ...
+    PASS an exception in game code pauses the play instead of crashing the editor (calls 1, errors 1)
+- make_package.py : 1 回目はランチャーが動いていて失敗。閉じてもらってから作り直し、成功 (57 s)。
+  Package の Editor (TsumugiEngine_v1.7.0.0) の DLL に GameCodeException / onGameCodeException が入っていることを確かめた

@@ -47,6 +47,8 @@ internal sealed partial class EditorApp
     private readonly ShaderGraphWindow _graph;   // SH4
     private readonly PreviewWindow _preview;     // AN5
     private bool    _showGraph;
+    private readonly WidgetDesigner _widgetDesigner;   // v1.7 : UI
+    private bool    _showWidgetDesigner;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
     private bool    _resetLayout;
@@ -91,6 +93,8 @@ internal sealed partial class EditorApp
         _reference = new ScriptReference(this, Path.Combine(database.ProjectRoot, "Scripts"));
         _graph = new ShaderGraphWindow(engine, database);   // SH4
         _project.OpenShaderGraph = path => OpenShaderGraph(path);
+        _widgetDesigner = new WidgetDesigner(engine, database);   // v1.7
+        _project.OpenWidget = path => OpenWidget(path);
         _preview = new PreviewWindow(engine, database);     // AN5
         _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
@@ -105,6 +109,7 @@ internal sealed partial class EditorApp
         engine.Window.FormClosing += onWindowClosing;   // 窓の × / Alt+F4 : 保存していない変更があれば聞く (ED10)
         _build = new BuildWindow(database, () => (_scenePath != null ? _database.ToAssetPath(_scenePath) : null, IsDirty));
         _picker = new Picker(engine);
+        engine.GameCodeException = onGameCodeException;   // v1.7 : スクリプトの例外でエディターが落ちないように
         engine.LateUpdate += update;
     }
 
@@ -256,6 +261,7 @@ internal sealed partial class EditorApp
         drawUnsavedPrompt();   // ED10
         _reference.Draw(ref _showReference);
         _graph.Draw(ref _showGraph);   // SH4
+        _widgetDesigner.Draw(ref _showWidgetDesigner);   // v1.7
         _preview.Draw();               // AN5
         _shaders?.Update();
         _scripts.Update();
@@ -367,6 +373,7 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Stats",     null, ref _showStats);
             ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.MenuItem("Shader Graph", null, ref _showGraph);   // SH4
+            ImGui.MenuItem("Widget Designer", null, ref _showWidgetDesigner);   // v1.7
             if (ImGui.MenuItem("FBX Preview", null, _preview.IsOpen))   // AN5
             {
                 if (_preview.IsOpen) _preview.Close();
@@ -424,6 +431,7 @@ internal sealed partial class EditorApp
         var io = ImGui.GetIO();
         if (io.WantTextInput) return;
         if (_graph.HasFocus) return;   // シェーダーグラフの窓が自分で使う (元に戻す / 消す / 複製。SH4)
+        if (_widgetDesigner.HasFocus) return;   // v1.7 : Widget Designer が使う (元に戻す / 消す / 複製)
         if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
         if (io.KeyCtrl)
         {
@@ -483,6 +491,7 @@ internal sealed partial class EditorApp
             }
             var min = ImGui.GetItemRectMin();
             var draw = ImGui.GetWindowDrawList();
+            drawGameUI(draw, min, new Vector2(width, height));   // v1.7 : 再生中のゲームの UI (絵の上)
             if (_playing) draw.AddRect(min, min + new Vector2(width, height), _paused ? 0xFF20B0FFu : 0xFF3080FFu, 0, ImDrawFlags.None, 3.0f);   // 再生中は枠の色
 
             if (!_gameView)
@@ -511,6 +520,21 @@ internal sealed partial class EditorApp
             _sceneHovered = false;
         }
         ImGui.End();
+    }
+
+    // v1.7 : ゲームの UI (UIManager が描いた物) をシーンビューの絵の上に。再生中のゲームのカメラの時だけ (UE の PIE と同じく編集中は出さない)
+    //   UI の大きさ = 絵の大きさ。マウスは絵の上にある時だけ UI へ (UIManager は次のフレームでこの位置と大きさを使う)
+    /// <summary>確認用 : マウスがシーンビューの上に無くても、ゲームの UI にマウスを渡す</summary>
+    public bool ForceGameUIInput { get; set; }
+
+    private void drawGameUI(ImDrawListPtr draw, Vector2 min, Vector2 size)
+    {
+        if (UI.Manager is not { } ui) return;
+        var show = _playing && _gameView;
+        ui.ViewportOffset = min;
+        ui.ViewportSize = size;
+        ui.InputEnabled = show && (_sceneHovered || ForceGameUIInput);
+        if (show) UIImGui.Draw(draw, ui.DrawList);
     }
 
     private void drawToolbar()

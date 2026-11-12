@@ -240,6 +240,15 @@ internal sealed partial class EditorApp
     public ScriptReference Reference => _reference;   // ED9
     public ShaderGraphWindow Graph => _graph;   // SH4
 
+    public WidgetDesigner WidgetDesigner => _widgetDesigner;   // v1.7
+
+    /// <summary>Widget Designer で開く (v1.7)</summary>
+    public bool OpenWidget(string path)
+    {
+        _showWidgetDesigner = true;
+        return _widgetDesigner.Open(path);
+    }
+
     /// <summary>シェーダーグラフの窓で開く (SH4)</summary>
     public bool OpenShaderGraph(string path)
     {
@@ -425,6 +434,26 @@ internal sealed partial class EditorApp
     public void TogglePlay()
     {
         if (_playing) stop(); else play();
+    }
+
+    /// <summary>再生中にゲームのコードが投げた例外の数 (確認用。v1.7)</summary>
+    public int GameCodeExceptionCount { get; private set; }
+
+    // v1.7 : ゲームのコード (System / Behaviour / UI のイベント) の例外。Console に出して再生を一時停止する (エディターは落とさない)
+    //   以前は誰も受け取らず、例えば Start で無い Widget を UI.CreateWidget するとエディターごと落ちた
+    //   続けるなら Pause をもう一度 (Start で起きた物は同じ物では呼ばれ直さない)、やめるなら Stop
+    private void onGameCodeException(Exception ex)
+    {
+        GameCodeExceptionCount++;
+        if (ex is System.Reflection.TargetInvocationException { InnerException: { } inner }) ex = inner;
+        Console.WriteLine($"[Error] Exception in game code : {ex.GetType().Name} : {ex.Message}");
+        foreach (var line in (ex.StackTrace ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Take(12)) Console.WriteLine($"    {line.Trim()}");
+        if (_playing && !_paused)
+        {
+            _paused = true;
+            _engine.IsPlaying = false;
+            Console.WriteLine("[Editor] Paused because of the error above (Pause : continue / Stop : end)");
+        }
     }
 
     public void TogglePause()

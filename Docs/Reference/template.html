@@ -400,6 +400,45 @@ float4 Surface(SurfaceInput IN)
 </ul>
 </article>
 
+<article data-id="ui" data-title="UI (Widget。v1.7)">
+<h2>UI (Widget。v1.7)</h2>
+<p>UE の UMG と同じ考え方。画面の UI は <b>Widget アセット</b> (<code>.widget.json</code>) に部品のツリーとして保存し、シーンの <a href="#/t/GameEngine.UIWidget">UIWidget</a> コンポーネント、またはコード (<a href="#/t/GameEngine.UI">UI</a>.CreateWidget) から使う。1 つの Widget アセットはいくつのシーンからでも使える (作るたびに別の <a href="#/t/GameEngine.UUserWidget">UUserWidget</a>)。</p>
+<h3>しくみ</h3>
+<ul>
+  <li>部品は <a href="#/t/GameEngine.UWidget">UWidget</a> を継ぐクラス (名前は UE の C++ と同じく U 付き。WinForms の Button などとぶつからない)。子を持つ物は <a href="#/t/GameEngine.UPanelWidget">UPanelWidget</a>、親の中での置き方は <a href="#/t/GameEngine.UIPanelSlot">UIPanelSlot</a></li>
+  <li>並べ方は Slate と同じ 2 回 : Prepass (子から欲しい大きさ) → Arrange (親が位置と大きさを決める。<code>Transform</code> = 自分の座標 → 画面のピクセル)。RenderTransform は描く時だけ</li>
+  <li>大きさの単位は Widget アセットの基準の解像度 (既定 1920 x 1080)。画面の短い方の辺に合わせて拡大縮小する (<code>UIManager.ScaleFor</code>)</li>
+  <li>描画は四角を <a href="#/t/GameEngine.UIDrawList">UIDrawList</a> に積み、Player では <code>Graphics.SubmitUI</code> (ImGui と同じ C++ の UI のパス。C++ は変えていない)、エディターでは ImGui の描画のリストに足す (シーンビューの絵の上 / Widget Designer の中)</li>
+  <li>文字は System.Drawing でフォントを文字の表に描いて GPU へ (12〜128 px の決まった段。新しい文字はそのフレームの分を 1 枚の小さなテクスチャにする)。C++ に UI のテクスチャを消す API が無いので、作り直さないようにしている</li>
+  <li>毎フレーム、ゲームの System の後 / エディターの GUI の前に <a href="#/t/GameEngine.UIManager">UIManager</a>.Update : UIWidget の反映 → 並べる → マウス / キー (再生中) → 描く</li>
+</ul>
+<h3>部品</h3>
+<table>
+<tr><th>Panel</th><td>CanvasPanel (Anchors / Offsets / Alignment / AutoSize / ZOrder) / HorizontalBox / VerticalBox (Auto / Fill + FillWeight) / Overlay / UniformGridPanel / ScrollBox / SizeBox / ScaleBox / Border / WidgetSwitcher</td></tr>
+<tr><th>Common</th><td>TextBlock / Image / Button / ProgressBar / Spacer</td></tr>
+<tr><th>Input</th><td>CheckBox / Slider / EditableTextBox</td></tr>
+<tr><th>共通</th><td>Visibility (Visible / Collapsed / Hidden / HitTestInvisible / SelfHitTestInvisible) / IsEnabled / RenderOpacity / RenderTransform / Clipping</td></tr>
+</table>
+<h3>コードから</h3>
+<pre><code>var hud = UI.CreateWidget("Assets/UI/HUD.widget.json");
+hud.AddToViewport(10);                                   // 数の大きい物が手前
+hud.GetWidget&lt;UTextBlock&gt;("Score")!.SetText("100");
+hud.GetWidget&lt;UButton&gt;("Start")!.OnClicked += () =&gt; { };
+hud.IsVisible = false;                                   // on / off
+hud.SetZOrder(30);
+hud.RemoveFromParent();
+var fromScene = UI.GetWidget(entity);                    // シーンの UIWidget が出している物
+if (UI.IsPointerOverUI) { /* ゲームのクリックを無視 */ }</code></pre>
+<h3>エディター</h3>
+<ul>
+  <li>Project の右クリック &gt; Create &gt; Widget で作り、ダブルクリックで Widget Designer (Palette / Hierarchy / 画面 / Details)。変えると少し後に自動で保存</li>
+  <li>シーンには UIWidget コンポーネント (Widget を Project から落とす)。再生中、ゲームのカメラの時だけシーンビューの上に出る (編集中は出さない)</li>
+  <li>見本 : <code>Assets/Scenes/ui.scene.json</code> + <code>Scripts/UITest.cs</code> (1 / 2 / 3 / 4 / Z キーで on / off と重なり順)</li>
+</ul>
+<h3>部品を足す</h3>
+<p>UWidget (子を持つなら UPanelWidget / UContentWidget) を継ぎ、<code>ComputeDesiredSize</code> / <code>ArrangeChildren</code> / <code>OnPaint</code> を書く。マウスを使うなら <code>HandlesPointer</code> と <code>OnMouseDown / Up / Drag</code>。保存されるのは public なフィールド。引数の無いコンストラクターを付け、ゲームの型なら <code>WidgetTypes.Register(typeof(...))</code> を呼ぶ。</p>
+</article>
+
 <article data-id="test" data-title="テストを書く">
 <h2>テストを書く</h2>
 <p><a href="#/t/GameEngine.Editor.EditorTest">EditorTest</a> はフレームを進めるコルーチン。<code>yield return 0</code> で 1 フレーム進み、<code>check(条件, "説明")</code> が PASS / FAIL を出す。</p>

@@ -2337,6 +2337,7 @@ internal sealed class EditorTest
         yield return 0;
 
         foreach (var step in dropAndAudio()) yield return step;
+        foreach (var step in uiWidgets()) yield return step;   // v1.7
     }
 
     // v1.6 : エクスプローラーからのドロップ (写す) / AudioSource のコピーからの Play / Stop で音が止まる
@@ -2397,5 +2398,281 @@ internal sealed class EditorTest
         Directory.Delete(source, true);
         database.Refresh();
         yield return 0;
+    }
+
+    // ---------------------------------------------------------------------
+    // v1.7 : UI (Widget)。並べ方 / 保存 / シーンの UIWidget / 重ね表示 / on / off / クリック / Widget Designer / 書き出し
+    // ---------------------------------------------------------------------
+    private IEnumerable<int> uiWidgets()
+    {
+        var database = _app.Database;
+        var ui = UI.Manager!;
+
+        // ---- 並べ方 (UE と同じ計算) ----
+        var slot = new UIPanelSlot { Anchors = new UIAnchors(1, 1), Offsets = new UIMargin(-20, -10, 200, 50), Alignment = new Vector2(1, 1) };
+        var (p1, s1) = UCanvasPanel.Layout(slot, Vector2.Zero, new Vector2(1000, 500));
+        var stretch = new UIPanelSlot { Anchors = new UIAnchors(0, 0, 1, 1), Offsets = new UIMargin(10, 20, 30, 40) };
+        var (p2, s2) = UCanvasPanel.Layout(stretch, Vector2.Zero, new Vector2(1000, 500));
+        check(p1 == new Vector2(780, 440) && s1 == new Vector2(200, 50) && p2 == new Vector2(10, 20) && s2 == new Vector2(960, 440),
+              $"canvas anchors / offsets / alignment ({p1} {s1} / {p2} {s2})");
+        var box = new UHorizontalBox();
+        var fixedSpacer = new USpacer { Size2D = new Vector2(100, 10) };
+        var fillA = new USpacer();
+        var fillB = new USpacer();
+        box.AddChild(fixedSpacer);
+        box.AddChild(fillA)!.Size = UISizeRule.Fill;
+        var slotB = box.AddChild(fillB)!;
+        slotB.Size = UISizeRule.Fill;
+        slotB.FillWeight = 3;
+        slotB.Padding = new UIMargin(10, 0, 10, 0);
+        ui.LayoutTree(box, new Vector2(520, 40), Matrix3x2.Identity, new Vector4(0, 0, 10000, 10000));
+        check(fixedSpacer.Size.X == 100 && fillA.Size.X == 100 && fillB.Size.X == 300 && Vector2.Transform(Vector2.Zero, fillB.Transform).X == 210,
+              $"horizontal box auto + fill weights + padding ({fixedSpacer.Size.X}, {fillA.Size.X}, {fillB.Size.X})");
+        check(UIManager.ScaleFor(new Vector2(1280, 720), new Vector2(1920, 1080)) == 1280f / 1920f && UIManager.ScaleFor(new Vector2(2560, 1080), new Vector2(1920, 1080)) == 1.0f,
+              "DPI scale follows the shorter side of the design size");
+        var lines = UIText.Wrap("aaa bbb ccc", new UIFont(20), ui.Resources.Fonts.Measure("aaa bbb", new UIFont(20)) + 1, ui.Resources.Fonts);
+        check(lines.Count == 2 && lines[0] == (0, 7) && lines[1] == (8, 3), $"text wraps at spaces ({string.Join(",", lines)})");
+        var jp = "日本語の文章は空白が無くても折れる。";
+        var jpLines = UIText.Wrap(jp, new UIFont(20), ui.Resources.Fonts.Measure("日本語の文章", new UIFont(20)) + 1, ui.Resources.Fonts);
+        check(jpLines.Count >= 2 && jpLines[0] == (0, 6) && jpLines.Sum(l => l.Length) == jp.Length && !jpLines.Skip(1).Any(l => jp[l.Start] == '。'),
+              $"Japanese wraps between characters, not before '。' ({string.Join(",", jpLines)})");
+
+        // ---- 保存 / 読み込み (サンプルの 3 つ : 読んで書くと同じ中身) ----
+        var names = new[] { "HUD", "Menu", "Popup" };
+        var same = true;
+        var counts = new List<int>();
+        foreach (var name in names)
+        {
+            var json = File.ReadAllText(database.FullPath($"Assets/UI/{name}.widget.json"));
+            var (root, size) = WidgetSerializer.Load(json);
+            var again = WidgetSerializer.Save(root, size);
+            var (root2, _) = WidgetSerializer.Load(again);
+            same &= again == WidgetSerializer.Save(root2, size) && root!.Descendants().Count() == root2!.Descendants().Count();
+            counts.Add(root!.Descendants().Count());
+        }
+        check(same && counts.All(c => c > 5), $"widget assets round-trip (save → load → save is the same; {string.Join("/", counts)} widgets)");
+        check(database.Find("Assets/UI/HUD.widget.json")?.Kind == AssetKind.Widget, "*.widget.json is a Widget asset");
+
+        // ---- シーン (1 つのシーンに 3 つ。同じアセットを別のシーンからも使える) ----
+        var scenePath = database.FullPath("Assets/Scenes/ui.scene.json");
+        _app.OpenScene(scenePath);
+        yield return 0;
+        check(ui.Widgets.Count == 0, "edit mode shows no game UI");
+        _app.ForceGameUIInput = true;
+        _app.TogglePlay();
+        for (int i = 0; i < 4; i++) yield return 0;
+        var hud = ui.Widgets.FirstOrDefault(w => w.Name == "HUD");
+        var menu = ui.Widgets.FirstOrDefault(w => w.Name == "Menu");
+        var popup = ui.Widgets.FirstOrDefault(w => w.Name == "Popup");
+        check(ui.Widgets.Count == 3 && hud != null && menu != null && popup != null && ui.Widgets[0] == hud && ui.Widgets[1] == menu && ui.Widgets[2] == popup,
+              $"playing the scene shows its UIWidget components in z order ({string.Join(", ", ui.Widgets)})");
+        check(popup != null && !popup.IsVisible && hud!.IsVisible && UI.GetWidget(find("HUD")) == hud && hud.Entity == find("HUD"), "Visible = false starts hidden / UI.GetWidget(entity)");
+        check(ui.DrawList.Count > 20 && ui.Resources.Fonts.TextureCount > 0, $"UI is drawn ({ui.DrawList.Count} quads, {ui.Resources.Fonts.TextureCount} glyph textures)");
+        if (hud == null || menu == null || popup == null) { _app.TogglePlay(); yield break; }
+
+        // 同じ Widget アセットを別のシーンで使っても、作った物は別
+        var other = UI.CreateWidget("Assets/UI/HUD.widget.json");
+        check(other != hud && other.Asset == hud.Asset && other.Root != hud.Root, "one widget asset → many instances (scenes / code)");
+
+        // ---- クリック (Menu の「スコア +10」) ----
+        var add = menu.GetWidget<UButton>("AddScore")!;
+        var center = Vector2.Transform(add.Size * 0.5f, add.Transform);
+        IEnumerable<int> click(Vector2 at)
+        {
+            Input.Simulate(at, MouseButtons.None);
+            yield return 0;
+            Input.Simulate(at, MouseButtons.Left);
+            yield return 0;
+            Input.Simulate(at, MouseButtons.None);
+            yield return 0;
+        }
+        var tester = find("UI Test");
+        foreach (var step in click(center)) yield return step;
+        check(add.ClickCount == 1 && getField(tester, "UITest", "Score") == 10, $"clicking a button calls OnClicked (score {getField(tester, "UITest", "Score")})");
+
+        // ---- 重ね表示 : Popup (z 20) の暗い背景が Menu (z 10) のクリックを止める ----
+        popup.IsVisible = true;
+        yield return 0;
+        foreach (var step in click(center)) yield return step;
+        var hitName = ui.HitTest(center)?.Name;
+        check(add.ClickCount == 1 && hitName == "Dim" && UI.IsPointerOverUI, $"a widget in front blocks the one behind (hit {hitName})");
+        menu.SetZOrder(30);   // Z キーと同じ
+        yield return 0;
+        check(ui.Widgets[^1] == menu, "SetZOrder moves the widget to the front");
+        foreach (var step in click(center)) yield return step;
+        check(add.ClickCount == 2, "after moving Menu to the front, its button gets the click");
+        menu.SetZOrder(10);
+        // Popup の「閉じる」で隠れる
+        var close = popup.GetWidget<UButton>("Close")!;
+        foreach (var step in click(Vector2.Transform(close.Size * 0.5f, close.Transform))) yield return step;
+        check(!popup.IsVisible, "Popup's Close button hides it (script event)");
+
+        // ---- on / off : コンポーネントの Visible (HUD) ----
+        var quads = ui.DrawList.Count;
+        World.Get<UIWidget>(find("HUD")).Visible = false;
+        yield return 0;
+        yield return 0;
+        check(!hud.IsVisible && ui.DrawList.Count < quads, $"UIWidget.Visible = false hides it ({quads} → {ui.DrawList.Count} quads)");
+        World.Get<UIWidget>(find("HUD")).Visible = true;
+        yield return 0;
+        check(hud.IsVisible, "UIWidget.Visible = true shows it again");
+        // 無効なエンティティの物は出さない
+        World.SetActive(find("Menu"), false);
+        yield return 0;
+        yield return 0;
+        check(!menu.IsInViewport, "inactive entity removes its widget from the screen");
+        World.SetActive(find("Menu"), true);
+        yield return 0;
+        yield return 0;
+        check(menu.IsInViewport, "active again → back on the screen");
+
+        // ---- コードで組んだ物 (AddToViewport / RemoveFromParent) ----
+        var toast = UI.CreateWidget(new UCanvasPanel { Name = "TestToast" });
+        toast.AddToViewport(50);
+        check(ui.Widgets.Count == 4 && ui.Widgets[^1] == toast && toast.IsInViewport, "AddToViewport (code)");
+        toast.RemoveFromParent();
+        check(ui.Widgets.Count == 3 && !toast.IsInViewport, "RemoveFromParent (code)");
+
+        // ---- 入力の部品 : CheckBox / Slider / EditableTextBox / WidgetSwitcher ----
+        var check1 = menu.GetWidget<UCheckBox>("SpinCheck")!;
+        var before = check1.IsChecked;
+        foreach (var step in click(Vector2.Transform(new Vector2(10, check1.Size.Y * 0.5f), check1.Transform))) yield return step;
+        check(check1.IsChecked != before && Convert.ToBoolean(gameType("UITest").GetField("Spin")!.GetValue(World.GetPool(gameType("UITest")).GetBoxed(tester.Id))) == check1.IsChecked,
+              "CheckBox toggles and calls OnCheckStateChanged");
+        var slider = menu.GetWidget<USlider>("SpeedSlider")!;
+        var left = Vector2.Transform(new Vector2(slider.HandleSize * 0.5f, slider.Size.Y * 0.5f), slider.Transform);
+        var right = Vector2.Transform(new Vector2(slider.Size.X - slider.HandleSize * 0.5f, slider.Size.Y * 0.5f), slider.Transform);
+        Input.Simulate(left, MouseButtons.None);
+        yield return 0;
+        Input.Simulate(left, MouseButtons.Left);
+        yield return 0;
+        var atLeft = slider.Value;
+        Input.Simulate(right, MouseButtons.Left);
+        yield return 0;
+        Input.Simulate(right, MouseButtons.None);
+        yield return 0;
+        check(atLeft == 0 && slider.Value == 360 && getField(tester, "UITest", "SpinSpeed") == 360, $"Slider drag ({atLeft} → {slider.Value})");
+        var nameBox = menu.GetWidget<UEditableTextBox>("NameBox")!;
+        foreach (var step in click(Vector2.Transform(nameBox.Size * 0.5f, nameBox.Transform))) yield return step;
+        check(UI.FocusedWidget == nameBox, "clicking a text box gives it keyboard focus");
+        Input.SimulateTyping("Tsumugi");
+        yield return 0;
+        check(nameBox.Text == "Tsumugi", $"typing goes to the focused text box ('{nameBox.Text}')");
+        ui.SetFocus(null);   // フォーカスが外れる → OnTextCommitted (UITest が HUD に書く)
+        yield return 0;
+        check(hud.GetWidget<UTextBlock>("Hello")?.Text.Contains("Tsumugi") == true, "OnTextCommitted reaches the script");
+        var tab2 = menu.GetWidget<UButton>("Tab2")!;
+        foreach (var step in click(Vector2.Transform(tab2.Size * 0.5f, tab2.Transform))) yield return step;
+        check(menu.GetWidget<UWidgetSwitcher>("Pages")!.ActiveWidgetIndex == 1, "tab button switches the WidgetSwitcher");
+        // 速さ : UI の処理の時間
+        // 速さ : 新しい文字の無い (落ち着いた) フレームの平均。1 フレーム目は文字を作るので除く
+        yield return 0;
+        double uiTotal = 0, uiMax = 0;
+        for (int i = 0; i < 120; i++) { yield return 0; uiTotal += ui.LastMilliseconds; uiMax = Math.Max(uiMax, ui.LastMilliseconds); }
+        Console.WriteLine($"[Test] UI update average {uiTotal / 120:F3} ms, max {uiMax:F3} ms ({ui.DrawList.Count} quads, {ui.Widgets.Count} widgets, {ui.Resources.Fonts.TextureCount} glyph textures)");
+
+        // ---- 止めると消える ----
+        _app.ForceGameUIInput = false;
+        _app.TogglePlay();
+        yield return 0;
+        yield return 0;
+        check(ui.Widgets.Count == 0, "stopping the play removes all game UI");
+
+        // ---- Widget Designer ----
+        const string folder = "Assets/_UITest";
+        Directory.CreateDirectory(database.FullPath(folder));
+        database.Refresh();
+        _app.Project.CreateFolderForTest(folder);
+        var created = _app.Project.CreateWidget("Test Widget");
+        check(created != null && _app.OpenWidget(created!) && _app.WidgetDesigner.Root is UCanvasPanel, "Create > Widget makes a widget with a CanvasPanel root and opens the designer");
+        var designer = _app.WidgetDesigner;
+        var text = designer.AddWidget("TextBlock");
+        var button = designer.AddWidget("Button", designer.Root);
+        check(text != null && button != null && designer.Root!.Children.Count == 2 && button.Children.Count == 1, "palette adds widgets (Button gets a text)");
+        designer.Undo();
+        check(designer.Root!.Children.Count == 1, "designer undo");
+        designer.Redo();
+        check(designer.Root!.Children.Count == 2, "designer redo");
+        designer.Selected = designer.Root.Children[1];
+        designer.DuplicateSelected();
+        check(designer.Root.Children.Count == 3 && designer.Root.Children[2].Name != designer.Root.Children[1].Name, "duplicate (new name)");
+        check(designer.Move(designer.Root.Children[2], designer.Root.Children[0], into: false) && designer.Root.Children[0].TypeName == "Button", "move (reorder)");
+        designer.Flush();
+        var saved = File.ReadAllText(database.FullPath(created!));
+        check(saved.Contains("\"TextBlock\"") && saved.Contains("\"Button\"") && !designer.Dirty, "designer saves the widget");
+        yield return 0;
+        for (int i = 0; i < 3; i++) yield return 0;
+        check(designer.LastQuadCount > 0, $"designer draws the widget ({designer.LastQuadCount} quads)");
+        // 保存した物から作ると同じ物
+        var fromAsset = _app.Engine.Assets.LoadWidget(created!).CreateInstance();
+        check(fromAsset.Root!.Children.Count == 3, "the saved asset creates the same tree");
+        // 名前を変えても .widget.json のまま (以前は ".widget" が消えて "Renamed.json" (Text) になり、UI.CreateWidget で読めなかった)
+        var renamedWidget = database.Rename(created!, "Renamed Widget");
+        check(renamedWidget == $"{folder}/Renamed Widget.widget.json" && database.Find(renamedWidget)?.Kind == AssetKind.Widget &&
+              AssetDatabase.SplitName("Renamed Widget.widget.json", false) == ("Renamed Widget", ".widget.json"),
+              $"renaming a widget keeps the .widget.json extension ({renamedWidget})");
+
+        // ---- ゲームのコードの例外 (無い Widget を読む) : エディターは落ちず、Console に出して一時停止 ----
+        //   以前は Start の例外を誰も受け取らず、エディターごと落ちた (showcase で WidgetController を付けて再生)
+        _app.TogglePlay();
+        yield return 0;
+        var thrower = new MissingWidgetSystem();
+        _app.Engine.AddSystem(thrower);
+        var exceptionsBefore = _app.GameCodeExceptionCount;
+        for (int i = 0; i < 3; i++) yield return 0;
+        check(thrower.Calls == 1 && _app.GameCodeExceptionCount == exceptionsBefore + 1 && _app.IsPlaying && _app.IsPaused,
+              $"an exception in game code pauses the play instead of crashing the editor (calls {thrower.Calls}, errors {_app.GameCodeExceptionCount - exceptionsBefore})");
+        _app.Engine.RemoveSystems(new object[] { thrower });
+        _app.TogglePlay();
+        yield return 0;
+        check(!_app.IsPlaying, "stop after the error");
+
+        // ---- 書き出し : シーンの Widget アセットが入る ----
+        var deps = new AssetDependencies(database);
+        deps.AddScene("Assets/Scenes/ui.scene.json");
+        check(names.All(n => deps.Assets.Contains($"Assets/UI/{n}.widget.json")), "game export includes the widget assets used by the scene");
+
+        // 書き出したゲーム (Player) でも、シーンの UI が出てスクリプトが繋がる (Player.log で確かめる。フォルダは残す : 見た目の確認用)
+        var uiBuildFolder = Path.Combine(Path.GetTempPath(), "ge_ui_build");
+        if (Directory.Exists(uiBuildFolder)) Directory.Delete(uiBuildFolder, true);
+        var uiBuildSettings = new BuildSettings
+        {
+            ProductName = "UI Test", Width = 1280, Height = 720, VSync = true, OutputFolder = uiBuildFolder, IncludeDotnet = false,
+            Scenes = { "Assets/Scenes/ui.scene.json" },
+        };
+        var uiBuilder = _app.BuildWindow.Builder;
+        var uiBuildTask = Task.Run(() => uiBuilder.Build(uiBuildSettings, uiBuilder.CollectAssets(uiBuildSettings)));
+        while (!uiBuildTask.IsCompleted) yield return 0;
+        var uiBuild = uiBuildTask.Result;
+        check(uiBuild.Ok, $"export the UI scene ({(uiBuild.Ok ? $"{uiBuild.FileCount} files" : uiBuild.Error)})");
+        if (uiBuild.Ok)
+        {
+            var playerLog = Path.Combine(uiBuildFolder, "ui_test.log");
+            var run = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uiBuild.ExePath, $"--frames 60 --log \"{playerLog}\"") { UseShellExecute = false });
+            var runTask = Task.Run(() => run!.WaitForExit(60000));
+            while (!runTask.IsCompleted) yield return 0;
+            var logText = File.Exists(playerLog) ? File.ReadAllText(playerLog) : "";
+            check(logText.Contains("[UITest] bound : HUD True, Menu True, Popup True") && logText.Contains("60 frames done"),
+                  "the exported game shows the scene's widgets and the script binds them");
+        }
+
+        // 片付け
+        _app.OpenScene(database.FullPath("Assets/Scenes/showcase.scene.json"));
+        yield return 0;
+        Directory.Delete(database.FullPath(folder), true);
+        File.Delete(database.FullPath(folder) + ".meta");
+        database.Refresh();
+        yield return 0;
+    }
+
+    // v1.7 : 無い Widget を読むゲームの System (例外のテスト用。Start で UI.CreateWidget を呼ぶスクリプトと同じ)
+    private sealed class MissingWidgetSystem : ISystem
+    {
+        public int Calls;
+        public void Update(World world)
+        {
+            Calls++;
+            UI.CreateWidget("Assets/UI/Missing.widget.json").AddToViewport();
+        }
     }
 }

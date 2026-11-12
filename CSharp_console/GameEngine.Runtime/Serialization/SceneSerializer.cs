@@ -99,6 +99,10 @@ public static class SceneSerializer
         RegisterConverter<AnimationClip?>(
             (w, v, _) => writeAsset(w, v?.Path),
             (e, c) => readAsset<AnimationClip?>(e, c, path => c.Assets!.LoadAnimationClip(path), null));
+        // v1.7 : UI の Widget (.widget.json)
+        RegisterConverter<WidgetAsset?>(
+            (w, v, _) => writeAsset(w, v?.Path),
+            (e, c) => readAsset<WidgetAsset?>(e, c, path => c.Assets!.LoadWidget(path), null));
     }
 
     // ---------------------------------------------------------------------

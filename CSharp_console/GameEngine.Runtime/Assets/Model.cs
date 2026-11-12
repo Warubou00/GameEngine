@@ -29,7 +29,7 @@ public readonly struct Model
 // アセットの読み込み (以前の Test_LoadModel に当たる)
 //   同じパスは 1 回だけ読み込み、2 回目からは同じ Model / Sound を返す
 // ==========================================================================
-public sealed class AssetManager
+public sealed partial class AssetManager
 {
     private readonly Dictionary<string, Model> _models = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Sound> _sounds = new(StringComparer.OrdinalIgnoreCase);
@@ -96,6 +96,7 @@ public sealed class AssetManager
         rekey(_skeletons, (skeleton, path) => skeleton.Path = path);   // AN3
         rekey(_modelSkins);   // AN4
         rekey(_clips, (clip, path) => clip.Path = path);
+        rekey(_widgets, (widget, path) => widget.Path = path);   // v1.7
     }
 
     // パス → (覚える名前, 読むファイル)

@@ -1,0 +1,237 @@
+{
+  "format": "TsumugiWidget",
+  "version": 1,
+  "designSize": [
+    1920,
+    1080
+  ],
+  "root": {
+    "type": "CanvasPanel",
+    "name": "Root",
+    "children": [
+      {
+        "type": "Image",
+        "name": "Dim",
+        "props": {
+          "Brush": {
+            "Image": "",
+            "Tint": [
+              0,
+              0,
+              0,
+              0.55
+            ],
+            "DrawAs": "Image",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 0,
+            "ImageSize": [
+              0,
+              0
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              0,
+              0
+            ],
+            "Maximum": [
+              1,
+              1
+            ]
+          },
+          "Offsets": {
+            "Left": 0,
+            "Top": 0,
+            "Right": 0,
+            "Bottom": 0
+          }
+        }
+      },
+      {
+        "type": "Border",
+        "name": "Dialog",
+        "props": {
+          "Background": {
+            "Image": "",
+            "Tint": [
+              0.12,
+              0.14,
+              0.2,
+              0.98
+            ],
+            "DrawAs": "RoundedBox",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 14,
+            "ImageSize": [
+              0,
+              0
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              0.5,
+              0.5
+            ],
+            "Maximum": [
+              0.5,
+              0.5
+            ]
+          },
+          "Offsets": {
+            "Left": 0,
+            "Top": 0,
+            "Right": 680,
+            "Bottom": 380
+          },
+          "Alignment": [
+            0.5,
+            0.5
+          ]
+        },
+        "children": [
+          {
+            "type": "VerticalBox",
+            "name": "DialogBox",
+            "slot": {
+              "Padding": {
+                "Left": 32,
+                "Top": 24,
+                "Right": 32,
+                "Bottom": 24
+              }
+            },
+            "children": [
+              {
+                "type": "TextBlock",
+                "name": "PopupTitle",
+                "props": {
+                  "Text": "Popup (z 20)",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 34,
+                    "Bold": true,
+                    "Italic": false
+                  },
+                  "ColorAndOpacity": [
+                    1,
+                    0.8,
+                    0.4,
+                    1
+                  ]
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 0,
+                    "Right": 0,
+                    "Bottom": 12
+                  }
+                }
+              },
+              {
+                "type": "TextBlock",
+                "name": "Message",
+                "props": {
+                  "Text": "この Widget は他の Widget の上に重なっています。後ろの暗い Image がクリックを止めるので、Menu は押せません。Z キーで Menu を手前にすると押せるようになります。",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 22,
+                    "Bold": false,
+                    "Italic": false
+                  },
+                  "AutoWrapText": true
+                },
+                "slot": {
+                  "Size": "Fill"
+                }
+              },
+              {
+                "type": "HorizontalBox",
+                "name": "Buttons",
+                "slot": {
+                  "HorizontalAlignment": "Right",
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 12,
+                    "Right": 0,
+                    "Bottom": 0
+                  }
+                },
+                "children": [
+                  {
+                    "type": "Button",
+                    "name": "Ok",
+                    "props": {
+                      "BackgroundColor": [
+                        0.6,
+                        0.85,
+                        1,
+                        1
+                      ]
+                    },
+                    "slot": {
+                      "Padding": {
+                        "Left": 0,
+                        "Top": 0,
+                        "Right": 12,
+                        "Bottom": 0
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "TextBlock",
+                        "name": "OkText",
+                        "props": {
+                          "Text": "OK",
+                          "Font": {
+                            "Family": "Meiryo",
+                            "Size": 22,
+                            "Bold": false,
+                            "Italic": false
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Close",
+                    "children": [
+                      {
+                        "type": "TextBlock",
+                        "name": "CloseText",
+                        "props": {
+                          "Text": "閉じる",
+                          "Font": {
+                            "Family": "Meiryo",
+                            "Size": 22,
+                            "Bold": false,
+                            "Italic": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -671,6 +671,7 @@ public sealed class Engine : IDisposable
         // ゲームパッド (Core.dll。XInput + DirectInput)。パッドが無くてもそのまま動く (何も繋がっていない扱い)
         Gamepad.Initialize();
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
+        GameEngine.UI.Manager = new UIManager(this);   // v1.7 : UI (Widget)
         _particleSystem   = new ParticleSystem(World, Graphics.Particles);
 
         // カメラを動かす System は既定で入れておく (コンポーネントを付けた物だけが動く)
@@ -709,7 +710,15 @@ public sealed class Engine : IDisposable
     {
         IsPlaying = false;
         _audioSystem.StopAll();
+        GameEngine.UI.Manager?.Clear();   // v1.7 : 画面の UI も全部外す
     }
+
+    /// <summary>
+    /// ゲームのコード (System / Behaviour / FixedUpdate / LateUpdate / UI のイベント) が投げた例外を受け取る (v1.7)
+    /// null (既定。Player) なら今まで通り投げる (ゲームが止まり、理由をログと箱で出す)。エディターは受け取って Console に出し、再生を一時停止する
+    /// 例外の起きたフレームは、その System の残りの物は呼ばれない (次のフレームはまた呼ぶ)
+    /// </summary>
+    public Action<Exception>? GameCodeException { get; set; }
 
     /// <summary>System と物理の後、カメラと描画への反映の前に毎フレーム呼ばれる (エディターの GUI はここで作る)</summary>
     public event Action? LateUpdate;
@@ -814,11 +823,21 @@ public sealed class Engine : IDisposable
             Gamepad.Update();
 
             if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
-            if (IsPlaying) _collisionCallbacks.Dispatch(World, Physics, _systems);   // v1.2 : 前の物理の刻みの衝突 → Behaviour の OnCollision* (Update の前。Unity と同じ順)
-            if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
+            // v1.7 : ゲームのコード (System / Behaviour / UI のイベント) の例外は、GameCodeException があればそこへ渡して続ける (エディター)
+            //   以前はどこでも受け取らず、スクリプトの例外 (無い Widget を読んだ等) でエディターごと落ちていた
+            try
+            {
+                if (IsPlaying) _collisionCallbacks.Dispatch(World, Physics, _systems);   // v1.2 : 前の物理の刻みの衝突 → Behaviour の OnCollision* (Update の前。Unity と同じ順)
+                if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
+            }
+            catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
             _animationSystem.Update(World, IsPlaying, Time.DeltaTime);   // AN3 : 骨のエンティティに姿勢を書く (編集中は時間を進めず、その時間の姿勢)
             _transformSystem.Update(World);
-            _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
+            try
+            {
+                _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
+            }
+            catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }   // v1.7 : FixedUpdate の例外
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
             // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
@@ -826,9 +845,14 @@ public sealed class Engine : IDisposable
             // v1.4 : ゲームの LateUpdate (Update / アニメーション / 物理の後)。変えた Transform の行列を計算し直して、このフレームの描画に間に合わせる
             if (IsPlaying && _lateSystems.Count > 0)
             {
-                updateLateSystems();
+                try { updateLateSystems(); }
+                catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }   // v1.7
                 _transformSystem.Update(World);
             }
+            // v1.7 : UI (シーンの UIWidget の反映 / 並べる / クリック / 描く)。エディターの GUI より前 (シーンビューの絵の上に描くため)
+            //   クリックなどのイベントはゲームのコードを呼ぶので、例外は上と同じく受け取る
+            try { GameEngine.UI.Manager!.Update(World, IsPlaying, Time.DeltaTime); }
+            catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
             Graphics.ScreenSize = Graphics.RenderSize is { Width: > 0 } size ? size : ClientSize;   // v1.5 : カメラの範囲の比 / 描く範囲のピクセル
             _cameraSystem.Update(World, Graphics.CameraOverride, Graphics.ScreenSize);   // v1.5 : 全部のカメラ (Depth の順)
@@ -851,6 +875,12 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_ReportProfilerValue("C# transforms sent", _renderSyncSystem.TransformsSentLastFrame);
             NativeMethods.Renderer_ReportProfilerValue("Lights", _lightSystem.LightCount);
             NativeMethods.Renderer_ReportProfilerValue("Sounds playing", _audioSystem.PlayingCount);
+            if (GameEngine.UI.Manager!.Widgets.Count > 0)
+            {
+                NativeMethods.Renderer_ReportProfilerValue("UI widgets", GameEngine.UI.Manager.Widgets.Count);
+                NativeMethods.Renderer_ReportProfilerValue("UI quads", GameEngine.UI.Manager.LastQuadCount);
+                NativeMethods.Renderer_ReportProfilerValue("UI update (ms)", GameEngine.UI.Manager.LastMilliseconds);
+            }
             if (_physicsLoaded)
             {
                 NativeMethods.Renderer_ReportProfilerValue("Physics step (ms)", Physics.StepMs);
@@ -891,7 +921,11 @@ public sealed class Engine : IDisposable
     public List<Entity> LoadScene(string path, bool additive = false)
     {
         var start = Stopwatch.GetTimestamp();
-        if (!additive) World.Clear();
+        if (!additive)
+        {
+            World.Clear();
+            GameEngine.UI.Manager?.Clear();   // v1.7 : シーンを替えると画面の UI は外れる (UE のレベルの切り替えと同じ)
+        }
         var warnings = new List<string>();
         var created = SceneSerializer.LoadFile(World, path, Assets, warnings);
         foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");

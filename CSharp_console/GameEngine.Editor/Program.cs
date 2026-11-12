@@ -54,6 +54,7 @@ internal static class Program
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
         engine.Assets.Database = database;
+        UI.Manager!.AutoSubmit = false;   // v1.7 : ゲームの UI は ImGui の中 (シーンビューの絵の上) に描く (自分で SubmitUI すると ImGui を消してしまう)
 
         using var imgui = new ImGuiBackend(engine, Path.Combine(exeDirectory, "imgui.ini"));
         var editor = new EditorApp(engine, imgui, log, database, scenes);
@@ -96,6 +97,7 @@ internal static class Program
         }
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
+        if (options.TryGetValue("--open-widget", out var widgetPath)) editor.OpenWidget(widgetPath);   // v1.7 : Widget Designer
 
         engine.Run();
         DotnetTool.ShutdownBuildServers();   // Package : 同梱の SDK のビルドのサーバーを残さない (フォルダを掴んだままになるため)
