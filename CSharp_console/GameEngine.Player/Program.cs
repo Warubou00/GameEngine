@@ -22,6 +22,9 @@ namespace GameEngine.Player;
 //   --frames N          : N フレーム進めたら終わる (--dump があれば、その時のシーンの様子を書く)
 //   --dump <file>       : SceneState.Dump の結果を書く (エディターの再生と比べる)
 //   --log <file>        : ログの書き先 (既定は exe の隣の Player.log)
+//   --crash-dir <folder> : クラッシュレポートの置き場 (v1.8。既定は exe の隣の CrashReports)
+//   --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (v1.8。クラッシュレポートの確認用)
+//   --run-in-background true : 後ろにある時も止めない (v1.8。player.json の RunInBackground と同じ)
 //   --warmup-scene <path> --warmup-frames N : 先に別のシーンを N フレーム動かしてから最初のシーンを開いて再生する
 //                         (エディターで前に別のシーンを使った後の再生と同じ状態。物理の決まった動きの確認用)
 // ==========================================================================
@@ -35,20 +38,26 @@ internal static class Program
 
         var exeDirectory = AppContext.BaseDirectory;
         var log = openLog(options.GetValueOrDefault("--log", Path.Combine(exeDirectory, "Player.log")));
+        // v1.8 : クラッシュレポート (exe の隣の CrashReports。書けなければ %LOCALAPPDATA%)。窓を作る前に
+        //   以前は落ちた理由が Player.log と箱の 1 行だけで、C++ で落ちた時は何も残らなかった
+        CrashReporter.ShowDialog = !options.ContainsKey("--frames");
+        CrashReporter.Install("Player", options.GetValueOrDefault("--crash-dir", Path.Combine(exeDirectory, "CrashReports")));
         try
         {
             return run(options, exeDirectory);
         }
         catch (Exception ex)
         {
-            // 窓の無い exe なので、落ちた理由をログと箱で知らせる
+            // 窓の無い exe なので、落ちた理由をログと箱で知らせる (v1.8 : 箱はレポートの場所付き。CrashReporter が出す)
             Console.WriteLine($"[Player] Fatal : {ex}");
             log?.Flush();
-            if (!options.ContainsKey("--frames")) MessageBox.Show(ex.Message, "Game", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            var folder = CrashReporter.Report(ex, "Fatal exception (Player)");
+            if (folder == null && !options.ContainsKey("--frames")) MessageBox.Show(ex.Message, "Game", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
         finally
         {
+            CrashReporter.Shutdown();
             log?.Dispose();
         }
     }
@@ -75,6 +84,9 @@ internal static class Program
             WorkingDirectory = data,   // アセットのパス ("Assets/...") とシェーダー (../Shader) の起点
         });
         engine.Graphics.ProfilerVisible = settings.ShowProfiler;
+        // v1.8 : 後ろにある時に止めるか (確かめる時 (--frames) は止めない : 決まったフレーム数を、前に出さなくても進めるため)
+        engine.RunInBackground = settings.RunInBackground || options.ContainsKey("--frames") || options.ContainsKey("--run-in-background");
+        CrashReporter.SetInfo("Product", settings.ProductName);
 
         // アセット (書き出した物だけ。Id は .meta から)
         var database = new AssetDatabase(data);
@@ -146,6 +158,13 @@ internal static class Program
                 Console.WriteLine($"[Player] {frames} frames done{(dump != null ? $" (dump : {dump})" : "")}");
                 engine.Quit();
             };
+        }
+
+        // v1.8 : --crash-test <managed|native|thread|stackoverflow> : 10 フレーム動かしてからわざと落とす (クラッシュレポートの確認用)
+        if (options.TryGetValue("--crash-test", out var crashKind))
+        {
+            var crashFrames = 0;
+            engine.LateUpdate += () => { if (++crashFrames == 10) CrashReporter.TestCrash(crashKind); };
         }
 
         engine.Run();

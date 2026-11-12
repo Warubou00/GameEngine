@@ -64,6 +64,12 @@
     <Filter Include="ソース ファイル\Controller\diectInput">
       <UniqueIdentifier>{decf1e37-a236-43c9-845a-382b24678b10}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ヘッダー ファイル\Crash">
+      <UniqueIdentifier>{38d6efa3-db31-4a69-bb55-fb33566f0909}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ソース ファイル\Crash">
+      <UniqueIdentifier>{f76617f4-d5e7-4c23-aa4d-e9768f5f7865}</UniqueIdentifier>
+    </Filter>
     <Filter Include="ソース ファイル\Controller\xInput">
       <UniqueIdentifier>{ebf34a9a-c895-407f-8efc-ef1a0e553342}</UniqueIdentifier>
     </Filter>
@@ -267,6 +273,17 @@
     </ClCompile>
     <ClCompile Include="Source\Controller\xInput\xInput.cpp">
       <Filter>ソース ファイル\Controller\xInput</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Crash\crashHandler.h">
+      <Filter>ヘッダー ファイル\Crash</Filter>
+    </ClInclude>
+    <ClCompile Include="Source\Crash\crashHandler.cpp">
+      <Filter>ソース ファイル\Crash</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Crash\crashDll.cpp">
+      <Filter>ソース ファイル\Crash</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

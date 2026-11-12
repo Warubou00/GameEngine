@@ -59,6 +59,9 @@ public static class Time
 
     internal static void AdvancePlayTime() => PlayTime += DeltaTime;
 
+    // v1.8 : 止めていた (後ろにあった) 後 : 前のフレームの時刻を今にする (止めていた間を次の DeltaTime に入れない)
+    internal static void ResetFrameClock() => _lastTicks = _clock.ElapsedTicks;
+
     internal static void Tick()
     {
         var now = _clock.ElapsedTicks;

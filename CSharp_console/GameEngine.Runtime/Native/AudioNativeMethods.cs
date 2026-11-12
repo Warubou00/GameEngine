@@ -30,6 +30,13 @@ internal static unsafe class AudioNativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Audio_SetMasterVolume(float volume);
 
+    // v1.8 : 後ろにある間、XAudio2 の処理を止める / 再開する
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Audio_Suspend();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Audio_Resume();
+
     // ---------- サウンド ----------
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]

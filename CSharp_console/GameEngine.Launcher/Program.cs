@@ -1,4 +1,5 @@
 using System.Text;
+using GameEngine;
 
 namespace GameEngine.Launcher;
 
@@ -28,11 +29,26 @@ internal static class Program
             return LauncherTest.Run(new EditorInstalls(data), options, keep: args.Contains("--keep"));
         }
 
-        ApplicationConfiguration.Initialize();
-        var form = new LauncherForm(new EditorInstalls(data));
-        if (options.GetValueOrDefault("--tab") == "installs") form.ShowInstalls();   // 最初に Installs の頁を出す
-        Application.Run(form);
-        return 0;
+        // v1.8 : クラッシュレポート (%LOCALAPPDATA%\<エンジンの名前>\CrashReports\Launcher)。窓を作る前に
+        CrashReporter.Install("Launcher");
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            var form = new LauncherForm(new EditorInstalls(data));
+            if (options.GetValueOrDefault("--tab") == "installs") form.ShowInstalls();   // 最初に Installs の頁を出す
+            if (options.TryGetValue("--crash-test", out var crashKind)) form.Shown += (_, _) => GameEngine.CrashReporter.TestCrash(crashKind);   // 確認用
+            Application.Run(form);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            CrashReporter.Report(ex, "Fatal exception (Launcher)");
+            return 1;
+        }
+        finally
+        {
+            CrashReporter.Shutdown();
+        }
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]

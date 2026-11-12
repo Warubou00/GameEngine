@@ -99,6 +99,17 @@ namespace Audio
 		if (_pMasterVoice) _pMasterVoice->SetVolume((std::max)(volume, 0.0f));
 	}
 
+	// v1.8 : 後ろにある間は XAudio2 の処理を止める (以前は止める手段が無く、ゲームを止めても音の処理は回り続けた)
+	void XAudio::Suspend()
+	{
+		if (_pXAudio2) _pXAudio2->StopEngine();
+	}
+
+	void XAudio::Resume()
+	{
+		if (_pXAudio2) _pXAudio2->StartEngine();
+	}
+
 	// ==========================================================================
 	// サウンド
 	// ==========================================================================

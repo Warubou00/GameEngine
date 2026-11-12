@@ -27,7 +27,8 @@ internal sealed class BuildSettings
     public int          Height       { get; set; } = 720;
     public bool         VSync        { get; set; } = true;
     public bool         ShowProfiler { get; set; }
-    public List<string> Scenes       { get; set; } = new();   // 入れるシーン (アセットのパス。0 番が最初のシーン)
+    public bool         RunInBackground { get; set; }            // v1.8 : 後ろにある時も動かすか (player.json へ)
+    public List<string> Scenes      { get; set; } = new();   // 入れるシーン (アセットのパス。0 番が最初のシーン)
     public string       OutputFolder { get; set; } = "Build"; // プロジェクトのフォルダからの相対パスか絶対パス
     public bool         DebugSymbols { get; set; }            // .pdb も入れるか
     public bool         IncludeDotnet { get; set; } = true;   // .NET (動かすだけの物) を exe の隣の dotnet に入れるか (.NET を入れていない PC でも動く。約 100 MB)
@@ -188,7 +189,7 @@ internal sealed class GameBuilder
         new PlayerSettings
         {
             ProductName = settings.ProductName, Width = settings.Width, Height = settings.Height, VSync = settings.VSync,
-            ShowProfiler = settings.ShowProfiler, StartScene = settings.Scenes[0], Scenes = settings.Scenes.ToList(),
+            ShowProfiler = settings.ShowProfiler, RunInBackground = settings.RunInBackground, StartScene = settings.Scenes[0], Scenes = settings.Scenes.ToList(),
         }.Save(Path.Combine(data, PlayerSettings.FileName));
         var projectSettings = Path.Combine(_database.ProjectRoot, ProjectSettings.FileName);
         if (File.Exists(projectSettings)) copyFile(projectSettings, Path.Combine(data, ProjectSettings.FileName));

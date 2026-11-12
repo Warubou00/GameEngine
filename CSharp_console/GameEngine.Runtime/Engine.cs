@@ -678,6 +678,12 @@ public sealed class Engine : IDisposable
         AddSystem(new FreeCameraSystem());
         AddSystem(new OrbitCameraSystem());
         InputActions.Set(ProjectSettings.Current.InputActions, ProjectSettings.Current.InputAxes);   // 入力のアクションの既定 (ED6。ProjectSettings.Apply で置き換わる)
+
+        // v1.8 : クラッシュレポートに書くエンジンの様子 (落ちた時だけ呼ばれる)
+        CrashReporter.StateProvider = () =>
+            $"frame {Time.FrameCount}, total {Time.TotalTime:F1} s, play {Time.PlayTime:F1} s, dt {Time.DeltaTime * 1000:F2} ms, playing {IsPlaying}, " +
+            $"background {IsInBackground}, entities {World.EntityCount}, systems {_systems.Count}, client {ClientSize.Width}x{ClientSize.Height}";
+        CrashReporter.SetInfo("Playing", "False");
     }
 
     // ---------- エディター (ED3) ----------
@@ -700,6 +706,7 @@ public sealed class Engine : IDisposable
         _collisionSystem.ResetForPlay();
         _collisionCallbacks.Reset(Physics);
         IsPlaying = true;
+        CrashReporter.SetInfo("Playing", "True");   // v1.8 : C++ で落ちた時のレポートにも書く
     }
 
     /// <summary>
@@ -709,6 +716,7 @@ public sealed class Engine : IDisposable
     public void EndPlay()
     {
         IsPlaying = false;
+        CrashReporter.SetInfo("Playing", "False");   // v1.8
         _audioSystem.StopAll();
         GameEngine.UI.Manager?.Clear();   // v1.7 : 画面の UI も全部外す
     }
@@ -801,6 +809,71 @@ public sealed class Engine : IDisposable
         if (!_fixedSystems.Contains(system)) _fixedSystems.Add(system);
     }
 
+    // ---------- バックグラウンド (v1.8) ----------
+
+    /// <summary>
+    /// 後ろにある時 (他のアプリが前にある時) も動かし続けるか (既定 false。Unity の Run In Background と同じ)
+    /// false なら、最小化中 / 後ろにある間は Update・物理・アニメーション・UI・描画・音の処理を全部止めて、CPU / GPU を休ませる
+    /// 同じプロセスの窓 (ファイルのダイアログ / 箱) が前にある時は止めない。自動の確認 (テスト) では true にする
+    /// true でも最小化中は止める (以前と同じ。描いても見えないため)
+    /// </summary>
+    public bool RunInBackground { get; set; }
+
+    /// <summary>今、後ろにあって止めているか</summary>
+    public bool IsInBackground => _backgroundSince != 0;
+
+    /// <summary>止めた / 再開した時 (引数 = 止めたか)。エディターが表示を変えたりする</summary>
+    public event Action<bool>? BackgroundChanged;
+
+    private long _backgroundSince;      // 止めた時の Stopwatch の値 (0 = 動いている)
+    private bool _audioSuspended;
+    private bool _audioCanSuspend = true;
+    private readonly uint _processId = (uint)Environment.ProcessId;
+
+    // 前の窓がこのプロセスの物か
+    private bool isForeground()
+    {
+        var foreground = Win32NativeMethods.GetForegroundWindow();
+        if (foreground == IntPtr.Zero) return false;
+        Win32NativeMethods.GetWindowThreadProcessId(foreground, out var processId);
+        return processId == _processId;
+    }
+
+    // 止める必要があるか : 最小化中は常に。後ろにある時は RunInBackground = false の時だけ
+    private bool shouldPause()
+    {
+        if (_window.WindowState == FormWindowState.Minimized) return true;
+        return !RunInBackground && !isForeground();
+    }
+
+    private void enterBackground()
+    {
+        _backgroundSince = Stopwatch.GetTimestamp();
+        // 以前は最小化中も音の処理とパッドの振動が続いた。RunInBackground = true の最小化 (以前と同じ動き) だけは音を止めない
+        if (!RunInBackground || _window.WindowState != FormWindowState.Minimized)
+        {
+            if (_audioLoaded && _audioCanSuspend)
+            {
+                try { AudioNativeMethods.Audio_Suspend(); _audioSuspended = true; }
+                catch (EntryPointNotFoundException) { _audioCanSuspend = false; }   // 古い Audio.dll (v1.7 まで) : 音は止めない
+            }
+            for (int pad = 0; pad < GamepadNativeMethods.MaxPads; pad++) Gamepad.StopVibration(pad);
+            Gamepad.Update();   // 振動を止めるのは次の Controller_Update で送られるため
+        }
+        Console.WriteLine($"[Engine] Paused ({(_window.WindowState == FormWindowState.Minimized ? "minimized" : "in background")})");
+        BackgroundChanged?.Invoke(true);
+    }
+
+    private void leaveBackground()
+    {
+        var seconds = Stopwatch.GetElapsedTime(_backgroundSince).TotalSeconds;
+        _backgroundSince = 0;
+        if (_audioSuspended) { AudioNativeMethods.Audio_Resume(); _audioSuspended = false; }
+        Time.ResetFrameClock();   // 止めていた間を DeltaTime に入れない (以前は 0.1 秒で切った分、1 フレームだけ大きく進んだ)
+        Console.WriteLine($"[Engine] Resumed after {seconds:F1} s");
+        BackgroundChanged?.Invoke(false);
+    }
+
     // ウィンドウが閉じられるまで回す
     public void Run()
     {
@@ -809,12 +882,16 @@ public sealed class Engine : IDisposable
             Application.DoEvents();
             if (_closed) break;
 
-            // 最小化中は描画しても見えないので、CPU / GPU を休ませる
-            if (_window.WindowState == FormWindowState.Minimized)
+            // v1.8 : 最小化中 / 後ろにある間は何もしない (電力と CPU / GPU を使わない)
+            //   以前は最小化中だけ止め、Thread.Sleep(16) で 1 秒に 60 回起きていた。後ろにある時は全部動いていた
+            //   止めている間はメッセージが来るまで眠る (前に戻った / 窓の操作はすぐ分かる。100 ms ごとにも見直す)
+            if (shouldPause())
             {
-                Thread.Sleep(16);
+                if (!IsInBackground) enterBackground();
+                Win32NativeMethods.MsgWaitForMultipleObjectsEx(0, IntPtr.Zero, 100, Win32NativeMethods.QS_ALLINPUT, Win32NativeMethods.MWMO_INPUTAVAILABLE);
                 continue;
             }
+            if (IsInBackground) leaveBackground();
 
             Time.Tick();
             var start = Stopwatch.GetTimestamp();
@@ -921,6 +998,7 @@ public sealed class Engine : IDisposable
     public List<Entity> LoadScene(string path, bool additive = false)
     {
         var start = Stopwatch.GetTimestamp();
+        CrashReporter.SetInfo(additive ? "Scene (additive)" : "Scene", path);   // v1.8 : どのシーンで落ちたか
         if (!additive)
         {
             World.Clear();

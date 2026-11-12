@@ -27,6 +27,11 @@
     <EmbeddedResource Include="..\Project\Scripts\Editor\GameEditor.csproj" LogicalName="ProjectTemplate/GameEditor.csproj" Visible="false" />
   </ItemGroup>
 
+  <!-- v1.8 : クラッシュレポート。ランチャーは Runtime を参照しないので、ファイルだけ入れる (Core.dll が無いので C# の例外だけ) -->
+  <ItemGroup>
+    <Compile Include="..\GameEngine.Runtime\CrashReporter.cs" Link="CrashReporter.cs" />
+  </ItemGroup>
+
   <!-- エンジンの名前 / 版 / アイコン (Package 化で足した) -->
   <Import Project="..\Engine.props" />
 
