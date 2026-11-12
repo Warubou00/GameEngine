@@ -259,6 +259,10 @@ internal sealed class Inspector
             return drawAssetPath(label, clip.Path, ref value, path => _engine.Assets.LoadAnimationClip(path));
         case null when type == typeof(AnimationClip):
             return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadAnimationClip(path));
+        case WidgetAsset widget:   // v1.7 : UI
+            return drawAssetPath(label, widget.Path, ref value, path => _engine.Assets.LoadWidget(path));
+        case null when type == typeof(WidgetAsset):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadWidget(path));
         case CollisionMesh mesh:
             return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
         case null when type == typeof(CollisionMesh):
@@ -383,7 +387,8 @@ internal sealed class Inspector
         if (ImGui.BeginDragDropTarget())
         {
             var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material :
-                       typeof(T) == typeof(Skeleton) ? AssetKind.FbxSkeleton : typeof(T) == typeof(AnimationClip) ? AssetKind.FbxAnimation : AssetKind.Model;   // AN3
+                       typeof(T) == typeof(Skeleton) ? AssetKind.FbxSkeleton : typeof(T) == typeof(AnimationClip) ? AssetKind.FbxAnimation :
+                       typeof(T) == typeof(WidgetAsset) ? AssetKind.Widget : AssetKind.Model;   // AN3 / v1.7 : Widget
             var accepted = kind == AssetKind.Model ? ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel) : ProjectPanel.AcceptDrop(kind);   // AN2 : FBX のモデルも
             if (accepted is { } asset) { edited = asset.Path; entered = true; }
             ImGui.EndDragDropTarget();

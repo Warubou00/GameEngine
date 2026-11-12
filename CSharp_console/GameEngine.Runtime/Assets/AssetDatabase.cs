@@ -15,7 +15,7 @@ namespace GameEngine;
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 //   - 表示名 : .meta の "displayName" (エディターの Project に出す名前だけ。ファイル / フォルダの名前とパスはそのまま)
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script }
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script, Widget }
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -58,6 +58,7 @@ public sealed class AssetDatabase
         if (name.EndsWith(".scene.json"))    return AssetKind.Scene;
         if (name.EndsWith(".material.json")) return AssetKind.Material;
         if (name.EndsWith(".prefab.json"))   return AssetKind.Prefab;   // ED8
+        if (name.EndsWith(".widget.json"))   return AssetKind.Widget;   // v1.7 : UI
         if (name.EndsWith(".shadergraph.json")) return AssetKind.ShaderGraph;   // SH4
         if (name.EndsWith(".mod.fbx")) return AssetKind.FbxModel;       // AN1 : FBX は名前で種類が決まる (ただの .fbx は Other)
         if (name.EndsWith(".skl.fbx")) return AssetKind.FbxSkeleton;
@@ -292,7 +293,8 @@ public sealed class AssetDatabase
     public static (string Stem, string Extension) SplitName(string fileName, bool isFolder)
     {
         if (isFolder) return (fileName, "");
-        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json", ".shadergraph.json", ".mod.fbx", ".skl.fbx", ".anm.fbx" })
+        //   v1.7 : .widget.json も (以前は無く、"New Widget.widget.json" の名前を変えると ".widget" が消えて Widget として読めなくなった)
+        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json", ".shadergraph.json", ".widget.json", ".mod.fbx", ".skl.fbx", ".anm.fbx" })
             if (fileName.EndsWith(compound, StringComparison.OrdinalIgnoreCase)) return (fileName[..^compound.Length], fileName[^compound.Length..]);
         var extension = Path.GetExtension(fileName);
         return (fileName[..^extension.Length], extension);

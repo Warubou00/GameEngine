@@ -41,6 +41,8 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.hlsl
 # シェーダーグラフも入れる (SH4)
 !CSharp_console/Project/Assets/**/*.shadergraph.json
+# UI の Widget (v1.7。見本の HUD / Menu / Popup)
+!CSharp_console/Project/Assets/**/*.widget.json
 # 自作の FBX のサンプル (AN1。Assets > Create FBX Samples で作り直せる)
 !CSharp_console/Project/Assets/Samples/Fbx/*.fbx
 !CSharp_console/Project/Assets/Textures/Noise/*.png

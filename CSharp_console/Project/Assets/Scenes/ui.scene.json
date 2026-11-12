@@ -1,0 +1,212 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "c1dfaa6d-b02b-4a3c-90ff-eae8c3a1d8a2",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "Intensity": 1.8,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.36,
+            -0.28,
+            0.11,
+            0.88
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "acca8091-6a43-4fae-8c0d-f02fbb752ff8",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            4,
+            -10
+          ],
+          "Rotation": [
+            0.13053,
+            0,
+            0,
+            0.99144
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "45b0ffd3-fc08-4878-93ba-d091e65c4ef2",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Ground.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            20,
+            1,
+            20
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "d8b4c913-5b72-4e8e-a191-fc8bfb09596a",
+      "name": "Cube",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -2,
+            1.5,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            2,
+            2,
+            2
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "a93da5bf-4565-4bf4-8587-3cf10bdd145e",
+      "name": "HUD",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.UIWidget",
+          "Widget": {
+            "path": "Assets/UI/HUD.widget.json"
+          },
+          "ZOrder": 0,
+          "Visible": true
+        }
+      ]
+    },
+    {
+      "id": "a10b1577-06d5-4a40-a1b4-0e52af7d1da2",
+      "name": "Menu",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.UIWidget",
+          "Widget": {
+            "path": "Assets/UI/Menu.widget.json"
+          },
+          "ZOrder": 10,
+          "Visible": true
+        }
+      ]
+    },
+    {
+      "id": "128d75b1-f3e6-461e-8fa9-313ad33b5b9e",
+      "name": "Popup",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.UIWidget",
+          "Widget": {
+            "path": "Assets/UI/Popup.widget.json"
+          },
+          "ZOrder": 20,
+          "Visible": false
+        }
+      ]
+    },
+    {
+      "id": "9072d5a6-4265-4e71-a2cf-82c5d85fa9e7",
+      "name": "UI Test",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine_console.UITest",
+          "SpinSpeed": 90
+        }
+      ]
+    }
+  ]
+}

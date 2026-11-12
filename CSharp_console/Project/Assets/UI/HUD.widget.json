@@ -1,0 +1,339 @@
+{
+  "format": "TsumugiWidget",
+  "version": 1,
+  "designSize": [
+    1920,
+    1080
+  ],
+  "root": {
+    "type": "CanvasPanel",
+    "name": "Root",
+    "children": [
+      {
+        "type": "Border",
+        "name": "InfoPanel",
+        "props": {
+          "Background": {
+            "Image": "",
+            "Tint": [
+              0.05,
+              0.07,
+              0.1,
+              0.75
+            ],
+            "DrawAs": "RoundedBox",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 10,
+            "ImageSize": [
+              0,
+              0
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              0,
+              0
+            ],
+            "Maximum": [
+              0,
+              0
+            ]
+          },
+          "Offsets": {
+            "Left": 32,
+            "Top": 32,
+            "Right": 0,
+            "Bottom": 0
+          },
+          "AutoSize": true
+        },
+        "children": [
+          {
+            "type": "VerticalBox",
+            "name": "InfoBox",
+            "slot": {
+              "Padding": {
+                "Left": 20,
+                "Top": 14,
+                "Right": 20,
+                "Bottom": 16
+              }
+            },
+            "children": [
+              {
+                "type": "TextBlock",
+                "name": "Title",
+                "props": {
+                  "Text": "UI テスト (HUD : z 0)",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 30,
+                    "Bold": true,
+                    "Italic": false
+                  },
+                  "ColorAndOpacity": [
+                    1,
+                    0.85,
+                    0.4,
+                    1
+                  ],
+                  "ShadowOffset": [
+                    2,
+                    2
+                  ]
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 0,
+                    "Right": 0,
+                    "Bottom": 8
+                  }
+                }
+              },
+              {
+                "type": "HorizontalBox",
+                "name": "HpRow",
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 4,
+                    "Right": 0,
+                    "Bottom": 4
+                  }
+                },
+                "children": [
+                  {
+                    "type": "TextBlock",
+                    "name": "HpLabel",
+                    "props": {
+                      "Text": "HP",
+                      "Font": {
+                        "Family": "Meiryo",
+                        "Size": 22,
+                        "Bold": false,
+                        "Italic": false
+                      }
+                    },
+                    "slot": {
+                      "Padding": {
+                        "Left": 0,
+                        "Top": 0,
+                        "Right": 12,
+                        "Bottom": 0
+                      },
+                      "VerticalAlignment": "Center"
+                    }
+                  },
+                  {
+                    "type": "ProgressBar",
+                    "name": "HpBar",
+                    "props": {
+                      "Percent": 0.75,
+                      "FillColorAndOpacity": [
+                        0.3,
+                        0.9,
+                        0.4,
+                        1
+                      ],
+                      "DesiredBarSize": [
+                        320,
+                        22
+                      ]
+                    },
+                    "slot": {
+                      "VerticalAlignment": "Center"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "TextBlock",
+                "name": "Score",
+                "props": {
+                  "Text": "Score : 0",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 24,
+                    "Bold": false,
+                    "Italic": false
+                  }
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 6,
+                    "Right": 0,
+                    "Bottom": 0
+                  }
+                }
+              },
+              {
+                "type": "TextBlock",
+                "name": "Hello",
+                "props": {
+                  "Text": "名前を入れて Enter",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 20,
+                    "Bold": false,
+                    "Italic": false
+                  },
+                  "ColorAndOpacity": [
+                    0.7,
+                    0.85,
+                    1,
+                    1
+                  ]
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 6,
+                    "Right": 0,
+                    "Bottom": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Border",
+        "name": "HelpPanel",
+        "props": {
+          "Background": {
+            "Image": "",
+            "Tint": [
+              0.05,
+              0.07,
+              0.1,
+              0.7
+            ],
+            "DrawAs": "RoundedBox",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 8,
+            "ImageSize": [
+              0,
+              0
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              0.5,
+              1
+            ],
+            "Maximum": [
+              0.5,
+              1
+            ]
+          },
+          "Offsets": {
+            "Left": 0,
+            "Top": -20,
+            "Right": 0,
+            "Bottom": 0
+          },
+          "Alignment": [
+            0.5,
+            1
+          ],
+          "AutoSize": true
+        },
+        "children": [
+          {
+            "type": "TextBlock",
+            "name": "Help",
+            "props": {
+              "Text": "1 : HUD (コンポーネントの Visible)   2 : Menu (コードで IsVisible)   3 : Popup   4 : コードで作るトースト   Z : Menu と Popup の重なり順を入れ替え",
+              "Font": {
+                "Family": "Meiryo",
+                "Size": 20,
+                "Bold": false,
+                "Italic": false
+              },
+              "ColorAndOpacity": [
+                1,
+                1,
+                1,
+                0.95
+              ]
+            },
+            "slot": {
+              "Padding": {
+                "Left": 16,
+                "Top": 6,
+                "Right": 16,
+                "Bottom": 8
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "Image",
+        "name": "Crosshair",
+        "props": {
+          "Brush": {
+            "Image": "",
+            "Tint": [
+              1,
+              1,
+              1,
+              0.8
+            ],
+            "DrawAs": "RoundedBox",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 6,
+            "ImageSize": [
+              12,
+              12
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              0.5,
+              0.5
+            ],
+            "Maximum": [
+              0.5,
+              0.5
+            ]
+          },
+          "Offsets": {
+            "Left": 0,
+            "Top": 0,
+            "Right": 12,
+            "Bottom": 12
+          },
+          "Alignment": [
+            0.5,
+            0.5
+          ]
+        }
+      }
+    ]
+  }
+}

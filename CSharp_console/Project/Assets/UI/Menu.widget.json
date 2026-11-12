@@ -1,0 +1,1675 @@
+{
+  "format": "TsumugiWidget",
+  "version": 1,
+  "designSize": [
+    1920,
+    1080
+  ],
+  "root": {
+    "type": "CanvasPanel",
+    "name": "Root",
+    "children": [
+      {
+        "type": "Border",
+        "name": "MenuPanel",
+        "props": {
+          "Background": {
+            "Image": "",
+            "Tint": [
+              0.08,
+              0.09,
+              0.12,
+              0.92
+            ],
+            "DrawAs": "RoundedBox",
+            "Margin": {
+              "Left": 0,
+              "Top": 0,
+              "Right": 0,
+              "Bottom": 0
+            },
+            "CornerRadius": 12,
+            "ImageSize": [
+              0,
+              0
+            ]
+          }
+        },
+        "slot": {
+          "Anchors": {
+            "Minimum": [
+              1,
+              0.5
+            ],
+            "Maximum": [
+              1,
+              0.5
+            ]
+          },
+          "Offsets": {
+            "Left": -40,
+            "Top": 0,
+            "Right": 460,
+            "Bottom": 760
+          },
+          "Alignment": [
+            1,
+            0.5
+          ],
+          "Padding": {
+            "Left": 0,
+            "Top": 0,
+            "Right": 0,
+            "Bottom": 0
+          }
+        },
+        "children": [
+          {
+            "type": "VerticalBox",
+            "name": "MenuBox",
+            "slot": {
+              "Padding": {
+                "Left": 24,
+                "Top": 20,
+                "Right": 24,
+                "Bottom": 20
+              }
+            },
+            "children": [
+              {
+                "type": "TextBlock",
+                "name": "MenuTitle",
+                "props": {
+                  "Text": "Menu (z 10)",
+                  "Font": {
+                    "Family": "Meiryo",
+                    "Size": 32,
+                    "Bold": true,
+                    "Italic": false
+                  }
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 0,
+                    "Right": 0,
+                    "Bottom": 12
+                  }
+                }
+              },
+              {
+                "type": "Button",
+                "name": "OpenPopup",
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 4,
+                    "Right": 0,
+                    "Bottom": 4
+                  }
+                },
+                "children": [
+                  {
+                    "type": "TextBlock",
+                    "name": "OpenPopupText",
+                    "props": {
+                      "Text": "Popup を開く",
+                      "Font": {
+                        "Family": "Meiryo",
+                        "Size": 22,
+                        "Bold": false,
+                        "Italic": false
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "Button",
+                "name": "AddScore",
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 4,
+                    "Right": 0,
+                    "Bottom": 4
+                  }
+                },
+                "children": [
+                  {
+                    "type": "TextBlock",
+                    "name": "AddScoreText",
+                    "props": {
+                      "Text": "スコア +10",
+                      "Font": {
+                        "Family": "Meiryo",
+                        "Size": 22,
+                        "Bold": false,
+                        "Italic": false
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "HorizontalBox",
+                "name": "Tabs",
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 12,
+                    "Right": 0,
+                    "Bottom": 4
+                  }
+                },
+                "children": [
+                  {
+                    "type": "Button",
+                    "name": "Tab1",
+                    "slot": {
+                      "Size": "Fill",
+                      "Padding": {
+                        "Left": 0,
+                        "Top": 0,
+                        "Right": 4,
+                        "Bottom": 0
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "TextBlock",
+                        "name": "Tab1Text",
+                        "props": {
+                          "Text": "設定",
+                          "Font": {
+                            "Family": "Meiryo",
+                            "Size": 22,
+                            "Bold": false,
+                            "Italic": false
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Tab2",
+                    "slot": {
+                      "Size": "Fill",
+                      "Padding": {
+                        "Left": 4,
+                        "Top": 0,
+                        "Right": 0,
+                        "Bottom": 0
+                      }
+                    },
+                    "children": [
+                      {
+                        "type": "TextBlock",
+                        "name": "Tab2Text",
+                        "props": {
+                          "Text": "リスト",
+                          "Font": {
+                            "Family": "Meiryo",
+                            "Size": 22,
+                            "Bold": false,
+                            "Italic": false
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "WidgetSwitcher",
+                "name": "Pages",
+                "slot": {
+                  "Size": "Fill",
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 8,
+                    "Right": 0,
+                    "Bottom": 0
+                  }
+                },
+                "children": [
+                  {
+                    "type": "VerticalBox",
+                    "name": "SettingsPage",
+                    "children": [
+                      {
+                        "type": "CheckBox",
+                        "name": "SpinCheck",
+                        "props": {
+                          "IsChecked": true
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 4,
+                            "Right": 0,
+                            "Bottom": 4
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "SpinLabel",
+                            "props": {
+                              "Text": "箱を回す",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 22,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "TextBlock",
+                        "name": "SpeedLabel",
+                        "props": {
+                          "Text": "回る速さ : 90",
+                          "Font": {
+                            "Family": "Meiryo",
+                            "Size": 20,
+                            "Bold": false,
+                            "Italic": false
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 8,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        }
+                      },
+                      {
+                        "type": "Slider",
+                        "name": "SpeedSlider",
+                        "props": {
+                          "Value": 90,
+                          "MinValue": 0,
+                          "MaxValue": 360,
+                          "StepSize": 1
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 8
+                          }
+                        }
+                      },
+                      {
+                        "type": "EditableTextBox",
+                        "name": "NameBox",
+                        "props": {
+                          "HintText": "名前を入力 (Enter で確定)",
+                          "MinDesiredWidth": 300
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 4,
+                            "Right": 0,
+                            "Bottom": 4
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "ScrollBox",
+                    "name": "ListPage",
+                    "children": [
+                      {
+                        "type": "Border",
+                        "name": "Item0",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText0",
+                            "props": {
+                              "Text": "リストの項目 1  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item1",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText1",
+                            "props": {
+                              "Text": "リストの項目 2  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item2",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText2",
+                            "props": {
+                              "Text": "リストの項目 3  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item3",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText3",
+                            "props": {
+                              "Text": "リストの項目 4  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item4",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText4",
+                            "props": {
+                              "Text": "リストの項目 5  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item5",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText5",
+                            "props": {
+                              "Text": "リストの項目 6  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item6",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText6",
+                            "props": {
+                              "Text": "リストの項目 7  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item7",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText7",
+                            "props": {
+                              "Text": "リストの項目 8  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item8",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText8",
+                            "props": {
+                              "Text": "リストの項目 9  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item9",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText9",
+                            "props": {
+                              "Text": "リストの項目 10  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item10",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText10",
+                            "props": {
+                              "Text": "リストの項目 11  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item11",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText11",
+                            "props": {
+                              "Text": "リストの項目 12  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item12",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText12",
+                            "props": {
+                              "Text": "リストの項目 13  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item13",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText13",
+                            "props": {
+                              "Text": "リストの項目 14  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item14",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.12,
+                              0.13,
+                              0.17,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText14",
+                            "props": {
+                              "Text": "リストの項目 15  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "Border",
+                        "name": "Item15",
+                        "props": {
+                          "Background": {
+                            "Image": "",
+                            "Tint": [
+                              0.15,
+                              0.17,
+                              0.22,
+                              1
+                            ],
+                            "DrawAs": "RoundedBox",
+                            "Margin": {
+                              "Left": 0,
+                              "Top": 0,
+                              "Right": 0,
+                              "Bottom": 0
+                            },
+                            "CornerRadius": 4,
+                            "ImageSize": [
+                              0,
+                              0
+                            ]
+                          }
+                        },
+                        "slot": {
+                          "Padding": {
+                            "Left": 0,
+                            "Top": 2,
+                            "Right": 0,
+                            "Bottom": 2
+                          }
+                        },
+                        "children": [
+                          {
+                            "type": "TextBlock",
+                            "name": "ItemText15",
+                            "props": {
+                              "Text": "リストの項目 16  (ホイール / つまみで動く)",
+                              "Font": {
+                                "Family": "Meiryo",
+                                "Size": 20,
+                                "Bold": false,
+                                "Italic": false
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "UniformGridPanel",
+                "name": "Colors",
+                "props": {
+                  "SlotPadding": {
+                    "Left": 4,
+                    "Top": 4,
+                    "Right": 4,
+                    "Bottom": 4
+                  },
+                  "MinDesiredSlotHeight": 40
+                },
+                "slot": {
+                  "Padding": {
+                    "Left": 0,
+                    "Top": 10,
+                    "Right": 0,
+                    "Bottom": 0
+                  }
+                },
+                "children": [
+                  {
+                    "type": "Button",
+                    "name": "Color0",
+                    "props": {
+                      "BackgroundColor": [
+                        1,
+                        0.4,
+                        0.4,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 0,
+                      "Column": 0,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Color1",
+                    "props": {
+                      "BackgroundColor": [
+                        0.4,
+                        1,
+                        0.5,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 0,
+                      "Column": 1,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Color2",
+                    "props": {
+                      "BackgroundColor": [
+                        0.4,
+                        0.6,
+                        1,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 0,
+                      "Column": 2,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Color3",
+                    "props": {
+                      "BackgroundColor": [
+                        1,
+                        0.9,
+                        0.3,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 1,
+                      "Column": 0,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Color4",
+                    "props": {
+                      "BackgroundColor": [
+                        0.9,
+                        0.5,
+                        1,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 1,
+                      "Column": 1,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "name": "Color5",
+                    "props": {
+                      "BackgroundColor": [
+                        1,
+                        1,
+                        1,
+                        1
+                      ],
+                      "MinimumSize": [
+                        40,
+                        32
+                      ],
+                      "Normal": {
+                        "Image": "",
+                        "Tint": [
+                          0.85,
+                          0.85,
+                          0.85,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Hovered": {
+                        "Image": "",
+                        "Tint": [
+                          1,
+                          1,
+                          1,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      },
+                      "Pressed": {
+                        "Image": "",
+                        "Tint": [
+                          0.6,
+                          0.6,
+                          0.6,
+                          1
+                        ],
+                        "DrawAs": "RoundedBox",
+                        "Margin": {
+                          "Left": 0,
+                          "Top": 0,
+                          "Right": 0,
+                          "Bottom": 0
+                        },
+                        "CornerRadius": 4,
+                        "ImageSize": [
+                          0,
+                          0
+                        ]
+                      }
+                    },
+                    "slot": {
+                      "Row": 1,
+                      "Column": 2,
+                      "HorizontalAlignment": "Fill",
+                      "VerticalAlignment": "Fill"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
