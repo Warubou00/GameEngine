@@ -22,6 +22,8 @@ internal sealed class Inspector
     public Action<Entity, Type, string?, string>? Written;
     // コンポーネントの右クリック > Open Reference (ED9。スクリプトリファレンスで型を出す)
     public Action<Type>? OpenReference;
+    // コリジョンアセットの欄をダブルクリック : コリジョンの窓で開く (v1.9)
+    public Action<string>? OpenCollision;
     private World World => _engine.World;
     private string _addFilter = "";
     private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)
@@ -263,6 +265,21 @@ internal sealed class Inspector
             return drawAssetPath(label, widget.Path, ref value, path => _engine.Assets.LoadWidget(path));
         case null when type == typeof(WidgetAsset):
             return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadWidget(path));
+        case CollisionAsset collision:   // v1.9 : コリジョンアセット (ダブルクリックで窓を開く)
+        {
+            var changed = drawAssetPath(label, collision.Path, ref value, path => _engine.Assets.LoadCollisionAsset(path));
+            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) OpenCollision?.Invoke(collision.Path);
+            return changed;
+        }
+        case null when type == typeof(CollisionAsset):
+            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadCollisionAsset(path));
+        case null when type.IsArray:   // v1.9 : まだ作っていない配列 (struct の既定値) は空の配列にして出す
+        {
+            var empty = Array.CreateInstance(type.GetElementType()!, 0);
+            object? boxed = empty;
+            if (drawList(label, empty, ref boxed, owner)) { value = boxed; return true; }
+            return false;
+        }
         case CollisionMesh mesh:
             return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
         case null when type == typeof(CollisionMesh):
@@ -388,7 +405,7 @@ internal sealed class Inspector
         {
             var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material :
                        typeof(T) == typeof(Skeleton) ? AssetKind.FbxSkeleton : typeof(T) == typeof(AnimationClip) ? AssetKind.FbxAnimation :
-                       typeof(T) == typeof(WidgetAsset) ? AssetKind.Widget : AssetKind.Model;   // AN3 / v1.7 : Widget
+                       typeof(T) == typeof(WidgetAsset) ? AssetKind.Widget : typeof(T) == typeof(CollisionAsset) ? AssetKind.Collision : AssetKind.Model;   // AN3 / v1.7 : Widget / v1.9 : コリジョン
             var accepted = kind == AssetKind.Model ? ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel) : ProjectPanel.AcceptDrop(kind);   // AN2 : FBX のモデルも
             if (accepted is { } asset) { edited = asset.Path; entered = true; }
             ImGui.EndDragDropTarget();

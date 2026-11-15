@@ -103,6 +103,10 @@ public static class SceneSerializer
         RegisterConverter<WidgetAsset?>(
             (w, v, _) => writeAsset(w, v?.Path),
             (e, c) => readAsset<WidgetAsset?>(e, c, path => c.Assets!.LoadWidget(path), null));
+        // v1.9 : コリジョンアセット (.collision.json)
+        RegisterConverter<CollisionAsset?>(
+            (w, v, _) => writeAsset(w, v?.Path),
+            (e, c) => readAsset<CollisionAsset?>(e, c, path => c.Assets!.LoadCollisionAsset(path), null));
     }
 
     // ---------------------------------------------------------------------

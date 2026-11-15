@@ -58,6 +58,19 @@ extern "C"
 		if (g_world) g_world->DestroyBody(body);
 	}
 
+	// 複合の体 (v1.9 コリジョンアセット) : 部品をまとめて作る (1 回の呼び出し)。1 つ目が代表 (位置 / 剛体 / 消す はこのハンドルで)
+	// 同じ group (0 以外) の体どうしは調べない。戻り値は作れた数 (outHandles に count 個。作れなかった所は INVALID_HANDLE)
+	PHYSICS_API uint32_t Physics_CreateCompound(const Physics::PartDesc* parts, uint32_t count, uint32_t group, uint32_t* outHandles)
+	{
+		if (!g_world || !parts || !outHandles || count == 0) return 0;
+		return g_world->CreateCompound(parts, count, group, outHandles);
+	}
+
+	PHYSICS_API void Physics_SetBodyGroup(uint32_t body, uint32_t group)
+	{
+		if (g_world) g_world->SetBodyGroup(body, group);
+	}
+
 	// 動いた体の位置 / 回転 / 大きさ (まとめて)
 	PHYSICS_API void Physics_SetTransforms(const Physics::BodyTransform* items, uint32_t count)
 	{

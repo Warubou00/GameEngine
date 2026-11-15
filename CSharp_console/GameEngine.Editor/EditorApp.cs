@@ -48,6 +48,7 @@ internal sealed partial class EditorApp
     private readonly PreviewWindow _preview;     // AN5
     private bool    _showGraph;
     private readonly WidgetDesigner _widgetDesigner;   // v1.7 : UI
+    private readonly CollisionEditor _collisionEditor;  // v1.9 : コリジョンアセット
     private bool    _showWidgetDesigner;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
@@ -99,10 +100,13 @@ internal sealed partial class EditorApp
         _widgetDesigner = new WidgetDesigner(engine, database);   // v1.7
         _project.OpenWidget = path => OpenWidget(path);
         _preview = new PreviewWindow(engine, database);     // AN5
+        _collisionEditor = new CollisionEditor(engine, database);   // v1.9
+        _project.OpenCollision = path => OpenCollision(path);
         _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
+        _inspector.OpenCollision = path => OpenCollision(path);   // v1.9
         _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
         _inspector.BuildBones = entity => BuildBones(entity).Count;    // AN3
         _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
@@ -266,6 +270,7 @@ internal sealed partial class EditorApp
         _graph.Draw(ref _showGraph);   // SH4
         _widgetDesigner.Draw(ref _showWidgetDesigner);   // v1.7
         _preview.Draw();               // AN5
+        _collisionEditor.Draw();       // v1.9
         _shaders?.Update();
         _scripts.Update();
 
@@ -377,6 +382,13 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.MenuItem("Shader Graph", null, ref _showGraph);   // SH4
             ImGui.MenuItem("Widget Designer", null, ref _showWidgetDesigner);   // v1.7
+            if (ImGui.MenuItem("Collision Editor", null, _collisionEditor.IsOpen))   // v1.9 : 選んだ物の CompoundCollider の最初のアセット
+            {
+                if (_collisionEditor.IsOpen) _collisionEditor.Close();
+                else if (World.IsAlive(Selected) && World.Has<CompoundCollider>(Selected) &&
+                         World.Get<CompoundCollider>(Selected).Assets?.FirstOrDefault(a => a != null) is { } collision) OpenCollision(collision.Path);
+                else Console.WriteLine("[Collision] Double-click a .collision.json in Project (right-click > Create > Collision Asset to make one)");
+            }
             if (ImGui.MenuItem("FBX Preview", null, _preview.IsOpen))   // AN5
             {
                 if (_preview.IsOpen) _preview.Close();
@@ -443,6 +455,7 @@ internal sealed partial class EditorApp
         if (_graph.HasFocus) return;   // シェーダーグラフの窓が自分で使う (元に戻す / 消す / 複製。SH4)
         if (_widgetDesigner.HasFocus) return;   // v1.7 : Widget Designer が使う (元に戻す / 消す / 複製)
         if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
+        if (_collisionEditor.HasFocus) return;   // v1.9 : コリジョンの窓 (元に戻す / 消す / W E R)
         if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);

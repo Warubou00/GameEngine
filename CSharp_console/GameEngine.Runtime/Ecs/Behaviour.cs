@@ -290,6 +290,9 @@ internal interface ICollisionReceiver
 //   GetComponent<U>() は相手のコンポーネント (Unity の collision.gameObject.GetComponent)
 //   TryGetContact : 接触点と法線 (相手から自分へ向く = 自分が押し返される向き)。Exit とトリガーには無い
 //   接触点は、初めて聞かれた時にそのフレームの分を 1 回だけ C++ から取る (聞かなければ取らない)
+//   SelfPart / OtherPart (v1.9) : CompoundCollider (コリジョンアセット) の部品なら、どのアセット (AssetIndex) の
+//   どのコライダー (Id / Name) か。ふつうの Collider は IsPart = false (Id = -1)。部品の組ごとに呼ばれる
+//     例 : if (collision.SelfPart.Id == 3) { /* 頭に当たった */ }
 // ==========================================================================
 public readonly struct Collision
 {
@@ -298,13 +301,23 @@ public readonly struct Collision
     public Entity Self { get; }
     public Entity Other { get; }
     public bool IsTrigger { get; }
+    /// <summary>自分の当たった部品 (コリジョンアセット。ふつうの Collider は IsPart = false)</summary>
+    public ColliderPart SelfPart { get; }
+    /// <summary>相手の当たった部品 (コリジョンアセット。ふつうの Collider は IsPart = false)</summary>
+    public ColliderPart OtherPart { get; }
+    /// <summary>自分の当たったコライダーの ID (SelfPart.Id。ふつうの Collider は -1)</summary>
+    public int SelfColliderId => SelfPart.Id;
+    /// <summary>相手の当たったコライダーの ID (OtherPart.Id。ふつうの Collider は -1)</summary>
+    public int OtherColliderId => OtherPart.Id;
 
-    internal Collision(CollisionCallbackSystem source, Entity self, Entity other, bool isTrigger)
+    internal Collision(CollisionCallbackSystem source, Entity self, Entity other, bool isTrigger, ColliderPart selfPart = default, ColliderPart otherPart = default)
     {
         _source = source;
         Self = self;
         Other = other;
         IsTrigger = isTrigger;
+        SelfPart = selfPart;
+        OtherPart = otherPart;
     }
 
     public World World => _source.World;
@@ -320,7 +333,8 @@ public readonly struct Collision
     public bool HasComponent<U>() where U : struct => World.Has<U>(Other);
 
     /// <summary>接触点と法線 (相手から自分へ向く単位ベクトル)。今の接触が無ければ false</summary>
-    public bool TryGetContact(out Vector3 point, out Vector3 normal) => _source.TryGetContact(Self, Other, out point, out normal);
+    public bool TryGetContact(out Vector3 point, out Vector3 normal) => _source.TryGetContact(Self, SelfPart, Other, OtherPart, out point, out normal);
 
-    public override string ToString() => $"Collision({Self} - {Other}{(IsTrigger ? ", trigger" : "")})";
+    public override string ToString() =>
+        $"Collision({Self}{(SelfPart.IsPart ? $"[{SelfPart}]" : "")} - {Other}{(OtherPart.IsPart ? $"[{OtherPart}]" : "")}{(IsTrigger ? ", trigger" : "")})";
 }

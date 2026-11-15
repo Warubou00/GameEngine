@@ -1,0 +1,119 @@
+v1.9.0.0 : コリジョンアセット (.collision.json / CompoundCollider / コリジョンの窓 / 部品ごとの衝突のメソッド)
+ブランチ : feature/v19-collision-asset (未コミット)
+日付 : 2026-11-15
+
+■ 依頼と対応
+1. コライダーをまとめるアセット (Box / Capsule を組み合わせて、モデルの複雑な当たりを表す) … 対応
+   - 新しいアセットの種類 : .collision.json (AssetKind.Collision。Project の表示 "Collide")
+   - ノードの形 : Box / Capsule / Sphere / Empty (形なし。子をまとめるだけ)
+   - Project の右クリック > Create > Collision Asset で作る (箱 1 つ、ID 1)
+   - 見本 : Assets/Collisions/Humanoid.collision.json (人型 8 コライダー、プレビューは Tomimi.pmx)
+
+2. ダブルクリックで新しい窓を開いてプレビュー / プロジェクトのモデルを選んで一緒に表示 … 対応
+   - コリジョンの窓 (Collision Editor)。Project のダブルクリック / View > Collision Editor / --open-collision <path> /
+     Inspector の CompoundCollider のアセットの欄をダブルクリック
+   - シーンとは別の小さな世界 (PreviewScene。FBX プレビューと同じ仕組み) に描く
+   - Model の欄 : プロジェクトの Model / FBX モデルから選ぶ (Project からドラッグでも)。アセットに previewModel として覚える
+   - 右ドラッグ : 回す / 中ドラッグ : ずらす / ホイール / F : 全体 / クリック : コライダーを選ぶ /
+     ギズモ (W 移動 / E 回転 / R 大きさ。Local 切り替え) / X-Ray (モデルの手前に描く) / Model / Grid の表示切り替え
+   - 変えると少し後に自動で保存 (Ctrl+S ですぐ)。Ctrl+Z / Ctrl+Y、Delete、Ctrl+D
+   - シーンと同じ CollisionAsset を直に変えるので、置いてある物 (再生中も) にすぐ反映する
+
+3. 親子関係 … 対応
+   - Hierarchy の木。ドラッグで親を変える (持ち主から見た位置 / 回転は変わらない。輪になる組は断る) / 何も無い所へ落とすと一番上
+   - 右クリック : Add Box / Capsule / Sphere / Empty (子として)、Duplicate (子孫ごと、新しい ID)、Unparent、Delete (子孫ごと)
+   - 位置 / 回転は親から見た値。読む時に親をたどって「持ち主から見た値」の平らな表 (Parts) を 1 回だけ作る
+
+4. 親子が選ばれている時は色を変えて分かるように … 対応
+   - 選んだノード : 黄色 / その子孫 : 橙色 (木の字も橙色) / 他 : 緑 / トリガー : 水色。親と子の中心を線で結ぶ
+   - 選んだ物と子孫は最後に描いて上に重ねる。選んだノードの名前と ID を画面に出す
+
+5. ID を振れる … 対応
+   - ノードごとに ID (整数) と名前。重なった ID は木と欄で赤くし、下に「Duplicate IDs」を出す。足す時は空いている一番小さい ID
+
+6. 複数のコリジョンアセットを持ち、機能するコンポーネント (Project に作らず、エンジン側に隠す) … 対応
+   - GameEngine.Runtime の CompoundCollider (Add Component > Physics > Compound Collider)
+       Assets : CollisionAsset?[] (いくつでも) / Enabled
+   - Rigidbody と一緒に付けると、全部の部品で 1 つの剛体 (後述)。Static も付いた物は動かない物
+   - シーンにはアセットのパスで保存
+
+7. OnCollisionEnter / Stay / Exit (OnTrigger* も) でどのアセットのどのコライダー (ID) が当たったか受け取れる … 対応
+   - Collision.SelfPart / OtherPart (ColliderPart : IsPart / Asset / AssetIndex / Id / Name / IsTrigger)
+     Collision.SelfColliderId / OtherColliderId (ふつうの Collider は -1)
+     例 : protected override void OnCollisionEnter(ref Player p, in Collision c) { if (c.SelfColliderId == 3) { /* 頭 */ } }
+   - イベントは部品の組ごと (頭と体が同時に当たれば 2 回)。TryGetContact も部品の組の接触点
+   - engine.Physics.Events (CollisionEvent.PartA / PartB)、Raycast (RaycastHit.Part)、GetContacts (Contact.PartA / PartB) も部品が分かる
+   - 既存のシグネチャは変えていない (足した値は既定値付き。今のスクリプトはそのまま動く)
+
+8. アセットの中のコライダーどうしは当たらない … 対応
+   - C++ の体に Group (持ち主ごとの番号) を足し、同じ Group の組は「組の表に入れる前」に捨てる (形の判定もしない)
+   - 同じエンティティに Collider もある時は、その Collider とも当たらない (同じ Group を付ける)
+
+9. 最適化 … 対応 (下の計測)
+   - 部品の体は 1 回の P/Invoke (Physics_CreateCompound) でまとめて作る
+   - 動いた時は持ち主の Transform を代表の 1 つにだけ送る。C++ の SetTransforms が部品へ広げる (C# で部品の行列を掛けない)
+   - 作り直すのはアセットの中身 (Version) / 配列 / Static / Collider の有無が変わった時だけ (毎フレームは参照と版の比較だけ)
+   - 体の番号 → (エンティティ, 部品) は配列で引く (O(1))
+   - 自分の部品どうしはブロードフェーズで捨てる (組にならない)
+
+■ 剛体 (CompoundCollider + Rigidbody。推奨案で今回に入れた)
+- C++ : 代表の体だけが剛体の値 (_rigidData) を持ち、部品は Motion / RigidSlot / Solver を代表と同じにする (syncParts)
+  → 部品の接触は全部 代表の SolverBody に掛かる (1 つの剛体)。組の表 / 接触 / 色分け は体ごとのまま (変えていない)
+- 質量 = Rigidbody.Mass を部品の体積で分ける (トリガーの部品は入れない)。重心 = 部品の中心の重み付きの平均
+- 慣性 = Σ (部品の向きに回した部品の慣性 + 平行軸の定理)。持ち主の向きの 3x3 で持つ (単体の剛体は以前どおり対角)
+- 接触の点の腕 (r) は SolverBody の重心から (以前は形の中心。単体の剛体は同じ値なので結果は変わらない)
+- 大きさが変わった時は、次の Simulate の始めに求め直す (部品は並列に形を直すので、代表だけが印を付ける)
+- 同じエンティティに Collider もある時は、剛体は Collider の方 (部品は Transform について動くだけ)
+
+■ その他の直し
+- 以前 (v1.8 まで) : 体を作り直した / 消した同じフレームに体の番号が使い回されると、C++ が返す「離れた」のイベントの相手が
+  分からず、OnCollisionStay が呼ばれ続けることがありえた → 消した体の持ち主を覚えて (_retired)、そのフレームのうちに Exit を受け取る
+
+■ 変えたファイル
+C++ (Physics.dll)
+  common.h            : PartDesc (112 byte)
+  physicsWorld.h/.cpp : Body.Group / Compound / LocalRotation、CreateCompound / SetBodyGroup / syncParts、
+                        updateShape (部品の向き)、SetTransforms (代表 → 部品へ広げる)、canCollide (同じ Group)、DestroyBody (部品も)
+  solver.cpp          : 複合の剛体 (updateCompoundMass / worldInvInertia / comLocalOf / comWorldOf)、接触の腕を SolverBody の重心から
+  physicsDll.cpp      : Physics_CreateCompound / Physics_SetBodyGroup
+C# Runtime
+  Assets/CollisionAsset.cs (新)        : CollisionNode / CollisionAsset (JSON / 親子 / Parts / Version) / CollisionPart / ColliderPart
+  Assets/AssetManager.Collisions.cs (新) : LoadCollisionAsset / ReloadCollisionAsset
+  Components/CompoundCollider.cs (新)
+  Systems/CollisionSystem.Compound.cs (新) : 作る / 動かす / 作り直す / 線で描く (CollisionDraw)
+  Systems/CollisionSystem.cs / .Rigidbody.cs : 上の呼び出し、消した体の持ち主、部品の重なりの色
+  Systems/CollisionCallbackSystem.cs : 組の鍵を (エンティティ, 部品) に
+  Ecs/Behaviour.cs (Collision)、Physics.cs (CollisionEvent / RaycastHit / Contact に部品)、PhysicsNativeMethods.cs、
+  AssetDatabase.cs (種類 / 名前の拡張子)、SceneSerializer.cs (パスで保存)
+C# Editor
+  CollisionEditor.cs (新)、EditorTest.Collision.cs (新)、BehaviourTestTypes.cs (PartProbe)、
+  EditorApp(.Edit).cs / ProjectPanel.cs / Inspector.cs / Program.cs (開く / 作る / 読み直す / メニュー / --open-collision /
+  --editor-test-section collision)
+その他 : Engine.props (1.9.0.0)、Project/Assets/Collisions/Humanoid.collision.json (見本)
+
+■ 確認
+- ビルド : Physics.dll (Release / Debug)、Runtime / Editor / GameEngine_console (Release)、Package (make_package.py)
+- エディターの自動の確認 (--editor-test) : pass 391 / fail 0 (書き出したゲームとエディターの再生が同じ動き 11 シーン含む)
+  コリジョンの所だけ (--editor-test-section collision) : 29 項目
+    親子の位置 / JSON の往復 / 作る / 窓で開く / 子を足す / 選んだ物と子孫の色 / 親を変えても位置が同じ (輪は断る) /
+    複製 / 元に戻す / やり直す / モデルの表示 / クリックで選ぶ / 保存 /
+    部品ごとに体 / 自分どうしは当たらない / 当たった部品の ID (自分 / 相手) / 部品ごとの Exit / トリガーの部品 /
+    レイキャストの部品 / アセットを直すと作り直す / 2 つ目のアセットの AssetIndex / 消すと体が全部消える /
+    複合の剛体が落ちて止まる (自分で押し合って飛び散らない) / 重心が部品の体積から / 傾けて落とすと 1 つの剛体として回って平らに /
+    シーンの保存と読み込み
+- 目で確認 : コリジョンの窓 (Tomimi と見本の人型。選んだ Pelvis が黄色、子孫が橙色、外でファイルを書き換えた時の読み直し)
+
+■ 計測 (RTX 2070 / Release / 1280x720。同じ C# で Physics.dll だけ入れ替え、交互に 2 回)
+- 衝突判定だけ 10000 個 (--collision-bench 10000) : step 新 1.005 / 1.187 ms、前 1.191 / 1.043 ms → 差は揺れの中
+- 剛体 1500 個 眠りなし (--physics-bench 1500 --sleep off) : 解く 新 9.41 / 9.11 ms、前 8.68 / 10.44 ms (1 刻み) → 差は揺れの中
+  (Body に 28 byte 足したが、体だけの時の遅れは見えなかった)
+- 同じ形の数で比べる (エディターの確認の中。200 体 x 8 形が毎フレーム動く) :
+  CompoundCollider 0.45 / 0.53 ms、子のエンティティの Collider 8 個 (以前の作り方) 0.78 / 0.98 ms (CollisionSystem 全体)
+  → 送る位置が 1/8、Transform の親子の計算も無いので 4〜5 割速い
+
+■ 制限 / 次の候補
+- 部品が回っていて、持ち主の大きさが軸ごとに違う時は、箱を軸の長さで近似する (本当は歪む。Unity と同じ制限)
+- 部品にメッシュの形は使えない (メッシュは動かない物だけのため)
+- 骨に付けて動かす (スキンのボーンに追従する当たり判定) は、設計の時の推奨どおり次の段階
+- イベントは部品の組ごと。「持ち主どうしで 1 回だけ」の切り替えは付けていない
+- 「新しい窓」はエディターの中の窓 (ImGui。FBX プレビュー / Widget Designer と同じ)。OS の別の窓ではない

@@ -49,6 +49,7 @@ internal sealed class ProjectPanel : IDisposable
     // シェーダーグラフをダブルクリックした時 (グラフの窓で開く。SH4)
     public Action<string>? OpenShaderGraph;
     public Action<string>? OpenWidget;   // v1.7 : Widget Designer
+    public Action<string>? OpenCollision;   // v1.9 : コリジョンアセット
     public Action<string>? OpenPreview;   // AN5 : FBX をダブルクリック
     // Project の窓にフォーカスがあるか (前のフレーム。Delete キーをシーンの物ではなくアセットに使う。v1.1)
     public bool HasFocus { get; private set; }
@@ -144,6 +145,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation => _engine.Assets.ReloadFbx(path) ? 1 : 0,   // AN1
                     AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     AssetKind.Widget   => _engine.Assets.ReloadWidget(path) ? 1 : 0,   // v1.7
+                    AssetKind.Collision => _engine.Assets.ReloadCollisionAsset(path) ? 1 : 0,   // v1.9 : 外で書き換えた時 (使っている CompoundCollider は作り直す)
                     _ => 0,
                 };
                 if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); UI.Manager?.Resources.Textures.Forget(path); }   // サムネイルも作り直す (v1.7 : UI の画像も)
@@ -460,6 +462,7 @@ internal sealed class ProjectPanel : IDisposable
             else if (entry.Kind == AssetKind.Scene) _openScene(_database.FullPath(entry.Path));
             else if (entry.Kind == AssetKind.ShaderGraph) OpenShaderGraph?.Invoke(entry.Path);   // SH4
             else if (entry.Kind == AssetKind.Widget) OpenWidget?.Invoke(entry.Path);   // v1.7 : Widget Designer
+            else if (entry.Kind == AssetKind.Collision) OpenCollision?.Invoke(entry.Path);   // v1.9 : コリジョンの窓
             else if (entry.Kind is AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation) OpenPreview?.Invoke(entry.Path);   // AN5
             else if (entry.Kind == AssetKind.Script) OpenScript(entry.Path);   // v1.1 : Visual Studio で sln と .cs を開く
             else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
@@ -499,6 +502,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.Script   => ("C#", 0xFF9A3C68u),     // v1.1
         AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
         AssetKind.Widget   => ("Widget", 0xFF2F9AD8u),   // v1.7 : UI
+        AssetKind.Collision => ("Collide", 0xFF30A060u),  // v1.9 : コリジョンアセット
         AssetKind.FbxModel     => ("FBX Mod", 0xFF5A7A2Au),   // AN1
         AssetKind.FbxSkeleton  => ("FBX Skl", 0xFF7A5A2Au),
         AssetKind.FbxAnimation => ("FBX Anm", 0xFF2A5A9Au),
@@ -798,6 +802,26 @@ internal sealed class ProjectPanel : IDisposable
         }
     }
 
+    // 今のフォルダにコリジョンアセット (.collision.json) を作って選ぶ (v1.9)。箱 1 つ (ID 1)
+    public string? CreateCollisionAsset(string name = "New Collision")
+    {
+        try
+        {
+            var path = $"{_folder}/{name}{CollisionAsset.Extension}";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}{CollisionAsset.Extension}";
+            File.WriteAllText(_database.FullPath(path), CollisionAsset.DefaultJson(), new System.Text.UTF8Encoding(false));
+            _database.Refresh();
+            Select(_database.Find(path));
+            Console.WriteLine($"[Assets] Created {path}");
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Failed to create a collision asset : {ex.Message}");
+            return null;
+        }
+    }
+
     // 今のフォルダに Widget (.widget.json) を作って選ぶ (v1.7)。一番上は CanvasPanel
     public string? CreateWidget(string name = "New Widget")
     {
@@ -979,6 +1003,7 @@ internal sealed class ProjectPanel : IDisposable
         if (ImGui.MenuItem("Shader Graph")) { _folder = folder; if (CreateShaderGraph() is { } graph) OpenShaderGraph?.Invoke(graph); }
         ImGui.Separator();
         if (ImGui.MenuItem("Widget")) { _folder = folder; if (CreateWidget() is { } widget) OpenWidget?.Invoke(widget); }   // v1.7 : UI
+        if (ImGui.MenuItem("Collision Asset")) { _folder = folder; if (CreateCollisionAsset() is { } collision) OpenCollision?.Invoke(collision); }   // v1.9
         ImGui.EndMenu();
     }
 

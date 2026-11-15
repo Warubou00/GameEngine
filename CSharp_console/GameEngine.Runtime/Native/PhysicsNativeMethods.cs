@@ -33,6 +33,15 @@ internal static unsafe class PhysicsNativeMethods
         public uint       Flags;         // 1 : トリガー (以前は詰め物。P1)
     }
 
+    // 複合の体の部品 (v1.9 コリジョンアセット。112byte)
+    //   Body.Center = 持ち主から見た部品の中心 / LocalRotation = 持ち主から見た部品の向き / Body.Position 以下は持ち主の Transform
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PartDesc
+    {
+        public BodyDesc   Body;
+        public Quaternion LocalRotation;
+    }
+
     // ---------- 剛体 (P1。C++ の common.h と同じ並び) ----------
 
     // 32byte
@@ -243,6 +252,13 @@ internal static unsafe class PhysicsNativeMethods
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Physics_DestroyBody(uint body);
+
+    // 複合の体 (v1.9) : 部品をまとめて作る。1 つ目が代表 (位置 / 剛体 / 消す は代表のハンドルで)。同じ group (0 以外) どうしは調べない
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern unsafe uint Physics_CreateCompound(PartDesc* parts, uint count, uint group, uint* outHandles);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Physics_SetBodyGroup(uint body, uint group);
 
     // 体 / ジョイントを全部消して、作った直後と同じにする (設定とメッシュは残す。Engine.BeginPlay)
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]

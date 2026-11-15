@@ -249,6 +249,11 @@ internal sealed partial class EditorApp
         return _widgetDesigner.Open(path);
     }
 
+    public CollisionEditor CollisionEditor => _collisionEditor;   // v1.9
+
+    /// <summary>コリジョンアセットの窓で開く (v1.9)</summary>
+    public bool OpenCollision(string path) => _collisionEditor.Open(path);
+
     /// <summary>シェーダーグラフの窓で開く (SH4)</summary>
     public bool OpenShaderGraph(string path)
     {

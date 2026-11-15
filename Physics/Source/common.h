@@ -77,6 +77,16 @@ namespace Physics
 		BODY_TRIGGER = 1u,   // 重なりのイベントだけ (押し戻さない。Unity の isTrigger)
 	};
 
+	// 複合の体の部品 (v1.9 コリジョンアセット。C# の PhysicsNativeMethods.PartDesc と同じ並び : 112byte)
+	//   Body.Center = 持ち主 (Transform) から見た部品の中心 / LocalRotation = 持ち主から見た部品の向き
+	//   Body.Position / Rotation / Scale は持ち主の Transform (部品ごとに違う値は渡さない)
+	struct PartDesc
+	{
+		BodyDesc Body;
+		float    LocalRotation[4];   // クォータニオン (x, y, z, w)
+	};
+	static_assert(sizeof(PartDesc) == 112, "PartDesc must be 112 bytes (same as C#)");
+
 	// ==============================================================
 	// 剛体 (P1)
 	// ==============================================================

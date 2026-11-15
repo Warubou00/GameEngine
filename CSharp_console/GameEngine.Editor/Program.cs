@@ -100,7 +100,7 @@ internal static class Program
         // シェーダーの読み直し (ED5) : 実行中に読むフォルダ (../Shader) と、元のファイル (RHI/Source/Shader) を見張る
         editor.WatchShaders(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "Shader")),
                             root != null ? Path.Combine(root.FullName, "RHI", "Source", "Shader") : null);
-        if (args.Contains("--editor-test")) editor.FrameHook = new EditorTest(editor).Frame;   // 自動の確認 (ED4)
+        if (args.Contains("--editor-test")) editor.FrameHook = new EditorTest(editor, options.GetValueOrDefault("--editor-test-section")).Frame;   // 自動の確認 (ED4)
         // --quit-after N : N フレーム描いたら閉じる (ランチャーの確認用。ED9)
         if (options.TryGetValue("--quit-after", out var quitText) && int.TryParse(quitText, out var quitFrames))
         {
@@ -125,6 +125,7 @@ internal static class Program
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
         if (options.TryGetValue("--open-widget", out var widgetPath)) editor.OpenWidget(widgetPath);   // v1.7 : Widget Designer
+        if (options.TryGetValue("--open-collision", out var collisionPath)) editor.OpenCollision(collisionPath);   // v1.9 : コリジョンの窓
         // v1.8 : --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (クラッシュレポートの確認用)
         if (options.TryGetValue("--crash-test", out var crashKind))
         {
