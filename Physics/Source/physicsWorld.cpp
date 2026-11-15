@@ -114,6 +114,9 @@ namespace Physics
 		_moverMark = 0;
 		_islandParent.clear();
 		_islandSleep.clear();
+
+		_compounds.clear();   // v1.9
+		_expandBuffer.clear();
 	}
 
 	PhysicsWorld::Body* PhysicsWorld::find(uint32_t handle)
@@ -125,6 +128,12 @@ namespace Physics
 	}
 
 	uint32_t PhysicsWorld::CreateBody(const BodyDesc& desc)
+	{
+		return createBody(desc, nullptr);
+	}
+
+	// localRotation : 複合の部品の、持ち主から見た形の向き (v1.9。無ければ回転なし)
+	uint32_t PhysicsWorld::createBody(const BodyDesc& desc, const Quat* localRotation)
 	{
 		uint32_t index;
 		if (!_freeBodies.empty())
@@ -170,6 +179,11 @@ namespace Physics
 		body.Friction    = desc.Friction;
 		body.Restitution = desc.Restitution;
 		body.IsTrigger   = (desc.Flags & BODY_TRIGGER) != 0;
+		if (localRotation)
+		{
+			body.LocalRotation = *localRotation;
+			body.LocalRotated  = !(localRotation->x == 0.0f && localRotation->y == 0.0f && localRotation->z == 0.0f);
+		}
 		updateShape(body, desc.Position, desc.Rotation, desc.Scale);
 		insertProxy(index);
 		noteEnlarged(index);           // 次の Step で、この体の組を探す
@@ -181,11 +195,103 @@ namespace Physics
 		return handleOf(index);
 	}
 
+	// ==============================================================
+	// 複合の体 (v1.9 コリジョンアセット)
+	// ==============================================================
+
+	uint32_t PhysicsWorld::CreateCompound(const PartDesc* parts, uint32_t count, uint32_t group, uint32_t* outHandles)
+	{
+		uint32_t created = 0;
+		int root = -1;
+		std::vector<uint32_t> members;
+		members.reserve(count);
+		for (uint32_t i = 0; i < count; ++i)
+		{
+			BodyDesc desc = parts[i].Body;
+			if (desc.Shape == static_cast<uint32_t>(ShapeType::Mesh)) desc.Shape = static_cast<uint32_t>(ShapeType::Sphere);   // 部品にメッシュは使わない
+			const Quat local = normalize(Quat(parts[i].LocalRotation[0], parts[i].LocalRotation[1], parts[i].LocalRotation[2], parts[i].LocalRotation[3]));
+			const uint32_t handle = createBody(desc, &local);   // 形の向きを入れてから形と箱を作る
+			outHandles[i] = handle;
+			Body* body = find(handle);
+			if (!body) continue;
+			const uint32_t index = handle & 0xFFFFu;
+			body->Group = group;
+			if (root < 0) root = static_cast<int>(index);
+			body->Compound = root;
+			members.push_back(index);
+			created++;
+		}
+		if (root >= 0) _compounds[static_cast<uint32_t>(root)] = std::move(members);
+		return created;
+	}
+
+	void PhysicsWorld::SetBodyGroup(uint32_t handle, uint32_t group)
+	{
+		Body* body = find(handle);
+		if (!body || body->Group == group) return;
+		body->Group = group;
+		// 組を探し直す (同じ group になった組は次の Step で表から消え、重なっていれば Exit になる)
+		markAllMoved();
+	}
+
+	void PhysicsWorld::syncParts(uint32_t root)
+	{
+		auto it = _compounds.find(root);
+		if (it == _compounds.end()) return;
+		const Body& r = _bodies[root];
+		for (const uint32_t index : it->second)
+		{
+			if (index == root) continue;
+			Body& part = _bodies[index];
+			part.Motion    = r.Motion;
+			part.RigidSlot = r.RigidSlot;
+			part.Solver    = r.Solver;
+		}
+	}
+
 	void PhysicsWorld::DestroyBody(uint32_t handle)
 	{
 		Body* body = find(handle);
 		if (!body) return;
 		const uint32_t index = handle & 0xFFFFu;
+
+		// 複合の体 (v1.9) : 代表を消す時は部品も消す / 部品だけ消す時は代表の一覧から外す
+		//   部品は剛体の値を代表と共有しているので、先に「剛体なし」に戻してから消す (setMotion で代表の剛体を消さないように)
+		if (body->Compound >= 0)
+		{
+			const uint32_t root = static_cast<uint32_t>(body->Compound);
+			auto detach = [&](Body& part) { part.Compound = -1; part.Motion = MotionType::None; part.RigidSlot = -1; part.Solver = -1; };
+			if (root == index)
+			{
+				auto it = _compounds.find(root);
+				if (it != _compounds.end())
+				{
+					std::vector<uint32_t> members = std::move(it->second);
+					_compounds.erase(it);
+					for (const uint32_t member : members)
+					{
+						if (member == root) continue;
+						detach(_bodies[member]);
+						DestroyBody(handleOf(member));
+					}
+				}
+				body = &_bodies[index];   // 上で _bodies は増えないが、念のため取り直す
+				body->Compound = -1;
+				if (body->RigidSlot >= 0) rigidOf(*body).Compound = false;
+			}
+			else
+			{
+				auto it = _compounds.find(root);
+				if (it != _compounds.end())
+				{
+					std::vector<uint32_t>& members = it->second;
+					members.erase(std::remove(members.begin(), members.end(), index), members.end());
+					Body& r = _bodies[root];
+					if (r.Alive && r.RigidSlot >= 0) rigidOf(r).MassDirty = true;
+				}
+				detach(*body);
+			}
+		}
 
 		// この体の組を表から消す。重なっていた相手には「離れた」を送る (次の Step のイベントに入る)
 		for (size_t i = 0; i < _pairs.size();)
@@ -229,13 +335,29 @@ namespace Physics
 	{
 		// 大きさを形に掛ける (球は一番大きい軸 / カプセルの太さは X と Z の大きい方 / 高さは Y)
 		const Float3 s(std::fabs(scale[0]), std::fabs(scale[1]), std::fabs(scale[2]));
+		// 複合の代表 (v1.9) : 大きさが変わったら、次の Simulate の始めに質量と慣性を求め直す (部品は並列に呼ばれるので代表だけが書く)
+		const bool scaleChanged = body.Scale.x != scale[0] || body.Scale.y != scale[1] || body.Scale.z != scale[2];
 		body.Position = Float3(position[0], position[1], position[2]);
 		body.Rotation = normalize(Quat(rotation[0], rotation[1], rotation[2], rotation[3]));
 		body.Scale    = Float3(scale[0], scale[1], scale[2]);
 		WorldShape& w = body.World;
 		w.Type     = body.Shape;
-		w.Rotation = Rotation3::FromQuaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
-		w.Center   = Float3(position[0], position[1], position[2]) + w.Rotation.Apply(mul(body.LocalCenter, Float3(scale[0], scale[1], scale[2])));
+		const Rotation3 owner = Rotation3::FromQuaternion(rotation[0], rotation[1], rotation[2], rotation[3]);
+		w.Center   = Float3(position[0], position[1], position[2]) + owner.Apply(mul(body.LocalCenter, Float3(scale[0], scale[1], scale[2])));
+		// 形の大きさに掛ける倍率 (形のローカルの軸ごと)。複合の部品で形が回っている時は、回した軸の向きの大きさ (v1.9)
+		//   持ち主の大きさが軸ごとに違い、形が斜めに回っている時は、本当は箱が歪む (箱では表せない) ので、軸の長さで近似する
+		Float3 k = s;
+		if (body.LocalRotated)
+		{
+			const Quat q = body.Rotation * body.LocalRotation;   // 先に部品の向き、次に持ち主の向き
+			w.Rotation = q.ToRotation();
+			const Rotation3 local = body.LocalRotation.ToRotation();
+			k = Float3(length(mul(local.axis[0], s)), length(mul(local.axis[1], s)), length(mul(local.axis[2], s)));
+		}
+		else
+		{
+			w.Rotation = owner;
+		}
 		if (body.Shape == ShapeType::Mesh)
 		{
 			// メッシュ : ワールドの三角形と BVH を作り直す (動かない物なので、作った時と動かされた時だけ)
@@ -250,15 +372,19 @@ namespace Physics
 			w.Radius = body.Size.x * (std::max)((std::max)(s.x, s.y), s.z);
 			break;
 		case ShapeType::Box:
-			w.HalfExtents = mul(body.Size, s);
+			w.HalfExtents = mul(body.Size, k);
 			break;
 		case ShapeType::Capsule:
-			w.Radius     = body.Size.x * (std::max)(s.x, s.z);
-			w.HalfHeight = body.Size.y * s.y;
+			w.Radius     = body.Size.x * (std::max)(k.x, k.z);
+			w.HalfHeight = body.Size.y * k.y;
 			break;
 		}
 		body.Box = w.ComputeAabb();
-		if (body.Motion == MotionType::Dynamic) updateMass(body);   // 大きさが変わると慣性も変わる
+		if (body.Motion == MotionType::Dynamic)
+		{
+			if (body.Compound < 0) updateMass(body);   // 大きさが変わると慣性も変わる
+			else if (scaleChanged && body.RigidSlot >= 0 && &body == &_bodies[body.Compound]) rigidOf(body).MassDirty = true;
+		}
 	}
 
 	float PhysicsWorld::marginOf(const Body& body) const
@@ -292,6 +418,36 @@ namespace Physics
 			Clock::time_point Start; float& Total;
 			~SyncTimer() { Total += elapsedMs(Start, Clock::now()); }
 		} timer{ start, _syncMs };
+		// 複合の体 (v1.9) : 代表の位置を部品へ広げる (C# は代表のハンドルにだけ送る。部品は同じ持ち主の Transform)
+		if (!_compounds.empty())
+		{
+			bool expand = false;
+			for (uint32_t i = 0; i < count && !expand; ++i)
+			{
+				const uint32_t index = items[i].Handle & 0xFFFFu;
+				expand = index < _bodies.size() && _bodies[index].Compound == static_cast<int>(index) && find(items[i].Handle);
+			}
+			if (expand)
+			{
+				_expandBuffer.assign(items, items + count);
+				for (uint32_t i = 0; i < count; ++i)
+				{
+					const uint32_t index = items[i].Handle & 0xFFFFu;
+					if (index >= _bodies.size() || _bodies[index].Compound != static_cast<int>(index) || !find(items[i].Handle)) continue;
+					auto it = _compounds.find(index);
+					if (it == _compounds.end()) continue;
+					for (const uint32_t member : it->second)
+					{
+						if (member == index) continue;
+						BodyTransform t = items[i];
+						t.Handle = handleOf(member);
+						_expandBuffer.push_back(t);
+					}
+				}
+				items = _expandBuffer.data();
+				count = static_cast<uint32_t>(_expandBuffer.size());
+			}
+		}
 		// 1. 形と箱を作り直す (体ごとに別の所へ書くので並列。同じ体を 1 回の呼び出しで 2 回渡さないこと)
 		if (_previousBoxes.size() < count) _previousBoxes.resize(count);
 		_jobs.ParallelFor(count, 512, [&](uint32_t begin, uint32_t end)
@@ -420,6 +576,7 @@ namespace Physics
 	bool PhysicsWorld::canCollide(const Body& a, const Body& b) const
 	{
 		if (a.IsStatic && b.IsStatic) return false;   // 動かない物どうしは調べない
+		if (a.Group != 0 && a.Group == b.Group) return false;   // 同じ持ち主の部品どうし (v1.9 コリジョンアセット)
 		return (a.Mask & (1u << b.Layer)) != 0 && (b.Mask & (1u << a.Layer)) != 0;
 	}
 

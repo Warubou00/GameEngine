@@ -10,17 +10,24 @@ namespace GameEngine.Editor;
 //   エディターの操作 (EditorApp の Create / Delete / Duplicate / SetParent / WriteTransform / Play・Stop) を同じ道で呼ぶ
 //   1 フレームに 1 歩ずつ進める (再生は本当にフレームを回す)。最後に pass / fail を出して終わる
 // ==========================================================================
-internal sealed class EditorTest
+internal sealed partial class EditorTest
 {
     private readonly EditorApp _app;
     private readonly IEnumerator<int> _steps;
     private int _pass, _fail;
     private World World => _app.Engine.World;
 
-    public EditorTest(EditorApp app)
+    // section : 一部だけ確認する (v1.9。--editor-test-section collision。null なら全部)
+    public EditorTest(EditorApp app, string? section = null)
     {
         _app = app;
-        _steps = run().GetEnumerator();
+        _steps = (section == "collision" ? only(collisionAssets()) : run()).GetEnumerator();
+    }
+
+    private static IEnumerable<int> only(IEnumerable<int> steps)
+    {
+        for (int i = 0; i < 10; i++) yield return 0;   // 読み込みと最初の描画を待つ
+        foreach (var step in steps) yield return step;
     }
 
     public void Frame(EditorApp _)
@@ -2338,6 +2345,7 @@ internal sealed class EditorTest
 
         foreach (var step in dropAndAudio()) yield return step;
         foreach (var step in uiWidgets()) yield return step;   // v1.7
+        foreach (var step in collisionAssets()) yield return step;   // v1.9
     }
 
     // v1.6 : エクスプローラーからのドロップ (写す) / AudioSource のコピーからの Play / Stop で音が止まる

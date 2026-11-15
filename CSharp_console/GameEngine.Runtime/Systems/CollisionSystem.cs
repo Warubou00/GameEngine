@@ -51,15 +51,21 @@ internal sealed unsafe partial class CollisionSystem
         _settings = settings;
         _enabled  = enabled;
         _settings.EntityOf = entityOf;
+        _settings.PartOf   = partOf;   // v1.9 : コリジョンアセットの部品
         world.GetPool<Collider>().Removed += (entity, _) =>
         {
             if ((uint)entity.Id >= (uint)_states.Length) return;
             ref var state = ref _states[entity.Id];
-            if (state.Active) _pendingDestroy.Add(state.Body);
+            if (state.Active)
+            {
+                _pendingDestroy.Add(state.Body);
+                if ((uint)(state.Body & 0xFFFF) < (uint)_bodyHandles.Length) _retired[state.Body] = (entity, default);   // v1.9 : 消した後の Exit のため
+            }
             state = default;
             if ((uint)entity.Id < (uint)_rigidStates.Length) _rigidStates[entity.Id] = default;
         };
         initializeRigidbodies(world);
+        initializeCompounds(world);   // v1.9
     }
 
     // simulate : 物理の時間を進めるか (エディターの編集中は false。衝突判定の形は作り、重なりは毎フレーム調べる。ED3)
@@ -77,7 +83,7 @@ internal sealed unsafe partial class CollisionSystem
         }
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        foreach (var body in _pendingDestroy) PhysicsNativeMethods.Physics_DestroyBody(body);
+        foreach (var body in _pendingDestroy) PhysicsNativeMethods.Physics_DestroyBody(body);   // 持ち主は消した時に _retired へ入れてある
         _pendingDestroy.Clear();
 
         if (_settings.BroadphaseDirty)
@@ -115,7 +121,7 @@ internal sealed unsafe partial class CollisionSystem
             {
                 if (state.Active)
                 {
-                    PhysicsNativeMethods.Physics_DestroyBody(state.Body);
+                    destroyBody(state.Body);
                     state = default;
                     if ((uint)entity.Id < (uint)_rigidStates.Length) _rigidStates[entity.Id] = default;
                 }
@@ -129,7 +135,7 @@ internal sealed unsafe partial class CollisionSystem
                                state.Friction != collider.Friction || state.Restitution != collider.Restitution || state.IsTrigger != collider.IsTrigger;
             if (changedShape)
             {
-                if (state.Active) PhysicsNativeMethods.Physics_DestroyBody(state.Body);
+                if (state.Active) destroyBody(state.Body);   // v1.9 : 消した体の Exit を正しい持ち主で (CompoundCollider の代表なら部品も)
                 var desc = new PhysicsNativeMethods.BodyDesc
                 {
                     Shape       = (uint)collider.Shape,
@@ -155,14 +161,7 @@ internal sealed unsafe partial class CollisionSystem
                 };
                 if (state.Active)
                 {
-                    var index = (int)(body & 0xFFFF);
-                    if (index >= _bodyEntities.Length)
-                    {
-                        Array.Resize(ref _bodyEntities, Math.Max(_bodyEntities.Length * 2, index + 1));
-                        Array.Resize(ref _bodyHandles,  _bodyEntities.Length);
-                    }
-                    _bodyEntities[index] = entity;
-                    _bodyHandles[index]  = body;
+                    registerBody(body, entity, default);
                     syncRigidbody(entity, ref state, ref transform, rigidbodies);
                 }
                 continue;
@@ -184,6 +183,9 @@ internal sealed unsafe partial class CollisionSystem
             };
         }
 
+        // v1.9 : CompoundCollider (コリジョンアセット)。動いた物は代表だけ同じ配列に入れる
+        updateCompounds(world, transforms, statics, rigidbodies, hasRigidbodies, ref batchCount);
+
         if (batchCount > 0)
         {
             fixed (PhysicsNativeMethods.BodyTransform* items = _batch)
@@ -201,7 +203,8 @@ internal sealed unsafe partial class CollisionSystem
         {
             var steps = runFixedSteps(world, fixedSystems);
             Time.FixedStepsThisFrame = steps;
-            if (steps == 0 && batchCount > 0) collectEvents((int)PhysicsNativeMethods.Physics_Step());   // 動かした物の重なりはすぐ知らせる
+            // 動かした物の重なりはすぐ知らせる。体を消した時も (v1.9 : 消した体の持ち主を覚えているこのフレームのうちに Exit を受け取る)
+            if (steps == 0 && (batchCount > 0 || _retired.Count > 0)) collectEvents((int)PhysicsNativeMethods.Physics_Step());
             writeRigidbodyTransforms(world, Time.FixedAlpha);
             readJoints(world);
         }
@@ -235,6 +238,7 @@ internal sealed unsafe partial class CollisionSystem
         if (_settings.ShowColliders) drawColliders(world);
         if (_settings.ShowColliders || _settings.ShowJoints) drawJoints(world);   // ED6 : ジョイントだけも出せる
         if (_settings.ShowContacts)  drawContacts();
+        _retired.Clear();   // 消した体のイベントは、このフレームで受け取り終わった (v1.9)
     }
 
     private readonly List<Contact> _contacts = new();
@@ -270,7 +274,7 @@ internal sealed unsafe partial class CollisionSystem
             var a = entityOf(e.BodyA);
             var b = entityOf(e.BodyB);
             var type = (CollisionEventType)e.Type;
-            _settings.EventList.Add(new CollisionEvent(a, b, type));
+            _settings.EventList.Add(new CollisionEvent(a, b, type, partOf(e.BodyA), partOf(e.BodyB)));   // v1.9 : どの部品か
             addOverlap(a, e.BodyA, type == CollisionEventType.Enter ? 1 : -1);
             addOverlap(b, e.BodyB, type == CollisionEventType.Enter ? 1 : -1);
         }
@@ -298,11 +302,19 @@ internal sealed unsafe partial class CollisionSystem
     private Entity entityOf(uint body)
     {
         var index = (int)(body & 0xFFFF);
-        return index < _bodyHandles.Length && _bodyHandles[index] == body ? _bodyEntities[index] : default;
+        if (index < _bodyHandles.Length && _bodyHandles[index] == body) return _bodyEntities[index];
+        return _retired.TryGetValue(body, out var r) ? r.Entity : default;   // v1.9 : このフレームで消した体
     }
 
     private void addOverlap(Entity entity, uint body, int delta)
     {
+        // v1.9 : コリジョンアセットの部品は、体の番号ごとに数える
+        var index = (int)(body & 0xFFFF);
+        if (index < _bodyParts.Length && _bodyHandles[index] == body && _bodyParts[index].IsPart)
+        {
+            _partOverlaps[index] = Math.Max(0, _partOverlaps[index] + delta);
+            return;
+        }
         if ((uint)entity.Id >= (uint)_states.Length) return;
         ref var state = ref _states[entity.Id];
         if (state.Active && state.Body == body) state.Overlaps = Math.Max(0, state.Overlaps + delta);
@@ -315,6 +327,7 @@ internal sealed unsafe partial class CollisionSystem
         var freeColor    = DebugDraw.Color(0.3f, 1.0f, 0.4f);
         var staticColor  = DebugDraw.Color(0.85f, 0.85f, 0.85f, 0.9f);
         var sleepColor   = DebugDraw.Color(0.35f, 0.55f, 1.0f);   // 眠っている剛体 (P2)
+        drawCompounds(world, freeColor, overlapColor, staticColor, sleepColor, DebugDraw.Color(0.3f, 0.85f, 1.0f));   // v1.9 : コリジョンアセットの部品
         var colliders  = world.GetPool<Collider>();
         var transforms = world.GetPool<Transform>();
         var entities   = colliders.Entities;
@@ -324,7 +337,7 @@ internal sealed unsafe partial class CollisionSystem
             ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
             if (!found || (uint)entities[i].Id >= (uint)_states.Length) continue;
             ref var state = ref _states[entities[i].Id];
-            if (!state.Active) continue;
+            if (!state.Active || state.Shape == CompoundShape) continue;
             if (!world.IsActive(entities[i])) continue;
             ref var c = ref components[i];
             var sleeping = state.Rigid != 0 && (uint)entities[i].Id < (uint)_rigidStates.Length && _rigidStates[entities[i].Id].Sleeping;

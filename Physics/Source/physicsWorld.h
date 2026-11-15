@@ -54,7 +54,17 @@ namespace Physics
 		// 再生を始める時に呼ぶ。体の番号 / 木の形 / 組の順は前に作って消した物で変わり、接触を解く順が変わって動きがずれるため
 		void     ResetBodies();
 		uint32_t CreateBody(const BodyDesc& desc);
-		void     DestroyBody(uint32_t handle);
+		void     DestroyBody(uint32_t handle);   // 複合の体の代表 (1 つ目) を消すと、部品も全部消える
+		// ==============================================================
+		// 複合の体 (v1.9 コリジョンアセット)
+		//   部品ごとに体を 1 つ作り、全部に同じ group を付ける (0 以外の同じ group どうしは調べない)
+		//   1 つ目を代表にする : 位置は代表のハンドルにだけ送れば部品も一緒に動く (SetTransforms が部品へ広げる)
+		//   剛体にする時は代表に SetBodyDynamics する。部品は代表と同じ SolverBody を使い (1 つの剛体)、
+		//   質量 / 重心 / 慣性は全部の部品の形から求める。outHandles に作ったハンドル (count 個。作れなければ INVALID_HANDLE)
+		// ==============================================================
+		uint32_t CreateCompound(const PartDesc* parts, uint32_t count, uint32_t group, uint32_t* outHandles);
+		// 0 以外の同じ group の体どうしは調べない (同じエンティティの Collider とコリジョンアセットなど)
+		void     SetBodyGroup(uint32_t handle, uint32_t group);
 		void     SetTransforms(const BodyTransform* items, uint32_t count);
 		void     SetBroadphase(Broadphase mode);
 		// レイヤーの衝突の表 (Unity の Layer Collision Matrix と同じ)。a と b のレイヤーの物どうしを調べるか
@@ -131,6 +141,13 @@ namespace Physics
 			Float3     Scale = Float3(1.0f, 1.0f, 1.0f);
 			int        Solver    = -1;        // _solverBodies の場所 (剛体でなければ -1)
 			int        RigidSlot = -1;        // _rigidBodies / _rigidData の場所
+
+			// ---------- 複合の体 (v1.9) ----------
+			uint32_t   Group    = 0;          // 0 以外の同じ番号どうしは調べない
+			int        Compound = -1;         // 代表の体の番号 (代表は自分。複合でなければ -1)
+			bool       LocalRotated = false;  // LocalRotation が回転なし以外
+			Quat       LocalRotation;         // 持ち主から見た形の向き (複合の部品)
+			// 部品 (代表でない物) は Motion / RigidSlot / Solver を代表と同じ値にする (syncParts)。剛体の値は代表の物を共有
 		};
 
 		// 剛体の値 (Dynamic / Kinematic の体だけ。_rigidBodies と同じ並び)
@@ -153,7 +170,15 @@ namespace Physics
 			bool       Asleep     = false;
 			float      SleepTime  = 0.0f;     // 止まっている秒数
 			uint32_t   SleepGroup = 0;        // 一緒に眠った島の番号 (起きる時は島ごと)
+			// 複合の剛体 (v1.9) : 重心 (持ち主のローカル。大きさを掛ける前) と、持ち主の向きでの慣性の逆数 (3x3)
+			bool       Compound  = false;
+			bool       MassDirty = false;     // 部品の大きさが変わった (次の Simulate の始めに求め直す)
+			Float3     ComLocal;
+			Mat3       InvInertiaFull;
 		};
+		// 複合の体の部品 (代表の番号 → 部品の番号。代表も含む。作った順)
+		std::unordered_map<uint32_t, std::vector<uint32_t>> _compounds;
+		std::vector<BodyTransform> _expandBuffer;   // SetTransforms の作業用 (代表の位置を部品へ広げる)
 
 		std::vector<Body>     _bodies;
 		std::vector<uint32_t> _freeBodies;
@@ -362,6 +387,21 @@ namespace Physics
 		void  releaseJointPair(const Joint& joint);
 		Joint* findJoint(uint32_t handle) const;
 		SolverBody* solverOf(const Body& body) { return body.Solver >= 0 ? &_solverBodies[body.Solver] : &_staticBody; }
+
+		// ---------- 複合の体 (v1.9) ----------
+		// 剛体の重心 (持ち主のローカル / ワールド) と、ワールドの慣性の逆数。複合でない剛体は形の中心と対角の慣性 (以前と同じ)
+		Float3 comLocalOf(const Body& body) const
+		{
+			return body.RigidSlot >= 0 && rigidOf(body).Compound ? rigidOf(body).ComLocal : body.LocalCenter;
+		}
+		Float3 comWorldOf(const Body& body) const
+		{
+			return body.RigidSlot >= 0 && rigidOf(body).Compound ? body.Position + rotate(body.Rotation, mul(rigidOf(body).ComLocal, body.Scale)) : body.World.Center;
+		}
+		Mat3  worldInvInertia(const Body& body) const;
+		bool  isPartOnly(uint32_t index) const { const Body& b = _bodies[index]; return b.Compound >= 0 && static_cast<uint32_t>(b.Compound) != index; }
+		void  syncParts(uint32_t root);           // 部品の Motion / RigidSlot / Solver を代表と同じにする
+		void  updateCompoundMass(Body& root);     // 部品の形から 質量の配分 / 重心 / 慣性
 		float                        _syncMs = 0.0f;   // SetTransforms の時間 (Step で _stats に移す)
 
 		// Grid の作業用
@@ -371,6 +411,7 @@ namespace Physics
 		static uint64_t pairKey(uint32_t a, uint32_t b) { return a < b ? (uint64_t(a) << 32) | b : (uint64_t(b) << 32) | a; }
 		uint32_t handleOf(uint32_t index) const { return (uint32_t(_bodies[index].Version) << 16) | index; }
 		Body*    find(uint32_t handle);
+		uint32_t createBody(const BodyDesc& desc, const Quat* localRotation);   // localRotation : 複合の部品の形の向き (v1.9)
 		void     updateShape(Body& body, const float position[3], const float rotation[4], const float scale[3]);
 		float    marginOf(const Body& body) const;
 		bool     canCollide(const Body& a, const Body& b) const;

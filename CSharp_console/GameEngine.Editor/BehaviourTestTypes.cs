@@ -84,3 +84,48 @@ internal sealed class LifecycleProbeSystem : Behaviour<LifecycleProbe>
         transform.Position = new Vector3(transform.Position.X, 100.0f + d.Late, transform.Position.Z);
     }
 }
+
+// ==========================================================================
+// 確認用 (v1.9) : コリジョンアセットの部品の衝突 (どの部品か / 自分の部品どうしで呼ばれないか) を数える
+// ==========================================================================
+internal struct PartProbe : IComponent
+{
+    public int Enter, Stay, Exit, TriggerEnter, TriggerExit;
+    public int SelfHits;            // 相手が自分 (同じエンティティの部品どうし) だった回数 (0 のはず)
+    public uint SelfIdMask;         // Enter で当たった自分の部品の ID (ビット)
+    public uint OtherIdMask;        // Enter で当たった相手の部品の ID (ビット)
+    public uint TriggerIdMask;      // OnTriggerEnter の自分の部品の ID (ビット)
+    public int LastAssetIndex;
+    public string? LastSelfName;
+    public bool OtherWasPart;
+    public bool HadContact;
+}
+
+internal sealed class PartProbeSystem : Behaviour<PartProbe>
+{
+    private static uint bit(int id) => id is >= 0 and < 32 ? 1u << id : 0u;
+
+    protected override void OnCollisionEnter(ref PartProbe data, in Collision collision)
+    {
+        data.Enter++;
+        if (collision.Other == Entity) data.SelfHits++;
+        data.SelfIdMask  |= bit(collision.SelfColliderId);
+        data.OtherIdMask |= bit(collision.OtherColliderId);
+        data.LastAssetIndex = collision.SelfPart.AssetIndex;
+        data.LastSelfName = collision.SelfPart.Name;
+        data.OtherWasPart = collision.OtherPart.IsPart;
+        if (collision.TryGetContact(out _, out _)) data.HadContact = true;
+    }
+
+    protected override void OnCollisionStay(ref PartProbe data, in Collision collision) => data.Stay++;
+    protected override void OnCollisionExit(ref PartProbe data, in Collision collision) => data.Exit++;
+
+    protected override void OnTriggerEnter(ref PartProbe data, in Collision other)
+    {
+        data.TriggerEnter++;
+        if (other.Other == Entity) data.SelfHits++;
+        data.TriggerIdMask |= bit(other.SelfColliderId);
+    }
+
+    protected override void OnTriggerExit(ref PartProbe data, in Collision other) => data.TriggerExit++;
+}

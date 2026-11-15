@@ -1,0 +1,277 @@
+{
+  "format": "TsumugiCollision",
+  "version": 1,
+  "previewModel": "Assets/Models/pmx/Sour式トミミ/Tomimi.pmx",
+  "nodes": [
+    {
+      "id": 1,
+      "name": "Pelvis",
+      "parent": -1,
+      "shape": "Box",
+      "position": [
+        0.0,
+        7.99,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        1.504,
+        0.94,
+        0.94
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 2,
+      "name": "Chest",
+      "parent": 0,
+      "shape": "Box",
+      "position": [
+        0.0,
+        2.82,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        1.598,
+        1.692,
+        0.94
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 3,
+      "name": "Head",
+      "parent": 1,
+      "shape": "Sphere",
+      "position": [
+        0.0,
+        3.102,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        1.128,
+        0.0,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 10,
+      "name": "Arms",
+      "parent": 1,
+      "shape": "Empty",
+      "position": [
+        0.0,
+        1.128,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 4,
+      "name": "ArmL",
+      "parent": 3,
+      "shape": "Capsule",
+      "position": [
+        3.102,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0.7071067811865476,
+        0.7071067811865476
+      ],
+      "size": [
+        0.423,
+        1.504,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 5,
+      "name": "ArmR",
+      "parent": 3,
+      "shape": "Capsule",
+      "position": [
+        -3.102,
+        0.0,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0.7071067811865476,
+        0.7071067811865476
+      ],
+      "size": [
+        0.423,
+        1.504,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 11,
+      "name": "Legs",
+      "parent": 0,
+      "shape": "Empty",
+      "position": [
+        0.0,
+        -0.94,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 6,
+      "name": "LegL",
+      "parent": 6,
+      "shape": "Capsule",
+      "position": [
+        0.846,
+        -3.384,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        0.611,
+        2.82,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 7,
+      "name": "LegR",
+      "parent": 6,
+      "shape": "Capsule",
+      "position": [
+        -0.846,
+        -3.384,
+        0.0
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        0.611,
+        2.82,
+        0.0
+      ],
+      "isTrigger": false,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    },
+    {
+      "id": 8,
+      "name": "HitSensor",
+      "parent": 2,
+      "shape": "Sphere",
+      "position": [
+        0.0,
+        0.0,
+        0.94
+      ],
+      "rotation": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "size": [
+        0.752,
+        0.0,
+        0.0
+      ],
+      "isTrigger": true,
+      "layer": 0,
+      "collideWith": 4294967295,
+      "friction": 0.5,
+      "restitution": 0
+    }
+  ]
+}

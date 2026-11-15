@@ -100,6 +100,7 @@ namespace Physics
 			body.RigidSlot = static_cast<int>(_rigidBodies.size());
 			_rigidBodies.push_back(index);
 			_rigidData.emplace_back();
+			_rigidData.back().Compound = body.Compound >= 0;   // 複合の代表 (v1.9)
 		}
 		else if (!isRigid && wasRigid)
 		{
@@ -108,11 +109,13 @@ namespace Physics
 			_rigidBodies[body.RigidSlot] = last;
 			_rigidData[body.RigidSlot]   = _rigidData.back();
 			_bodies[last].RigidSlot = body.RigidSlot;
+			if (_bodies[last].Compound == static_cast<int>(last)) syncParts(last);   // 動かした剛体が複合なら部品も (v1.9)
 			_rigidBodies.pop_back();
 			_rigidData.pop_back();
 			body.RigidSlot = -1;
 			body.Solver    = -1;
 		}
+		if (body.Compound == static_cast<int>(index)) syncParts(index);   // 複合の代表 : 部品も同じ剛体にする (v1.9)
 	}
 
 	void PhysicsWorld::SetBodyDynamics(uint32_t handle, const BodyDynamics& dynamics)
@@ -120,6 +123,7 @@ namespace Physics
 		Body* body = find(handle);
 		if (!body) return;
 		const uint32_t index = handle & 0xFFFFu;
+		if (isPartOnly(index)) return;   // 複合の部品は代表の剛体を使う (v1.9)
 		MotionType motion = dynamics.Motion <= 2 ? static_cast<MotionType>(dynamics.Motion) : MotionType::None;
 		if (body->IsStatic) motion = MotionType::None;   // 動かない物 (Static) は剛体にしない
 		wakeBody(index);   // 値を変えたら起こす (P2)
@@ -136,6 +140,7 @@ namespace Physics
 	void PhysicsWorld::updateMass(Body& body)
 	{
 		if (body.Motion == MotionType::None) return;
+		if (body.Compound >= 0) { updateCompoundMass(body); return; }   // v1.9
 		if (body.Motion != MotionType::Dynamic)
 		{
 			rigidOf(body).InvMass = 0.0f;
@@ -183,6 +188,148 @@ namespace Physics
 		rigidOf(body).InvInertiaLocal = Float3(inv(inertia.x), inv(inertia.y), inv(inertia.z));
 	}
 
+	// ワールドの慣性の逆数。単体は形の向きの対角 (以前と同じ)、複合は持ち主の向きの 3x3 (v1.9)
+	Mat3 PhysicsWorld::worldInvInertia(const Body& body) const
+	{
+		const RigidData& rigid = rigidOf(body);
+		if (!rigid.Compound) return rotateDiagonal(body.World.Rotation, rigid.InvInertiaLocal);
+		const Rotation3 r = body.Rotation.ToRotation();
+		Mat3 R;
+		for (int k = 0; k < 3; ++k) { R.m[0][k] = r.axis[k].x; R.m[1][k] = r.axis[k].y; R.m[2][k] = r.axis[k].z; }
+		Mat3 Rt;
+		for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) Rt.m[i][j] = R.m[j][i];
+		return R * rigid.InvInertiaFull * Rt;
+	}
+
+	namespace
+	{
+		// 形の体積と、質量 mass の時の中心まわりの慣性 (形のローカルの軸の対角)
+		float shapeVolume(const WorldShape& w)
+		{
+			switch (w.Type)
+			{
+			case ShapeType::Sphere:  return 4.0f / 3.0f * 3.14159265f * w.Radius * w.Radius * w.Radius;
+			case ShapeType::Box:     return 8.0f * w.HalfExtents.x * w.HalfExtents.y * w.HalfExtents.z;
+			case ShapeType::Capsule: return 3.14159265f * w.Radius * w.Radius * (2.0f * w.HalfHeight) + 4.0f / 3.0f * 3.14159265f * w.Radius * w.Radius * w.Radius;
+			default:                 return 0.0f;
+			}
+		}
+		Float3 shapeInertia(const WorldShape& w, float mass)
+		{
+			switch (w.Type)
+			{
+			case ShapeType::Sphere:
+			{
+				const float i = 0.4f * mass * w.Radius * w.Radius;
+				return Float3(i, i, i);
+			}
+			case ShapeType::Box:
+			{
+				const Float3 h = w.HalfExtents;
+				const float k = mass / 3.0f;
+				return Float3(k * (h.y * h.y + h.z * h.z), k * (h.x * h.x + h.z * h.z), k * (h.x * h.x + h.y * h.y));
+			}
+			case ShapeType::Capsule:
+			{
+				const float r = w.Radius, len = 2.0f * w.HalfHeight;
+				const float vc = 3.14159265f * r * r * len, vs = 4.0f / 3.0f * 3.14159265f * r * r * r;
+				const float mc = vc + vs > 0.0f ? mass * vc / (vc + vs) : 0.0f, ms = mass - mc;
+				const float iy = mc * r * r * 0.5f + ms * 0.4f * r * r;
+				const float ix = mc * (len * len / 12.0f + r * r * 0.25f) + ms * (0.4f * r * r + len * len * 0.25f + 0.375f * len * r);
+				return Float3(ix, iy, ix);
+			}
+			default:
+				return Float3(mass, mass, mass);
+			}
+		}
+	}
+
+	// ==============================================================
+	// 複合の剛体の質量 (v1.9)
+	//   質量 (Rigidbody.Mass) を部品の体積で分け、重心 = 部品の中心の重み付きの平均
+	//   慣性 = Σ (部品の向きに回した部品の慣性 + 平行軸の定理 m (|d|² E - d dᵀ))。持ち主の向きの 3x3 で持つ
+	//   トリガーの部品は質量に入れない (形の判定だけ)。部品の位置は持ち主のローカル (大きさを掛けた後) で求める
+	// ==============================================================
+	void PhysicsWorld::updateCompoundMass(Body& root)
+	{
+		RigidData& rigid = rigidOf(root);
+		rigid.Compound  = true;
+		rigid.MassDirty = false;
+		auto it = _compounds.find(static_cast<uint32_t>(root.Compound));
+		const Float3 scale = root.Scale;
+		const float mass = rigid.Dynamics.Mass > 0.0f ? rigid.Dynamics.Mass : 1.0f;
+
+		float totalVolume = 0.0f;
+		uint32_t solidCount = 0;
+		if (it != _compounds.end())
+		{
+			for (const uint32_t index : it->second)
+			{
+				const Body& part = _bodies[index];
+				if (!part.Alive || part.IsTrigger) continue;
+				totalVolume += shapeVolume(part.World);
+				solidCount++;
+			}
+		}
+		auto massOf = [&](const Body& part)
+		{
+			if (totalVolume > 1e-12f) return mass * shapeVolume(part.World) / totalVolume;
+			return solidCount > 0 ? mass / static_cast<float>(solidCount) : 0.0f;
+		};
+
+		// 重心
+		Float3 com;
+		if (solidCount > 0)
+		{
+			for (const uint32_t index : it->second)
+			{
+				const Body& part = _bodies[index];
+				if (!part.Alive || part.IsTrigger) continue;
+				com = com + mul(part.LocalCenter, scale) * massOf(part);
+			}
+			com = com * (1.0f / mass);
+		}
+		auto safeDiv = [](float v, float d) { return std::fabs(d) > 1e-6f ? v / d : 0.0f; };
+		rigid.ComLocal = Float3(safeDiv(com.x, scale.x), safeDiv(com.y, scale.y), safeDiv(com.z, scale.z));
+
+		if (root.Motion != MotionType::Dynamic)
+		{
+			rigid.InvMass = 0.0f;
+			rigid.InvInertiaLocal = Float3();
+			rigid.InvInertiaFull  = Mat3();
+			return;
+		}
+		rigid.InvMass = 1.0f / mass;
+
+		// 慣性 (持ち主の向き)
+		Mat3 inertia;
+		if (solidCount > 0)
+		{
+			for (const uint32_t index : it->second)
+			{
+				const Body& part = _bodies[index];
+				if (!part.Alive || part.IsTrigger) continue;
+				const float m = massOf(part);
+				Mat3 local = rotateDiagonal(part.LocalRotation.ToRotation(), shapeInertia(part.World, m));
+				const Float3 d = mul(part.LocalCenter, scale) - com;
+				const float dd = dot(d, d);
+				const float dv[3] = { d.x, d.y, d.z };
+				for (int i = 0; i < 3; ++i)
+					for (int j = 0; j < 3; ++j)
+						local.m[i][j] += m * ((i == j ? dd : 0.0f) - dv[i] * dv[j]);
+				inertia = inertia + local;
+			}
+		}
+		else
+		{
+			inertia = Mat3::Diagonal(Float3(mass, mass, mass));
+		}
+		const float inertiaScale = rigid.Dynamics.InertiaScale > 0.0f ? rigid.Dynamics.InertiaScale : 1.0f;
+		for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) inertia.m[i][j] *= inertiaScale;
+		rigid.InvInertiaFull  = inertia.Inverse();
+		rigid.InvInertiaLocal = Float3(rigid.InvInertiaFull.m[0][0], rigid.InvInertiaFull.m[1][1], rigid.InvInertiaFull.m[2][2]);   // 確認用 (複合では使わない)
+	}
+
 	void PhysicsWorld::ApplyCommands(const BodyCommand* commands, uint32_t count)
 	{
 		for (uint32_t i = 0; i < count; ++i)
@@ -202,7 +349,7 @@ namespace Physics
 			if ((c.Flags & COMMAND_IMPULSE) && dynamic)
 			{
 				rigidOf(*body).Velocity = rigidOf(*body).Velocity + mul(rigidOf(*body).LinearMask, toFloat3(c.Impulse) * rigidOf(*body).InvMass);
-				const Mat3 invI = maskInertia(rotateDiagonal(body->World.Rotation, rigidOf(*body).InvInertiaLocal), rigidOf(*body).AngularMask);
+				const Mat3 invI = maskInertia(worldInvInertia(*body), rigidOf(*body).AngularMask);
 				rigidOf(*body).AngularVelocity = rigidOf(*body).AngularVelocity + invI * toFloat3(c.AngularImpulse);
 			}
 			if (c.Flags & COMMAND_SET_VELOCITY)
@@ -240,7 +387,7 @@ namespace Physics
 			s.Rotation[0] = body.Rotation.x; s.Rotation[1] = body.Rotation.y; s.Rotation[2] = body.Rotation.z; s.Rotation[3] = body.Rotation.w;
 			store(s.Velocity, rigidOf(body).Velocity);
 			store(s.AngularVelocity, rigidOf(body).AngularVelocity);
-			store(s.CenterOfMass, body.World.Center);
+			store(s.CenterOfMass, comWorldOf(body));
 		}
 		return count;
 	}
@@ -262,7 +409,7 @@ namespace Physics
 			s.Rotation[0] = body.Rotation.x; s.Rotation[1] = body.Rotation.y; s.Rotation[2] = body.Rotation.z; s.Rotation[3] = body.Rotation.w;
 			store(s.Velocity, rigidOf(body).Velocity);
 			store(s.AngularVelocity, rigidOf(body).AngularVelocity);
-			store(s.CenterOfMass, body.World.Center);
+			store(s.CenterOfMass, comWorldOf(body));
 		};
 		for (const uint32_t slot : _awakeSlots) write(_rigidBodies[slot]);
 		for (const uint32_t index : _justSlept)
@@ -462,14 +609,24 @@ namespace Physics
 		if (dt <= 0.0f) return Step();
 		const float invDt = 1.0f / dt;
 
+		// 複合の剛体 (v1.9) : 部品の大きさ / 数が変わった物の質量と慣性を求め直す
+		if (!_compounds.empty())
+		{
+			for (const uint32_t index : _rigidBodies)
+			{
+				Body& body = _bodies[index];
+				if (rigidOf(body).Compound && rigidOf(body).MassDirty) updateCompoundMass(body);
+			}
+		}
+
 		// 1. キネマティックの目標 → 速度 (重心が目標の位置の重心へ、dt で着く速さ)
 		for (const uint32_t index : _rigidBodies)
 		{
 			Body& body = _bodies[index];
 			if (!rigidOf(body).HasTarget) continue;
 			rigidOf(body).HasTarget = false;
-			const Float3 targetCenter = rigidOf(body).TargetPosition + rotate(rigidOf(body).TargetRotation, mul(body.LocalCenter, body.Scale));
-			rigidOf(body).Velocity        = (targetCenter - body.World.Center) * invDt;
+			const Float3 targetCenter = rigidOf(body).TargetPosition + rotate(rigidOf(body).TargetRotation, mul(comLocalOf(body), body.Scale));
+			rigidOf(body).Velocity        = (targetCenter - comWorldOf(body)) * invDt;
 			rigidOf(body).AngularVelocity = angularVelocityBetween(body.Rotation, rigidOf(body).TargetRotation, invDt);
 			rigidOf(body).ClearVelocityAfterStep = true;
 		}
@@ -507,7 +664,7 @@ namespace Physics
 			}
 			if (lengthSq(s.DP) == 0.0f && s.Q.x == s.Q0.x && s.Q.y == s.Q0.y && s.Q.z == s.Q0.z && s.Q.w == s.Q0.w) continue;   // 動いていない
 			const Float3 center = s.Center0 + s.DP;
-			const Float3 position = center - rotate(s.Q, mul(body.LocalCenter, body.Scale));
+			const Float3 position = center - rotate(s.Q, mul(comLocalOf(body), body.Scale));   // 複合は全体の重心 (v1.9)
 			BodyTransform t {};
 			t.Handle = handleOf(index);
 			store(t.Position, position);
@@ -559,12 +716,12 @@ namespace Physics
 			s.W       = rigidOf(body).AngularVelocity;
 			s.DP      = Float3();
 			s.Q = s.Q0 = body.Rotation;
-			s.Center0 = body.World.Center;
+			s.Center0 = comWorldOf(body);   // 複合は全体の重心 (v1.9。以前は形の中心だけ)
 			s.Dynamic = body.Motion == MotionType::Dynamic;
 			if (body.Motion == MotionType::Dynamic)
 			{
 				s.InvMass    = rigidOf(body).LinearMask * rigidOf(body).InvMass;
-				s.InvInertia = maskInertia(rotateDiagonal(body.World.Rotation, rigidOf(body).InvInertiaLocal), rigidOf(body).AngularMask);
+				s.InvInertia = maskInertia(worldInvInertia(body), rigidOf(body).AngularMask);
 			}
 			else
 			{
@@ -573,6 +730,14 @@ namespace Physics
 			}
 		}
 		_staticBody = SolverBody();
+		// 複合の部品も代表と同じ SolverBody を使う (v1.9。眠っている物は -1)
+		if (!_compounds.empty())
+		{
+			for (const uint32_t index : _rigidBodies)
+			{
+				if (_bodies[index].Compound == static_cast<int>(index)) syncParts(index);
+			}
+		}
 
 		// ジョイントの準備 (壊れた / 体の無いジョイントは飛ばす)
 		std::vector<Joint*>& active = _activeJointList;
@@ -699,7 +864,9 @@ namespace Physics
 
 			const SolverBody& sa = *c.A;
 			const SolverBody& sb = *c.B;
-			const Float3 centerA = a.World.Center, centerB = b.World.Center;
+			// 剛体の点は SolverBody の重心から (複合の部品は全体の重心。v1.9。単体の剛体は形の中心で以前と同じ)
+			const Float3 centerA = a.Solver >= 0 ? sa.Center0 : a.World.Center;
+			const Float3 centerB = b.Solver >= 0 ? sb.Center0 : b.World.Center;
 			for (int i = 0; i < c.Count; ++i)
 			{
 				const ContactPoint& p = pair.Contact.Points[i];
@@ -1007,7 +1174,7 @@ namespace Physics
 			}
 			Body* body = find(ref.Handle);
 			if (!body) return false;
-			ref.LocalAnchor = mul(toFloat3(anchor) - body->LocalCenter, body->Scale);
+			ref.LocalAnchor = mul(toFloat3(anchor) - comLocalOf(*body), body->Scale);   // 重心から (複合は全体の重心。v1.9)
 			if (body->Solver >= 0 && body->Motion != MotionType::None)
 			{
 				ref.Body = &_solverBodies[body->Solver];
@@ -1015,7 +1182,7 @@ namespace Physics
 			else
 			{
 				ref.Fixed = SolverBody();
-				ref.Fixed.Center0 = body->World.Center;
+				ref.Fixed.Center0 = comWorldOf(*body);
 				ref.Fixed.Q = ref.Fixed.Q0 = body->Rotation;
 				ref.Body = &ref.Fixed;
 			}

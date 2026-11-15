@@ -68,6 +68,10 @@ internal sealed unsafe partial class CollisionSystem
         Array.Clear(_bodyEntities);
         Array.Clear(_bodyHandles);
         Array.Clear(_jointRecords);
+        Array.Clear(_compoundStates);   // v1.9
+        Array.Clear(_bodyParts);
+        Array.Clear(_partOverlaps);
+        _retired.Clear();
         _pendingDestroy.Clear();        // 消すはずだった体も、もう無い
         _pendingJointDestroy.Clear();
         _commandList.Clear();           // 前の体に向けた力

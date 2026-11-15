@@ -18,13 +18,16 @@ public enum CollisionEventType : uint
 }
 
 // レイの当たり
-public readonly record struct RaycastHit(Entity Entity, Vector3 Point, Vector3 Normal, float Distance);
+// Part : 当たったコリジョンアセットの部品 (v1.9。ふつうの Collider は IsPart = false)
+public readonly record struct RaycastHit(Entity Entity, Vector3 Point, Vector3 Normal, float Distance, ColliderPart Part = default);
 
 // 接触点 (法線は A → B。B を Normal の向きに Depth だけ動かすと離れる)
-public readonly record struct Contact(Entity A, Entity B, Vector3 Position, Vector3 Normal, float Depth);
+// PartA / PartB : コリジョンアセットの部品 (v1.9)
+public readonly record struct Contact(Entity A, Entity B, Vector3 Position, Vector3 Normal, float Depth, ColliderPart PartA = default, ColliderPart PartB = default);
 
 // 重なりのイベント。A / B はどちらが先とは決まっていない
-public readonly record struct CollisionEvent(Entity A, Entity B, CollisionEventType Type)
+//   PartA / PartB : コリジョンアセット (CompoundCollider) の部品の時は、どのアセットのどのコライダーか (v1.9。部品の組ごとにイベントが来る)
+public readonly record struct CollisionEvent(Entity A, Entity B, CollisionEventType Type, ColliderPart PartA = default, ColliderPart PartB = default)
 {
     // entity が関わっていれば、その相手を返す
     public bool Involves(Entity entity, out Entity other)
@@ -99,6 +102,8 @@ public sealed class PhysicsSettings
 
     // 体のハンドル → エンティティ (CollisionSystem が設定する)
     internal Func<uint, Entity>? EntityOf { get; set; }
+    // 体のハンドル → コリジョンアセットの部品 (v1.9)
+    internal Func<uint, ColliderPart>? PartOf { get; set; }
 
     // ---------- 問い合わせ (前のフレームの Step の後の位置で答える) ----------
 
@@ -109,7 +114,7 @@ public sealed class PhysicsSettings
         if (!Available) return false;
         var ray = new PhysicsNativeMethods.Ray { Origin = origin, Direction = direction, MaxDistance = maxDistance, LayerMask = layerMask };
         if (!PhysicsNativeMethods.Physics_Raycast(ref ray, out var result)) return false;
-        hit = new RaycastHit(EntityOf?.Invoke(result.Body) ?? default, result.Point, result.Normal, result.Distance);
+        hit = new RaycastHit(EntityOf?.Invoke(result.Body) ?? default, result.Point, result.Normal, result.Distance, PartOf?.Invoke(result.Body) ?? default);
         return true;
     }
 
@@ -170,7 +175,8 @@ public sealed class PhysicsSettings
         for (int i = 0; i < count; i++)
         {
             ref var c = ref _contactBuffer[i];
-            results.Add(new Contact(EntityOf?.Invoke(c.BodyA) ?? default, EntityOf?.Invoke(c.BodyB) ?? default, c.Position, c.Normal, c.Depth));
+            results.Add(new Contact(EntityOf?.Invoke(c.BodyA) ?? default, EntityOf?.Invoke(c.BodyB) ?? default, c.Position, c.Normal, c.Depth,
+                                    PartOf?.Invoke(c.BodyA) ?? default, PartOf?.Invoke(c.BodyB) ?? default));
         }
         return count;
     }
