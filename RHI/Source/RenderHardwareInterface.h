@@ -131,6 +131,32 @@ namespace RHI
         bool IsProfilerVisible()const override         { return _debugUI.IsVisible(); }
         void ReportProfilerValue(const char* name, double value)override { _profiler.SetValue(name, value); }
         void SetProfilerInfo(const char* name, const char* text)override { if (name && text) _profiler.SetInfo(name, text); }
+        // v1.10 : 計測値を外 (エディターの窓) から読む
+        void SetProfilerOverlayEnabled(bool enabled)override { _debugUI.SetOverlayEnabled(enabled); }
+        bool GetProfilerFrame(ProfilerFrameData& out)const override { if (!_isInitialized) return false; _profiler.GetFrameData(out); return true; }
+        uint32_t GetProfilerValues(double* values, uint32_t capacity)const override { return _profiler.GetValues(values, capacity); }
+        const char* GetProfilerValueName(uint32_t index)const override { return _profiler.GetValueName(index); }
+        uint32_t GetProfilerInfoCount()const override { return _profiler.GetInfoCount(); }
+        bool GetProfilerInfo(uint32_t index, const char** name, const char** text)const override { return _profiler.GetInfo(index, name, text); }
+        const char* GetGpuName()const override { return _profiler.GetGpuName(); }
+        // v1.10 P2 : 描画パス (CommandContext_Passes.cpp)
+        uint32_t RegisterPassName(const char* name)override;
+        const char* GetPassName(uint32_t id)const override;
+        void SetPassTimingEnabled(bool enabled)override;
+        uint32_t GetPassTimings(PassTiming* out, uint32_t capacity)const override;
+        void SetRenderTargetName(RenderTargetHandle handle, const char* name)override;
+        // v1.12 P3 : Render Graph Viewer
+        void SetRenderGraphCapture(bool enabled)override;
+        bool GetRenderGraph(RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                            RenderGraphResource* resources, uint32_t resourceCapacity, uint32_t* resourceCount,
+                            RenderGraphAccess* accesses, uint32_t accessCapacity, uint32_t* accessCount)const override;
+        uint32_t GetRenderTargetName(RenderTargetHandle handle, char* out, uint32_t size)const override;
+        void SetDebugReadTarget(RenderTargetHandle handle)override;
+        // v1.13 P4 : Frame Debugger
+        void SetFrameDebugger(const FrameDebugSettings& settings)override;
+        bool GetFrameDebugEvents(FrameDebugEvent* events, uint32_t eventCapacity, uint32_t* eventCount,
+                                 RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                                 FrameDebugResult* result)const override;
 
     private:         /*---メンバ変数---*/
         // 破棄は Shutdown で「GPU 完了待ち → Pipeline / Buffer / CommandContext → Device」の順に行う

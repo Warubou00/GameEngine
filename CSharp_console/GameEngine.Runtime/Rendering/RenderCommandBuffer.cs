@@ -167,6 +167,36 @@ public sealed unsafe class RenderCommandBuffer
         command.Params[3] = height;
     }
 
+    // ---------- 描画パスの区切り (v1.10 P2) ----------
+    //   描画の結果には影響しない。PIX / RenderDoc のイベントと、プロファイラーのパスごとの時間 (GPU / CPU) に使う
+    //   using (cmd.BeginPass("Bloom")) { ... } のように囲む (入れ子にできる。閉じ忘れは C++ がフレームの終わりで閉じる)
+    //   以前はシーン全体と UI の 2 区間しか GPU の時間が分からなかった
+
+    private static readonly Dictionary<string, uint> _passIds = new();   // 名前 → C++ の番号 (同じ名前は同じ番号)
+
+    /// <summary>描画パスを始める (EndPass と対。using で囲むと自動で EndPass)</summary>
+    public PassScope BeginPass(string name)
+    {
+        if (!_passIds.TryGetValue(name, out var id))
+        {
+            id = NativeMethods.Renderer_RegisterPassName(name);
+            _passIds[name] = id;
+        }
+        ref var command = ref Add(11);
+        command.Arg0 = id;
+        return new PassScope(this);
+    }
+
+    /// <summary>最後に始めた描画パスを終える</summary>
+    public void EndPass() => Add(12);
+
+    public readonly struct PassScope : IDisposable
+    {
+        private readonly RenderCommandBuffer? _buffer;
+        internal PassScope(RenderCommandBuffer buffer) => _buffer = buffer;
+        public void Dispose() => _buffer?.EndPass();
+    }
+
     // 1 フレーム分を C++ へ渡して描く
     internal void Submit()
     {

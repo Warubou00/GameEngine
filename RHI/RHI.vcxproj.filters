@@ -292,6 +292,12 @@
     <ClCompile Include="Source\DirectX12\RHIObject\CommandContext_Particles.cpp">
       <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>
+    <ClCompile Include="Source\DirectX12\RHIObject\CommandContext_Passes.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DirectX12\RHIObject\CommandContext_FrameDebug.cpp">
+      <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
+    </ClCompile>
     <ClCompile Include="Source\DirectX12\RHIObject\Device.cpp">
       <Filter>ソース ファイル\DirectX12\RHIObject</Filter>
     </ClCompile>

@@ -308,6 +308,9 @@ namespace RHI
 		                        //   描いた色の描画先は、この後 UI が読めるようにする (UI の Texture に GetRenderTargetTexture の番号)
 		SetCamera        = 9,   // v1.5 : Arg0 = カメラの番号 (SetCameraViews の何番目か)。この後の描画はそのカメラで (影のカスケード / カリングも)
 		SetViewport      = 10,  // v1.5 : Params[0..3] = x / y / 幅 / 高さ (ピクセル)。次の SetRenderTargets までの描画を、その範囲だけにする
+		BeginPass        = 11,  // v1.10 P2 : 描画パスの始め。Arg0 = 名前の番号 (RegisterPassName)。入れ子にできる。
+		                        //   PIX / RenderDoc のイベント、プロファイラーのパスごとの時間 (GPU / CPU) に使う。描画には影響しない
+		EndPass          = 12,  // v1.10 P2 : 最後に始めたパスの終わり (閉じ忘れはフレームの終わりで閉じる)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
@@ -551,6 +554,202 @@ namespace RHI
 		uint32_t Visible   = 0;      // 生きている物のうち画面に映った数 (描いた数)
 	};
 	static_assert(sizeof(ParticleStats) == 36, "ParticleStats must be 36 bytes (same as C#)");
+
+	// ==========================================================================
+	// プロファイラーの計測値 (v1.10)
+	//   エディターが自分の ImGui の窓 (Profiler / CPU / GPU / Rendering / Memory) に出すために読む
+	//   以前は RHI.dll の ImGui の窓に描くだけで、外からは読めなかった
+	//   C# の Native.ProfilerFrameData と同じ並び (184 byte)。GPU の値は FRAME_COUNT フレーム前のもの
+	// ==========================================================================
+	enum ProfilerFrameFlags : uint32_t
+	{
+		PROFILER_FLAG_GPU_VALID        = 1u << 0,   // GPU の時間が読めた
+		PROFILER_FLAG_INSTANCING       = 1u << 1,
+		PROFILER_FLAG_GPU_CULLING      = 1u << 2,
+		PROFILER_FLAG_OCCLUSION        = 1u << 3,
+		PROFILER_FLAG_VISIBLE_VALID    = 1u << 4,   // VisibleInstances / VisibleDraws が読めた
+		PROFILER_FLAG_INDIRECT_DRAW    = 1u << 5,
+		PROFILER_FLAG_INDIRECT_REUSED  = 1u << 6,   // ExecuteIndirect の引数を書き直さずに使えた
+		PROFILER_FLAG_VSYNC            = 1u << 7,
+		PROFILER_FLAG_TEARING          = 1u << 8,
+		PROFILER_FLAG_VRAM_VALID       = 1u << 9,   // VramUsage / VramBudget が読めた
+	};
+
+	struct ProfilerFrameData
+	{
+		// ---------- CPU (ミリ秒。最新のフレーム) ----------
+		double   FrameMs        = 0.0;
+		double   WaitMs         = 0.0;
+		double   SceneRecordMs  = 0.0;
+		double   UiMs           = 0.0;
+		double   PresentMs      = 0.0;
+		// ---------- GPU (ミリ秒) ----------
+		double   GpuSceneMs     = 0.0;
+		double   GpuUiMs        = 0.0;
+		double   GpuTotalMs     = 0.0;
+		// ---------- 0.5 秒ごとの平均 ----------
+		double   AverageFps     = 0.0;
+		double   AverageFrameMs = 0.0;
+		double   MinFrameMs     = 0.0;
+		double   MaxFrameMs     = 0.0;
+		// ---------- 量 (byte) ----------
+		uint64_t Triangles      = 0;
+		uint64_t UploadBytes    = 0;
+		uint64_t UploadRingUsed = 0;
+		uint64_t UploadRingSize = 0;
+		uint64_t VramUsage      = 0;
+		uint64_t VramBudget     = 0;
+		// ---------- 数 ----------
+		uint32_t DrawCalls        = 0;
+		uint32_t Instances        = 0;
+		uint32_t VisibleInstances = 0;
+		uint32_t VisibleDraws     = 0;
+		uint32_t Objects          = 0;
+		uint32_t Width            = 0;
+		uint32_t Height           = 0;
+		uint32_t FramesInFlight   = 0;
+		uint32_t Flags            = 0;   // ProfilerFrameFlags
+		uint32_t Padding          = 0;
+	};
+	static_assert(sizeof(ProfilerFrameData) == 184, "ProfilerFrameData must be 184 bytes (same as C#)");
+
+	// v1.10 P2 : 描画パス 1 つの時間 (C# の Native.PassTiming と同じ並び : 16 byte)。FRAME_COUNT フレーム前の値
+	struct PassTiming
+	{
+		uint32_t NameId = 0;      // RegisterPassName の番号 (GetPassName で名前)
+		uint32_t Depth  = 0;      // 入れ子の深さ (0 = 一番外)
+		float    GpuMs  = -1.0f;  // GPU の時間 (計っていない / 読めない時は -1)
+		float    CpuMs  = 0.0f;   // C++ が命令を積むのにかかった時間
+	};
+	static_assert(sizeof(PassTiming) == 16, "PassTiming must be 16 bytes (same as C#)");
+
+	// ==========================================================================
+	// v1.12 P3 : Render Graph Viewer 用の記録 (1 フレームの描画パス × リソースの読み書き / バリア)
+	//   SetRenderGraphCapture(true) の間だけ記録する。C# の Native.RenderGraph* と同じ並び
+	// ==========================================================================
+	constexpr uint32_t RENDER_GRAPH_NO_PASS     = 0xFFFFFFFFu;   // パスの外
+	constexpr uint32_t RENDER_GRAPH_MSAA_DEPTH  = 0xFFFFFFF0u;   // シーンの深度の MSAA 版 (C# からは SCENE_DEPTH に見える物)
+
+	struct RenderGraphPass   // 16 byte
+	{
+		uint32_t NameId = 0;
+		uint32_t Depth  = 0;
+		uint32_t Parent = RENDER_GRAPH_NO_PASS;   // 親のパスの番号 (この配列の中)
+		uint32_t Flags  = 0;
+	};
+	static_assert(sizeof(RenderGraphPass) == 16, "RenderGraphPass must be 16 bytes (same as C#)");
+
+	enum RenderGraphResourceFlags : uint32_t
+	{
+		RENDER_GRAPH_RESOURCE_DEPTH    = 1u << 0,   // 深度
+		RENDER_GRAPH_RESOURCE_IMPORTED = 1u << 1,   // 外から来た物 (画面 / シーンの深度 / エディターのシーンの絵 / 普通のテクスチャ)
+		RENDER_GRAPH_RESOURCE_MSAA     = 1u << 2,
+		RENDER_GRAPH_RESOURCE_USED     = 1u << 3,   // このフレームで使った
+		RENDER_GRAPH_RESOURCE_TEXTURE  = 1u << 4,   // 普通のテクスチャ (全画面シェーダーの入力。Skybox の空など)
+	};
+
+	struct RenderGraphResource   // 48 byte
+	{
+		uint64_t Bytes      = 0;   // GPU のメモリ (GetResourceAllocationInfo。MSAA は写しも含む。分からない物は 0)
+		uint32_t Id         = 0;   // レンダーターゲットの番号 / RenderTargetHandle::BACK_BUFFER / SCENE_DEPTH / RENDER_GRAPH_MSAA_DEPTH / TEXTURE_INPUT | n
+		uint32_t DxgiFormat = 0;
+		uint32_t Width      = 0;
+		uint32_t Height     = 0;
+		uint32_t Samples    = 1;
+		uint32_t ArraySize  = 1;
+		uint32_t Flags      = 0;   // RenderGraphResourceFlags
+		uint32_t TextureId  = 0xFFFFFFFFu;   // UI で見られるテクスチャの番号 (色で配列でない物だけ。他は 0xFFFFFFFF)
+		uint32_t Padding[2] = {};
+	};
+	static_assert(sizeof(RenderGraphResource) == 48, "RenderGraphResource must be 48 bytes (same as C#)");
+
+	enum RenderGraphAccessKind : uint32_t
+	{
+		RENDER_GRAPH_READ        = 1u << 0,   // シェーダーが読む (SRV)
+		RENDER_GRAPH_WRITE       = 1u << 1,   // 描画先 (色) に描く
+		RENDER_GRAPH_CLEAR       = 1u << 2,   // 消す
+		RENDER_GRAPH_DEPTH_WRITE = 1u << 3,   // 深度を書く
+		RENDER_GRAPH_DEPTH_TEST  = 1u << 4,   // 深度を比べるだけ (半透明)
+		RENDER_GRAPH_RESOLVE     = 1u << 5,   // MSAA → 1 サンプルの写し
+		RENDER_GRAPH_BARRIER     = 1u << 6,   // 遷移バリア (StateBefore → StateAfter)
+		RENDER_GRAPH_IMPLICIT    = 1u << 7,   // 命令には書いていないが読む (影のシャドーマップなど)
+		RENDER_GRAPH_RESOLVED_COPY = 1u << 8, // バリアが MSAA の写しの方 (Resolved) に掛かった
+	};
+
+	struct RenderGraphAccess   // 20 byte
+	{
+		uint32_t Pass        = RENDER_GRAPH_NO_PASS;   // RenderGraphPass の番号
+		uint32_t ResourceId  = 0;                      // RenderGraphResource::Id
+		uint32_t Kind        = 0;                      // RenderGraphAccessKind
+		uint32_t StateBefore = 0;                      // バリアの時 : D3D12_RESOURCE_STATES
+		uint32_t StateAfter  = 0;
+	};
+	static_assert(sizeof(RenderGraphAccess) == 20, "RenderGraphAccess must be 20 bytes (same as C#)");
+
+	// ==========================================================================
+	// v1.13 P4 : Frame Debugger (描画をイベントごとに止めて、その時の描画先を見る)
+	//   C# の Native.FrameDebug* と同じ並び
+	// ==========================================================================
+	constexpr uint32_t FRAME_DEBUG_NO_STOP = 0xFFFFFFFFu;   // 止めない (全部のイベントを数える)
+
+	struct FrameDebugSettings   // 32 byte
+	{
+		uint32_t Enabled      = 0;
+		uint32_t StopEvent    = FRAME_DEBUG_NO_STOP;   // このイベントまで描いて、残りは描かない
+		uint32_t ViewShader   = 0xFFFFFFFFu;           // 止めた時の描画先を写す全画面シェーダー (PSFrameDebugView)。INVALID なら写さない
+		uint32_t OutputTarget = 0xFFFFFFFFu;           // 写す先のレンダーターゲット (RGBA8)
+		uint32_t Slot         = 0;                     // 0〜3 = 色の描画先の何枚目 / 4 = 深度
+		uint32_t ChannelMask  = 0x7;                   // bit0 R, bit1 G, bit2 B, bit3 A
+		float    LevelMin     = 0.0f;
+		float    LevelMax     = 1.0f;
+	};
+	static_assert(sizeof(FrameDebugSettings) == 32, "FrameDebugSettings must be 32 bytes (same as C#)");
+
+	enum class FrameDebugEventType : uint32_t
+	{
+		ClearColor      = 1,
+		ClearDepth      = 2,
+		SceneDraw       = 3,   // DrawScene の 1 回の描画 (メッシュ × マテリアル。インスタンシングならまとめた数)
+		Fullscreen      = 4,
+		UpdateParticles = 5,
+		DrawParticles   = 6,
+		CustomDraw      = 7,   // 自分のシェーダー (SH2) の 1 個
+		Preview         = 8,   // プレビューの窓 (AN5)
+	};
+
+	struct FrameDebugEvent   // 144 byte
+	{
+		uint32_t Type          = 0;                      // FrameDebugEventType
+		uint32_t Pass          = RENDER_GRAPH_NO_PASS;   // パスの番号 (GetFrameDebugEvents の passes の中)
+		uint32_t ColorCount    = 0;
+		uint32_t Colors[4]     = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };   // レンダーターゲットの番号 (エディターはシーンの絵の番号)
+		uint32_t Depth         = 0xFFFFFFFFu;            // SCENE_DEPTH / RENDER_GRAPH_MSAA_DEPTH / 深度のレンダーターゲット
+		uint32_t Arg0          = 0;                      // SceneDraw : ScenePass / Fullscreen : シェーダー / CustomDraw : マテリアルのシェーダー
+		uint32_t Arg1          = 0;                      // SceneDraw / CustomDraw : RenderQueue / Fullscreen : ブレンド
+		uint32_t View          = 0;                      // SceneDraw : 視点 (0 カメラ / 1〜 影の段)
+		uint32_t Group         = 0;                      // SceneDraw : 描き方 (0 不透明 / 1 半透明 / 2 両面の不透明)
+		uint32_t IndexCount    = 0;
+		uint32_t InstanceCount = 0;
+		uint32_t Object        = 0xFFFFFFFFu;            // RHI の ObjectHandle (まとめた描画は最初の物)
+		uint32_t Material      = 0xFFFFFFFFu;
+		uint32_t Inputs[8]     = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+		float    Params[8]     = {};
+		float    Clear[4]      = {};                     // ClearColor の色 / ClearDepth の値 (Clear[0])
+	};
+	static_assert(sizeof(FrameDebugEvent) == 144, "FrameDebugEvent must be 144 bytes (same as C#)");
+
+	struct FrameDebugResult   // 32 byte
+	{
+		uint32_t EventCount   = 0;   // このフレームで数えたイベント (止めた時は止めた所まで)
+		uint32_t Stopped      = 0;   // 1 : StopEvent で止めた
+		uint32_t Captured     = 0;   // 1 : 描画先を OutputTarget に写した
+		uint32_t Source       = 0xFFFFFFFFu;   // 写した描画先 (レンダーターゲットの番号 / SCENE_DEPTH)
+		uint32_t SourceWidth  = 0;
+		uint32_t SourceHeight = 0;
+		uint32_t SourceFormat = 0;   // DXGI_FORMAT
+		uint32_t Status       = 0;   // 0 = 写した / 1 = 止めていない / 2 = その描画先が無い / 3 = 写せない (画面 / 深度の配列)
+	};
+	static_assert(sizeof(FrameDebugResult) == 32, "FrameDebugResult must be 32 bytes (same as C#)");
 
 	// ==========================================================================
 	// 初期化

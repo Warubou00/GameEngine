@@ -36,7 +36,11 @@ namespace RHI
 			// 1 フレームで書けるタイムスタンプの数 (開始 / 区切り / 終了)
 			// (以前は 4。GPU パーティクルの 更新 / ソート / 描画 の区切りを足した : CommandContext の TIMESTAMP_PARTICLE_*)
 			// (AN4 : 8 → 10。GPU スキニングの始め / 終わりを足した : TIMESTAMP_SKIN_BEGIN)
-			static constexpr UINT TIMESTAMPS_PER_FRAME = 10;
+			// (v1.10 P2 : 10 → 10 + PASS_TIMESTAMPS。描画パス (BeginPass / EndPass) の始め / 終わりを足した。
+			//   パスの分は 10 番から。読み戻しは別の範囲 (ResolveRange / ReadTicks) で行う)
+			static constexpr UINT FIXED_TIMESTAMPS     = 10;
+			static constexpr UINT PASS_TIMESTAMPS      = 256;   // 1 フレームの描画パス 128 個分
+			static constexpr UINT TIMESTAMPS_PER_FRAME = FIXED_TIMESTAMPS + PASS_TIMESTAMPS;
 
 			GpuTimer();
 			~GpuTimer();
@@ -66,6 +70,12 @@ namespace RHI
 			// first 番目のタイムスタンプからの区間 (outMs[i] = タイムスタンプ first+i → first+i+1)。GPU パーティクルの区間に使う
 			bool ReadIntervalsFrom(UINT frameIndex, UINT first, UINT count, double* outMs);
 
+			// v1.10 P2 : first 番目から count 個を読み戻し用バッファへ移す (描画パスの分。count = 0 なら「このフレームは無し」と覚えるだけ)
+			void ResolveRange(ID3D12GraphicsCommandList* cmdList, UINT frameIndex, UINT first, UINT count);
+			// v1.10 P2 : ResolveRange で移したタイムスタンプをそのまま読む (範囲の外なら false)
+			bool ReadTicks(UINT frameIndex, UINT first, UINT count, UINT64* outTicks);
+			UINT64 GetFrequency()const { return _frequency; }
+
 			void Release();
 
 		private:
@@ -74,6 +84,8 @@ namespace RHI
 			UINT64                                  _frequency  = 0;    // 1 秒あたりのカウント数
 			UINT                                    _frameCount = 0;
 			UINT                                    _resolvedCount[8] = {};   // フレームごとに Resolve した数 (0 = 未計測)
+			UINT                                    _rangeFirst[8]    = {};   // v1.10 P2 : フレームごとに ResolveRange した範囲
+			UINT                                    _rangeCount[8]    = {};
 		};
 	}
 }

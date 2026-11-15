@@ -167,6 +167,75 @@ namespace RHI
 		_infos.emplace_back(name, text);
 	}
 
+	// v1.10 : 最新の値 + 平均 + VRAM をまとめて渡す (エディターの窓用)
+	void Profiler::GetFrameData(ProfilerFrameData& out)const
+	{
+		const FrameStats& s = _latest;
+		out = ProfilerFrameData();
+		out.FrameMs        = s.FrameMs;
+		out.WaitMs         = s.WaitMs;
+		out.SceneRecordMs  = s.SceneRecordMs;
+		out.UiMs           = s.UiMs;
+		out.PresentMs      = s.PresentMs;
+		out.GpuSceneMs     = s.GpuSceneMs;
+		out.GpuUiMs        = s.GpuUiMs;
+		out.GpuTotalMs     = s.GpuTotalMs;
+		out.AverageFps     = _avgFps;
+		out.AverageFrameMs = _avgFrameMs;
+		out.MinFrameMs     = _minFrameMs;
+		out.MaxFrameMs     = _maxFrameMs;
+		out.Triangles      = s.Triangles;
+		out.UploadBytes    = s.UploadBytes;
+		out.UploadRingUsed = s.UploadRingUsed;
+		out.UploadRingSize = s.UploadRingSize;
+		out.VramUsage      = _vramUsage;
+		out.VramBudget     = _vramBudget;
+		out.DrawCalls        = s.DrawCalls;
+		out.Instances        = s.Instances;
+		out.VisibleInstances = s.VisibleInstances;
+		out.VisibleDraws     = s.VisibleDraws;
+		out.Objects          = s.Objects;
+		out.Width            = s.Width;
+		out.Height           = s.Height;
+		out.FramesInFlight   = s.FramesInFlight;
+		uint32_t flags = 0;
+		if (s.GpuValid)           flags |= PROFILER_FLAG_GPU_VALID;
+		if (s.Instancing)         flags |= PROFILER_FLAG_INSTANCING;
+		if (s.GpuCulling)         flags |= PROFILER_FLAG_GPU_CULLING;
+		if (s.OcclusionCulling)   flags |= PROFILER_FLAG_OCCLUSION;
+		if (s.VisibleValid)       flags |= PROFILER_FLAG_VISIBLE_VALID;
+		if (s.IndirectDraw)       flags |= PROFILER_FLAG_INDIRECT_DRAW;
+		if (s.IndirectArgsReused) flags |= PROFILER_FLAG_INDIRECT_REUSED;
+		if (s.VSync)              flags |= PROFILER_FLAG_VSYNC;
+		if (s.Tearing)            flags |= PROFILER_FLAG_TEARING;
+		if (_adapter && _vramBudget > 0) flags |= PROFILER_FLAG_VRAM_VALID;
+		out.Flags = flags;
+	}
+
+	uint32_t Profiler::GetValues(double* values, uint32_t capacity)const
+	{
+		const uint32_t count = static_cast<uint32_t>(_values.size());
+		if (values)
+		{
+			const uint32_t n = (std::min)(count, capacity);
+			for (uint32_t i = 0; i < n; ++i) values[i] = _values[i].second;
+		}
+		return count;
+	}
+
+	const char* Profiler::GetValueName(uint32_t index)const
+	{
+		return index < _values.size() ? _values[index].first.c_str() : nullptr;
+	}
+
+	bool Profiler::GetInfo(uint32_t index, const char** name, const char** text)const
+	{
+		if (index >= _infos.size()) return false;
+		if (name) *name = _infos[index].first.c_str();
+		if (text) *text = _infos[index].second.c_str();
+		return true;
+	}
+
 	void Profiler::updateVideoMemory()
 	{
 		if (!_adapter) return;

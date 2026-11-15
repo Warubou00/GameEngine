@@ -1,0 +1,36 @@
+v1.13.1.0 : Render Graph Viewer の Live のチラつきを直す
+ブランチ : feature/v110-profiler-windows (P1〜P4 と同じブランチ。未コミット)
+日付 : 2026-11-15
+
+■ 依頼
+「RenderGraphViewer で毎フレーム更新するためか非常にチラつくので改善してください」
+
+■ 原因 (確かめた)
+- 連続した 12 フレームの記録の形を出した : 17 パス / 55 読み書き と 18 パス / 56 読み書き が 1 フレームごとに入れ替わる
+- 影の遠い段 (3 段目) を 1 フレームおきに描く間引き (ThrottleFarCascades) のため、Cascade 2 のパスが出たり消えたりする
+- 以前の Viewer は Live の間、毎フレーム記録を差し替えて表を作り直していたので、列が増えたり減ったりしてチラついた
+
+■ 対応 (GameEngine.Editor/RenderGraphViewer.cs)
+- Live の間も表は毎フレーム差し替えない。一定の間隔 (0.25 / 0.5 / 1 / 2 秒。既定 0.5 秒。Live の右で選ぶ) ごとに判定する
+- その間に記録したフレームのうち、一番多くのパスを含む物 (同じなら読み書きの多い物 = 全部の段を描いたフレーム) を代表にする
+- 代表の形 (パスの名前と親 / 読み書きとバリアの状態 / リソースの名前・大きさ・形式・メモリ) が、出している物と違う時だけ差し替える
+  → 止まっているシーンでは表は変わらない。シーン / 設定を変えると、間隔の 1〜2 回分のうちに変わる
+- Capture (今のフレームで止める) は今まで通りすぐ
+- ついでに直した物 : Hide unused を切り替えても、次の記録まで行が変わらなかった (今はすぐ作り直す)
+- 影の間引き自体は変えていない (描き方 / 重さは今まで通り。Frame Debugger の間だけは P4 で止めている)
+
+■ 変えたファイル
+- CSharp_console/GameEngine.Editor/RenderGraphViewer.cs : Live の差し替え (updateLive / score / signatureOf)、間隔の選択、Hide unused
+- CSharp_console/GameEngine.Editor/EditorTest.Profiler.cs : チラつかないことの確認、MSAA の確認は差し替えを待つ (UpdateNow)
+- CSharp_console/Engine.props : 1.13.1.0
+- Docs/Reference/template.html : Render Graph Viewer の Live の説明。index.html は作り直した
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Debug / Release ともエラー 0 (警告は元からある 3 つだけ)。C++ は変えていない
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.13.1.0。版 1.13.1.0 を確かめた
+
+■ 確認
+- プロファイラーだけ (--editor-test-section profiler) : 53 / 53 を 2 回
+  新しい確認 : 記録は 17 / 18 パスで入れ替わるが、表は 18 パスのまま、2 秒の間に 1 回も差し替わらない
+- エディターの自動の確認 (--editor-test、Release) : pass 443 / fail 0
+- 見ていない物 : 実際の画面で目で見たチラつきの無さ (自動の確認は表の差し替えの回数と、出しているパスの数で見た)

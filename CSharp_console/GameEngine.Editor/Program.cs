@@ -75,7 +75,10 @@ internal static class Program
 
         using var engine = new Engine(new EngineSettings { Title = $"{EngineInfo.Name} Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory });
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
-        engine.Graphics.ProfilerVisible = false;   // C++ のプロファイラーは View メニュー / F1 で
+        engine.Graphics.ProfilerVisible = false;
+        // v1.10 : C++ (RHI.dll) の F1 の窓は使わない (エディターの View > Analysis の窓で出す)
+        //   以前はエディターでも F1 でその窓を出せたが、ImGui のコンテキストが別なので、窓の上のクリックが Hierarchy / Scene にすり抜けていた
+        Profiler.SetOverlayEnabled(false);
         engine.Assets.Database = database;
         // v1.8 : 後ろにある時も動かすか (View > Run In Background。自動の確認では止めない : 他の窓を使っている間も進めるため)
         var preferences = EditorPreferences.Load(Path.Combine(exeDirectory, EditorPreferences.FileName));

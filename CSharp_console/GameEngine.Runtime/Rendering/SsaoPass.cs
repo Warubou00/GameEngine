@@ -46,19 +46,21 @@ public sealed class SsaoPass : IDisposable
         {
             DisposeTargets();
             _scale = scale;
-            _ao   = RenderTexture.Create(RenderTextureFormat.R8, scale);
-            _blur = RenderTexture.Create(RenderTextureFormat.R8, scale);
+            _ao   = RenderTexture.Create(RenderTextureFormat.R8, scale, name: "SSAO");
+            _blur = RenderTexture.Create(RenderTextureFormat.R8, scale, name: "SSAO Blur");
         }
         _ssao       ??= FullscreenShader.Load(ShaderPath, "PSSsao");
         _blurShader ??= FullscreenShader.Load(ShaderPath, "PSSsaoBlur");
 
         var depth = RenderTexture.SceneDepth;
+        using var pass = cmd.BeginPass("SSAO");   // v1.10 P2 : 描画パスの区切り
         cmd.SetRenderTarget(_ao);
         cmd.DrawFullscreen(_ssao, [depth, normal ?? depth],
             [settings.Radius, settings.Intensity, settings.Bias, Math.Clamp(settings.SampleCount, 1, 32), normal != null ? 1.0f : 0.0f]);
 
         // ぼかし : 横 → 縦 (1 歩 = 遮蔽のバッファの 1 ピクセル。シェーダーがテクスチャの大きさから求める)
         const float sharpness = 40.0f;   // 深度が 2.5% 違うと重みが半分
+        using var blurPass = cmd.BeginPass("SSAO Blur");
         cmd.SetRenderTarget(_blur!);
         cmd.DrawFullscreen(_blurShader, [_ao, depth], [1.0f, 0.0f, sharpness]);
         cmd.SetRenderTarget(_ao);

@@ -73,8 +73,8 @@ public sealed class PreviewScene : IDisposable
         if (width == Width && height == Height && Color != null) return;
         _engine.Graphics.RetireTexture(Color);   // このフレームの UI が古い方を読んでいるかもしれないので、描いた後で消す
         _engine.Graphics.RetireTexture(Depth);
-        Color = RenderTexture.CreateFixed(RenderTextureFormat.RGBA8, (uint)width, (uint)height, Background);
-        Depth = RenderTexture.CreateFixed(RenderTextureFormat.Depth32, (uint)width, (uint)height);
+        Color = RenderTexture.CreateFixed(RenderTextureFormat.RGBA8, (uint)width, (uint)height, Background, name: "Preview Color");
+        Depth = RenderTexture.CreateFixed(RenderTextureFormat.Depth32, (uint)width, (uint)height, name: "Preview Depth");
         Width = width;
         Height = height;
         TextureId = Color.IsValid ? NativeMethods.Renderer_GetRenderTargetTexture(Color.Handle) : NativeMethods.InvalidHandle;

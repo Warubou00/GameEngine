@@ -90,7 +90,7 @@ public abstract class RenderPipeline : IDisposable
         var output = settings.CameraTarget;
         if (ao != null && settings.Ssao.ShowOnly)
         {
-            Ssao.Show(cmd, ao, output);
+            using (cmd.BeginPass("SSAO Show")) Ssao.Show(cmd, ao, output);   // v1.10 P2 : 描画パスの区切り
             return;
         }
         _tonemap ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSTonemap");
@@ -102,7 +102,8 @@ public abstract class RenderPipeline : IDisposable
         //   トーンマップの後に掛ける : 明るさが画面の見た目と同じになり、縁の見つけ方が人の目に近い
         //   (HDR のまま掛けると、明るい所の小さな差を縁と見なしてしまう)
         var fxaa = UseFxaa(settings);
-        if (fxaa) _ldr ??= RenderTexture.Create(RenderTextureFormat.RGBA8);
+        if (fxaa) _ldr ??= RenderTexture.Create(RenderTextureFormat.RGBA8, name: "LDR (FXAA input)");
+        var tonemapPass = cmd.BeginPass("Tonemap");   // v1.10 P2
         cmd.SetRenderTarget(fxaa ? _ldr! : output);
         // FXAA の時はアルファに明るさを書いてもらう (FXAA が 4 ピクセル分をまとめて読む)
         var exposure = unlit ? 1.0f : settings.Exposure;
@@ -120,10 +121,12 @@ public abstract class RenderPipeline : IDisposable
         {
             cmd.DrawFullscreen(_tonemap, [hdr], [exposure, (float)method, settings.Gamma, luma]);
         }
+        tonemapPass.Dispose();
         if (!fxaa) return;
 
         _fxaa ??= FullscreenShader.Load(ShaderPaths.AntiAliasing, "PSFxaa");
         var f = settings.Fxaa;
+        using var fxaaPass = cmd.BeginPass("FXAA");   // v1.10 P2
         cmd.SetRenderTarget(output);
         cmd.DrawFullscreen(_fxaa, [_ldr!], [Math.Clamp(f.Subpixel, 0.0f, 1.0f), f.EdgeThreshold, f.EdgeThresholdMin]);
     }
@@ -134,7 +137,9 @@ public abstract class RenderPipeline : IDisposable
     //   描画先に深度は付けない (C++ のシェーダーがシーンの深度を読んで比べる。MSAA の時は解決した深度)
     protected static void UpdateParticles(RenderCommandBuffer cmd, GraphicsSettings settings)
     {
-        if (settings.Particles.Enabled) cmd.UpdateParticles();
+        if (!settings.Particles.Enabled) return;
+        using var pass = cmd.BeginPass("Particles Update");   // v1.10 P2
+        cmd.UpdateParticles();
     }
 
     //   半分の解像度 (Particles.HalfResolution) : 縮小バッファ (RGBA16F) を 0 で消して描き、HDR へ乗算済みアルファで重ねる
@@ -143,13 +148,14 @@ public abstract class RenderPipeline : IDisposable
     protected void DrawParticles(RenderCommandBuffer cmd, RenderTexture hdr, GraphicsSettings settings)
     {
         if (!settings.Particles.Enabled) return;
+        using var pass = cmd.BeginPass("Particles");   // v1.10 P2
         if (!settings.Particles.HalfResolution)
         {
             cmd.SetRenderTarget(hdr);
             cmd.DrawParticles();
             return;
         }
-        _particleTarget    ??= RenderTexture.Create(RenderTextureFormat.RGBA16F, 0.5f);
+        _particleTarget    ??= RenderTexture.Create(RenderTextureFormat.RGBA16F, 0.5f, name: "Particles (half res)");
         _particleComposite ??= FullscreenShader.Load(ShaderPaths.PostProcess, "PSParticleComposite");
         cmd.SetRenderTarget(_particleTarget);
         cmd.ClearColor(Vector4.Zero);
@@ -205,7 +211,7 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         _background = settings.BackgroundColor;
         _samples    = MsaaSamples(settings);
         // 背景の色を最適化クリア値にしておく (毎フレームその色で消すので速い)
-        _hdr = RenderTexture.Create(RenderTextureFormat.RGBA16F, 1.0f, ToLinear(_background), _samples);
+        _hdr = RenderTexture.Create(RenderTextureFormat.RGBA16F, 1.0f, ToLinear(_background), _samples, "HDR (Forward)");
     }
 
     protected internal override void Render(RenderCommandBuffer cmd, GraphicsSettings settings)
@@ -219,44 +225,62 @@ public sealed class ForwardRenderPipeline : RenderPipeline
         {
             // 背景は環境光 0 (黒) で消す。足すのは環境光の分だけなので背景の色は変わらない
             // (同時に描くので、HDR と同じサンプル数にする)
-            _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F, 1.0f, default, _samples);
-            cmd.SetRenderTarget(_ambient);
-            cmd.ClearColor(Vector4.Zero);
-            cmd.SetRenderTarget(hdr);
-            cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
-            Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く。遮蔽は掛からない)
-            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
-            cmd.ClearDepth();
-            cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
-            cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
-            cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2。環境光の RT には書かない = 遮蔽を掛けない)
+            _ambient ??= RenderTexture.Create(RenderTextureFormat.R11G11B10F, 1.0f, default, _samples, "Ambient (Forward SSAO)");
+            using (cmd.BeginPass("Clear + Sky"))   // v1.10 P2 : 描画パスの区切り
+            {
+                cmd.SetRenderTarget(_ambient);
+                cmd.ClearColor(Vector4.Zero);
+                cmd.SetRenderTarget(hdr);
+                cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
+                Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く。遮蔽は掛からない)
+                cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+                cmd.ClearDepth();
+            }
+            using (cmd.BeginPass("Opaque"))
+            {
+                cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
+                cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Opaque);
+                cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2。環境光の RT には書かない = 遮蔽を掛けない)
+            }
             UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (不透明の深度で跳ね返る)
 
             ao = Ssao.Render(cmd, settings.Ssao, normal: null);   // 法線は深度から作る
 
             // 半透明 (遮蔽は掛けない)。環境光の RT も一緒に描画先にして、覆った分だけ減らす
-            cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
-            cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
-            cmd.DrawCustom(RenderQueue.Transparent);   // SH2
-            cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)。深度を描画先から外して読む
+            using (cmd.BeginPass("Transparent"))
+            {
+                cmd.SetRenderTargets([hdr, _ambient], RenderTexture.SceneDepth);
+                cmd.DrawScene(ScenePass.ForwardSplitAmbient, RenderQueue.Transparent);
+                cmd.DrawCustom(RenderQueue.Transparent);   // SH2
+                cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)。深度を描画先から外して読む
+            }
             DrawParticles(cmd, hdr, settings);   // 光る物は遮蔽を掛けない (環境光の RT には書かない)
             Tonemap(cmd, hdr, settings, ao, _ambient);
             return;
         }
 
-        cmd.SetRenderTarget(hdr);
-        cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
-        Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く)
-        cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
-        cmd.ClearDepth();
-        cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
-        cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2)
+        using (cmd.BeginPass("Clear + Sky"))   // v1.10 P2 : 描画パスの区切り
+        {
+            cmd.SetRenderTarget(hdr);
+            cmd.ClearColor(IsDepthOnly(settings) ? Vector4.Zero : hdr.ClearColor);   // v1.5 : DepthOnly は透明 (0) で消す
+            Sky.Draw(cmd, settings);   // v1.4 : 空 (物はこの上に描く)
+        }
+        using (cmd.BeginPass("Opaque"))
+        {
+            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+            cmd.ClearDepth();
+            cmd.DrawScene(ScenePass.Forward, RenderQueue.Opaque);
+            cmd.DrawCustom(RenderQueue.Opaque);   // 自分のシェーダー (SH2)
+        }
         UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (C++ が深度を付け直すので、続けて半透明を描ける)
 
         // 半透明
-        cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
-        cmd.DrawCustom(RenderQueue.Transparent);   // SH2 (遠い順)
-        cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)
+        using (cmd.BeginPass("Transparent"))
+        {
+            cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+            cmd.DrawCustom(RenderQueue.Transparent);   // SH2 (遠い順)
+            cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3 : 深度を読む物 (雲)
+        }
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings);
@@ -293,10 +317,10 @@ public sealed class DeferredRenderPipeline : RenderPipeline
 
     protected internal override void Initialize(GraphicsSettings settings)
     {
-        _albedo   = RenderTexture.Create(RenderTextureFormat.RGBA8_SRGB);
-        _normal   = RenderTexture.Create(RenderTextureFormat.RGBA16F);
-        _material = RenderTexture.Create(RenderTextureFormat.RGBA8);
-        _hdr      = RenderTexture.Create(RenderTextureFormat.RGBA16F);
+        _albedo   = RenderTexture.Create(RenderTextureFormat.RGBA8_SRGB, name: "GBuffer Albedo");
+        _normal   = RenderTexture.Create(RenderTextureFormat.RGBA16F, name: "GBuffer Normal");
+        _material = RenderTexture.Create(RenderTextureFormat.RGBA8, name: "GBuffer Material");
+        _hdr      = RenderTexture.Create(RenderTextureFormat.RGBA16F, name: "HDR (Deferred)");
         _lighting = FullscreenShader.Load(ShaderPaths.Scene, "PSDeferredLighting");
     }
 
@@ -306,9 +330,12 @@ public sealed class DeferredRenderPipeline : RenderPipeline
 
         // 1. G-Buffer (不透明だけ)。消すのは深度だけでよい (何も描かれていない所はライティングが深度で見分ける)
         Shadows.Render(cmd, settings);   // シャドーマップ (影はライティングの全画面パスが読む)
-        cmd.SetRenderTargets([_albedo!, _normal!, _material!], RenderTexture.SceneDepth);
-        cmd.ClearDepth();
-        cmd.DrawScene(ScenePass.GBuffer, RenderQueue.Opaque);
+        using (cmd.BeginPass("GBuffer"))   // v1.10 P2 : 描画パスの区切り
+        {
+            cmd.SetRenderTargets([_albedo!, _normal!, _material!], RenderTexture.SceneDepth);
+            cmd.ClearDepth();
+            cmd.DrawScene(ScenePass.GBuffer, RenderQueue.Opaque);
+        }
         UpdateParticles(cmd, settings);   // GPU パーティクルを動かす (G-Buffer の深度で跳ね返る)
 
         // 2. SSAO (G-Buffer の法線を使う)。使わない時は入力を渡さない (シェーダーは白 = 遮蔽なし を読む)
@@ -316,6 +343,7 @@ public sealed class DeferredRenderPipeline : RenderPipeline
 
         // 3. ライティング (全画面。背景もここで塗る)
         var background = ToLinear(settings.BackgroundColor);
+        var lightingPass = cmd.BeginPass("Deferred Lighting");   // v1.10 P2
         cmd.SetRenderTarget(hdr);
         // v1.4 : 空を先に描き、ライティングは背景 (何も描かれていない所) に触らない (Params[0].w = 1)
         // v1.5 : DepthOnly は透明 (0) で消して、背景に触らない (前のカメラの絵が見える)
@@ -329,14 +357,18 @@ public sealed class DeferredRenderPipeline : RenderPipeline
         {
             cmd.DrawFullscreen(_lighting!, [_albedo!, _normal!, _material!, RenderTexture.SceneDepth], [background.X, background.Y, background.Z, sky]);
         }
+        lightingPass.Dispose();
 
         // 4. 半透明はフォワードで重ねる (深度は G-Buffer のものを使う)
         //    自分のシェーダー (SH2) は G-Buffer に書かないので、ライティングの後にフォワードで描く (不透明 → 半透明)
-        cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
-        cmd.DrawCustom(RenderQueue.Opaque);
-        cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
-        cmd.DrawCustom(RenderQueue.Transparent);
-        cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3
+        using (cmd.BeginPass("Forward (custom + transparent)"))   // v1.10 P2
+        {
+            cmd.SetRenderTarget(hdr, RenderTexture.SceneDepth);
+            cmd.DrawCustom(RenderQueue.Opaque);
+            cmd.DrawScene(ScenePass.Forward, RenderQueue.Transparent);
+            cmd.DrawCustom(RenderQueue.Transparent);
+            cmd.DrawCustom(RenderQueue.Transparent, readDepth: true);   // SH3
+        }
         DrawParticles(cmd, hdr, settings);
 
         Tonemap(cmd, hdr, settings, ao);

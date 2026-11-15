@@ -1,0 +1,90 @@
+v1.11.0.0 : プロファイラーの強化 P2 (描画パスの区切り / パスごとの GPU・CPU の時間 / PIX のイベント / レンダーターゲットの名前)
+ブランチ : feature/v110-profiler-windows (P1 と同じブランチ。未コミット)
+日付 : 2026-11-15
+
+■ 依頼と対応 (設計の P2)
+1. 描画パスの区切り … 対応
+   - C# : RenderCommandBuffer.BeginPass("名前") / EndPass()。using (cmd.BeginPass("Bloom")) { ... } で囲む。入れ子にできる
+   - 命令 : RenderCommandType::BeginPass (11。Arg0 = 名前の番号) / EndPass (12)。描画の結果には影響しない
+   - 名前の番号 : Renderer_RegisterPassName (C# が名前ごとに 1 回だけ聞いて覚える)
+   - 閉じ忘れは C++ が ExecuteRenderCommands の終わりで閉じる
+   - 組み込みのパイプラインに区切りを入れた :
+       Camera N / Clear BackBuffer / Shadows (Cascade N) / Clear + Sky / Skybox / Opaque / Particles Update / SSAO (SSAO Blur) /
+       Transparent / Particles / Tonemap / FXAA / SSAO Show / GBuffer / Deferred Lighting / Forward (custom + transparent) / Preview
+     C++ の中 : Skinning (compute) / UI (ImGui / game UI)
+
+2. パスごとの GPU の時間 … 対応
+   - GpuTimer のタイムスタンプの枠 : 1 フレーム 10 → 10 + 256 (パスの分 = 10 番から 128 パス)。読み戻しは別の範囲 (ResolveRange / ReadTicks)
+     (以前は フレーム / シーン / UI / パーティクル / スキニングの 10 個に決まっていて、シーンの中の内訳が分からなかった)
+   - タイムスタンプは Profiler.PassTimingEnabled の間だけ書く (エディターの GPU Usage の窓が開いている間)。FRAME_COUNT フレーム後に読む
+   - 結果 : Profiler.ReadPassTimings → PassTimingSample (Name / Depth / GpuMilliseconds (計っていない時は -1) / CpuMilliseconds)
+
+3. パスごとの CPU の時間 (C++ が命令を積んだ時間) … 対応 (毎フレーム)
+
+4. PIX / RenderDoc のイベント … 対応 (毎フレーム)
+   - ID3D12GraphicsCommandList::BeginEvent / EndEvent (Metadata 0 = UTF-16 の文字列。WinPixEventRuntime なしの PIXBeginEvent と同じ形)
+
+5. RenderTexture の名前 … 対応
+   - RenderTexture.Create(..., name:) / CreateFixed(..., name:) / Name プロパティ。C++ は D3D12 の SetName (MSAA の写しは "名前 (resolved)")
+     画面の大きさが変わって作り直しても付け直す
+   - 組み込みの物 : HDR (Forward / Deferred) / Ambient (Forward SSAO) / LDR (FXAA input) / Particles (half res) / GBuffer Albedo / Normal / Material /
+     SSAO / SSAO Blur / Shadow Map / Camera N Target / Preview Color / Depth。BackBuffer / SceneDepth は C# の名前だけ
+
+6. エディターの窓 … 対応
+   - GPU Usage : 「Render passes」の表 (入れ子は字下げ。GPU ms / % GPU (一番外のパスの合計に対して) / CPU ms)。
+     行をクリックするとそのパスの GPU の時間のグラフ (同じ名前のパスはカメラが複数でも足す。右クリックで消す)
+   - CPU Usage : 「Render passes (C++ record)」の表
+
+■ 変えたファイル
+C++ (RHI)
+- RHI/Source/Public/rhiTypes.h : RenderCommandType::BeginPass / EndPass、PassTiming (16 byte)
+- RHI/Source/Public/rhi.h : RegisterPassName / GetPassName / SetPassTimingEnabled / GetPassTimings / SetRenderTargetName
+- RHI/Source/RenderHardwareInterface.h/.cpp : 上の実装 (CommandContext に渡すだけ)
+- RHI/Source/DirectX12/Object/dx12_gpuTimer.h/.cpp : PASS_TIMESTAMPS / ResolveRange / ReadTicks / GetFrequency
+- RHI/Source/DirectX12/RHIObject/CommandContext_Passes.cpp (新規) : パスの記録 / PIX のイベント / タイムスタンプ / 結果 / RT の名前
+- RHI/Source/DirectX12/RHIObject/CommandContext.h/.cpp : switch に BeginPass / EndPass、スキニングと UI をパスで囲む、
+  RenderStart で結果を読む、RenderEnd で読み戻す、RT を作った時に名前を付ける
+- RHI/RHI.vcxproj / .filters : CommandContext_Passes.cpp
+C++ (Renderer)
+- Renderer/Source/rendererDll.cpp : Renderer_RegisterPassName / GetPassName / SetPassTimingEnabled / GetPassTimings / SetRenderTargetName
+C# (Runtime)
+- Native/NativeMethods.cs : 上の宣言と PassTiming
+- Rendering/RenderCommandBuffer.cs : BeginPass / EndPass / PassScope
+- Rendering/RenderTexture.cs : Name / Create・CreateFixed の name
+- Rendering/RenderPipeline.cs / ShadowPass.cs / SsaoPass.cs / SkyboxPass.cs / PreviewScene.cs / Engine.cs : パスの区切り、RT の名前
+- Profiler.cs : PassTimingSample / PassTimingEnabled / ReadPassTimings
+C# (Editor)
+- ProfilerWindows.cs : GPU Usage / CPU Usage のパスの表、選んだパスのグラフ
+- EditorTest.Profiler.cs : 確認 7 項目と重さの計測
+その他
+- CSharp_console/Engine.props : 1.11.0.0
+- Docs/Reference/template.html : プロファイラーのガイドに v1.11、描画パイプラインのガイドに BeginPass。index.html は作り直した
+
+■ ビルド
+- RHI / Renderer (C++) : Debug / Release ともエラー 0、新しい警告 0 (元からある C4251 だけ)
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Debug / Release ともエラー 0 (警告は元からある 3 つだけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.11.0.0 (v1.10.0.0 は消えた)。新しい関数が入っていること、版 1.11.0.0 を確かめた
+
+■ 確認
+- エディターの自動の確認 (--editor-test、Release) : pass 412 / fail 0 (P1 の 405 + P2 の 7)
+  書き出したゲーム (Player) とエディターの再生が同じ動きの確認も含む (Player も新しい命令を通る)
+- プロファイラーだけ (--editor-test-section profiler) : Release 22 / 22 を 2 回、Debug 22 / 22
+  - パスが順番と入れ子で出る (Skinning (compute), Camera 0, Shadows, Cascade 0..., Clear + Sky, Skybox, Opaque, ...、UI)
+  - どのパスにも GPU / CPU の時間がある (Opaque 0.158 ms。一番外の合計 0.892 ms ≒ フレームの GPU 0.894 ms)
+  - 影の段が Shadows の中に入れ子 / Deferred のパス (GBuffer / Deferred Lighting / Forward (custom + transparent))
+  - RenderTexture の名前 / GPU Usage を閉じると GPU は -1 で CPU は出る
+- Debug ビルド (D3D12 のデバッグレイヤー。メッセージは Logger に出る設定) : D3D12 の ERROR / WARNING は 0 件
+- 見た目 : 5 つの窓を並べて撮り、GPU Usage の Render passes の表 (Shadows 26.5% / Cascade 0 18.7% …) を確かめた
+- 見ていない物 : PIX / RenderDoc で実際にイベントと RT の名前が出るか (ツールが入っていないため。D3D12 の API の呼び方だけ)
+
+■ 性能 (Release、RTX 2070、エディター 1600x900 の showcase、300 フレームの平均を 切 / 入 / 切 / 入、2 回)
+- パスのタイムスタンプ 切 : GPU 合計 0.665 / 0.622 ms、記録 (C++) 0.202 / 0.220 ms   (2 回目 : 0.676 / 0.626、0.179 / 0.181)
+  パスのタイムスタンプ 入 : GPU 合計 0.630 / 0.633 ms、記録 (C++) 0.229 / 0.216 ms   (2 回目 : 0.631 / 0.637、0.186 / 0.184)
+  → 差は揺れの範囲 (最初の「切」は温まる前で高め)。タイムスタンプ 32 個 / フレームでは測れるほどの差は無かった
+- PIX のイベントと CPU の時刻 (パスごとに steady_clock 2 回) は毎フレーム。上の「切」にも含まれる (別には測っていない)
+- 一番外のパスの GPU の合計 0.892 ms ≒ フレームの GPU 合計 0.894 ms (パスの時間がフレームと合っている)
+
+■ 残り (次の段階)
+- P3 : Render Graph Viewer (パスごとのレンダーターゲットの読み書き / バリア / 寿命)
+- P4 : Frame Debugger
+- パスごとの描画数 / 三角形数は出していない (GPU カリングの結果は GPU の中なので、P4 で扱う)

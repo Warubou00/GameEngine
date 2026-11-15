@@ -56,8 +56,14 @@ namespace RHI
 		void Shutdown();
 
 		bool IsInitialized()const { return _initialized; }
-		bool IsVisible()const     { return _initialized && _visible; }
+		bool IsVisible()const     { return _initialized && _overlayEnabled && _visible; }
 		void SetVisible(bool visible) { _visible = visible; }
+
+		// v1.10 : F1 の窓を使うか (false : 出さない / F1 も見ない / 入力も ImGui に渡さない)
+		//   エディターは自分の ImGui の窓に計測値を出すので切る
+		//   以前はエディターでも F1 でこの窓を出せたが、ImGui のコンテキストがエディターと別なので、
+		//   窓の上のクリックがエディター (Hierarchy / Scene) にもすり抜けていた
+		void SetOverlayEnabled(bool enabled) { _overlayEnabled = enabled; }
 
 		// ImGui のフレーム開始 (この後 ImGui::Begin などで UI を作る)
 		void BeginFrame();
@@ -77,6 +83,7 @@ namespace RHI
 		uint32_t                          _fontSrvIndex = 0xFFFFFFFFu;
 		bool                              _initialized  = false;
 		bool                              _visible      = true;
+		bool                              _overlayEnabled = true;   // v1.10
 		bool                              _inFrame      = false;
 	};
 }

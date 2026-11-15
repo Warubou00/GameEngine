@@ -462,6 +462,78 @@ namespace RHI
         return _commandContext->RenderEnd();
     }
 
+    // ======================================================================
+    // v1.10 P2 : 描画パスの名前 / 時間、レンダーターゲットの名前 (CommandContext に渡すだけ)
+    // ======================================================================
+    uint32_t RenderHardwareInterface::RegisterPassName(const char* name)
+    {
+        return _commandContext ? _commandContext->RegisterPassName(name) : 0;
+    }
+
+    const char* RenderHardwareInterface::GetPassName(uint32_t id)const
+    {
+        return _commandContext ? _commandContext->GetPassName(id) : nullptr;
+    }
+
+    void RenderHardwareInterface::SetPassTimingEnabled(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetPassTimingEnabled(enabled);
+    }
+
+    uint32_t RenderHardwareInterface::GetPassTimings(PassTiming* out, uint32_t capacity)const
+    {
+        return _commandContext ? _commandContext->GetPassTimings(out, capacity) : 0;
+    }
+
+    void RenderHardwareInterface::SetRenderTargetName(RenderTargetHandle handle, const char* name)
+    {
+        if (_commandContext) _commandContext->SetRenderTargetName(handle, name);
+    }
+
+    // v1.12 P3 : Render Graph Viewer (CommandContext に渡すだけ)
+    void RenderHardwareInterface::SetRenderGraphCapture(bool enabled)
+    {
+        if (_commandContext) _commandContext->SetRenderGraphCapture(enabled);
+    }
+
+    bool RenderHardwareInterface::GetRenderGraph(RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                                                 RenderGraphResource* resources, uint32_t resourceCapacity, uint32_t* resourceCount,
+                                                 RenderGraphAccess* accesses, uint32_t accessCapacity, uint32_t* accessCount)const
+    {
+        return _commandContext && _commandContext->GetRenderGraph(passes, passCapacity, passCount, resources, resourceCapacity, resourceCount,
+                                                                  accesses, accessCapacity, accessCount);
+    }
+
+    uint32_t RenderHardwareInterface::GetRenderTargetName(RenderTargetHandle handle, char* out, uint32_t size)const
+    {
+        if (out && size > 0) out[0] = '\0';
+        return _commandContext ? _commandContext->GetRenderTargetName(handle, out, size) : 0;
+    }
+
+    void RenderHardwareInterface::SetDebugReadTarget(RenderTargetHandle handle)
+    {
+        if (_commandContext) _commandContext->SetDebugReadTarget(handle);
+    }
+
+    // v1.13 P4 : Frame Debugger (CommandContext に渡すだけ)
+    void RenderHardwareInterface::SetFrameDebugger(const FrameDebugSettings& settings)
+    {
+        if (_commandContext) _commandContext->SetFrameDebugger(settings);
+    }
+
+    bool RenderHardwareInterface::GetFrameDebugEvents(FrameDebugEvent* events, uint32_t eventCapacity, uint32_t* eventCount,
+                                                      RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                                                      FrameDebugResult* result)const
+    {
+        if (!_commandContext)
+        {
+            if (eventCount) *eventCount = 0;
+            if (passCount) *passCount = 0;
+            return false;
+        }
+        return _commandContext->GetFrameDebugEvents(events, eventCapacity, eventCount, passes, passCapacity, passCount, result);
+    }
+
     void RenderHardwareInterface::SetIndirectDrawEnabled(bool enabled)
     {
         if (_commandContext) _commandContext->SetIndirectDrawEnabled(enabled);

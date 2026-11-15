@@ -148,7 +148,7 @@ namespace RHI
 
 	LRESULT CALLBACK DebugUI::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	{
-		if (g_instance && g_instance->_initialized)
+		if (g_instance && g_instance->_initialized && g_instance->_overlayEnabled)   // v1.10 : 窓を使わない時は全部素通し
 		{
 			// F1 : プロファイラーの表示 / 非表示 (非表示中も効くようにここで見る)
 			if (msg == WM_KEYDOWN && wParam == VK_F1 && (lParam & (1 << 30)) == 0)   // 押しっぱなしの連続入力は無視

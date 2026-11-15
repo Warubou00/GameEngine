@@ -1,0 +1,82 @@
+v1.12.0.0 : プロファイラーの強化 P3 (Render Graph Viewer / レンダーターゲットごとの GPU のメモリ)
+ブランチ : feature/v110-profiler-windows (P1 / P2 と同じブランチ。未コミット)
+日付 : 2026-11-15
+
+■ 依頼と対応 (設計の P3。Unity 6 の Render Graph Viewer に当たる窓)
+1. Render Graph Viewer の窓 … 対応 (View > Analysis > Render Graph Viewer)
+   - 格子 : 横 = 描画パス (実行した順。直接リソースを使ったパスだけ)、縦 = リソース
+     セル : 赤 = 書く / 緑 = 読む / 黄 = 読み書き / C = 消す / R = MSAA の解決 / 斜線 = 深度 (書く・比べる) /
+            輪郭の緑 = 命令に書いていない読み (影のシャドーマップ) / 橙の三角 = 遷移バリア / 灰色の帯 = 寿命 (最初 〜 最後に使ったパス)
+   - 1 行目 : 一番外のパス (Camera 0 / Finish (debug lines) / UI) の名前。2 行目 : パスの番号 (上に乗ると親をたどった名前)
+     番号が青 = 一つ前のパスと描画先 (色 + 深度) が同じ = まとめられる候補 (Unity の Native Render Pass の合体に当たる)
+   - 右の Resource : 形式 / 大きさ / MSAA / 配列 / GPU のメモリ / 寿命 / 中身の絵 (フレームの終わり。色だけ) /
+                     使われ方とバリア (例 : PIXEL_SHADER_RESOURCE -> RENDER_TARGET) の一覧 (実行した順)
+     Pass : 親のパス / 時間 (P2 の値) / 子のパス / 読み書きしたリソースとバリア
+     Passes : パスの一覧 (入れ子) / Warnings : 書いたのに読まれない、書く前に読む (前のフレームの中身)
+   - Live (毎フレーム更新) / Capture (今のフレームで止める) / Hide unused / Barriers / 名前で絞る
+
+2. GPU テクスチャがどの状態で使われているか … 対応
+   - makeTransitionBarrier を通る遷移バリアを、その時のパスと一緒に記録 (D3D12_RESOURCE_STATES の名前で出す)
+   - MSAA の写し (Resolved) に掛かったバリアは "(resolved copy)"
+
+3. Memory の窓のレンダーターゲットごとの GPU のメモリ … 対応 (P1 で「予定」と出していた所)
+   - GetResourceAllocationInfo (MSAA の写しも含む)。大きさ / 名前の順に並べ替え。合計
+
+■ 記録の仕組み (C++ : CommandContext_Passes.cpp)
+- RenderGraphCapture.Capture (= Renderer_SetRenderGraphCapture) の間だけ。Render Graph Viewer か Memory の窓が開いている間
+- 記録する物 : 描画先への描画 (DrawScene / DrawFullscreen / DrawCustom / DrawParticles / DrawPreview)、消す、全画面シェーダーの入力、
+  深度 (不透明 / 影 = 書く、半透明 = 比べる、SH3 = テクスチャとして読む)、MSAA の色の解決 / 深度の解決、影のシャドーマップ (命令に無い読み)、
+  パーティクルの深度の読み、遷移バリア (レンダーターゲット / シーンの深度 / MSAA の深度 / 画面)
+- 記録しない物 : バッファ (GPU カリング / スキニング / パーティクル) のバリア、ディファードのライティングが読む影 (全画面シェーダーごとには分からない)
+- エディターでは画面の代わりにシーンの絵 ("Scene View (editor)") に描いているので、BackBuffer への描画はそちらに付く
+- パスの外の読み書きが出ないように、C++ の後片付け / 確認用の線を "Finish (debug lines)" のパスで囲んだ
+- 中身の絵 : Renderer_SetDebugReadTarget の物を UI の前に PIXEL_SHADER_RESOURCE にする (深度 / 配列は ImGui で読めないので出さない)
+- エンジンは自動のバリア / パスの削除 / メモリの使い回しをしないので、この窓は「実際に実行した命令の列」を見せる物
+
+■ 変えたファイル
+C++ (RHI)
+- Public/rhiTypes.h : RenderGraphPass (16) / RenderGraphResource (48) / RenderGraphAccess (20) と印
+- Public/rhi.h : SetRenderGraphCapture / GetRenderGraph / GetRenderTargetName / SetDebugReadTarget
+- RenderHardwareInterface.h/.cpp : 上の実装 (CommandContext に渡すだけ)
+- DirectX12/RHIObject/CommandContext.h : 記録の関数と変数、PassRecord.Parent、RenderTarget.Bytes
+- DirectX12/RHIObject/CommandContext.cpp : 命令ごとの記録、makeTransitionBarrier から記録、解決の記録、
+  レンダーターゲットのメモリ、"Finish (debug lines)" のパス、シーンの絵の名前
+- DirectX12/RHIObject/CommandContext_Passes.cpp : 記録 / 写し / 名前 / 中身の絵の準備
+C++ (Renderer)
+- rendererDll.cpp : Renderer_SetRenderGraphCapture / GetRenderGraph / GetRenderTargetName / SetDebugReadTarget
+C# (Runtime)
+- RenderGraphCapture.cs (新規) : RenderGraphCapture / RenderGraphSnapshot / *Info / 印 / 状態と形式の名前
+- Profiler.cs : PassName を internal に (Render Graph の記録でも使う)
+C# (Editor)
+- RenderGraphViewer.cs (新規) : 窓
+- ProfilerWindows.cs : Memory の Render targets
+- EditorApp.cs / EditorApp.Edit.cs : メニュー、毎フレームの更新、確認用
+- EditorTest.Profiler.cs : 確認 15 項目と重さの計測、見た目の確認に Viewer を足した
+その他
+- CSharp_console/Engine.props : 1.12.0.0
+- Docs/Reference/template.html : プロファイラーのガイドに Render Graph Viewer。index.html は作り直した
+
+■ ビルド
+- RHI / Renderer (C++) : Debug / Release ともエラー 0、新しい警告 0
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Debug / Release ともエラー 0 (警告は元からある 3 つだけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.12.0.0。Renderer.dll に新しい関数、版 1.12.0.0 を確かめた
+
+■ 確認
+- エディターの自動の確認 (--editor-test、Release) : pass 427 / fail 0 (P2 までの 412 + P3 の 15)
+- プロファイラーだけ (--editor-test-section profiler) : Release 37 / 37、Debug 37 / 37
+  - 構造体の大きさ / 窓を開くと記録 / 名前 (HDR / LDR / Scene View (取り込み) / SceneDepth / BackBuffer)
+  - Opaque が HDR と深度を書く / Tonemap が HDR を読んで LDR に書き、FXAA が LDR を読んでシーンの絵に書く
+  - Tonemap のパスで HDR の RENDER_TARGET -> PIXEL_SHADER_RESOURCE のバリア / Opaque が影を命令に無い読みで読む
+  - パスの外の読み書きが 0 / 格子 (14 列 x 10 行) / HDR のメモリ 4.75 MB (968x598 RGBA16F)
+  - 中身の絵は色だけ / Live を切ると同じ記録 / MSAA 4x : HDR の解決と MSAA の深度 / Memory の窓だけでも記録 / 閉じると記録しない
+- Debug ビルド (D3D12 のデバッグレイヤー。[D3D12 ERROR] などでログに出る設定) : 中身の絵 (UI の前のバリア) を含めて 0 件
+- 見た目 : 5 つの窓 + Viewer を並べて撮り、格子 / 寿命 / バリア / HDR の中身 / 使われ方の一覧を確かめた
+
+■ 性能 (Release、RTX 2070、エディター 1600x900 の showcase、300 フレームの平均を 切 / 入 / 切 / 入)
+- 記録 (C++) の時間 : 切 0.166 / 0.159 ms、入 0.196 / 0.198 ms → 記録している間だけ +0.03〜0.04 ms
+  (窓が閉じている間は、命令ごとに bool を見るだけ。バリアの所は static のポインタを見るだけ)
+
+■ 残り (次の段階)
+- P4 : Frame Debugger
+- 1 行目のパスのまとまりの名前は列の幅で切れる (上に乗ると全部の名前)
+- ディファードのライティングが読む影は記録していない (全画面シェーダーごとの入力しか分からない)

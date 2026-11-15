@@ -30,7 +30,8 @@ public sealed class SkyboxPass
         _shader ??= FullscreenShader.Load(ShaderPaths.Skybox, "PSSkybox");
         DrawCount++;
         if (!_wrapped.TryGetValue(texture, out var input)) _wrapped[texture] = input = RenderTexture.WrapTexture(texture);
-        cmd.DrawFullscreen(_shader, [input], [sky.Intensity, sky.Rotation * MathF.PI / 180.0f]);
+        using (cmd.BeginPass("Skybox"))   // v1.10 P2
+            cmd.DrawFullscreen(_shader, [input], [sky.Intensity, sky.Rotation * MathF.PI / 180.0f]);
         return true;
     }
 
