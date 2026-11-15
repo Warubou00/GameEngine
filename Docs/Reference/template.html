@@ -245,15 +245,18 @@ public sealed class SpinSystem : ISystem
 <p>1 フレームの描き方は C# で組み立てる (<a href="#/t/GameEngine.Rendering.RenderPipeline">RenderPipeline</a>。Unity の SRP に当たる)。<code>Render</code> は <a href="#/t/GameEngine.Rendering.RenderCommandBuffer">RenderCommandBuffer</a> に命令を<b>積むだけ</b>。エンジンが 1 フレーム分を 1 回の P/Invoke (<code>Renderer_Render</code>) で C++ に渡し、RHI の <code>CommandContext</code> が順に実行する。</p>
 <ol class="steps">
   <li><b>C# : パイプライン</b><small><a href="#/t/GameEngine.Rendering.ForwardRenderPipeline">ForwardRenderPipeline</a> / <a href="#/t/GameEngine.Rendering.DeferredRenderPipeline">DeferredRenderPipeline</a> が例。Initialize でレンダーターゲット (<a href="#/t/GameEngine.Rendering.RenderTexture">RenderTexture</a>) と全画面のシェーダー (<a href="#/t/GameEngine.Rendering.FullscreenShader">FullscreenShader</a>.Load) を作る</small></li>
-  <li><b>C# : 命令</b><small>SetRenderTarget(s) / ClearColor / ClearDepth / DrawScene / DrawFullscreen / UpdateParticles / DrawParticles / DrawCustom / SetCamera / SetViewport (v1.5)</small></li>
+  <li><b>C# : 命令</b><small>SetRenderTarget(s) / ClearColor / ClearDepth / DrawScene / DrawFullscreen / UpdateParticles / DrawParticles / DrawCustom / SetCamera / SetViewport (v1.5) / BeginPass・EndPass (v1.11。区切りだけ。<a href="#/g/profiler">プロファイラー</a>)</small></li>
   <li><b>C++ : 実行</b><small>RHI/Source/DirectX12/RHIObject/CommandContext.cpp の <code>switch (RenderCommandType)</code></small></li>
 </ol>
 <h3>全画面のパス (ポストエフェクト) を足す</h3>
 <pre><code>// Initialize
 _blur = FullscreenShader.Load("../Shader/postProcess.shader", "PSBlur");
 // Render
-cmd.SetRenderTarget(_temp);
-cmd.DrawFullscreen(_blur, stackalloc[] { hdr }, stackalloc[] { 1.0f / width, 0.0f });
+using (cmd.BeginPass("Blur"))   // v1.11 : プロファイラー / PIX にパスとして出る (無くても描ける)
+{
+    cmd.SetRenderTarget(_temp);
+    cmd.DrawFullscreen(_blur, stackalloc[] { hdr }, stackalloc[] { 1.0f / width, 0.0f });
+}
 // シェーダーでは g_Inputs[0].x がテクスチャの番号、g_Params が値</code></pre>
 <h3>新しい命令の種類を足す</h3>
 <ol class="steps">
@@ -458,6 +461,51 @@ if (UI.IsPointerOverUI) { /* ゲームのクリックを無視 */ }</code></pre>
   <li>レポートに足したい情報は <code>CrashReporter.SetInfo("名前", 値)</code> (C++ で落ちた時の native.txt にも出る)</li>
   <li>確かめ方 : <code>--crash-test managed|native|thread|stackoverflow</code> (Player / エディター。10 フレーム後に落ちる)</li>
   <li>受け取れない物 : C# のスタックオーバーフロー、Environment.FailFast、各 DLL の CRT (/MT) の abort</li>
+</ul>
+</article>
+
+<article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
+<h2>プロファイラー (v1.10 - v1.13)</h2>
+<p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>
+<ul>
+  <li>以前は C++ (RHI.dll) の ImGui の窓 1 つに全部を出していた。ImGui のコンテキストがエディターと別なので、窓の上のクリックが Hierarchy / Scene にもすり抜けていた。エディターではその窓 (F1 のオーバーレイ) を切る : <code>Profiler.SetOverlayEnabled(false)</code> (= <code>Renderer_SetProfilerOverlayEnabled</code>。F1 もメッセージの横取りもしなくなる)。Player は今まで通り F1 で出る</li>
+  <li>C++ の計測値は <a href="#/t/GameEngine.Profiler">Profiler</a>.GetFrame (<a href="#/t/GameEngine.ProfilerFrameData">ProfilerFrameData</a> = <code>RHI::ProfilerFrameData</code>、184 byte) / ReadValues / ReadInfos / GpuName で読む。値は <code>ReportProfilerValue</code> で足された順 (名前は増えた時だけ読む)</li>
+  <li>窓は値の名前で分ける : <code>GPU…</code> → GPU Usage、<code>Physics…</code> → CPU Usage の Physics、<code>(ms)</code> の付いた物 → CPU Usage、<code>bytes</code> / <code>memory</code> を含む物 → Memory、残り → Rendering Stats</li>
+  <li>履歴は 300 フレーム。グラフをクリックするとそのフレームを選んで止める (全部の窓がそのフレームを出す)。Pause / Latest / Clear</li>
+</ul>
+<h3>CPU の区間</h3>
+<ul>
+  <li><code>Profiler.BeginSample("名前")</code> 〜 <code>EndSample()</code>、または <code>using (Profiler.Sample("名前")) { }</code>。入れ子にできる。閉じ忘れはフレームの終わりで閉じる</li>
+  <li><a href="#/t/GameEngine.Engine">Engine</a>.Run の各段 (Gamepad / Update (game systems) / Animation / Transform / Physics / LateUpdate / UI / Editor GUI / Cameras / Render sync / Skinning / Lights / Render pipeline / Render (native)) と、ゲームの System ごと (型の名前) に区間がある</li>
+  <li><code>Profiler.Enabled</code> が false の間は何もしない (CPU Usage の窓が開いている間だけ true)。変えた次のフレームから効く (フレームの途中で切っても、開いた区間は閉じられる)</li>
+</ul>
+<h3>描画パスの区切りとパスごとの時間 (v1.11)</h3>
+<ul>
+  <li><code>using (cmd.BeginPass("名前")) { ... }</code> (<a href="#/t/GameEngine.Rendering.RenderCommandBuffer">RenderCommandBuffer</a>.BeginPass / EndPass)。命令の <code>RenderCommandType::BeginPass</code> (11。Arg0 = 名前の番号) / <code>EndPass</code> (12)。描画の結果には影響しない。入れ子にでき、閉じ忘れは C++ がフレームの終わりで閉じる</li>
+  <li>名前は <code>Renderer_RegisterPassName</code> で番号にする (C# が名前ごとに 1 回だけ聞いて覚える)</li>
+  <li>C++ (<code>RHI/Source/DirectX12/RHIObject/CommandContext_Passes.cpp</code>) : PIX / RenderDoc のイベント (<code>BeginEvent</code> / <code>EndEvent</code>) と C++ の CPU の時間は毎フレーム。GPU のタイムスタンプは <code>Profiler.PassTimingEnabled</code> の間だけ (エディターの GPU Usage の窓が開いている間)。GpuTimer の 10 番から 256 個 (128 パス)、別の範囲で読み戻す</li>
+  <li>C++ の中のパス : <code>Skinning (compute)</code> / <code>UI (ImGui / game UI)</code>。組み込みのパイプラインのパス : Camera N / Shadows (Cascade N) / Clear + Sky / Skybox / Opaque / Particles Update / SSAO (SSAO Blur) / Transparent / Particles / Tonemap / FXAA / GBuffer / Deferred Lighting / Forward (custom + transparent) / Preview</li>
+  <li>結果は <a href="#/t/GameEngine.Profiler">Profiler</a>.ReadPassTimings (<a href="#/t/GameEngine.PassTimingSample">PassTimingSample</a>。GPU の値は数フレーム前、計っていない時は -1)。エディターは GPU Usage の「Render passes」(行をクリックするとそのパスのグラフ) と CPU Usage の「Render passes (C++ record)」</li>
+  <li><a href="#/t/GameEngine.Rendering.RenderTexture">RenderTexture</a>.Create(..., name:) / <code>Name</code> : D3D12 の SetName (PIX / RenderDoc / デバッグレイヤーに出る。画面の大きさで作り直しても付け直す)</li>
+</ul>
+<h3>Render Graph Viewer (v1.12)</h3>
+<ul>
+  <li>View &gt; Analysis &gt; Render Graph Viewer (<code>GameEngine.Editor/RenderGraphViewer.cs</code>)。横 = 描画パス、縦 = リソースの格子 : 赤 = 書く / 緑 = 読む / 黄 = 読み書き / C = 消す / R = MSAA の解決 / 斜線 = 深度 / 輪郭の緑 = 命令に無い読み (影) / 橙の三角 = 遷移バリア / 灰色の帯 = 寿命。パスの番号が青 = 前のパスと描画先が同じ (まとめられる候補)</li>
+  <li>Live (v1.13.1) : 一定の間隔 (0.25 / 0.5 / 1 / 2 秒) ごとに、その間で一番多くのパスを含むフレームを代表にして、形 (パス / 読み書き / バリア / リソース) が変わった時だけ表を差し替える。影の遠い段を間引くので、フレームごとにパスの数が変わるため (以前は毎フレーム差し替えてチラついた)</li>
+  <li>右 : Resource (形式 / 大きさ / メモリ / 寿命 / 中身の絵 (フレームの終わり) / 使われ方とバリアの状態の移り変わり)、Pass (親のパス / 時間 / 読み書きしたリソース)、Passes、Warnings (書いたのに読まれない / 書く前に読む = 前のフレームの中身)</li>
+  <li>C++ (<code>CommandContext_Passes.cpp</code>) が <a href="#/t/GameEngine.RenderGraphCapture">RenderGraphCapture</a>.Capture の間だけ記録する (Render Graph Viewer か Memory の窓が開いている間)。記録 : 描画先への描画 / 消す / 全画面シェーダーの入力 / 深度 (書く・比べる) / MSAA の解決 / 影のシャドーマップ (命令に無い読み) / <code>makeTransitionBarrier</code> を通る遷移バリア。バッファ (カリング / スキニング / パーティクル) のバリアは記録しない</li>
+  <li>C# : <code>RenderGraphCapture.Read()</code> → <a href="#/t/GameEngine.RenderGraphSnapshot">RenderGraphSnapshot</a> (Passes / Resources / Accesses)。中身の絵は <code>SetPreviewTarget</code> (C++ が UI の前に PIXEL_SHADER_RESOURCE にする。深度 / 配列は出せない)</li>
+  <li>エンジンは自動のバリア / パスの削除 / メモリの使い回しをしない。この窓は「実際に実行した命令の列」を見せる物 (Unity の RenderGraph の API とは違う)</li>
+  <li>Memory の窓の「Render targets」 : レンダーターゲットごとの GPU のメモリ (<code>GetResourceAllocationInfo</code>。MSAA の写しも含む)</li>
+</ul>
+<h3>Frame Debugger (v1.13)</h3>
+<ul>
+  <li>View &gt; Analysis &gt; Frame Debugger (<code>GameEngine.Editor/FrameDebuggerWindow.cs</code>)。Enable で、1 フレームの描画をイベントに分けて止める : 消す (色 / 深度) / シーンの描画 1 回 (メッシュ × マテリアル。インスタンシングならまとめた数) / 全画面 / パーティクルの更新・描画 / 自分のシェーダーの 1 個 / プレビュー</li>
+  <li>左 : 描画パスごとのイベントの一覧。スライダー / ◀ ▶ / ← → で動かす。右 : 止めた時の描画先 (RT 0〜3 / Depth、R G B A、Levels)、詳細 (パス / 描画先 / シーンのパス・列・描き方 / 三角形とインスタンスの数 / 物 (クリックで Hierarchy で選ぶ) / マテリアル / 全画面シェーダーの名前・入力・g_Params)</li>
+  <li>仕組み (<code>CommandContext_FrameDebug.cpp</code>) : 毎フレーム同じフレームを描き直し、StopEvent のイベントまで描いたら、その時の描画先を <code>frameDebug.shader</code> の PSFrameDebugView で確認用の絵へ写して、残りの描画を飛ばす (UI と後片付けは続ける)。イベントの一覧は止めずに描いたフレームで取る (<code>FrameDebugger.StopEvent = -1</code>)</li>
+  <li>Enable の間 : ExecuteIndirect / GPU カリング / オクルージョンを使わず 1 個ずつ描く (描画ごとに止めるため)、影の遠い段の間引きをしない (フレームごとにイベントの並びが変わらないように)、再生中なら一時停止する</li>
+  <li>写せない物 : 画面 (Player のバックバッファ) と深度の配列 (シャドーマップ)。シーンビューは止めている間、最後まで描いたフレームの絵のまま</li>
+  <li>C# : <a href="#/t/GameEngine.FrameDebugger">FrameDebugger</a> (Enabled / StopEvent / Slot / ChannelMask / Levels / Apply / Read / FindEntity)、<a href="#/t/GameEngine.FrameDebugSnapshot">FrameDebugSnapshot</a></li>
 </ul>
 </article>
 

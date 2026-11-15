@@ -583,6 +583,16 @@ namespace Renderer
 		return IsInitialized() ? _rhi->GetMeshBytesUsed() : 0;
 	}
 
+	uint32_t SceneRenderer::FindRenderObjectByRhiObject(uint32_t rhiObject) const
+	{
+		for (uint32_t i = 0; i < static_cast<uint32_t>(_renderObjects.size()); ++i)
+		{
+			const RenderObject& object = _renderObjects[i];
+			if (object.Model != INVALID_HANDLE && object.Object.Index == rhiObject) return i;
+		}
+		return INVALID_HANDLE;
+	}
+
 	uint32_t SceneRenderer::GetLoadedModelCount() const
 	{
 		uint32_t count = 0;

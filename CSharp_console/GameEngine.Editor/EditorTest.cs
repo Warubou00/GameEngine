@@ -21,7 +21,7 @@ internal sealed partial class EditorTest
     public EditorTest(EditorApp app, string? section = null)
     {
         _app = app;
-        _steps = (section == "collision" ? only(collisionAssets()) : run()).GetEnumerator();
+        _steps = (section == "collision" ? only(collisionAssets()) : section == "profiler" ? only(profilerWindows()) : section == "profiler-view" ? only(profilerView()) : section == "fd-view" ? only(frameDebuggerView()) : run()).GetEnumerator();   // v1.10 : profiler
     }
 
     private static IEnumerable<int> only(IEnumerable<int> steps)
@@ -2346,6 +2346,7 @@ internal sealed partial class EditorTest
         foreach (var step in dropAndAudio()) yield return step;
         foreach (var step in uiWidgets()) yield return step;   // v1.7
         foreach (var step in collisionAssets()) yield return step;   // v1.9
+        foreach (var step in profilerWindows()) yield return step;   // v1.10
     }
 
     // v1.6 : エクスプローラーからのドロップ (写す) / AudioSource のコピーからの Play / Stop で音が止まる

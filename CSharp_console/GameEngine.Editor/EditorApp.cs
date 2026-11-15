@@ -39,7 +39,12 @@ internal sealed partial class EditorApp
     private string? _scenePath;
     private (EditCommand? Top, int Revision) _savedState;
     private bool    _layoutBuilt;
-    private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showStats = true, _showProject = true;
+    private bool    _showHierarchy = true, _showInspector = true, _showConsole = true, _showProject = true;
+    // v1.10 : プロファイラーの窓 (Profiler / CPU Usage / GPU Usage / Rendering Stats / Memory)
+    //   以前は Stats の窓 (_showStats) と C++ の F1 の窓だった。Stats の中身は Profiler の窓の「Editor」の欄へ移した
+    private readonly ProfilerWindows _profiler;
+    private readonly RenderGraphViewer _renderGraph = new();   // v1.12 P3 : Render Graph Viewer
+    private readonly FrameDebuggerWindow _frameDebugger;       // v1.13 P4 : Frame Debugger
     private bool    _showProjectSettings;
     private readonly ProjectSettingsWindow _projectSettings;   // ED6
     private bool    _showBuild;
@@ -101,6 +106,9 @@ internal sealed partial class EditorApp
         _project.OpenWidget = path => OpenWidget(path);
         _preview = new PreviewWindow(engine, database);     // AN5
         _collisionEditor = new CollisionEditor(engine, database);   // v1.9
+        _profiler = new ProfilerWindows(engine) { ShowOverview = true, DrawEditorStats = drawEditorStats };   // v1.10
+        _profiler.RenderGraphSource = () => _renderGraph.Snapshot;   // v1.12 P3 : Memory の窓のレンダーターゲットの一覧
+        _frameDebugger = new FrameDebuggerWindow(this);              // v1.13 P4
         _project.OpenCollision = path => OpenCollision(path);
         _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
@@ -260,7 +268,12 @@ internal sealed partial class EditorApp
         if (_showHierarchy) drawHierarchy();
         if (_showInspector) drawInspectorWindow();
         if (_showConsole)   _log.Draw(ref _showConsole);
-        if (_showStats)     drawStats();
+        _profiler.Update();   // v1.10 (開いている窓が無ければ何もしない)
+        _profiler.Draw();
+        _renderGraph.Update(_profiler.ShowMemory);   // v1.12 P3 (Render Graph Viewer / Memory の窓が閉じていれば記録しない)
+        _renderGraph.Draw();
+        _frameDebugger.Update();   // v1.13 P4 (Enable していなければ C++ に「動かさない」を送るだけ)
+        _frameDebugger.Draw();
         if (_showProject)   _project.Draw(ref _showProject);
         drawExtensionWindows();
         _projectSettings.Draw(ref _showProjectSettings);
@@ -302,7 +315,7 @@ internal sealed partial class EditorApp
         DockBuilder.DockWindow("Hierarchy", left);
         DockBuilder.DockWindow("Inspector", right);
         DockBuilder.DockWindow("Console", bottom);
-        DockBuilder.DockWindow("Stats", bottom);
+        DockBuilder.DockWindow("Profiler", bottom);   // v1.10 (以前は Stats)
         DockBuilder.DockWindow("Project", bottom);
         DockBuilder.DockWindow("Scene", scene);
         DockBuilder.igDockBuilderFinish(dockspace);
@@ -378,7 +391,6 @@ internal sealed partial class EditorApp
             ImGui.MenuItem("Hierarchy", null, ref _showHierarchy);
             ImGui.MenuItem("Inspector", null, ref _showInspector);
             ImGui.MenuItem("Console",   null, ref _showConsole);
-            ImGui.MenuItem("Stats",     null, ref _showStats);
             ImGui.MenuItem("Project",   null, ref _showProject);
             ImGui.MenuItem("Shader Graph", null, ref _showGraph);   // SH4
             ImGui.MenuItem("Widget Designer", null, ref _showWidgetDesigner);   // v1.7
@@ -414,8 +426,19 @@ internal sealed partial class EditorApp
                 if (ImGui.MenuItem("SSAO Only", null, ref ssaoOnly)) graphics.Ssao.ShowOnly = ssaoOnly;
                 ImGui.EndMenu();
             }
-            var profiler = _engine.Graphics.ProfilerVisible;
-            if (ImGui.MenuItem("Profiler (F1)", null, ref profiler)) _engine.Graphics.ProfilerVisible = profiler;
+            // v1.10 : プロファイラーの窓 (以前は Profiler (F1) = C++ の窓 1 つ。クリックがエディターにすり抜けていた)
+            if (ImGui.BeginMenu("Analysis"))
+            {
+                ImGui.MenuItem("Profiler", "F1", ref _profiler.ShowOverview);
+                ImGui.MenuItem("CPU Usage", null, ref _profiler.ShowCpu);
+                ImGui.MenuItem("GPU Usage", null, ref _profiler.ShowGpu);
+                ImGui.MenuItem("Rendering Stats", null, ref _profiler.ShowRendering);
+                ImGui.MenuItem("Memory", null, ref _profiler.ShowMemory);
+                ImGui.Separator();
+                ImGui.MenuItem("Render Graph Viewer", null, ref _renderGraph.Show);   // v1.12 P3
+                ImGui.MenuItem("Frame Debugger", null, ref _frameDebugger.Show);      // v1.13 P4
+                ImGui.EndMenu();
+            }
             // v1.8 : 後ろにある時も動かすか (切ると、他のアプリが前にある間は再生も描画も止めて CPU / GPU を休ませる)
             var runInBackground = _engine.RunInBackground;
             if (ImGui.MenuItem("Run In Background", null, ref runInBackground))
@@ -452,6 +475,7 @@ internal sealed partial class EditorApp
     {
         var io = ImGui.GetIO();
         if (io.WantTextInput) return;
+        if (ImGui.IsKeyPressed(ImGuiKey.F1, false)) _profiler.ShowOverview = !_profiler.ShowOverview;   // v1.10 (以前は C++ の窓が F1 を使っていた)
         if (_graph.HasFocus) return;   // シェーダーグラフの窓が自分で使う (元に戻す / 消す / 複製。SH4)
         if (_widgetDesigner.HasFocus) return;   // v1.7 : Widget Designer が使う (元に戻す / 消す / 複製)
         if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
@@ -465,7 +489,7 @@ internal sealed partial class EditorApp
             if (ImGui.IsKeyPressed(ImGuiKey.D)) Duplicate();
             if (ImGui.IsKeyPressed(ImGuiKey.P)) TogglePlay();
             if (ImGui.IsKeyPressed(ImGuiKey.B)) _showBuild = !_showBuild;   // ED8 後半
-            if (ImGui.IsKeyPressed(ImGuiKey.H)) _showReference = !_showReference;   // ED9 (F1 は C++ のプロファイラーが使う)
+            if (ImGui.IsKeyPressed(ImGuiKey.H)) _showReference = !_showReference;   // ED9 (F1 は Profiler の窓。v1.10)
             return;
         }
         // Delete : Project にフォーカスがある時はアセットを消す方 (ProjectPanel)。以前はシーンの物も一緒に消えた (v1.1)
@@ -496,6 +520,7 @@ internal sealed partial class EditorApp
             _engine.Graphics.SetRenderSize(width, height);   // 変わった時だけ C++ が作り直す
             ImGui.Image((IntPtr)GraphicsSettings.ViewTexture, new Vector2(width, height));
             _sceneHovered = ImGui.IsItemHovered();
+            SceneImageRect = (ImGui.GetItemRectMin(), ImGui.GetItemRectSize());   // v1.10 (確認用)
             // Project からドラッグ : モデルはマウスの下 (当たった所 / 地面 / 10 m 先) に置く、シーンは開く
             if (ImGui.BeginDragDropTarget())
             {
@@ -1083,9 +1108,9 @@ internal sealed partial class EditorApp
         ImGui.Separator();
     }
 
-    private void drawStats()
+    // v1.10 : 以前の Stats の窓の中身 (今は Profiler の窓の「Editor」の欄に出す)
+    private void drawEditorStats()
     {
-        if (ImGui.Begin("Stats", ref _showStats))
         {
             var (rw, rh) = _engine.Graphics.RenderSize;
             ImGui.Text($"Frame {_frameMs:F2} ms ({1000.0 / Math.Max(_frameMs, 0.001):F0} FPS)");
@@ -1098,8 +1123,6 @@ internal sealed partial class EditorApp
             ImGui.Text($"Undo {_undo.Count}{(_undo.UndoName is { } name ? $" (last : {name})" : "")}");
             ImGui.Text($"Models {_engine.Graphics.LoadedModelCount}, materials {_engine.Assets.LoadedMaterials.Count()}, mesh memory {_engine.Graphics.MeshBytesUsed / (1024.0 * 1024.0):F2} MB");
             ImGui.Text($"Asset reloads {_engine.Assets.ReloadCount}, shader reloads {_shaders?.ReloadCount ?? 0}");
-            ImGui.TextDisabled("Detailed GPU / CPU timings : View > Profiler (F1)");
         }
-        ImGui.End();
     }
 }

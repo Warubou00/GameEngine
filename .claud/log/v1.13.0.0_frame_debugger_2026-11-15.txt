@@ -1,0 +1,83 @@
+v1.13.0.0 : プロファイラーの強化 P4 (Frame Debugger)
+ブランチ : feature/v110-profiler-windows (P1〜P3 と同じブランチ。未コミット)
+日付 : 2026-11-15
+
+■ 依頼と対応 (設計の P4。Unity の Frame Debugger に当たる窓)
+1. 描画結果をイベントごとに確認できる窓 … 対応 (View > Analysis > Frame Debugger)
+   - Enable : 1 フレームの描画をイベントに分ける
+       消す (色 / 深度) / シーンの描画 1 回 (メッシュ × マテリアル。インスタンシングならまとめた数) / 全画面 /
+       パーティクルの更新・描画 / 自分のシェーダー (SH2) の 1 個 / プレビューの窓
+   - 左 : 描画パスごと (Camera 0 / Opaque など、親をたどった名前の見出し) のイベントの一覧
+     スライダー / ◀ ▶ / 窓にフォーカスがある時の ← → (↑ ↓) で 1 つずつ動かす / Refresh で一覧を取り直す
+   - 右 : 止めた時の描画先の絵
+       描画先の選択 (RT 0〜3 = MRT の何枚目 / Depth)、R G B A (1 つだけなら白黒)、Levels (HDR の明るい所 / 深度の差を広げる)
+     詳細 : パス / 描画先 / 深度 / シーンのパス・列・描き方 (不透明 / 半透明 / 両面) / 視点 (カメラ / 影の段) /
+            インデックス・三角形 / インスタンスの数 / 物 (ボタンで Hierarchy で選ぶ) / マテリアル /
+            全画面 : シェーダーの名前 (ファイル : 入口) / ブレンド / 入力の名前 / g_Params の値 / 消す色・深度の値
+   - Enable の間は再生中ならゲームを一時停止する (Disable / 窓を閉じると戻す)
+
+■ 仕組み (C++ : CommandContext_FrameDebug.cpp、シェーダー : frameDebug.shader)
+- 毎フレーム同じフレームを描き直し、StopEvent のイベントまで描いたら、その時の描画先を PSFrameDebugView で確認用の絵
+  ("Frame Debugger View"、RGBA8) へ写して、残りの描画を飛ばす (パスの区切りと UI / 後片付けは続ける)
+- Enable の間 : ExecuteIndirect / GPU カリング / オクルージョンを使わず 1 個ずつ描く (描画ごとに止めるため)
+  影の遠い段の間引き (ThrottleFarCascades) もしない (フレームごとにイベントの並びが変わると同じ所で止められないため。
+  確認の途中で、一覧のフレームと止めたフレームでイベントの番号がずれていたので足した)
+- イベントの一覧は止めずに描いたフレーム (StopEvent = -1) で取る (止めたフレームは止めた所までしか数えない)
+- 描画 → 物 : 描画の引数 → 最初の DrawItem (インスタンシングでまとめた時は最初の 1 つ) → Renderer の描画オブジェクト → MeshRenderer.Handle
+- 写せない物 : 画面 (Player のバックバッファ) / 深度の配列 (シャドーマップ)。窓に理由を出す
+- 止めている間、シーンビューは最後まで描いたフレームの絵のまま (止めた所から後は描かないので)
+
+■ 変えたファイル
+C++ (RHI)
+- Public/rhiTypes.h : FrameDebugSettings (32) / FrameDebugEventType / FrameDebugEvent (144) / FrameDebugResult (32)
+- Public/rhi.h : SetFrameDebugger / GetFrameDebugEvents
+- RenderHardwareInterface.h/.cpp : 上の実装 (CommandContext に渡すだけ)
+- DirectX12/RHIObject/CommandContext.h : 関数と変数
+- DirectX12/RHIObject/CommandContext.cpp : 命令ごと / シーンの描画 1 回ごと / 自分のシェーダー 1 個ごとのイベント、止めた後は飛ばす、
+  Enable の間は 1 個ずつ描く (PrepareScene)
+- DirectX12/RHIObject/CommandContext_FrameDebug.cpp (新規) : 数える / 止める / 写す / 結果
+- Shader/frameDebug.shader (新規) : PSFrameDebugView
+- RHI.vcxproj / .filters : CommandContext_FrameDebug.cpp
+C++ (Renderer)
+- sceneRenderer.h/.cpp : FindRenderObjectByRhiObject
+- rendererDll.cpp : Renderer_SetFrameDebugger / GetFrameDebugEvents / FindRenderObjectByRhiObject
+C# (Runtime)
+- FrameDebugger.cs (新規) : FrameDebugger / FrameDebugSnapshot / FrameDebugEventInfo / FrameDebugResult
+- RenderGraphCapture.cs : ResourceName (名前を Frame Debugger でも使う)
+- Rendering/RenderTexture.cs : FullscreenShader.LoadedShaders (番号 → 名前)
+- Rendering/ShadowPass.cs : Frame Debugger の間は影の段を間引かない
+C# (Editor)
+- FrameDebuggerWindow.cs (新規) : 窓
+- EditorApp.cs / EditorApp.Edit.cs : メニュー、毎フレームの更新、確認用
+- EditorTest.Profiler.cs / EditorTest.cs : 確認 15 項目、重さの計測、見た目の確認 (--editor-test-section fd-view)
+その他
+- CSharp_console/Engine.props : 1.13.0.0
+- Docs/Reference/template.html : プロファイラーのガイドに Frame Debugger。index.html は作り直した
+
+■ ビルド
+- RHI / Renderer (C++) : Debug / Release ともエラー 0、新しい警告 0
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Debug / Release ともエラー 0 (警告は元からある 3 つだけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.13.0.0 (Shader/frameDebug.shader も入る)。新しい関数と版 1.13.0.0 を確かめた
+- 開発中の注意 : 開発中のエディターはシェーダーを見本 (GameEngine_console) の出力から読むので、新しいシェーダーは見本をビルドするまで読めない
+
+■ 確認
+- エディターの自動の確認 (--editor-test、Release) : pass 442 / fail 0 (P3 までの 427 + P4 の 15)
+- プロファイラーだけ (--editor-test-section profiler) : Release 52 / 52 (2 回)、Debug 52 / 52
+  - 構造体の大きさ / Enable で再生が一時停止 / 止めないフレームで一覧 (117 イベント) / 消す・シーンの描画・全画面がある
+  - Enable の間は ExecuteIndirect / GPU カリングを使わない
+  - 最後のイベントで止めて写す / Opaque の最初の描画で止めると HDR (RGBA16F 968x598) / 描画 → MeshRenderer のエンティティ (34 描画)
+  - Depth でシーンの深度 (D32F) / 影の段は写せない (Status 3) / Tonemap のシェーダー名・描画先 LDR・入力 HDR、止めると LDR
+  - 一覧を取り直しても同じ並び / Disable で再生と ExecuteIndirect に戻る
+- Debug ビルド (D3D12 のデバッグレイヤー) : [D3D12 ERROR] / [D3D12 WARNING] 0 件
+- 見た目 : Opaque の途中 (112 / 152) で止めた絵を撮った。岩は描かれ、後のキャラクターはまだ描かれていないことを確かめた
+
+■ 性能 (Release、RTX 2070、エディター 1600x900 の showcase、300 フレームの平均を 切 / 入 / 切 / 入)
+- Frame Debugger 切 : 記録 (C++) 0.163 / 0.152 ms、GPU 0.645 / 0.645 ms
+  Frame Debugger 入 (止めない) : 記録 0.139 / 0.140 ms、GPU 0.619 / 0.619 ms
+  → この場面 (描画 34 回) では 1 個ずつ描く方がむしろ少し軽い (GPU カリングの計算が無くなる)。描画が多い場面では重くなる
+- 切の間は命令ごとに bool を見るだけ
+
+■ 残り
+- マテリアル / 自分のシェーダーは番号で出す (名前は C# のアセットから引いていない)
+- PSO の細かい状態 (ブレンド / 深度テスト / ラスタライザ) は、シーンのパス・列・描き方からの説明だけ
+- 止めた所の絵をシーンビューにも出す切り替え、ピクセルの値の読み戻し (設計の P5)

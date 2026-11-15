@@ -179,6 +179,8 @@ namespace Renderer
 		void     SetRenderObjectMaterial(uint32_t object, uint32_t material);
 		uint64_t GetMeshBytesUsed() const;
 		uint32_t GetLoadedModelCount() const;
+		// v1.13 P4 : RHI の物 (ObjectHandle) → 描画オブジェクトのハンドル (Frame Debugger の描画からエンティティを探す)。無ければ INVALID_HANDLE
+		uint32_t FindRenderObjectByRhiObject(uint32_t rhiObject) const;
 		bool     ReloadShaders() { return IsInitialized() && _rhi->ReloadShaders(); }
 
 		// ==========================================================

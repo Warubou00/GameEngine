@@ -245,6 +245,58 @@ namespace RHI
 
 		// 任意の文字列をプロファイラーに表示する (例: "Render pipeline" → "Deferred / PBR")
 		virtual void SetProfilerInfo(const char* name, const char* text) = 0;
+
+		// v1.10 : 計測値を外から読む (エディターが自分の窓に出す)。値 / 文字列のポインタは次に値が足されるまで有効
+		// F1 の ImGui の窓を使わない (false : F1 も入力の横取りもしない。エディターは自分の窓で出すので切る)
+		virtual void SetProfilerOverlayEnabled(bool enabled) = 0;
+		virtual bool GetProfilerFrame(ProfilerFrameData& out)const = 0;
+		// ReportProfilerValue などで足された値。戻り値 = 全部の数 (capacity より多くても数は返す)。並びは足された順で変わらない
+		virtual uint32_t GetProfilerValues(double* values, uint32_t capacity)const = 0;
+		virtual const char* GetProfilerValueName(uint32_t index)const = 0;
+		virtual uint32_t GetProfilerInfoCount()const = 0;
+		virtual bool GetProfilerInfo(uint32_t index, const char** name, const char** text)const = 0;
+		virtual const char* GetGpuName()const = 0;
+
+		// ======================================================================
+		// v1.10 P2 : 描画パス (RenderCommandType::BeginPass / EndPass) の名前と時間
+		// ======================================================================
+
+		// 名前を登録して番号をもらう (同じ名前なら同じ番号)。BeginPass の Arg0 に入れる
+		virtual uint32_t RegisterPassName(const char* name) = 0;
+		virtual const char* GetPassName(uint32_t id)const = 0;
+		// パスごとに GPU の時間を計るか (タイムスタンプを書く。プロファイラーの窓が開いている間だけ true にする)
+		// PIX / RenderDoc のイベント (BeginEvent / EndEvent) と CPU の時間は、この値に関係なく毎フレーム
+		virtual void SetPassTimingEnabled(bool enabled) = 0;
+		// 最後に読めたフレームのパスの時間 (始まった順)。戻り値 = 全部の数
+		virtual uint32_t GetPassTimings(PassTiming* out, uint32_t capacity)const = 0;
+		// レンダーターゲットに名前を付ける (D3D12 の SetName。PIX / RenderDoc / デバッグレイヤーの表示。作り直しても残る)
+		virtual void SetRenderTargetName(RenderTargetHandle handle, const char* name) = 0;
+
+		// ======================================================================
+		// v1.12 P3 : Render Graph Viewer (パスごとのリソースの読み書き / バリア)
+		// ======================================================================
+
+		// 記録するか (エディターの Render Graph Viewer / Memory の窓が開いている間だけ true)
+		virtual void SetRenderGraphCapture(bool enabled) = 0;
+		// 最後に記録したフレーム。各配列の数を *outCount に入れる (capacity を超えた分は写さない)。戻り値 = 記録があるか
+		virtual bool GetRenderGraph(RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+		                            RenderGraphResource* resources, uint32_t resourceCapacity, uint32_t* resourceCount,
+		                            RenderGraphAccess* accesses, uint32_t accessCapacity, uint32_t* accessCount)const = 0;
+		// レンダーターゲットの名前 (SetRenderTargetName の物。UTF-8。無ければ空)
+		virtual uint32_t GetRenderTargetName(RenderTargetHandle handle, char* out, uint32_t size)const = 0;
+		// UI (ImGui) で中身を見るレンダーターゲット (毎フレーム、UI の前に読める状態にする。INVALID で止める)
+		virtual void SetDebugReadTarget(RenderTargetHandle handle) = 0;
+
+		// ======================================================================
+		// v1.13 P4 : Frame Debugger
+		// ======================================================================
+
+		// 毎フレーム設定する (Enabled の間は ExecuteIndirect / GPU カリングを使わず 1 個ずつ描き、イベントを数える)
+		virtual void SetFrameDebugger(const FrameDebugSettings& settings) = 0;
+		// 最後のフレームのイベント (止めた時は止めた所まで) とパス。戻り値 = 記録があるか
+		virtual bool GetFrameDebugEvents(FrameDebugEvent* events, uint32_t eventCapacity, uint32_t* eventCount,
+		                                 RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+		                                 FrameDebugResult* result)const = 0;
 	};
 }
 

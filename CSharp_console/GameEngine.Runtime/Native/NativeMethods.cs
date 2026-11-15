@@ -382,6 +382,56 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetProfilerInfo([MarshalAs(UnmanagedType.LPStr)] string name, [MarshalAs(UnmanagedType.LPStr)] string text);
 
+    // ---------- v1.10 : プロファイラーの計測値を読む (エディターの窓) ----------
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetProfilerOverlayEnabled([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_GetProfilerFrame(ProfilerFrameData* frame);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetProfilerValues(double* values, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetProfilerValueName(uint index, byte* name, uint size);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetProfilerInfoCount();
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_GetProfilerInfo(uint index, byte* name, uint nameSize, byte* text, uint textSize);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetGpuName(byte* name, uint size);
+
+    // ---------- v1.10 P2 : 描画パス (BeginPass / EndPass) / レンダーターゲットの名前 ----------
+    // C++ の RHI::PassTiming と同じ並び (16 byte)
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PassTiming
+    {
+        public uint  NameId;
+        public uint  Depth;
+        public float GpuMs;   // 計っていない時は -1
+        public float CpuMs;
+    }
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_RegisterPassName([MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetPassName(uint id, byte* name, uint size);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetPassTimingEnabled([MarshalAs(UnmanagedType.I1)] bool enabled);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_GetPassTimings(PassTiming* timings, uint capacity);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetRenderTargetName(uint handle, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
+
     // ---------- 描画パス / ライト ----------
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]

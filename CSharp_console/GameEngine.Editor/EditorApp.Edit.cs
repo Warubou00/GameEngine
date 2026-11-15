@@ -250,6 +250,20 @@ internal sealed partial class EditorApp
     }
 
     public CollisionEditor CollisionEditor => _collisionEditor;   // v1.9
+    internal ProfilerWindows ProfilerWindows => _profiler;          // v1.10
+    internal RenderGraphViewer RenderGraphViewer => _renderGraph;   // v1.12 P3
+    internal FrameDebuggerWindow FrameDebuggerWindow => _frameDebugger;   // v1.13 P4
+    internal bool SceneHovered => _sceneHovered;                    // v1.10 (確認用 : シーンビューにマウスが乗っているか)
+    internal (Vector2 Position, Vector2 Size) SceneImageRect { get; private set; }
+    /// <summary>確認用 (v1.10) : シーンの上に浮いているかもしれない道具の窓を閉じる (前の確認が開いたままの物)</summary>
+    internal void CloseToolWindowsForTest()
+    {
+        _showProjectSettings = _showBuild = _showReference = _showGraph = _showWidgetDesigner = false;
+        _renderGraph.Show = false;
+        _frameDebugger.Show = false;
+        if (_preview.IsOpen) _preview.Close();
+        if (_collisionEditor.IsOpen) _collisionEditor.Close();
+    }   // v1.10 (確認用 : シーンビューの絵の位置と大きさ)
 
     /// <summary>コリジョンアセットの窓で開く (v1.9)</summary>
     public bool OpenCollision(string path) => _collisionEditor.Open(path);

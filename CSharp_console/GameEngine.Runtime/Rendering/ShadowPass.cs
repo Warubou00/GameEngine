@@ -52,6 +52,8 @@ public sealed class ShadowPass : IDisposable
     public RenderTexture? ShadowMap => _map;
 
     /// <summary>影を使うなら、シャドーマップを描く命令を積んで true を返す</summary>
+    private static readonly string[] CascadePassNames = ["Cascade 0", "Cascade 1", "Cascade 2", "Cascade 3"];   // v1.10 P2 (毎フレーム文字列を作らない)
+
     public bool Render(RenderCommandBuffer cmd, GraphicsSettings graphics)
     {
         var settings = graphics.Shadows;
@@ -68,7 +70,7 @@ public sealed class ShadowPass : IDisposable
         if (_map == null || resolution != _resolution || cascades != _cascades)
         {
             _map?.Dispose();   // C++ は消したシャドーマップの影を止める。下で新しい物を送り直す
-            _map = RenderTexture.CreateFixed(RenderTextureFormat.Depth32, (uint)resolution, (uint)resolution, arraySize: cascades);
+            _map = RenderTexture.CreateFixed(RenderTextureFormat.Depth32, (uint)resolution, (uint)resolution, arraySize: cascades, name: "Shadow Map");
             _resolution = resolution;
             _cascades   = cascades;
             _hasSent    = false;
@@ -78,7 +80,8 @@ public sealed class ShadowPass : IDisposable
         // このフレームで描き直さない段 (間引き) : 3 段目は偶数フレーム、4 段目は 4 フレームに 1 回 (3 段目と重ならないように)
         uint frozen = 0;
         // v1.5 : カメラが複数の時は間引かない (前のカメラの段が残っているので)
-        if (settings.ThrottleFarCascades && !_drawAll && !DrawEveryCascade)
+        // v1.13 P4 : Frame Debugger の間も間引かない (フレームごとにイベントの並びが変わると、同じ所で止められない)
+        if (settings.ThrottleFarCascades && !_drawAll && !DrawEveryCascade && !FrameDebugger.Enabled)
         {
             if (cascades >= 3 && (_frame & 1) != 0) frozen |= 1u << 2;
             if (cascades >= 4 && (_frame & 3) != 1) frozen |= 1u << 3;
@@ -105,9 +108,11 @@ public sealed class ShadowPass : IDisposable
         });
 
         // 段ごとに : 配列の c 枚目を消して、視点 c + 1 (ライトのカスケード c) で描く。カリングは C++ が段ごと (または 1 回) に行う
+        using var shadowPass = cmd.BeginPass("Shadows");   // v1.10 P2 : 描画パスの区切り (段ごとにも)
         for (int c = 0; c < cascades; c++)
         {
             if ((frozen & (1u << c)) != 0) continue;
+            using var cascadePass = cmd.BeginPass(CascadePassNames[c]);
             cmd.SetRenderTargets(ReadOnlySpan<RenderTexture>.Empty, _map, depthSlice: c);
             cmd.ClearDepth();
             cmd.DrawScene(ScenePass.Shadow, RenderQueue.Opaque, view: c + 1);

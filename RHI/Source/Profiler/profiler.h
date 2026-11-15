@@ -34,6 +34,7 @@
 #include <chrono>
 
 #include "frameStats.h"
+#include "../Public/rhiTypes.h"   // v1.10 : ProfilerFrameData
 
 struct IDXGIAdapter3;
 
@@ -71,6 +72,14 @@ namespace RHI
 		 * @param[in,out] bool* occlusion    オクルージョンカリングの ON / OFF のチェックボックス (nullptr なら出さない)
 		 ************************************************************************************/
 		void Draw(bool* indirectDraw = nullptr, bool* instancing = nullptr, bool* gpuCulling = nullptr, bool* occlusion = nullptr);
+
+		// ---------- v1.10 : 外から読む (エディターが自分の窓に出す) ----------
+		void GetFrameData(ProfilerFrameData& out)const;
+		uint32_t GetValues(double* values, uint32_t capacity)const;
+		const char* GetValueName(uint32_t index)const;
+		uint32_t GetInfoCount()const { return static_cast<uint32_t>(_infos.size()); }
+		bool GetInfo(uint32_t index, const char** name, const char** text)const;
+		const char* GetGpuName()const { return _gpuName.c_str(); }
 
 	private:
 		void updateVideoMemory();

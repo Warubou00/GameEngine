@@ -38,6 +38,8 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <string>
+#include <chrono>
 #include <d3d12.h>
 #include <wrl/client.h>
 
@@ -510,6 +512,8 @@ namespace RHI
                 Microsoft::WRL::ComPtr<ID3D12Resource> Resolved;
                 D3D12_RESOURCE_STATES ResolvedState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
                 bool                  ResolveDirty  = false;
+                std::wstring          Name;   // v1.10 P2 : SetRenderTargetName の名前 (空なら既定の名前)
+                uint64_t              Bytes = 0;   // v1.12 P3 : GPU のメモリ (GetResourceAllocationInfo。MSAA の写しも含む)
             };
             std::vector<RenderTarget>                            _renderTargets;
             std::vector<uint32_t>                                _freeRenderTargets;
@@ -679,6 +683,103 @@ namespace RHI
             uint32_t GetSkinnedInstances()const { return _skinnedInstances; }
             uint32_t GetSkinnedVertices()const { return _skinnedVertices; }
             float    GetSkinGpuMs()const { return _skinGpuMs; }   // FRAME_COUNT フレーム前の GPU スキニングの時間 (曲げなかったフレームは 0)
+
+            // ---------- v1.10 P2 : 描画パス (BeginPass / EndPass。CommandContext_Passes.cpp) ----------
+            uint32_t    RegisterPassName(const char* name);
+            const char* GetPassName(uint32_t id)const;
+            void        SetPassTimingEnabled(bool enabled) { _passTimingEnabled = enabled; }
+            uint32_t    GetPassTimings(RHI::PassTiming* out, uint32_t capacity)const;
+            void        SetRenderTargetName(RHI::RenderTargetHandle handle, const char* name);
+
+            // ---------- v1.12 P3 : Render Graph Viewer (CommandContext_Passes.cpp) ----------
+            void     SetRenderGraphCapture(bool enabled) { _graphCapture = enabled; }
+            bool     GetRenderGraph(RHI::RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                                    RHI::RenderGraphResource* resources, uint32_t resourceCapacity, uint32_t* resourceCount,
+                                    RHI::RenderGraphAccess* accesses, uint32_t accessCapacity, uint32_t* accessCount)const;
+            uint32_t GetRenderTargetName(RHI::RenderTargetHandle handle, char* out, uint32_t size)const;
+            void     SetDebugReadTarget(RHI::RenderTargetHandle handle) { _debugReadTarget = handle.Index; }
+            // 遷移バリアを作った時に呼ばれる (記録している時だけ。makeTransitionBarrier から)
+            void     RecordGraphBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after);
+            // 記録中の CommandContext (記録していない時は nullptr。描画は 1 つのスレッドだけで行う)
+            static CommandContext* s_graphSink;
+
+            // ---------- v1.13 P4 : Frame Debugger (CommandContext_FrameDebug.cpp) ----------
+            void SetFrameDebugger(const RHI::FrameDebugSettings& settings) { _fdSettings = settings; }
+            bool GetFrameDebugEvents(RHI::FrameDebugEvent* events, uint32_t eventCapacity, uint32_t* eventCount,
+                                     RHI::RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+                                     RHI::FrameDebugResult* result)const;
+        private:
+            void fdStartFrame(Buffer* buffer);            // ExecuteRenderCommands の頭
+            bool fdSkipping()const { return _fdActive && (_fdStopHit || _fdStopped); }   // 止めたので残りは描かない
+            // イベントを 1 つ数える。戻り値 = 実行してよいか (止めた後なら false)。止める番号ならこのイベントの後で写す
+            bool fdEvent(RHI::FrameDebugEvent& e);
+            void fdFillTargets(RHI::FrameDebugEvent& e)const;   // 今の描画先を入れる
+            void fdAfterCommand(Buffer* buffer);          // 命令の後 : 止める番号を越えたら描画先を写す
+            void fdCapture(Buffer* buffer);
+            void fdFinishFrame();                         // ExecuteRenderCommands の終わり : 結果を C# が読めるように
+            void fdBuildArgObjects(const DrawFrame& frame);   // 描画の引数の番号 → 最初の DrawItem (物 / マテリアル)
+
+            RHI::FrameDebugSettings            _fdSettings;
+            bool                               _fdActive  = false;   // このフレームで動かしている
+            bool                               _fdStopHit = false;   // 止めるイベントを描いた (この命令の後で写す)
+            bool                               _fdStopped = false;   // 写した。残りの命令は飛ばす
+            std::vector<RHI::FrameDebugEvent>  _fdEvents;
+            std::vector<std::pair<uint32_t, uint32_t>> _fdArgObjects;   // 引数の番号 → (Object, Material)
+            std::vector<RHI::FrameDebugEvent>  _fdLastEvents;
+            std::vector<RHI::RenderGraphPass>  _fdLastPasses;
+            RHI::FrameDebugResult              _fdResult;
+            RHI::FrameDebugResult              _fdLastResult;
+            bool                               _fdHasLast = false;
+        private:
+            // 今のパスにリソースの使い方を足す (同じパス・同じリソースはまとめる)。記録していない時は何もしない
+            void graphAccess(uint32_t resourceId, uint32_t kind);
+            void graphBoundWrite(bool depthWrite);   // 今の描画先 (色 / 深度) に描いた
+            void graphShadowRead();                  // 影のシャドーマップを読む (命令には書いていない)
+            void finishGraphFrame();                 // ExecuteRenderCommands の終わり : 記録を写して C# が読めるようにする
+            void prepareDebugReadTarget();           // UI の前 : 見るレンダーターゲットを読める状態に
+
+            bool                               _graphCapture   = false;
+            bool                               _graphRecording = false;   // このフレームを記録中
+            std::vector<RHI::RenderGraphAccess> _graphAccesses;           // 記録中のフレーム
+            std::vector<std::pair<ID3D12Resource*, uint32_t>> _graphResourceMap;   // リソース → Id (下位 31 bit) + 写しの印 (最上位 bit)
+            std::vector<uint32_t>              _graphTextureInputs;        // このフレームで読んだ普通のテクスチャ (TEXTURE_INPUT | n)
+            // 最後に記録したフレーム (C# が読む)
+            std::vector<RHI::RenderGraphPass>     _graphLastPasses;
+            std::vector<RHI::RenderGraphResource> _graphLastResources;
+            std::vector<RHI::RenderGraphAccess>   _graphLastAccesses;
+            bool                               _graphHasLast  = false;
+            uint32_t                           _debugReadTarget = 0xFFFFFFFFu;
+            uint32_t                           _debugLinesPassName = 0xFFFFFFFFu;
+        private:
+            void beginPass(uint32_t nameId);   // PIX のイベント + (計る時は) GPU のタイムスタンプ + CPU の時刻
+            void endPass();
+            void closeOpenPasses();            // 閉じ忘れを閉じる (ExecuteRenderCommands の終わり)
+            void startPassFrame();             // ExecuteRenderCommands の頭 : このフレームの記録を始める
+            void collectPassResults();         // RenderStart (GPU の完了待ちの後) : FRAME_COUNT フレーム前の時間を読む
+            void resolvePassTimestamps();      // RenderEnd : このフレームのパスのタイムスタンプを読み戻し用バッファへ
+            void applyRenderTargetName(uint32_t index);   // 名前を D3D12 のリソースに付ける (作り直した後も)
+
+            struct PassRecord
+            {
+                uint32_t NameId    = 0;
+                uint32_t Depth     = 0;
+                uint32_t Parent    = 0xFFFFFFFFu;   // v1.12 P3 : 親のパス (_passRecords の番号)
+                uint32_t Timestamp = 0xFFFFFFFFu;   // 始めのタイムスタンプの番号 (終わり = +1)。計らない時は 0xFFFFFFFF
+                double   CpuMs     = 0.0;
+                std::chrono::steady_clock::time_point Start;
+            };
+            std::vector<PassRecord>            _passRecords[FRAME_COUNT];   // フレームごと (GPU の値は FRAME_COUNT フレーム後に読む)
+            uint32_t                           _passTimestampsUsed[FRAME_COUNT] = {};
+            bool                               _passTimed[FRAME_COUNT] = {};
+            std::vector<uint32_t>              _passStack;                  // 開いているパス (_passRecords の番号)
+            bool                               _passTimingEnabled = false;
+            std::vector<RHI::PassTiming>       _passResults;                // 最後に読めたフレームの結果
+            std::vector<UINT64>                _passTicks;                  // 読む時の作業用
+            std::vector<std::string>           _passNames;
+            std::vector<std::wstring>          _passNamesWide;              // PIX のイベント用 (UTF-16)
+            std::unordered_map<std::string, uint32_t> _passNameIds;
+            uint32_t                           _uiPassName   = 0xFFFFFFFFu; // C++ の中のパス (UI / スキニング)
+            uint32_t                           _skinPassName = 0xFFFFFFFFu;
         private:
             void recordSkinning(Buffer* buffer, ID3D12GraphicsCommandList* cmdList, D3D12_RESOURCE_STATES vertexState);   // 描画の前に、姿勢が変わった物を曲げる
             // 確認用の読み戻し (フレームの頭で写す)

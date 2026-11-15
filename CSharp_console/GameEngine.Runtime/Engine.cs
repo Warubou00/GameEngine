@@ -260,7 +260,11 @@ public sealed class GraphicsSettings
     {
         commands.Clear();
         renderCameras(commands);
-        foreach (var preview in _previews) preview.Submit(commands);   // AN5 : プレビューの窓 (シーンの後、UI の前)
+        foreach (var preview in _previews)
+        {
+            using var pass = commands.BeginPass("Preview");   // v1.10 P2 : 描画パスの区切り
+            preview.Submit(commands);   // AN5 : プレビューの窓 (シーンの後、UI の前)
+        }
         commands.Submit();
         // AN5 : 窓を閉じた / 大きさを変えたレンダーターゲットは、このフレームを描いた後で消す
         //       (以前はその場で消していたので、同じフレームの UI がもう消えたテクスチャを読み、GPU が止まった (デバイスの削除))
@@ -272,6 +276,9 @@ public sealed class GraphicsSettings
     //   画面全体で背景を消すカメラ : バックバッファへ直接 (1 台だけの時は以前と同じ)
     //   範囲が一部 / DepthOnly のカメラ : 自分の絵 (RGBA8。画面と同じ大きさ) に描いてから、範囲に重ねる
     //     (DepthOnly は透明の所 (何も写っていない所) が前のカメラの絵のまま)
+    // v1.10 P2 : カメラごとの描画パスの名前 (毎フレーム文字列を作らない)
+    private static readonly string[] CameraPassNames = Enumerable.Range(0, 16).Select(i => $"Camera {i}").ToArray();
+
     private void renderCameras(RenderCommandBuffer cmd)
     {
         var count = Math.Min(CameraCount, NativeMethods.MaxCameras);
@@ -293,6 +300,7 @@ public sealed class GraphicsSettings
         // 1 台目が画面全体を塗らない時は、先にバックバッファを黒で消す
         if (!CameraSystem.IsFullRect(CameraSystem.ClampRect(main.ViewportRect)) || mainClear == CameraClearFlags.DepthOnly)
         {
+            using var clearPass = cmd.BeginPass("Clear BackBuffer");   // v1.10 P2
             cmd.SetRenderTarget(RenderTexture.BackBuffer);
             cmd.ClearColor(new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
         }
@@ -304,6 +312,7 @@ public sealed class GraphicsSettings
         {
             var camera   = i < RenderCameras.Count ? RenderCameras[i] : main;
             var pipeline = i == 0 ? _pipeline! : pipelineOf(i, camera.RenderPath);
+            using var cameraPass = cmd.BeginPass(CameraPassNames[Math.Min(i, CameraPassNames.Length - 1)]);   // v1.10 P2 : カメラごとの描画パス
             pipeline.SharedShadows = i == 0 ? null : _pipeline!.OwnShadows;   // v1.5 : シャドーマップは 1 つを使い回す
             _pipeline!.OwnShadows.DrawEveryCascade = count > 1;
             if (i > 0)
@@ -315,7 +324,7 @@ public sealed class GraphicsSettings
             ClearFlags = i == 0 ? mainClear : camera.ClearFlags;
             var rect   = CameraSystem.ClampRect(camera.ViewportRect);
             var direct = CameraSystem.IsFullRect(rect) && ClearFlags != CameraClearFlags.DepthOnly;
-            CameraTarget = direct ? RenderTexture.BackBuffer : (_cameraTargets[i] ??= RenderTexture.Create(RenderTextureFormat.RGBA8));
+            CameraTarget = direct ? RenderTexture.BackBuffer : (_cameraTargets[i] ??= RenderTexture.Create(RenderTextureFormat.RGBA8, name: $"Camera {i} Target"));
             pipeline.Render(cmd, this);
             if (!direct)
             {
@@ -783,13 +792,26 @@ public sealed class Engine : IDisposable
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void updateSystems()
     {
-        foreach (var system in _systems) system.Update(World);
+        foreach (var system in _systems)
+        {
+            // v1.10 : CPU Usage の窓が開いている間は System ごとに測る (例外が出ても区間を閉じる)
+            if (!Profiler.Enabled) { system.Update(World); continue; }
+            Profiler.BeginSample(system.GetType().Name);
+            try { system.Update(World); }
+            finally { Profiler.EndSample(); }
+        }
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void updateLateSystems()
     {
-        foreach (var system in _lateSystems) system.LateUpdate(World);
+        foreach (var system in _lateSystems)
+        {
+            if (!Profiler.Enabled) { system.LateUpdate(World); continue; }   // v1.10
+            Profiler.BeginSample(system.GetType().Name);
+            try { system.LateUpdate(World); }
+            finally { Profiler.EndSample(); }
+        }
     }
 
     /// <summary>System を外す (ED7 : ゲームの DLL を読み直す前)</summary>
@@ -895,26 +917,38 @@ public sealed class Engine : IDisposable
 
             Time.Tick();
             var start = Stopwatch.GetTimestamp();
+            // v1.10 : CPU の区間 (エディターの CPU Usage の窓が開いている間だけ記録する。閉じている間は bool を見るだけ)
+            Profiler.BeginFrame();
 
             // ゲームパッドはフレームの頭で 1 回、全パッド分をまとめて読む (System の中ではこの値を見る)
+            Profiler.BeginSample("Gamepad");
             Gamepad.Update();
+            Profiler.EndSample();
 
             if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
             // v1.7 : ゲームのコード (System / Behaviour / UI のイベント) の例外は、GameCodeException があればそこへ渡して続ける (エディター)
             //   以前はどこでも受け取らず、スクリプトの例外 (無い Widget を読んだ等) でエディターごと落ちていた
+            Profiler.BeginSample("Update (game systems)");
             try
             {
                 if (IsPlaying) _collisionCallbacks.Dispatch(World, Physics, _systems);   // v1.2 : 前の物理の刻みの衝突 → Behaviour の OnCollision* (Update の前。Unity と同じ順)
                 if (IsPlaying) updateSystems();   // 編集中 (ED3) は止める
             }
             catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
+            Profiler.EndSample();
+            Profiler.BeginSample("Animation");
             _animationSystem.Update(World, IsPlaying, Time.DeltaTime);   // AN3 : 骨のエンティティに姿勢を書く (編集中は時間を進めず、その時間の姿勢)
+            Profiler.EndSample();
+            Profiler.BeginSample("Transform");
             _transformSystem.Update(World);
+            Profiler.EndSample();
+            Profiler.BeginSample("Physics (FixedUpdate + step)");
             try
             {
                 _collisionSystem.Update(World, _fixedSystems, IsPlaying);   // Transform.Changed を見るので RenderSyncSystem (Changed を下ろす) より前。剛体はここで動く
             }
             catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }   // v1.7 : FixedUpdate の例外
+            Profiler.EndSample();
             _transformSystem.ChangedCount += _collisionSystem.TransformsWritten;
             // 剛体の子 : 剛体が位置を書いた後に、子のワールドの行列を計算し直す (ED2。親子が無ければ何もしない)
             if (_collisionSystem.TransformsWritten > 0 && _transformSystem.HasHierarchy) _transformSystem.UpdateAgain(World);
@@ -922,29 +956,45 @@ public sealed class Engine : IDisposable
             // v1.4 : ゲームの LateUpdate (Update / アニメーション / 物理の後)。変えた Transform の行列を計算し直して、このフレームの描画に間に合わせる
             if (IsPlaying && _lateSystems.Count > 0)
             {
+                Profiler.BeginSample("LateUpdate (game systems)");
                 try { updateLateSystems(); }
                 catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }   // v1.7
                 _transformSystem.Update(World);
+                Profiler.EndSample();
             }
             // v1.7 : UI (シーンの UIWidget の反映 / 並べる / クリック / 描く)。エディターの GUI より前 (シーンビューの絵の上に描くため)
             //   クリックなどのイベントはゲームのコードを呼ぶので、例外は上と同じく受け取る
+            Profiler.BeginSample("UI");
             try { GameEngine.UI.Manager!.Update(World, IsPlaying, Time.DeltaTime); }
             catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
+            Profiler.EndSample();
+            Profiler.BeginSample("Editor GUI (LateUpdate hook)");
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
+            Profiler.EndSample();
             Graphics.ScreenSize = Graphics.RenderSize is { Width: > 0 } size ? size : ClientSize;   // v1.5 : カメラの範囲の比 / 描く範囲のピクセル
+            Profiler.BeginSample("Cameras + render settings");
             _cameraSystem.Update(World, Graphics.CameraOverride, Graphics.ScreenSize);   // v1.5 : 全部のカメラ (Depth の順)
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem);   // カメラの描き方 / Project Settings + Volume (ED6 / v1.5)
+            Profiler.EndSample();
+            Profiler.BeginSample("Render sync");
             _renderSyncSystem.Update(World);
+            Profiler.EndSample();
+            Profiler.BeginSample("Skinning + previews");
             _skinningSystem.Update(World, Assets);   // AN4 : 曲げる物の骨の行列を C++ へ (描画オブジェクトができた後)
             Graphics.UpdatePreviews(Time.DeltaTime);   // AN5 : プレビューの窓の世界 (骨 / 行列 / 描画オブジェクト / 曲げる)
+            Profiler.EndSample();
+            Profiler.BeginSample("Lights + particles + audio");
             _lightSystem.Update(World);
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)
             else           _audioSystem.UpdateStopped();   // v1.6 : 外された AudioSource のボイスは編集中も消す (以前は Stop 後も鳴り続けた)
 
             // 描画パイプラインが 1 フレーム分の命令を積む (以前は C++ が決まった描き方で描いていた)
+            Profiler.EndSample();
+            Profiler.BeginSample("Render pipeline (commands)");
             Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;
             Graphics.BeginFrame();
+            Profiler.EndSample();
 
             UpdateMilliseconds = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             if (Time.TotalTime >= 1.0) { _updateTotalMs += UpdateMilliseconds; _updateFrames++; }   // 起動直後は除く
@@ -980,9 +1030,12 @@ public sealed class Engine : IDisposable
             }
             DebugDraw.Flush();   // 確認用の線 (このフレームの描画の最後に描かれる)
 
+            Profiler.BeginSample("Render (native : wait + record + present)");
             Graphics.RenderFrame(_commands);
+            Profiler.EndSample();
             NativeMethods.Renderer_ReportProfilerValue("Render commands", _commands.Count);
             Input.EndFrame();
+            Profiler.EndFrame();   // v1.10
         }
     }
 

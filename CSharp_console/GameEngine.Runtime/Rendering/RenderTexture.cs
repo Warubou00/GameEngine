@@ -30,8 +30,8 @@ public enum RenderTextureFormat : uint
 // ==========================================================================
 public sealed class RenderTexture : IDisposable
 {
-    public static RenderTexture BackBuffer { get; } = new(0xFFFFFFFEu, owned: false, RenderTextureFormat.RGBA8, 1.0f);
-    public static RenderTexture SceneDepth { get; } = new(0xFFFFFFFDu, owned: false, RenderTextureFormat.R32F, 1.0f);
+    public static RenderTexture BackBuffer { get; } = new(0xFFFFFFFEu, owned: false, RenderTextureFormat.RGBA8, 1.0f) { _name = "BackBuffer" };
+    public static RenderTexture SceneDepth { get; } = new(0xFFFFFFFDu, owned: false, RenderTextureFormat.R32F, 1.0f) { _name = "SceneDepth" };
 
     /// <summary>
     /// 普通のテクスチャ (UI のテクスチャの番号) を、全画面シェーダーの入力として渡す (v1.4。Skybox の空の画像)
@@ -48,6 +48,21 @@ public sealed class RenderTexture : IDisposable
     public int SampleCount { get; }   // MSAA のサンプル数 (頼んだ数。GPU が対応していなければ C++ が下げる)
     public bool IsValid => Handle != NativeMethods.InvalidHandle;
 
+    private string? _name;
+
+    /// <summary>
+    /// 名前 (v1.10 P2。プロファイラー / PIX / RenderDoc / D3D12 のデバッグレイヤーに出る。画面の大きさが変わって作り直しても残る)
+    /// </summary>
+    public string? Name
+    {
+        get => _name;
+        set
+        {
+            _name = value;
+            if (_owned && IsValid) NativeMethods.Renderer_SetRenderTargetName(Handle, value ?? "");
+        }
+    }
+
     private RenderTexture(uint handle, bool owned, RenderTextureFormat format, float scale, Vector4 clearColor = default, int sampleCount = 1)
     {
         Handle      = handle;
@@ -61,20 +76,25 @@ public sealed class RenderTexture : IDisposable
     /// <summary>画面の大きさに合わせたレンダーターゲットを作る</summary>
     /// <param name="clearColor">最適化クリア値 (RenderCommandBuffer.ClearColor で同じ色を使うと速い)</param>
     /// <param name="sampleCount">MSAA のサンプル数 (1 なら MSAA なし)</param>
-    public static RenderTexture Create(RenderTextureFormat format, float scale = 1.0f, Vector4 clearColor = default, int sampleCount = 1)
+    /// <param name="name">名前 (v1.10 P2。プロファイラー / PIX などに出る。null なら付けない)</param>
+    public static RenderTexture Create(RenderTextureFormat format, float scale = 1.0f, Vector4 clearColor = default, int sampleCount = 1, string? name = null)
     {
         var samples = Math.Max(1, sampleCount);
         var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = scale, ClearColor = clearColor, SampleCount = (uint)samples, ArraySize = 1 };
-        return CreateNative(ref desc, format, scale, clearColor, samples);
+        var texture = CreateNative(ref desc, format, scale, clearColor, samples);
+        if (name != null) texture.Name = name;
+        return texture;
     }
 
     /// <summary>大きさ固定のレンダーターゲットを作る (リサイズしても変わらない)</summary>
     /// <param name="arraySize">配列の枚数 (Depth32 だけ。カスケードのシャドーマップ。SetRenderTargets の depthSlice で選ぶ)</param>
-    public static RenderTexture CreateFixed(RenderTextureFormat format, uint width, uint height, Vector4 clearColor = default, int arraySize = 1)
+    public static RenderTexture CreateFixed(RenderTextureFormat format, uint width, uint height, Vector4 clearColor = default, int arraySize = 1, string? name = null)
     {
         var desc = new NativeMethods.RenderTargetDesc { Format = (uint)format, Scale = 0.0f, Width = width, Height = height, ClearColor = clearColor, SampleCount = 1,
                                                         ArraySize = (uint)Math.Max(1, arraySize) };
-        return CreateNative(ref desc, format, 0.0f, clearColor);
+        var texture = CreateNative(ref desc, format, 0.0f, clearColor);
+        if (name != null) texture.Name = name;   // v1.10 P2
+        return texture;
     }
 
     private static RenderTexture CreateNative(ref NativeMethods.RenderTargetDesc desc, RenderTextureFormat format, float scale, Vector4 clearColor, int sampleCount = 1)
@@ -121,6 +141,12 @@ public sealed class FullscreenShader
         {
             throw new InvalidOperationException($"Failed to load fullscreen shader {path} : {entry}. See the log above.");
         }
-        return new FullscreenShader(handle, path, entry);
+        var shader = new FullscreenShader(handle, path, entry);
+        Loaded[handle] = shader;   // v1.13 P4 : Frame Debugger が番号から名前を出す
+        return shader;
     }
+
+    /// <summary>読んだ全画面シェーダー (番号 → シェーダー。v1.13 P4 : Frame Debugger の表示)</summary>
+    public static IReadOnlyDictionary<uint, FullscreenShader> LoadedShaders => Loaded;
+    internal static readonly Dictionary<uint, FullscreenShader> Loaded = new();
 }

@@ -26,6 +26,9 @@
 
 #include "../../Core/Source/Log/logger.h"
 
+#include <algorithm>   // v1.10 : std::min (copyText)
+#include <cstring>     // v1.10 : strlen / memcpy
+
 namespace
 {
 	// C# の Native.WindowDesc と同じ並び (IntPtr / uint / uint / uint)
@@ -559,6 +562,187 @@ extern "C"
 	RENDERER_API void Renderer_SetProfilerInfo(const char* name, const char* text)
 	{
 		if (g_renderer && name && text) g_renderer->SetProfilerInfo(name, text);
+	}
+
+	// ==============================================================
+	// v1.10 : プロファイラーの計測値を読む (エディターが自分の ImGui の窓に出す)
+	//   以前は RHI.dll の ImGui の窓 (F1) に描くだけで、C# からは読めなかった
+	// ==============================================================
+	namespace
+	{
+		// 文字列を C# の領域へ写す (終わりの 0 を含めて size 以内)。戻り値 = 元の長さ (0 終わりを除く)
+		uint32_t copyText(const char* text, char* out, uint32_t size)
+		{
+			if (!text) { if (out && size > 0) out[0] = '\0'; return 0; }
+			const size_t length = strlen(text);
+			if (out && size > 0)
+			{
+				const size_t n = (std::min)(length, static_cast<size_t>(size - 1));
+				memcpy(out, text, n);
+				out[n] = '\0';
+			}
+			return static_cast<uint32_t>(length);
+		}
+	}
+
+	// F1 の窓を使うか (エディターは false : 自分の窓で出す。F1 も入力の横取りもしなくなる)
+	RENDERER_API void Renderer_SetProfilerOverlayEnabled(bool enabled)
+	{
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetProfilerOverlayEnabled(enabled);
+	}
+
+	RENDERER_API bool Renderer_GetProfilerFrame(RHI::ProfilerFrameData* out)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi && out && rhi->GetProfilerFrame(*out);
+	}
+
+	// 値を足された順に values へ。戻り値 = 全部の数
+	RENDERER_API uint32_t Renderer_GetProfilerValues(double* values, uint32_t capacity)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi ? rhi->GetProfilerValues(values, capacity) : 0;
+	}
+
+	RENDERER_API uint32_t Renderer_GetProfilerValueName(uint32_t index, char* out, uint32_t size)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return copyText(rhi ? rhi->GetProfilerValueName(index) : nullptr, out, size);
+	}
+
+	RENDERER_API uint32_t Renderer_GetProfilerInfoCount()
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi ? rhi->GetProfilerInfoCount() : 0;
+	}
+
+	RENDERER_API bool Renderer_GetProfilerInfo(uint32_t index, char* name, uint32_t nameSize, char* text, uint32_t textSize)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		const char* n = nullptr;
+		const char* t = nullptr;
+		if (!rhi || !rhi->GetProfilerInfo(index, &n, &t)) return false;
+		copyText(n, name, nameSize);
+		copyText(t, text, textSize);
+		return true;
+	}
+
+	RENDERER_API uint32_t Renderer_GetGpuName(char* out, uint32_t size)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return copyText(rhi ? rhi->GetGpuName() : nullptr, out, size);
+	}
+
+	// ==============================================================
+	// v1.10 P2 : 描画パス (BeginPass / EndPass) の名前と時間、レンダーターゲットの名前
+	// ==============================================================
+
+	// 名前を登録して番号をもらう (同じ名前なら同じ番号。C# の RenderCommandBuffer.BeginPass が使う)
+	RENDERER_API uint32_t Renderer_RegisterPassName(const char* name)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi ? rhi->RegisterPassName(name) : 0;
+	}
+
+	RENDERER_API uint32_t Renderer_GetPassName(uint32_t id, char* out, uint32_t size)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return copyText(rhi ? rhi->GetPassName(id) : nullptr, out, size);
+	}
+
+	// パスごとに GPU の時間を計るか (エディターの GPU Usage の窓が開いている間だけ true)
+	RENDERER_API void Renderer_SetPassTimingEnabled(bool enabled)
+	{
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetPassTimingEnabled(enabled);
+	}
+
+	// 最後に読めたフレームのパスの時間 (始まった順)。戻り値 = 全部の数
+	RENDERER_API uint32_t Renderer_GetPassTimings(RHI::PassTiming* out, uint32_t capacity)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		return rhi ? rhi->GetPassTimings(out, capacity) : 0;
+	}
+
+	// レンダーターゲットに名前を付ける (PIX / RenderDoc / デバッグレイヤーの表示)
+	RENDERER_API void Renderer_SetRenderTargetName(uint32_t handle, const char* name)
+	{
+		RHI::RenderTargetHandle target;
+		target.Index = handle;
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetRenderTargetName(target, name);
+	}
+
+	// ==============================================================
+	// v1.12 P3 : Render Graph Viewer (パスごとのリソースの読み書き / バリア) と Memory の窓
+	// ==============================================================
+
+	// 記録するか (エディターの Render Graph Viewer / Memory の窓が開いている間だけ true)
+	RENDERER_API void Renderer_SetRenderGraphCapture(bool enabled)
+	{
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetRenderGraphCapture(enabled);
+	}
+
+	// 最後に記録したフレーム (各配列の数は out の数へ。capacity を超えた分は写さない)。戻り値 = 記録があるか
+	RENDERER_API bool Renderer_GetRenderGraph(RHI::RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+	                                          RHI::RenderGraphResource* resources, uint32_t resourceCapacity, uint32_t* resourceCount,
+	                                          RHI::RenderGraphAccess* accesses, uint32_t accessCapacity, uint32_t* accessCount)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		if (!rhi)
+		{
+			if (passCount) *passCount = 0;
+			if (resourceCount) *resourceCount = 0;
+			if (accessCount) *accessCount = 0;
+			return false;
+		}
+		return rhi->GetRenderGraph(passes, passCapacity, passCount, resources, resourceCapacity, resourceCount, accesses, accessCapacity, accessCount);
+	}
+
+	RENDERER_API uint32_t Renderer_GetRenderTargetName(uint32_t handle, char* out, uint32_t size)
+	{
+		RHI::RenderTargetHandle target;
+		target.Index = handle;
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		if (!rhi) { if (out && size > 0) out[0] = 0; return 0; }
+		return rhi->GetRenderTargetName(target, out, size);
+	}
+
+	// ==============================================================
+	// v1.13 P4 : Frame Debugger
+	// ==============================================================
+
+	// 毎フレーム設定する (Enabled の間は 1 個ずつ描いてイベントを数え、StopEvent で止めて描画先を写す)
+	RENDERER_API void Renderer_SetFrameDebugger(const RHI::FrameDebugSettings* settings)
+	{
+		if (!settings) return;
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetFrameDebugger(*settings);
+	}
+
+	RENDERER_API bool Renderer_GetFrameDebugEvents(RHI::FrameDebugEvent* events, uint32_t eventCapacity, uint32_t* eventCount,
+	                                               RHI::RenderGraphPass* passes, uint32_t passCapacity, uint32_t* passCount,
+	                                               RHI::FrameDebugResult* result)
+	{
+		auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr;
+		if (!rhi)
+		{
+			if (eventCount) *eventCount = 0;
+			if (passCount) *passCount = 0;
+			return false;
+		}
+		return rhi->GetFrameDebugEvents(events, eventCapacity, eventCount, passes, passCapacity, passCount, result);
+	}
+
+	// RHI の物の番号 → 描画オブジェクトのハンドル (C# の MeshRenderer.Handle と同じ。無ければ 0xFFFFFFFF)
+	RENDERER_API uint32_t Renderer_FindRenderObjectByRhiObject(uint32_t rhiObject)
+	{
+		return g_renderer ? g_renderer->FindRenderObjectByRhiObject(rhiObject) : 0xFFFFFFFFu;
+	}
+
+	// UI で中身を見るレンダーターゲット (毎フレーム UI の前に読める状態にする。0xFFFFFFFF で止める)
+	RENDERER_API void Renderer_SetDebugReadTarget(uint32_t handle)
+	{
+		RHI::RenderTargetHandle target;
+		target.Index = handle;
+		if (auto* rhi = g_renderer ? g_renderer->GetRHI() : nullptr) rhi->SetDebugReadTarget(target);
 	}
 }
 

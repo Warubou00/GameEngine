@@ -82,6 +82,7 @@ namespace RHI
 			// 遷移バリアを1つ作る (同じ設定を何度も書かないためのヘルパー)
 			D3D12_RESOURCE_BARRIER makeTransitionBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
 			{
+				if (CommandContext::s_graphSink) CommandContext::s_graphSink->RecordGraphBarrier(resource, before, after);   // v1.12 P3 : どのパスでどの状態に変えたか
 				D3D12_RESOURCE_BARRIER barrier = {};
 				barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
 				barrier.Flags                  = D3D12_RESOURCE_BARRIER_FLAG_NONE;
@@ -362,6 +363,8 @@ namespace RHI
 				_skinGpuMs = static_cast<float>(skin);
 				_skinTimed[_frameIndex] = false;
 			}
+			// v1.10 P2 : FRAME_COUNT フレーム前の描画パスの時間 (GPU / CPU)
+			collectPassResults();
 			_stats.Width  = _swapChain->GetWidth();
 			_stats.Height = _swapChain->GetHeight();
 
@@ -499,6 +502,7 @@ namespace RHI
 				_gpuTimer->Resolve(_frameCommandList->GetCmdList(), _frameIndex,
 					_skinTimed[_frameIndex] ? TIMESTAMP_SKIN_BEGIN + TIMESTAMP_SKIN_COUNT :
 					_particleTimed[_frameIndex] ? TIMESTAMP_PARTICLE_BEGIN + TIMESTAMP_PARTICLE_COUNT : TIMESTAMP_COUNT);
+				resolvePassTimestamps();   // v1.10 P2 : 描画パスの分 (10 番から。別の範囲)
 			}
 
 			// 8. リソースバリア (RenderTarget -> Present)
@@ -578,6 +582,8 @@ namespace RHI
 
 			ID3D12CommandSignature* signature = _currentPipeline ? _currentPipeline->GetIndirectDrawSignature() : nullptr;
 			_scene.Indirect = _useIndirectDraw && signature;
+			// v1.13 P4 : Frame Debugger の間は 1 個ずつ描く (描画ごとに止められるように。GPU カリング / オクルージョンもしない)
+			if (_fdSettings.Enabled) _scene.Indirect = false;
 			// GPU カリング : ExecuteIndirect の時だけ (結果の引数を GPU が作るので、1 個ずつ描く時は使えない)
 			_scene.Culling  = _scene.Indirect && _useGpuCulling && frame.Culled && frame.Written > 0 &&
 			                  _currentPipeline->IsGpuCullingAvailable();
@@ -712,12 +718,20 @@ namespace RHI
 				_skinReadbackRequest = RHI::VertexRange();
 			}
 
+			// v1.10 P2 : 描画パスの記録を始める (PIX のイベント / パスごとの時間)
+			startPassFrame();
+			fdStartFrame(buffer);   // v1.13 P4 : Frame Debugger
+
 			// AN4 : GPU スキニング (この後の描画が曲げた頂点を読む。姿勢が変わった物だけ)
+			beginPass(_skinPassName);   // v1.10 P2
 			recordSkinning(buffer, cmdList, vertexState);
+			endPass();
 
 			for (uint32_t i = 0; i < count; ++i)
 			{
 				const RHI::RenderCommand& command = commands[i];
+				// v1.13 P4 : Frame Debugger で止めた後は描かない (パスの区切りだけは続ける : PIX のイベントの対を崩さない)
+				if (fdSkipping() && command.Type != RHI::RenderCommandType::BeginPass && command.Type != RHI::RenderCommandType::EndPass) continue;
 				switch (command.Type)
 				{
 				case RHI::RenderCommandType::SetRenderTargets:
@@ -725,42 +739,84 @@ namespace RHI
 					break;
 
 				case RHI::RenderCommandType::ClearColor:
+					if (_fdActive)   // v1.13 P4
+					{
+						RHI::FrameDebugEvent e;
+						e.Type = static_cast<uint32_t>(RHI::FrameDebugEventType::ClearColor);
+						std::memcpy(e.Clear, command.ClearColor, sizeof(e.Clear));
+						fdEvent(e);
+					}
 					// 最適化クリア値と同じ色なら高速クリアになる (RenderTargetDesc.ClearColor)
 					for (uint32_t c = 0; c < _boundColorCount; ++c)
 					{
 						cmdList->ClearRenderTargetView(_boundRtvs[c], command.ClearColor, 0, nullptr);
+						graphAccess(_boundColors[c], RHI::RENDER_GRAPH_CLEAR);   // v1.12 P3
 					}
 					break;
 
 				case RHI::RenderCommandType::ClearDepth:
 					if (_boundDepth != RHI::RenderTargetHandle::INVALID)   // シーンの深度 / 深度のレンダーターゲット
 					{
+						if (_fdActive)   // v1.13 P4
+						{
+							RHI::FrameDebugEvent e;
+							e.Type     = static_cast<uint32_t>(RHI::FrameDebugEventType::ClearDepth);
+							e.Clear[0] = command.ClearDepth;
+							fdEvent(e);
+						}
 						cmdList->ClearDepthStencilView(boundDsv(), D3D12_CLEAR_FLAG_DEPTH, command.ClearDepth, 0, 0, nullptr);
+						graphAccess(_boundDepth == RHI::RenderTargetHandle::SCENE_DEPTH && _boundDepthMsaa ? RHI::RENDER_GRAPH_MSAA_DEPTH : _boundDepth,
+						            RHI::RENDER_GRAPH_CLEAR);   // v1.12 P3
 					}
 					break;
 
 				case RHI::RenderCommandType::DrawScene:
 					drawScene(buffer, command.Arg0, command.Arg1, command.Inputs[0]);   // Inputs[0] = 視点 (0 カメラ / 1〜 影)
+					// v1.12 P3 : 不透明 / 影は深度を書く、半透明は比べるだけ。影以外は影のシャドーマップを読む
+					graphBoundWrite(command.Arg1 != 1u || command.Arg0 == 3u);
+					if (command.Arg0 != 3u) graphShadowRead();
 					break;
 
 				case RHI::RenderCommandType::DrawFullscreen:
+					if (_fdActive)   // v1.13 P4
+					{
+						RHI::FrameDebugEvent e;
+						e.Type = static_cast<uint32_t>(RHI::FrameDebugEventType::Fullscreen);
+						e.Arg0 = command.Arg0;
+						e.Arg1 = command.Arg1;
+						std::memcpy(e.Inputs, command.Inputs, sizeof(e.Inputs));
+						std::memcpy(e.Params, command.Params, sizeof(e.Params));
+						fdEvent(e);
+					}
 					drawFullscreen(buffer, command);
+					graphBoundWrite(false);   // v1.12 P3 (入力の読みは drawFullscreen の中で記録する)
 					break;
 
 				case RHI::RenderCommandType::UpdateParticles:
+					if (_fdActive) { RHI::FrameDebugEvent e; e.Type = static_cast<uint32_t>(RHI::FrameDebugEventType::UpdateParticles); fdEvent(e); }   // v1.13 P4
 					updateParticles(buffer);
+					graphAccess(RHI::RenderTargetHandle::SCENE_DEPTH, RHI::RENDER_GRAPH_READ);   // v1.12 P3 : 衝突で深度を読む
 					break;
 
 				case RHI::RenderCommandType::DrawParticles:
+					if (_fdActive) { RHI::FrameDebugEvent e; e.Type = static_cast<uint32_t>(RHI::FrameDebugEventType::DrawParticles); fdEvent(e); }   // v1.13 P4
 					drawParticles(buffer);
+					graphBoundWrite(false);   // v1.12 P3
+					graphAccess(RHI::RenderTargetHandle::SCENE_DEPTH, RHI::RENDER_GRAPH_READ);   // シェーダーが深度を読んで比べる
 					break;
 
 				case RHI::RenderCommandType::DrawCustom:
 					drawCustom(buffer, command.Arg1, command.Params[0], (command.Arg0 & 1u) != 0);   // SH2 : Arg1 = 列 / Params[0] = 時間 / Arg0 bit0 = 深度を読む物 (SH3)
+					// v1.12 P3 : 深度を読む物は深度を描画先から外してテクスチャとして読む
+					if ((command.Arg0 & 1u) != 0) { graphBoundWrite(false); graphAccess(RHI::RenderTargetHandle::SCENE_DEPTH, RHI::RENDER_GRAPH_READ); }
+					else                          graphBoundWrite(command.Arg1 != 1u);
+					graphShadowRead();
 					break;
 
 				case RHI::RenderCommandType::DrawPreview:
+					if (_fdActive) { RHI::FrameDebugEvent e; e.Type = static_cast<uint32_t>(RHI::FrameDebugEventType::Preview); e.View = command.Arg0; fdEvent(e); }   // v1.13 P4
 					drawPreview(buffer, command.Arg0);   // AN5 : Arg0 = 視点の番号
+					graphBoundWrite(true);   // v1.12 P3
 					break;
 
 				case RHI::RenderCommandType::SetCamera:
@@ -784,8 +840,19 @@ namespace RHI
 					cmdList->RSSetScissorRects(1, &scissor);
 					break;
 				}
+
+				case RHI::RenderCommandType::BeginPass:
+					beginPass(command.Arg0);   // v1.10 P2 : Arg0 = 名前の番号
+					break;
+
+				case RHI::RenderCommandType::EndPass:
+					endPass();                 // v1.10 P2
+					break;
 				}
+				fdAfterCommand(buffer);   // v1.13 P4 : 止めるイベントを越えたら描画先を写す
 			}
+			closeOpenPasses();   // v1.10 P2 : 閉じ忘れのパス (C# の例外などで EndPass が来なかった)
+			beginPass(_debugLinesPassName);   // v1.12 P3 : 後片付け / 確認用の線 (Render Graph Viewer で「パスの外」にならないように)
 
 			// 可視の記録は 2 段階のオクルージョンをした時だけ更新される。しなかったら次は使わない
 			_visibilityValid = _scene.OcclusionDone;
@@ -841,7 +908,13 @@ namespace RHI
 				setTarget(backBufferRtv, _swapChain->GetWidth(), _swapChain->GetHeight());
 				drawDebugLines();   // 確認用の線 (トーンマップ / FXAA の後のバックバッファへ。ImGui の下)
 			}
+			endPass();   // v1.12 P3 : Finish (debug lines)
+			beginPass(_uiPassName);   // v1.10 P2
+			prepareDebugReadTarget();   // v1.12 P3 : Render Graph Viewer で中身を見るレンダーターゲット
 			drawUI();   // UI (エディター。ED3) : 画面の一番上 (C++ のプロファイラーの下)
+			endPass();
+			finishGraphFrame();   // v1.12 P3 : 記録を C# が読めるようにする
+			fdFinishFrame();      // v1.13 P4
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
 		}
 
@@ -876,6 +949,7 @@ namespace RHI
 				const RHI::RenderTargetHandle handle = CreateRenderTarget(buffer, desc);
 				if (handle.Index == RHI::RenderTargetHandle::INVALID) { _renderWidth = _renderHeight = 0; return false; }
 				_viewTarget = handle.Index;
+				SetRenderTargetName(handle, "Scene View (editor)");   // v1.12 P3
 			}
 			return recreateSceneTargets();
 		}
@@ -1322,6 +1396,8 @@ namespace RHI
 				return pso != nullptr;
 			};
 
+			if (_fdActive) fdBuildArgObjects(frame);   // v1.13 P4 : 描画 → 物 / マテリアル
+
 			// カリングの結果 (映った描画だけを詰めた引数) を、GPU が数えた数 (Count バッファ) だけ描く
 			// GroupCount は上限 (詰めた数がこれを超えることは無い)
 			auto drawCulled = [&](uint32_t group)
@@ -1354,6 +1430,20 @@ namespace RHI
 					for (uint32_t i = 0; i < frame.GroupCount[group]; ++i)
 					{
 						const auto& args = frame.Args[frame.GroupStart[group] + i];
+						if (_fdActive)   // v1.13 P4 : 1 回の描画 = 1 イベント
+						{
+							const uint32_t argIndex = frame.GroupStart[group] + i;
+							RHI::FrameDebugEvent e;
+							e.Type          = static_cast<uint32_t>(RHI::FrameDebugEventType::SceneDraw);
+							e.Arg0          = scenePass;
+							e.Arg1          = queue;
+							e.View          = view;
+							e.Group         = group;
+							e.IndexCount    = args.IndexCountPerInstance;
+							e.InstanceCount = args.InstanceCount;
+							if (argIndex < _fdArgObjects.size()) { e.Object = _fdArgObjects[argIndex].first; e.Material = _fdArgObjects[argIndex].second; }
+							if (!fdEvent(e)) break;
+						}
 						cmdList->DrawIndexedInstanced(args.IndexCountPerInstance, args.InstanceCount, args.StartIndexLocation, 0, args.StartInstanceLocation);
 					}
 				}
@@ -1403,6 +1493,7 @@ namespace RHI
 					for (const auto& draw : frame.Custom)
 					{
 						const auto* settings = _currentPipeline->GetCustomShaderSettings(buffer->GetMaterialShader(draw.Material));
+						if (fdSkipping()) break;   // v1.13 P4 : Frame Debugger で止めた後
 						if (!settings || settings->Transparent || !settings->DepthWrite) continue;
 						const RHI::ObjectConstants* object = buffer->GetObjectConstants(draw.Object);   // v1.5 : 影を落とさない物
 						if (object && (object->Flags & RHI::OBJECT_FLAG_NO_CAST_SHADOWS)) continue;
@@ -1485,6 +1576,7 @@ namespace RHI
 			{
 				const uint32_t index = command.Inputs[i];
 				constants[i] = 0;   // 無い時は既定テクスチャ (白)
+				if (index != RHI::RenderTargetHandle::INVALID) graphAccess(index, RHI::RENDER_GRAPH_READ);   // v1.12 P3 : 入力を読む
 				if (index < 0x80000000u && (index & RHI::RenderTargetHandle::TEXTURE_INPUT) != 0)
 				{
 					// v1.4 : 普通のテクスチャ (読むだけ。状態はいつも PIXEL_SHADER_RESOURCE なので、バリアは要らない)
@@ -1689,6 +1781,8 @@ namespace RHI
 			auto cmdList = _frameCommandList->GetCmdList();
 			transitionMsaaDepth(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 			transitionDepth(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+			graphAccess(RHI::RENDER_GRAPH_MSAA_DEPTH, RHI::RENDER_GRAPH_READ);                                   // v1.12 P3
+			graphAccess(RHI::RenderTargetHandle::SCENE_DEPTH, RHI::RENDER_GRAPH_RESOLVE | RHI::RENDER_GRAPH_DEPTH_WRITE);
 			const D3D12_CPU_DESCRIPTOR_HANDLE dsv = _dsvHeap->GetCpuHandle(0);
 			cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
 			const D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(_depthWidth), static_cast<float>(_depthHeight), 0.0f, 1.0f };
@@ -1769,6 +1863,7 @@ namespace RHI
 			if (count > 0) cmdList->ResourceBarrier(count, barriers);
 			cmdList->ResolveSubresource(target.Resolved.Get(), 0, target.Resource.Get(), 0, target.Format);
 			target.ResolveDirty = false;
+			graphAccess(static_cast<uint32_t>(&target - _renderTargets.data()), RHI::RENDER_GRAPH_RESOLVE);   // v1.12 P3
 		}
 
 		// ==============================================================
@@ -1905,6 +2000,9 @@ namespace RHI
 				depthSrv.Texture2DArray.MipLevels = 1;
 				depthSrv.Texture2DArray.ArraySize = target.ArraySize;
 				dx12Device->CreateShaderResourceView(target.Resource.Get(), &depthSrv, _heapManager->GetSrvCpuHandle(target.SrvIndex));
+				applyRenderTargetName(index);   // v1.10 P2 : 名前 (作り直しても付け直す)
+				const D3D12_RESOURCE_DESC depthDesc = target.Resource->GetDesc();   // v1.12 P3 : GPU のメモリ
+				target.Bytes = dx12Device->GetResourceAllocationInfo(0, 1, &depthDesc).SizeInBytes;
 				return true;
 			}
 
@@ -1946,6 +2044,17 @@ namespace RHI
 			srvDesc.Texture2D.MipLevels     = 1;
 			ID3D12Resource* readable = target.SampleCount > 1 ? target.Resolved.Get() : target.Resource.Get();
 			dx12Device->CreateShaderResourceView(readable, &srvDesc, _heapManager->GetSrvCpuHandle(target.SrvIndex));
+			applyRenderTargetName(index);   // v1.10 P2 : 名前 (作り直しても付け直す)
+			// v1.12 P3 : GPU のメモリ (Memory / Render Graph Viewer の窓)
+			{
+				const D3D12_RESOURCE_DESC resourceDesc = target.Resource->GetDesc();
+				target.Bytes = dx12Device->GetResourceAllocationInfo(0, 1, &resourceDesc).SizeInBytes;
+				if (target.Resolved)
+				{
+					const D3D12_RESOURCE_DESC resolvedDesc = target.Resolved->GetDesc();
+					target.Bytes += dx12Device->GetResourceAllocationInfo(0, 1, &resolvedDesc).SizeInBytes;
+				}
+			}
 			return true;
 		}
 
@@ -2138,6 +2247,19 @@ namespace RHI
 				const auto& draw = frame.Custom[_customOrder[order]];
 				ID3D12PipelineState* pso = _currentPipeline->GetCustomPso(buffer->GetMaterialShader(draw.Material), _boundFormats, _boundColorCount, dsvFormat, _boundSamples);
 				if (!pso) continue;
+				if (_fdActive)   // v1.13 P4 : 1 個 = 1 イベント
+				{
+					RHI::FrameDebugEvent e;
+					e.Type          = static_cast<uint32_t>(RHI::FrameDebugEventType::CustomDraw);
+					e.Arg0          = buffer->GetMaterialShader(draw.Material);
+					e.Arg1          = queue;
+					e.IndexCount    = draw.IndexCount;
+					e.InstanceCount = 1;
+					e.Object        = draw.Object;
+					e.Material      = draw.Material;
+					e.Params[0]     = time;
+					if (!fdEvent(e)) break;
+				}
 				if (pso != current) { cmdList->SetPipelineState(pso); current = pso; }
 				uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
 				constants[0] = static_cast<uint32_t>(_customParamBase[draw.Material]);   // g_Inputs[0].x : パラメーターの先頭 (float4 の番号)

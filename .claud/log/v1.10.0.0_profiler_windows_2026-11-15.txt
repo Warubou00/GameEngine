@@ -1,0 +1,92 @@
+v1.10.0.0 : プロファイラーの強化 P1 (窓を 5 つに分ける / クリックのすり抜けを直す / CPU の区間)
+ブランチ : feature/v110-profiler-windows (未コミット)
+日付 : 2026-11-15
+
+■ 依頼と対応 (設計の P1)
+1. 1 つだけのプロファイラーを複数の窓に分ける … 対応
+   - View > Analysis : Profiler (概要。F1) / CPU Usage / GPU Usage / Rendering Stats / Memory
+   - どれもエディターの ImGui の窓 (ドッキングできる)。以前の Stats の窓の中身は Profiler の「Editor」の欄へ移した
+   - 履歴 300 フレーム。グラフをクリック / ドラッグでそのフレームを選んで止める (全部の窓がそのフレームを出す)
+     Pause / Latest / Clear
+   - Profiler       : FPS (0.5 秒の平均 / 最小 / 最大)、GPU の名前、画面 / VSync / Tearing、パイプラインの説明、
+                      CPU / GPU のグラフ、まとめの表、Editor の欄
+   - CPU Usage      : CPU のフレームと C# の区間のグラフ、区間のタイムライン (横 = 時間、縦 = 入れ子) と表 (Total / Self / %)、
+                      C++ の内訳 (待ち / 記録 / Present)、報告された時間 (… (ms))、Physics の値
+   - GPU Usage      : GPU 合計 / シーンのグラフ、合計 / シーン / スキニング / GPU パーティクルの時間
+   - Rendering Stats: 描画数のグラフ、ExecuteIndirect / Instancing / GPU culling / Occlusion の切り替え (以前は F1 の窓)、
+                      描画数 / インスタンス / 三角形 / 物の数 / その他の値
+   - Memory         : C# のヒープのグラフ、VRAM (使用量 / 予算)、メッシュのバッファ、アップロード、モデル / マテリアルの数、
+                      .NET の GC、プロセスのメモリ
+
+2. プロファイラーの上のクリックがエディターにすり抜ける … 対応
+   - 原因 : プロファイラーは RHI.dll の中の別の ImGui のコンテキストで描いていた。ウィンドウのメッセージを横取りしていたが、
+     ImGui_ImplWin32_WndProcHandler はマウスのメッセージにほぼ 0 を返すので、メッセージは WinForms → エディターの ImGui にも届き、
+     エディターの ImGui はそこに窓があることを知らないので Hierarchy / Scene が反応していた
+   - 直し方 : エディターでは F1 の窓 (オーバーレイ) を切り (F1 もメッセージの横取りもしない)、窓は全部エディターの ImGui で描く。
+     C++ からは計測値だけを読む。同じコンテキストなので、窓の下には入力が届かない
+   - Player (ビルドしたゲーム) は今まで通り F1 の窓
+
+3. CPU の区間 (CPU Usage の窓のため) … 対応
+   - GameEngine.Profiler.BeginSample / EndSample / using (Profiler.Sample("名前")) (入れ子。閉じ忘れはフレームの終わりで閉じる)
+   - Engine.Run の各段とゲームの System ごと (型の名前) に区間を入れた
+   - Profiler.Enabled が false の間は何もしない (CPU Usage の窓が開いている間だけ true。フレームの頭の値で 1 フレーム通す)
+
+■ 変えたファイル
+C++ (RHI)
+- RHI/Source/Public/rhiTypes.h : ProfilerFrameData (184 byte) / ProfilerFrameFlags を足した
+- RHI/Source/Public/rhi.h : IRenderHardwareInterface に SetProfilerOverlayEnabled / GetProfilerFrame / GetProfilerValues /
+  GetProfilerValueName / GetProfilerInfoCount / GetProfilerInfo / GetGpuName を足した (承認済み)
+- RHI/Source/RenderHardwareInterface.h : 上の実装 (Profiler / DebugUI に渡すだけ)
+- RHI/Source/Profiler/profiler.h/.cpp : GetFrameData / GetValues / GetValueName / GetInfo / GetGpuName
+- RHI/Source/Profiler/debugUI.h/.cpp : SetOverlayEnabled (false なら F1 もメッセージも素通し、IsVisible は false)
+C++ (Renderer)
+- Renderer/Source/rendererDll.cpp : Renderer_SetProfilerOverlayEnabled / Renderer_GetProfilerFrame / Renderer_GetProfilerValues /
+  Renderer_GetProfilerValueName / Renderer_GetProfilerInfoCount / Renderer_GetProfilerInfo / Renderer_GetGpuName
+C# (Runtime)
+- GameEngine.Runtime/Profiler.cs (新規) : Profiler (CPU の区間 + C++ の値を読む) / ProfilerFrameData / ProfilerSample
+- GameEngine.Runtime/Native/NativeMethods.cs : 上の C++ の関数の宣言
+- GameEngine.Runtime/Engine.cs : Run の各段とゲームの System ごとの区間 (Profiler.BeginFrame / EndFrame)
+C# (Editor)
+- GameEngine.Editor/ProfilerWindows.cs (新規) : 5 つの窓
+- GameEngine.Editor/EditorApp.cs : Stats の窓 → Profiler の窓、View > Analysis、F1 で Profiler の窓、最初の並びで Profiler を下に
+- GameEngine.Editor/EditorApp.Edit.cs : 確認用の ProfilerWindows / SceneHovered
+- GameEngine.Editor/Program.cs : Profiler.SetOverlayEnabled(false)
+- GameEngine.Editor/EditorTest.Profiler.cs (新規) / EditorTest.cs : 確認 (--editor-test-section profiler / profiler-view)
+その他
+- CSharp_console/Engine.props : 1.10.0.0
+- Docs/Reference/template.html : ガイド「プロファイラー (v1.10)」。index.html は make_reference.py で作り直した
+  (エディターの Script Reference はソースを埋め込んで作るので、Profiler は自動で載る)
+
+■ ビルド
+- RHI / Renderer (C++) : Debug / Release ともエラー 0 (警告は元からある C4251 だけ)
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Debug / Release ともエラー 0
+  (警告は元からある EditorApp.cs CS8602 / CS8778、EditorTest.cs CS8604 だけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.10.0.0 (古い v1.9.0.0 は消えた)。
+  Package の Editor の Renderer.dll / GameEngine.Runtime.dll に新しい関数が入っていること、Editor の版 1.10.0.0 を確かめた
+  (ランチャーは System.Version で比べるので 1.10 > 1.9 として選ぶ)
+
+■ 確認
+- エディターの自動の確認 (--editor-test、Release) : pass 405 / fail 0 を 2 回 (v1.9 の 391 + 前回までの追加 + プロファイラー 15)
+  ※途中の 1 回で「Destroy(Entity) in OnCollisionEnter ...」(物理) が 1 度だけ落ちた。今回触っていない所で、他の 4 回は通った (時間の揺れによる不安定な確認と思われる)
+- プロファイラーだけ (--editor-test-section profiler) : pass 15 / fail 0
+  構造体の大きさ 184 / C++ の値・名前・文字列 / F1 の窓が出ない / 区間 (エンジンの段・System ごとの入れ子・手で作る区間・閉じ忘れ) /
+  Pause と再開 / CPU Usage を閉じると測らない / シーンビューの真ん中に重ねた Profiler の窓をクリック → シーンは反応せず、選んだ物も変わらない
+- 見た目 (--editor-test-section profiler-view で 5 つの窓を並べて再生し、ゲームの窓だけを PrintWindow で撮った) :
+  グラフ / タイムライン / 表 / 切り替えのチェックが出ることを確かめた
+- 確認の途中で直した物 : Pause でフレームの途中に Enabled を切ると、閉じ忘れの区間を閉じる EndFrame のループが終わらなかった
+  (EndSample が Enabled を見ていた) → 記録するかはフレームの頭で決めて、そのフレームは最後まで同じにした
+- 見ていない物 : Player の F1 の窓 (C++ の動きは「窓を使う」の時は前と同じ)。実機での手の操作 (クリック) は自動の確認だけ
+
+■ 性能
+- CPU Usage の窓を閉じている間 : 区間は static の bool を見るだけ (1 フレームに 30 回ほど)
+- 開いている間 : 区間ごとに Stopwatch を 2 回読む (区間は 1 フレームに 15〜30 個)。窓の描画 (ImGui) の分はエディターの GUI に入る
+- 測った値 (Release、RTX 2070、エディターの中で 1000 回 / 100 万回の平均、2 回) :
+    記録している間   : 75〜85 ns / 区間 (BeginSample + EndSample) → 1 フレーム 20 区間で 2 µs 程度
+    記録していない間 : 6〜9 ns / 区間 → 1 フレーム 0.2 µs 程度
+- C++ から読むのは窓が開いている間だけ (1 フレームに P/Invoke 2 回 + 0.5 秒ごとに文字列)。値の名前は増えた時だけ読む
+
+■ 残り (次の段階)
+- P2 : 描画パスの区切り (BeginPass) / RenderTexture の名前 / パスごとの GPU 時間 / PIX のマーカー
+- P3 : Render Graph Viewer、P4 : Frame Debugger
+- 窓の開け閉めはエディターを閉じると忘れる (Profiler の窓だけ最初から開く)
+- 確認で窓を浮かせて置くので、bin の imgui.ini に Profiler の窓の位置が残る (View > Reset Layout で戻る)

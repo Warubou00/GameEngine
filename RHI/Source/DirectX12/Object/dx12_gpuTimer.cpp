@@ -18,6 +18,8 @@
 ******************************************************************/
 #include "dx12_gpuTimer.h"
 
+#include <cstring>   // v1.10 P2 : memcpy
+
 namespace RHI
 {
 	namespace DirectX12
@@ -107,6 +109,36 @@ namespace RHI
 			}
 
 			// CPU からは書き込んでいないので、書き込み範囲は空
+			D3D12_RANGE writeRange = { 0, 0 };
+			_readback->Unmap(0, &writeRange);
+			return true;
+		}
+
+		void GpuTimer::ResolveRange(ID3D12GraphicsCommandList* cmdList, UINT frameIndex, UINT first, UINT count)
+		{
+			if (!_queryHeap || frameIndex >= _frameCount) return;
+			_rangeFirst[frameIndex] = first;
+			_rangeCount[frameIndex] = 0;
+			if (!cmdList || count == 0 || first + count > TIMESTAMPS_PER_FRAME) return;
+
+			const UINT base = frameIndex * TIMESTAMPS_PER_FRAME + first;
+			cmdList->ResolveQueryData(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, base, count,
+				_readback.Get(), sizeof(UINT64) * base);
+			_rangeCount[frameIndex] = count;
+		}
+
+		bool GpuTimer::ReadTicks(UINT frameIndex, UINT first, UINT count, UINT64* outTicks)
+		{
+			if (!_readback || !outTicks || frameIndex >= _frameCount || count == 0) return false;
+			const UINT rangeFirst = _rangeFirst[frameIndex];
+			const UINT rangeCount = _rangeCount[frameIndex];
+			if (first < rangeFirst || first + count > rangeFirst + rangeCount) return false;
+
+			const UINT base = frameIndex * TIMESTAMPS_PER_FRAME + first;
+			D3D12_RANGE readRange = { sizeof(UINT64) * base, sizeof(UINT64) * (base + count) };
+			void* mapped = nullptr;
+			if (FAILED(_readback->Map(0, &readRange, &mapped)) || !mapped) return false;
+			std::memcpy(outTicks, static_cast<const UINT64*>(mapped) + base, sizeof(UINT64) * count);
 			D3D12_RANGE writeRange = { 0, 0 };
 			_readback->Unmap(0, &writeRange);
 			return true;
