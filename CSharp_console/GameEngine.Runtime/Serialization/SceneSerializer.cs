@@ -39,7 +39,7 @@ public static class SceneSerializer
             if (!World.IsAlive(entity)) return null;
             if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo($"Entity {entity.Id}"));
             ref var info = ref World.Get<EntityInfo>(entity);
-            if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
+            if (info.Id == Guid.Empty) { info.Id = Guid.NewGuid(); World.Reindex(entity); }   // v1.18 : Id で引く索引も直す
             return Ids[entity] = info.Id;
         }
     }
@@ -78,6 +78,20 @@ public static class SceneSerializer
         RegisterConverter<Entity>(
             (w, v, c) => { if (c.IdOf(v) is { } id) w.WriteStringValue(id.ToString()); else w.WriteNullValue(); },
             (e, c) => e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var id) ? c.EntityOf(id) : Entity.Null);
+        // v1.18 : GameObject も Entity と同じく相手の Id (読む時は読み込み先の World の物)
+        RegisterConverter<GameObject>(
+            (w, v, c) => { if (v.IsValid && ReferenceEquals(v.World, c.World) && c.IdOf(v.Entity) is { } id) w.WriteStringValue(id.ToString()); else w.WriteNullValue(); },
+            (e, c) => e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var id) ? new GameObject(c.World, c.EntityOf(id)) : GameObject.None);
+
+        // v1.20 GO3 : プレハブ (.prefab.json) / シーンへの参照 (.scene.json。読み込みはしない。Id があれば今のパスを引く)
+        RegisterConverter<Prefab?>(
+            (w, v, _) => writeAsset(w, v?.Path),
+            (e, c) => readAsset<Prefab?>(e, c, path => c.Assets!.LoadPrefab(path), null));
+        RegisterConverter<SceneReference>(
+            (w, v, _) => { if (!v.IsValid) w.WriteNullValue(); else { w.WriteStartObject(); if (v.AssetId != Guid.Empty) w.WriteString("guid", v.AssetId.ToString()); w.WriteString("path", v.Path); w.WriteEndObject(); } },
+            (e, _) => e.ValueKind != JsonValueKind.Object ? default :
+                new SceneReference(e.TryGetProperty("path", out var p) ? p.GetString() : null,
+                                   e.TryGetProperty("guid", out var g) && Guid.TryParse(g.GetString(), out var guid) ? guid : Guid.Empty));
 
         // アセット : パス (読む時は AssetManager で読む。同じパスは 1 回だけ読まれる)
         RegisterConverter<Model>(
@@ -153,6 +167,7 @@ public static class SceneSerializer
                 w.WriteString("name", info.Name ?? "");
                 w.WriteBoolean("active", info.Active);
                 if (info.Layer != 0) w.WriteNumber("layer", info.Layer);   // v1.5 : レイヤー (0 なら書かない。以前のファイルと同じ中身のまま)
+                if (!string.IsNullOrEmpty(info.Tag)) w.WriteString("tag", info.Tag);   // v1.18 : タグ (Untagged なら書かない)
                 w.WriteStartArray("components");
                 foreach (var (pool, type) in pools)
                 {
@@ -185,15 +200,18 @@ public static class SceneSerializer
         {
             if (!infos.Has(entity.Id)) world.Add(entity, new EntityInfo($"Entity {entity.Id}"));
             ref var info = ref infos.Get(entity.Id);
-            if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
+            if (info.Id == Guid.Empty) { info.Id = Guid.NewGuid(); world.Reindex(entity); }   // v1.18 : Id で引く索引も直す
             context.Ids[entity] = info.Id;
         }
         return context;
     }
 
     /// <summary>Id (EntityInfo.Id) → 今のエンティティ (無ければ Entity.Null)</summary>
+    //   v1.18 : World の索引で引く (以前は毎回全部の物を順に見ていた)。索引で見つからない時だけ、今まで通り順に見る
     public static Entity FindEntity(World world, Guid id)
     {
+        var found = world.FindById(id);
+        if (!found.IsNull) return found;
         var infos = world.GetPool<EntityInfo>();
         var entities = infos.Entities;
         var components = infos.Components;
@@ -353,6 +371,7 @@ public static class SceneSerializer
                     Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
                     Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
                     Layer  = element.TryGetProperty("layer", out var layer) && layer.TryGetInt32(out var layerValue) ? Math.Clamp(layerValue, 0, 31) : 0,   // v1.5
+                    Tag    = element.TryGetProperty("tag", out var tag) && tag.ValueKind == JsonValueKind.String && tag.GetString() is { Length: > 0 } tagValue ? tagValue : null,   // v1.18
                     SceneId = _sceneId,   // v1.14 : どのシーンの物か
                 };
                 var entity = _world.CreateEntity();
@@ -447,6 +466,13 @@ public static class SceneSerializer
         Converter? converter;
         lock (_converters) _converters.TryGetValue(type, out converter);
         if (converter != null) { converter.Write(w, value, context); return; }
+        // v1.20 GO3 : ComponentRef<T> など (型引数ごとに書き方を登録しないで、相手の Id を書く)
+        if (value is IEntityRef reference)
+        {
+            if (reference.World != null && ReferenceEquals(reference.World, context.World) && context.IdOf(reference.Entity) is { } refId) w.WriteStringValue(refId.ToString());
+            else w.WriteNullValue();
+            return;
+        }
 
         switch (value)
         {
@@ -491,6 +517,9 @@ public static class SceneSerializer
         Converter? converter;
         lock (_converters) _converters.TryGetValue(type, out converter);
         if (converter != null) return converter.Read(e, context);
+        // v1.20 GO3 : ComponentRef<T> など (読み込み先の World の物。無い物は空の値)
+        if (EntityRefs.IsEntityRef(type))
+            return EntityRefs.Create(type, context.World, e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var refGuid) ? context.EntityOf(refGuid) : Entity.Null);
 
         if (type == typeof(bool))   return e.GetBoolean();
         if (type == typeof(string)) return e.GetString();

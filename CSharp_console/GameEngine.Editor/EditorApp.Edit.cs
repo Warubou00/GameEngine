@@ -393,8 +393,7 @@ internal sealed partial class EditorApp
         var source = EditorWorld.WithDescendants(World, _selected);
         var created = SceneSerializer.Load(World, SceneSerializer.Save(World, source), _engine.Assets);
         if (created.Count == 0) return Entity.Null;
-        ref var info = ref World.Get<EntityInfo>(created[0]);
-        info.Name = $"{info.Name} (copy)";
+        World.SetName(created[0], $"{World.GetName(created[0])} (copy)");   // v1.18 : Find の索引も直す
         var ids = created.Select(e => EditorWorld.IdOf(World, e)).ToList();
         _undo.Record(new EntitiesEdit("Duplicate", SceneSerializer.Save(World, created), ids, create: true));
         syncSubScenes();   // v1.14 S3 : 複製した持ち主のサブシーンも読む

@@ -14,6 +14,9 @@ public struct EntityInfo : IComponent
     public string Name;
     public bool   Active;
     [Layer] public int Layer;   // v1.5 : レイヤー (カメラの Culling Mask で写すかを決める。Unity の GameObject.layer。名前は Project Settings)
+    // v1.18 : タグ (Unity の GameObject.tag。null / 空 = Untagged)。FindWithTag で速く探せる。候補の名前は Project Settings の TagNames
+    //   書き換えは GameObject.Tag / World.SetTag で (ref で直接書き換えると、FindWithTag の索引が古いままになることがある)
+    [Tag] public string? Tag;
 
     // v1.14 : どのシーン (SceneManager の Scene.Id) から来た物か。0 = どのシーンでもない (コードで作った物など。今のメインシーンの物として扱う)
     //   保存しない / インスペクターに出さない (public でないので ComponentRegistry のフィールドに入らない)

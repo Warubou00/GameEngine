@@ -1,0 +1,49 @@
+v1.20.0.0 : GameObject GO3 (ComponentRef<T> / Prefab・SceneReference のフィールド / アセットの欄の表と選ぶ窓)
+ブランチ : feature/v118-object-reference (GO1 / GO2 と同じブランチ。未コミット)
+日付 : 2026-11-18
+
+■ 依頼
+「GO3 へ進む」 : 設計の GO3 = GameObject 以外のコンポーネントやアセットも Inspector に入れられるようにする
+
+■ 作った物
+- Runtime/Ecs/ComponentRef.cs (新)
+  - ComponentRef<T> : 「T を持つ物」への参照 (World + Entity)。IsValid / ref Value / TryGet / GameObject / if (r) / Entity への暗黙の変換
+  - IEntityRef (型引数を知らずに World / Entity / ComponentType を読む口) / EntityRefs.Create / IsEntityRef
+    保存と Inspector はこれで扱い、ゲームの型 T で MakeGenericMethod をしない (ED7 の古い DLL が残る問題を避ける)
+- Runtime/Scenes/SceneReference.cs (新) : シーンのパス + アセットの Id。Path は Id から今のパスを引く (名前を変えても辿れる)。Name / IsValid
+  SceneManager.LoadScene(SceneReference) / LoadSceneAsync(SceneReference)
+- GameObject.GetComponentRef<T>()
+- SceneSerializer
+  - IEntityRef の値 : 相手の Id で書く / 読み込み先の World の物で作る (型ごとの登録なし)
+  - Prefab : { guid, path } (他のアセットと同じ。Assets.LoadPrefab で読む)
+  - SceneReference : { guid, path } (読み込みはしない)
+- エディター
+  - Inspector.AssetField.cs (新) : アセットの欄の表 (型 → 種類 / パスの取り方 / 読み方 / ダブルクリック)。
+    以前 drawValue の switch に型ごとに並べていた Model / Sound / Material / Skeleton / AnimationClip / WidgetAsset / CollisionAsset / CollisionMesh を表に移し、
+    Prefab / SceneReference を足した。欄は「パスを書いて Enter / Project から落とす」(以前と同じ) + [...] の選ぶ窓 (その種類のアセット、名前・パスで検索) +
+    空の時は None (型) のヒント。CollisionAsset のダブルクリックで窓を開くのも表の中に
+    以前の drawAssetPath (落とせる種類を型から if で決めていた) は消した
+  - Inspector.ObjectField.cs : ComponentRef<T> の欄。T を持たない物は落としても断る / 選ぶ窓は T を持つ物だけ /
+    相手が T を外すと赤で「名前 (no T)」。入れ物は GetPool(Type) でなく今ある物から探す (ゲームの型の空の入れ物を作らないため)
+- 確認 : EditorTest.Objects.cs に assetRefs (ComponentRef / 保存と読み込み / 空の値 / プレハブを作る / シーンの名前の変更 / LoadScene(SceneReference) /
+  アセットの表と選ぶ窓 / ComponentRef の欄が断る・絞る / 相手が T を外す) と、objectFieldsDrag に ComponentRef<Camera> の欄へのドラッグ (断る / 入る)
+  撮影用の objects-view にアセットの選ぶ窓を足した
+- Docs/Reference/template.html : 「コンポーネントとアセットへの参照 (v1.20)」。index.html は作り直した
+- Engine.props : 1.20.0.0
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある物だけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.20.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.20.0.0)
+
+■ 確認
+- objects (--editor-test-section objects) : 90 / 90 (GO1 46 + GO2 22 + GO3 22)
+- エディターの自動の確認 (--editor-test、Release) : pass 603 / fail 0 (アセットの欄を表に移した後も、今までのマテリアル / モデル / 音などの確認は全部通った。
+  何度も読み直した後の「古い Game.dll が残らない」確認も通った)
+- 目で見た (PrintWindow) : ComponentRef<Camera> の欄 (Turret Camera (Camera))、シーンの選ぶ窓 (11 個、今の物が選ばれている)
+
+■ 設計からの変更 / まだの物
+- ユーザーのアセットの型を Inspector に足す公開の口 (EditorApi.RegisterAssetField) は入れていない。Inspector の中の RegisterAssetField はあるが、
+  拡張を読んだ時に呼ぶ所 (Unity の InitializeOnLoad に当たる物) がまだ無く、ゲームの型を表に残すとホットリロードで古い DLL が残るため。
+  入れる時は EditorExtensions.Clear() で一緒に外す形にする
+- [AssetPath] の string の欄は今まで通り (選ぶ窓は付けていない。入力の度に値が変わる今の動きを変えないため)
+- 次 : GO4 (まとめの確認 / ドキュメント)

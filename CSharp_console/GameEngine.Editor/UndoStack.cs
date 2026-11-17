@@ -51,7 +51,7 @@ internal static class EditorWorld
     {
         if (!world.Has<EntityInfo>(entity)) world.Add(entity, new EntityInfo($"Entity {entity.Id}"));
         ref var info = ref world.Get<EntityInfo>(entity);
-        if (info.Id == Guid.Empty) info.Id = Guid.NewGuid();
+        if (info.Id == Guid.Empty) { info.Id = Guid.NewGuid(); world.Reindex(entity); }   // v1.18 : Id の索引も直す
         return info.Id;
     }
 }

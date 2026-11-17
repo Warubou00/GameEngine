@@ -30,6 +30,8 @@ public sealed class ComponentPool<T> : IComponentPool where T : struct
     public event Action<Entity, T>? Removed;
     // 付けられたときに呼ばれる (v1.6。例 : AudioSource に持ち主のエンティティを書く)。置き換え (SetBoxed / Get への代入) では呼ばれない
     public event Action<Entity>? Added;
+    // v1.18 : SetBoxed / World.Set で丸ごと置き換えられたとき (EntityInfo の名前 / タグの索引を直すのに使う)。ref で中を書き換えた時は呼ばれない
+    internal event Action<Entity>? Replaced;
 
     public Type ComponentType => typeof(T);
     public int  Count => _count;
@@ -75,10 +77,17 @@ public sealed class ComponentPool<T> : IComponentPool where T : struct
 
     public object GetBoxed(int entityId) => Get(entityId);
 
-    public void SetBoxed(Entity entity, object component)
+    public void SetBoxed(Entity entity, object component) => Set(entity, (T)component);
+
+    // 持っていれば置き換え (Replaced を呼ぶ)、無ければ追加 (v1.18。World.Set と SetBoxed から)
+    internal void Set(Entity entity, in T component)
     {
-        if (Has(entity.Id)) Get(entity.Id) = (T)component;
-        else                Add(entity, (T)component);
+        if (Has(entity.Id))
+        {
+            Get(entity.Id) = component;
+            Replaced?.Invoke(entity);
+        }
+        else Add(entity, component);
     }
 
     public void Remove(int entityId)

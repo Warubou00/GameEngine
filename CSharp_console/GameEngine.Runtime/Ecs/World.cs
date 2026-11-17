@@ -16,7 +16,7 @@ public delegate void ForEachAction<T1, T2, T3>(Entity entity, ref T1 c1, ref T2 
 //   ※ForEach の中でエンティティ / コンポーネントを追加・削除しないこと (配列の順番が変わるため)
 //     必要なら一度リストに集めて、ForEach の後で行う
 // ==========================================================================
-public sealed class World
+public sealed partial class World
 {
     private int[]      _versions = new int[256];   // 番号ごとの世代 (生きている間の値)
     private bool[]     _alive    = new bool[256];
@@ -241,9 +241,7 @@ public sealed class World
     public void Set<T>(Entity entity, in T component) where T : struct
     {
         ThrowIfDead(entity);
-        var pool = GetPool<T>();
-        if (pool.Has(entity.Id)) pool.Get(entity.Id) = component;
-        else                     pool.Add(entity, component);
+        GetPool<T>().Set(entity, component);   // v1.18 : 置き換えた時に Replaced を呼ぶ (名前の索引のため)
     }
 
     public bool Has<T>(Entity entity) where T : struct => IsAlive(entity) && GetPool<T>().Has(entity.Id);

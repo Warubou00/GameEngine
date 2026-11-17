@@ -126,6 +126,41 @@ public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollis
     protected bool TryGetComponent<U>(Entity entity, out U component) where U : struct => ComponentAccess.TryGet(World, entity, out component);
     protected bool HasComponent<U>(Entity entity) where U : struct => World.Has<U>(entity);
 
+    // ---------------------------------------------------------------------
+    // GameObject / 探す (v1.18。Unity の gameObject / GameObject.Find など。World の索引で引くので速い)
+    // ---------------------------------------------------------------------
+
+    /// <summary>今処理している物の GameObject (Unity の gameObject)</summary>
+    protected GameObject GameObject => new(World, Entity);
+
+    /// <summary>名前 (または "親/子" のパス) で有効な物を探す (無ければ GameObject.None)</summary>
+    protected GameObject Find(string nameOrPath) => wrap(World.Find(nameOrPath));
+
+    /// <summary>タグで有効な物を探す (無ければ GameObject.None)</summary>
+    protected GameObject FindWithTag(string tag) => wrap(World.FindWithTag(tag));
+
+    /// <summary>タグの有効な物を全部</summary>
+    protected List<GameObject> FindGameObjectsWithTag(string tag)
+    {
+        _findScratch.Clear();
+        World.FindAllWithTag(tag, _findScratch);
+        return _findScratch.ConvertAll(e => new GameObject(World, e));
+    }
+
+    /// <summary>U を持つ最初の有効な物 (Unity の FindObjectOfType)</summary>
+    protected GameObject FindObjectOfType<U>() where U : struct => wrap(World.FindObjectOfType<U>());
+
+    /// <summary>U を持つ有効な物を全部</summary>
+    protected List<GameObject> FindObjectsOfType<U>() where U : struct
+    {
+        _findScratch.Clear();
+        World.FindObjectsOfType<U>(_findScratch);
+        return _findScratch.ConvertAll(e => new GameObject(World, e));
+    }
+
+    private readonly List<Entity> _findScratch = new();
+    private GameObject wrap(Entity entity) => entity.IsNull ? GameObject.None : new GameObject(World, entity);
+
     /// <summary>今のエンティティの Transform (= GetComponent&lt;Transform&gt;()。Unity の transform)</summary>
     protected ref Transform Transform => ref World.GetPool<Transform>().Get(Entity.Id);
 

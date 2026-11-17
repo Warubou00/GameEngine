@@ -1,0 +1,48 @@
+v1.19.0.0 : GameObject GO2 (Inspector の物の欄 : Hierarchy から落とす / Ping / 検索つきの選ぶ窓 / 別のシーンの物を断る)
+ブランチ : feature/v118-object-reference (GO1 と同じブランチ。未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「GO2 へ進む」 : 設計の GO2 = Inspector の Entity / GameObject のフィールドを Unity の ObjectField のようにする
+
+■ 作った物
+- GameEngine.Editor/Inspector.ObjectField.cs (新。Inspector を partial にした)
+  - 欄 : [ 名前 (GameObject) ][...] ラベル。何も無ければ None (薄い字)、消えた物は Missing (赤)
+  - Hierarchy の行を落とす (ENTITY の荷物。ドラッグしている物は EditorApp から受け取る)。断る物は落としても入れず、理由をツールチップに出す
+  - クリック = Ping / ダブルクリック = 選ぶ / 右クリック = Ping・Select・Clear
+  - [...] = 選ぶ窓 : 検索 (名前の一部・大文字小文字を問わない / t:型 / tag:タグ)、None、ImGuiListClipper で見えている行だけ描く、親の名前、
+    無効な物は薄い字、断る物は押せない (理由はツールチップ)。[...] の下に右端を揃えて出し、背景は不透明
+  - 以前の Entity の欄 (全部の物を並べるコンボ) は消した (この欄に置き換え)
+- GameEngine.Editor/EditorApp.ObjectRefs.cs (新)
+  - Ping(entity) : Hierarchy を出し、親を開き、その行までスクロール (1 回)、1.5 秒かけて消える黄色い枠
+  - ReferenceRefusal : 編集中に別のシーン (足したシーン / サブシーンの中 ⇔ メインシーン) の物を断る。再生中は断らない
+- EditorApp.cs
+  - Hierarchy の行の前後で Ping の処理を呼ぶ
+  - ドラッグを始めたら、押した時に変えた選択を元に戻す (以前は押した物が選ばれたままで Inspector がドラッグ中の物に変わり、落とす先の欄が消えた)
+  - Inspector に PingEntity / SelectEntity / DraggedEntity / ReferenceRefusal を渡す
+- 確認 : EditorTest.Objects.cs に objectFields (選ぶ窓の一覧 / 値の型 / 別のシーンを断る / Ping / 欄から選ぶ窓を開く / Missing) と
+  objectFieldsDrag (Input.Simulate で本当の ImGui のドラッグ & ドロップ : GameObject の欄 / Entity の欄 / 親は変わらない / 選択が保たれる / Undo 2 回)
+  撮影用 : --editor-test-section objects-view (Ping と選ぶ窓を開いたまま待つ)
+- Docs/Reference/template.html : 「Inspector の物の欄 (v1.19)」。index.html は作り直した
+- Engine.props : 1.19.0.0
+
+■ 実装中に見つけて直した物
+- MakeReference の ?: で GameObject が暗黙に Entity へ変わり、GameObject の欄に Entity が入った (object にしてから選ぶように直した。確認で見つけた)
+- 上の「ドラッグを始めると選択が変わる」問題 (本当のドラッグの確認で見つけた)
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある物だけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.19.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.19.0.0)
+
+■ 確認
+- objects (--editor-test-section objects) : 68 / 68 (GO1 46 + GO2 22)
+- エディターの自動の確認 (--editor-test、Release) : pass 581 / fail 0
+  ※1 回目 : 早い段階の確認 (_EditorTest2.meta を消す所) が、別のプロセスにファイルを掴まれて落ちた (今回の変更と関係のない一時的な物)。残った .meta を消して流し直した
+  ※2 回目 : 580 / 1。全体の流れでは前の確認がメインシーンを外していて、足したシーンがメインになる (SceneManager の決まり) ため、
+    別のシーンを断る確認の前提が崩れた。確認の方で、メインが無ければ先にメイン役のシーンを足すようにした (機能は変えていない)
+- 目で見た (PrintWindow で撮影) : Ping の黄色い枠、欄 (GameObject / Entity / None)、選ぶ窓 ([...] の下、親の名前つき)
+- 外から PostMessage でマウスを送ってドラッグする方法は、エディターの WinForms の MouseMove に届かなかったので、Input.Simulate で確かめた
+
+■ 残り (設計の続き)
+- GO3 : ComponentRef<T> / Prefab / SceneReference のフィールド、アセットの欄の表 (選ぶ窓の Assets タブ)
+- GO4 : まとめの確認 / ドキュメント
