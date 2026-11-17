@@ -118,7 +118,42 @@ public sealed class World
         //  以前は前から消していたので、読み直したシーンの番号が逆順になり、階層の並びが逆になった)
         var entities = Entities.ToList();
         for (int i = entities.Count - 1; i >= 0; i--) DestroyEntity(entities[i]);
+        Array.Clear(_sceneFlags);
+        _anySceneInactive = false;
+        Cleared?.Invoke();   // v1.14 : SceneManager が持っているシーンの一覧を空にする
     }
+
+    /// <summary>Clear で全部消えた後 (v1.14。SceneManager が受け取る)</summary>
+    internal event Action? Cleared;
+
+    // ---------------------------------------------------------------------
+    // シーンの印 (v1.14。EntityInfo.SceneId ごと。SceneManager が書く)
+    //   Inactive : そのシーンが無効 (待機 / 親のシーンが無効)。中の物は自分の Active に関係なく無効になる
+    //   NotMain  : 今のメインシーン (SceneManager.ActiveScene) でないシーンの物 (サブシーン / 足したシーン / 永続。メインシーンを保存する時に書かない)
+    //   0 番 (どのシーンでもない物) はいつも有効
+    // ---------------------------------------------------------------------
+    internal const byte SceneInactive = 1, SceneNotMain = 2;
+    private byte[] _sceneFlags = new byte[16];
+
+    internal void SetSceneFlags(int sceneId, byte flags)
+    {
+        if (sceneId <= 0) return;
+        if (sceneId >= _sceneFlags.Length) Array.Resize(ref _sceneFlags, Math.Max(sceneId + 1, _sceneFlags.Length * 2));
+        _sceneFlags[sceneId] = flags;
+        _anySceneInactive = Array.Exists(_sceneFlags, f => (f & SceneInactive) != 0);
+    }
+
+    // 無効なシーンが 1 つでもあるか (無ければ IsSelfActive は Active を見るだけ。TransformSystem が毎フレーム全部の物で呼ぶので)
+    //   以前 (S1 の最初) は毎回シーンの印を引いていて、1 万個の TransformSystem が 3〜9 % 遅くなった
+    private bool _anySceneInactive;
+    internal bool AnySceneInactive => _anySceneInactive;
+
+    internal byte SceneFlags(int sceneId) => (uint)sceneId < (uint)_sceneFlags.Length ? _sceneFlags[sceneId] : (byte)0;
+
+    /// <summary>EntityInfo の Active とシーンの有効を合わせた「自分の」有効 (親は含まない)</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    internal bool IsSelfActive(in EntityInfo info) =>
+        info.Active && (!_anySceneInactive || (uint)info.SceneId >= (uint)_sceneFlags.Length || (_sceneFlags[info.SceneId] & SceneInactive) == 0);
 
     // エンティティと、その全てのコンポーネントを削除する
     public void DestroyEntity(Entity entity)
@@ -154,7 +189,7 @@ public sealed class World
         var infos = GetPool<EntityInfo>();
         if (!infos.Has(entity.Id)) infos.Add(entity, new EntityInfo($"Entity {entity.Id}") { Active = active });
         else infos.Get(entity.Id).Active = active;
-        SetActiveInHierarchy(entity.Id, active);
+        SetActiveInHierarchy(entity.Id, IsSelfActive(infos.Get(entity.Id)));   // v1.14 : 無効なシーンの物は有効にしない
     }
 
     // 有効 / 無効が変わった回数 (描画などが「作り直す物があるか」を見るのに使う)

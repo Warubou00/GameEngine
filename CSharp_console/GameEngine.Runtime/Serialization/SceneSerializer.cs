@@ -114,7 +114,12 @@ public static class SceneSerializer
     // ---------------------------------------------------------------------
 
     /// <summary>World の全部のエンティティを JSON にする (EntityInfo が無い物には付ける)</summary>
-    public static string Save(World world) => Save(world, world.Entities.ToList());
+    // v1.14 : メインシーンでない物 (サブシーンの中の物など) は書かない (それぞれのファイルにある物。以前は全部を書いていたので、サブシーンの中の物がメインシーンに重なって入った)
+    public static string Save(World world) => Save(world, world.Entities.Where(e => !IsOutsideMainScene(world, e)).ToList());
+
+    /// <summary>今のメインシーンでないシーン (サブシーン / 足したシーン / 永続) の物か (v1.14。メインシーンを保存する時に飛ばす)</summary>
+    public static bool IsOutsideMainScene(World world, Entity entity) =>
+        world.Has<EntityInfo>(entity) && (world.SceneFlags(world.Get<EntityInfo>(entity).SceneId) & World.SceneNotMain) != 0;
 
     /// <summary>
     /// 一部のエンティティだけを JSON にする (エディターの元に戻す / 複製。ED4)
@@ -260,46 +265,116 @@ public static class SceneSerializer
     /// 知らない型 / 読めない値は飛ばして warnings に入れる (読み込みは止めない)
     /// </summary>
     // freshIds : 全部の物に新しい Id を付ける (プレハブを置く時。ED8)。中の参照は新しい物どうしに繋がる
-    public static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings = null, bool freshIds = false)
+    // v1.14 : 中身は SceneLoader (少しずつ進められる読み込み) を最後まで回す。非同期の読み込みも同じ道を通るので、作る物と順番は同じ
+    public static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings = null, bool freshIds = false) =>
+        Load(world, json, assets, warnings, freshIds, sceneId: 0);
+
+    internal static List<Entity> Load(World world, string json, AssetManager? assets, List<string>? warnings, bool freshIds, int sceneId)
     {
-        var context = new ReadContext(world, assets) { Existing = existingIds(world) };
-        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-        var root = document.RootElement;
-        if (root.TryGetProperty("format", out var format) && format.GetString() != Format) throw new InvalidDataException($"Not a scene file (format {format.GetString()}).");
-        var created = new List<Entity>();
-        if (!root.TryGetProperty("entities", out var entities)) return created;
+        using var loader = new SceneLoader(world, json, assets, freshIds, sceneId);
+        loader.Parse();
+        while (loader.Step()) { }
+        warnings?.AddRange(loader.Warnings);
+        return loader.Created;
+    }
+
+    // ---------------------------------------------------------------------
+    // 少しずつ進められる読み込み (v1.14)
+    //   Parse : JSON を解析する (World に触らないので、別のスレッドで呼んでも良い)
+    //   Step  : 1 回目で全部のエンティティを作り (参照が後の物を指していても引けるように)、その後は 1 回で 1 つの物のコンポーネントを入れる
+    //           (アセットはここで読む = メインのスレッド)。戻り値 = まだ続きがあるか
+    //   以前は Load の中で全部を一度に行ったので、途中で止めて次のフレームに続ける (ロード画面を動かしながら読む) ことができなかった
+    // ---------------------------------------------------------------------
+    internal sealed class SceneLoader : IDisposable
+    {
+        private readonly World _world;
+        private readonly string _json;
+        private readonly bool _freshIds;
+        private readonly int _sceneId;
+        private readonly ReadContext _context;
+        private JsonDocument? _document;
+        private JsonElement[] _elements = [];
+        private int _next = -1;   // -1 = エンティティをまだ作っていない
+
+        public List<Entity> Created { get; } = new();
+        public List<string> Warnings => _context.Warnings;
+        /// <summary>全部の手数 (エンティティを作る 1 + 物の数) と済んだ数</summary>
+        public int Total => _elements.Length + 1;
+        public int Done => _next < 0 ? 0 : _next + 1;
+        /// <summary>全部の物を作り終えたか</summary>
+        public bool IsFinished => _next >= 0 && _next >= _elements.Length;
+        /// <summary>最後の Step でコンポーネントを入れた物 (遅い物を調べる用。v1.14 S2)</summary>
+        public Entity LastEntity { get; private set; }
+
+        public SceneLoader(World world, string json, AssetManager? assets, bool freshIds, int sceneId)
+        {
+            _world = world;
+            _json = json;
+            _freshIds = freshIds;
+            _sceneId = sceneId;
+            _context = new ReadContext(world, assets);
+        }
+
+        public void Parse()
+        {
+            if (_document != null) return;
+            _document = JsonDocument.Parse(_json, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            var root = _document.RootElement;
+            if (root.TryGetProperty("format", out var format) && format.GetString() != Format) throw new InvalidDataException($"Not a scene file (format {format.GetString()}).");
+            _elements = root.TryGetProperty("entities", out var entities) ? entities.EnumerateArray().ToArray() : [];
+        }
+
+        public bool Step()
+        {
+            Parse();
+            if (_next < 0)
+            {
+                createEntities();
+                _next = 0;
+                return _elements.Length > 0;
+            }
+            if (_next >= _elements.Length) return false;
+            LastEntity = Created[_next];
+            readComponents(_elements[_next], Created[_next]);
+            _next++;
+            return _next < _elements.Length;
+        }
 
         // 1. エンティティを全部作る (参照が後の物を指していても引けるように)
-        var existing = context.Existing!;
-        foreach (var element in entities.EnumerateArray())
+        private void createEntities()
         {
-            var fileId = element.TryGetProperty("id", out var idElement) && Guid.TryParse(idElement.GetString(), out var parsed) ? parsed : Guid.NewGuid();
-            var info = new EntityInfo
+            var existing = _context.Existing = existingIds(_world);
+            foreach (var element in _elements)
             {
-                Id     = freshIds || (existing.ContainsKey(fileId) && world.IsAlive(existing[fileId])) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
-                Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
-                Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
-                Layer  = element.TryGetProperty("layer", out var layer) && layer.TryGetInt32(out var layerValue) ? Math.Clamp(layerValue, 0, 31) : 0,   // v1.5
-            };
-            var entity = world.CreateEntity();
-            world.Add(entity, info);
-            context.Entities[fileId] = entity;
-            created.Add(entity);
+                var fileId = element.TryGetProperty("id", out var idElement) && Guid.TryParse(idElement.GetString(), out var parsed) ? parsed : Guid.NewGuid();
+                var info = new EntityInfo
+                {
+                    Id     = _freshIds || (existing.ContainsKey(fileId) && _world.IsAlive(existing[fileId])) ? Guid.NewGuid() : fileId,   // 同じシーンを 2 回読んだ時は新しい Id
+                    Name   = element.TryGetProperty("name", out var name) ? name.GetString() ?? "" : "",
+                    Active = !element.TryGetProperty("active", out var active) || active.GetBoolean(),
+                    Layer  = element.TryGetProperty("layer", out var layer) && layer.TryGetInt32(out var layerValue) ? Math.Clamp(layerValue, 0, 31) : 0,   // v1.5
+                    SceneId = _sceneId,   // v1.14 : どのシーンの物か
+                };
+                var entity = _world.CreateEntity();
+                _world.Add(entity, info);
+                // v1.14 : 無効なシーン (待機) の物は、コンポーネントを入れる前から無効 (読み込みの途中の物を描画 / 物理が拾わないように)
+                if (!_world.IsSelfActive(info)) _world.SetActiveInHierarchy(entity.Id, false);
+                _context.Entities[fileId] = entity;
+                Created.Add(entity);
+            }
         }
 
         // 2. コンポーネント
-        var index = 0;
-        foreach (var element in entities.EnumerateArray())
+        private void readComponents(JsonElement element, Entity entity)
         {
-            var entity = created[index++];
-            if (!element.TryGetProperty("components", out var components)) continue;
+            if (!element.TryGetProperty("components", out var components)) return;
             foreach (var componentElement in components.EnumerateArray())
             {
                 var typeName = componentElement.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
                 var type = ComponentRegistry.Find(typeName);
                 if (type == null)
                 {
-                    context.Warnings.Add($"Unknown component type '{typeName}' on {world.Get<EntityInfo>(entity).Name} (skipped)");
+                    _context.Warnings.Add($"Unknown component type '{typeName}' on {_world.Get<EntityInfo>(entity).Name} (skipped)");
                     continue;
                 }
                 var boxed = type.CreateDefault();
@@ -308,18 +383,53 @@ public static class SceneSerializer
                     if (!componentElement.TryGetProperty(field.Name, out var value)) continue;   // 無い値は既定のまま
                     try
                     {
-                        field.SetValue(boxed, readValue(value, field.FieldType, context));
+                        field.SetValue(boxed, readValue(value, field.FieldType, _context));
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException)
                     {
-                        context.Warnings.Add($"{type.Type.Name}.{field.Name} : {ex.Message}");
+                        _context.Warnings.Add($"{type.Type.Name}.{field.Name} : {ex.Message}");
                     }
                 }
-                world.GetPool(type.Type).SetBoxed(entity, boxed);
+                _world.GetPool(type.Type).SetBoxed(entity, boxed);
             }
         }
-        warnings?.AddRange(context.Warnings);
-        return created;
+
+        /// <summary>
+        /// 使うアセットのパス (v1.14 S2。コンポーネントの中の { "path": ... } / { "model": ... })。Parse の後、別のスレッドで呼んで良い
+        /// 非同期の読み込みが、先にファイルを読んでおく (OS のキャッシュに載せる) のに使う
+        /// </summary>
+        public HashSet<string> CollectAssetPaths()
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var element in _elements)
+            {
+                if (element.TryGetProperty("components", out var components)) collectPaths(components, result);
+            }
+            return result;
+        }
+
+        private static void collectPaths(JsonElement e, HashSet<string> result)
+        {
+            switch (e.ValueKind)
+            {
+            case JsonValueKind.Object:
+                foreach (var property in e.EnumerateObject())
+                {
+                    if ((property.NameEquals("path") || property.NameEquals("model")) && property.Value.ValueKind == JsonValueKind.String &&
+                        property.Value.GetString() is { Length: > 0 } path && !path.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Add(path.IndexOf('#') is var hash and >= 0 ? path[..hash] : path);   // 部品 (xxx.mod.fbx#ノード) はファイルの所まで
+                    }
+                    else collectPaths(property.Value, result);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in e.EnumerateArray()) collectPaths(item, result);
+                break;
+            }
+        }
+
+        public void Dispose() => _document?.Dispose();
     }
 
     public static List<Entity> LoadFile(World world, string path, AssetManager? assets, List<string>? warnings = null) =>

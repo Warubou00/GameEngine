@@ -464,6 +464,63 @@ if (UI.IsPointerOverUI) { /* ゲームのクリックを無視 */ }</code></pre>
 </ul>
 </article>
 
+<article data-id="scenes" data-title="シーンの管理 / サブシーン / 非同期 (v1.14 - v1.17)">
+<h2>シーンの管理 / サブシーン / 非同期 (v1.14 - v1.17)</h2>
+<p><a href="#/t/GameEngine.SceneManager">SceneManager</a> (<code>engine.Scenes</code> / <code>SceneManager.Current</code> / Behaviour の <code>Scenes</code>) が、読み込んだシーン (<a href="#/t/GameEngine.Scene">Scene</a>) を持つ。同期 (v1.14) と非同期 (v1.15) の両方で読める。見本 : <code>Assets/Scenes/scenes_demo.scene.json</code> + <code>Scripts/SceneLoadingDemo.cs</code> (N = ロード画面つきの非同期の切り替え / B = 同期 / 1・2 = サブシーン)。</p>
+<h3>シーンの切り替え (Unity / UE と同じ)</h3>
+<ul>
+  <li><code>Scenes.LoadScene(path)</code> (Single) : 今のシーンを全部外してから読み、メインシーン (<code>ActiveScene</code>) にする。<code>LoadSceneMode.Additive</code> は足すだけ</li>
+  <li><code>Scenes.DontDestroyOnLoad(entity)</code> : 永続シーン (<code>Scenes.Persistent</code>) へ移す。Transform の子 / 持っているサブシーンも一緒。Single で切り替えても残る</li>
+  <li>コードで作った物 (SceneId 0) は今のメインシーンの物として扱う (切り替えると消える)</li>
+  <li><code>Engine.LoadScene(path, additive)</code> は今まで通り (すぐ読み、作った物を返す)。中身は SceneManager</li>
+  <li>外してもアセットは解放しない (次のシーンで使う物を読み直さない)。解放は <code>Scenes.UnloadUnusedAssets()</code></li>
+</ul>
+<h3>シーンの中のシーン (RE Engine と同じ)</h3>
+<ul>
+  <li><a href="#/t/GameEngine.SubScene">SubScene</a> コンポーネント (Scene = .scene.json / LoadOnStart / ActiveOnLoad) を付けたエンティティが「持ち主」</li>
+  <li>状態 : 未ロード → 待機 (読んであるが無効) ⇔ 有効 → 未ロード。<code>LoadSubScene(owner)</code> / <code>SetSubSceneActive(owner, bool)</code> / <code>UnloadSubScene(owner)</code></li>
+  <li>有効 / 待機の切り替えは印を変えるだけ (物とアセットは残る。すぐ効く)。持ち主を無効にする / 消すと、中の物も無効 / 外れる</li>
+  <li>中の一番上の物 (親の無い Transform) は持ち主の子になる (持ち主を動かすと全部動く)</li>
+  <li>入れ子にできる。自分を読む輪 (親のシーンと同じファイル) は読まずに Console に出す</li>
+</ul>
+<h3>非同期 (ロード画面)</h3>
+<ul>
+  <li><code>var op = Scenes.LoadSceneAsync(path)</code> / <code>Scenes.LoadSubSceneAsync(owner, active)</code> が <a href="#/t/GameEngine.SceneOperation">SceneOperation</a> を返す (Unity の AsyncOperation)。<code>Progress</code> (0〜0.9 = 読んでいる / 0.9 = 待っている / 1 = 終わった)、<code>IsReadyToActivate</code>、<code>AllowActivation</code> (false の間は切り替えない)、<code>Completed</code>、<code>await op</code> (続きはメインのスレッド)</li>
+  <li>別のスレッド : ファイルを読む → JSON の解析 → 使うアセットのファイルを先に読む (OS のキャッシュに載せる)。メインのスレッド : フレームの頭で <code>Scenes.AsyncBudgetMs</code> (既定 4 ms) ずつ物を作る (アセットの GPU への転送はメインだけ)</li>
+  <li>読み込み中のシーンの物は無効。有効にする時にまとめて有効になり、Single はその時に前のシーンを外す (それまで前のシーンは動く)。中の LoadOnStart のサブシーンも同じ Operation で読む</li>
+  <li>取りやめ : 読み込み中のシーンを <code>UnloadScene</code> / 同期の Single / <code>World.Clear</code> / 持ち主を消す → <code>IsCancelled</code></li>
+  <li>ロード画面の Widget は <code>UUserWidget.KeepOnSceneChange = true</code> で切り替えの瞬間も消えない (コードで作った他の Widget は、切り替えで今まで通り外れる)</li>
+  <li>1 つの物は途中で止められない (<code>op.SlowestEntity</code> で一番重い物が分かる)。大きなモデルは v1.17 で別のスレッドへ (下)</li>
+</ul>
+<h3>モデルを別のスレッドで読む (v1.17)</h3>
+<ul>
+  <li>C++ : <code>Renderer_BeginLoadModel(path)</code> がワーカーで <b>.obj / .pmx の解析とテクスチャのデコード</b> を始め、<code>Renderer_FinishLoadModel(job, wait)</code> がメインスレッドで <b>GPU への登録</b> (頂点 / インデックス / テクスチャ / マテリアル) をする。<code>SceneRenderer::loadModelResource</code> は <code>prepareModel</code> (CPU) + <code>uploadModel</code> (GPU) に分けた (同期の <code>LoadModel</code> は今まで通り続けて呼ぶ)</li>
+  <li>RHI : <code>DecodeTextures</code> (どのスレッドでも) / <code>CreateDecodedTextures</code> (メイン) / <code>ReleaseDecodedTextures</code>。<code>LoadTextures</code> はこの 2 つを続けて呼ぶ形にした (中身は同じ)。WIC のファクトリーは RHI の初期化 (メイン) で作る</li>
+  <li>C# : <code>Assets.BeginLoadModel</code> / <code>IsModelLoading</code> / <code>FinishModelLoads(budgetMs)</code> / <code>PendingModelLoads</code>。<code>LoadModel</code> は読み込み中の物を頼まれたら終わるのを待って使う (2 回読まない)</li>
+  <li>非同期のシーン : 解析の後、使う .obj / .pmx を別のスレッドで読み始め、全部終わってから物を作る (物を作る手は軽い)。<code>Scenes.Update</code> が毎フレーム終わった物を登録する (取りやめた読み込みの物も)</li>
+  <li><code>SceneRenderer::Shutdown</code> は読み込み中の物を待ってから RHI を壊す</li>
+  <li>FBX (C# で読む) と、同期の <code>LoadScene</code> は今まで通り (メインスレッド)</li>
+</ul>
+<h3>エディター (v1.16)</h3>
+<ul>
+  <li>Hierarchy : SubScene を持つ物に <code>[Sub Scene 名前 · 状態]</code>。中の物は紫で持ち主の下 (Transform の無い物も)。メインでない一番上のシーン (足したシーン / <code>DontDestroyOnLoad</code> / 読み込み中 <code>(loading 90%)</code>) は見出しの下にまとめる</li>
+  <li>編集中は、サブシーンの中の物は見るだけ (メインシーンに保存されないため)。消す / 複製 / 親を変える / 名前 / ギズモ / Inspector を止め、Inspector に理由と「Open Its Scene」。再生中は触れる</li>
+  <li>持ち主の右クリック &gt; Sub Scene : Load / Unload / Activate / Standby / Open。Inspector の SubScene の下にも状態とボタン</li>
+  <li>Project の .scene.json を Hierarchy へドラッグ : SubScene を持つ物を作って読む (元に戻せる。開いているシーン自身は置けない)</li>
+  <li>持ち主を消す / 複製する時、中の物は入れない (<code>EditorWorld.WithDescendants</code> は別のシーンの子を飛ばす)。元に戻す / やり直す / 複製の後と、SubScene.Scene を変えた時は読み直す。シーンのアセットの名前を変えると SubScene.Scene も付け替える</li>
+  <li>Build Game : シーンの JSON の "Assets/..." を辿るので、サブシーンのファイルも入る</li>
+</ul>
+<h3>仕組み</h3>
+<ul>
+  <li>どのシーンの物かは <code>EntityInfo.SceneId</code> (internal。保存しない)。World はシーンごとの印 (無効 / メインでない) を持ち、<code>TransformSystem</code> が「自分の Active かつシーンが有効」と親から、<code>World.IsActive</code> を決める</li>
+  <li>ゲームのコード (Update / FixedUpdate / LateUpdate / 衝突 / UI のイベント) の中で頼んだ読み込み / 外すは、次のフレームの頭 (<code>Scenes.Update</code>。全部の System の前) で行う。戻り値の Scene は <code>State = Loading</code>、読み終わると <code>Loaded</code> と <code>SceneLoaded</code></li>
+  <li>メインシーンを保存する時 (<code>SceneSerializer.Save(world)</code>) は、メインでないシーン (サブシーン / 足したシーン / 永続) の物は書かない</li>
+  <li>読み込みは <code>SceneSerializer.SceneLoader</code> (Parse = 別のスレッドで呼べる / Step = 1 つずつ)。同期の Load もこれを最後まで回すので、非同期でも作る物と順番は同じ</li>
+  <li>エディター : 停止 / スクリプトの読み直しで JSON から世界を作り直した後、<code>LoadStartSubScenes(開いているシーン)</code> でサブシーンを読み直す</li>
+  <li>確認 : <code>--editor-test --editor-test-section scenes</code> (速さ : <code>scenes-bench-sync</code> / <code>scenes-bench-async</code>、目で見る : <code>scenes-demo-hold</code>)。テストでキーを押す : <code>Input.SimulateKeyPress</code></li>
+</ul>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

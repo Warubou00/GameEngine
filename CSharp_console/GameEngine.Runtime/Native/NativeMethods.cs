@@ -257,6 +257,15 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_LoadModel([MarshalAs(UnmanagedType.LPWStr)] string filePath, out uint subMeshCount);
 
+    // v1.17 (S4) : モデルを別のスレッドで読み始める (解析 + テクスチャのデコード)。戻り値 = 読み込みの番号 (0 = 始められなかった)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Renderer_BeginLoadModel([MarshalAs(UnmanagedType.LPWStr)] string filePath);
+
+    // v1.17 (S4) : 読み込みを終える (メインスレッド。GPU への登録)。wait = 0 なら終わっていない時はすぐ戻る
+    // 戻り値 = 0 まだ / 1 できた (handle) / 2 失敗 / 3 知らない番号
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int Renderer_FinishLoadModel(uint job, int wait, out uint handle, out uint subMeshCount);
+
     // 頂点 (56 byte) とインデックスの配列からモデルを作る (SH1 : プリミティブ)。name はモデルの名前 ("builtin:Cube" など)
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_CreateMesh(Primitives.NativeVertex* vertices, uint vertexCount, uint* indices, uint indexCount,

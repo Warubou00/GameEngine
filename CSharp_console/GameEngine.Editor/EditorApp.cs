@@ -117,7 +117,10 @@ internal sealed partial class EditorApp
         _inspector.OpenCollision = path => OpenCollision(path);   // v1.9
         _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
         _inspector.BuildBones = entity => BuildBones(entity).Count;    // AN3
-        _inspector.Written = MarkOverrides;   // プレハブの変えた値の印 (ED8)
+        _inspector.Written = onComponentWritten;   // プレハブの変えた値の印 (ED8)。v1.14 S3 : SubScene のシーンを変えたら読み直す
+        _inspector.ReadOnlyReason = readOnlyReason;    // v1.14 S3 : サブシーンの中の物は見るだけ
+        _inspector.OpenOwningScene = OpenOwningScene;
+        _inspector.DrawSubSceneInfo = drawSubSceneInfo;
         _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
@@ -692,6 +695,7 @@ internal sealed partial class EditorApp
     private void updateGizmo(SceneCamera camera, ImDrawListPtr draw)
     {
         if (!World.IsAlive(_selected) || !World.Has<Transform>(_selected)) return;
+        if (IsReadOnly(_selected)) return;   // v1.14 S3 : サブシーンの中の物は動かさない (保存されないため)
         if (_gizmo.Update(camera, draw, World, _selected, _sceneHovered && !_flying, out var transform))
         {
             ref var t = ref World.Get<Transform>(_selected);
@@ -821,11 +825,18 @@ internal sealed partial class EditorApp
             // 親 → 子の一覧 (毎フレーム作る。1 万個でも 1 ms かからない)
             foreach (var list in _children.Values) list.Clear();
             _roots.Clear();
+            beginHierarchyScenes();   // v1.14 S3
             var transforms = World.GetPool<Transform>();
             foreach (var e in World.Entities)
             {
                 var parent = transforms.Has(e.Id) ? transforms.Get(e.Id).Parent : Entity.Null;
-                if (parent.IsNull || !World.IsAlive(parent)) { _roots.Add(e); continue; }
+                if (parent.IsNull || !World.IsAlive(parent))
+                {
+                    // v1.14 S3 : サブシーンの物 (Transform の無い物) は持ち主の下、メインでないシーンの物はその見出しの下
+                    parent = hierarchyParentOf(e, out var otherScene);
+                    if (otherScene != null) { addSceneRoot(otherScene, e); continue; }
+                    if (parent.IsNull) { _roots.Add(e); continue; }
+                }
                 if (!_children.TryGetValue(parent, out var list)) _children[parent] = list = new List<Entity>();
                 list.Add(e);
             }
@@ -836,14 +847,16 @@ internal sealed partial class EditorApp
                 !ImGui.GetIO().WantTextInput && ImGui.IsKeyPressed(ImGuiKey.F2, false))
                 BeginRename(_selected);
             foreach (var root in _roots) drawNode(root);
+            drawOtherSceneRoots();   // v1.14 S3 : 足したシーン / DontDestroyOnLoad / 読み込み中
             // 何も無い所へ落とすと親を外す
             ImGui.Dummy(new Vector2(-1, Math.Max(20.0f, ImGui.GetContentRegionAvail().Y)));
             if (ImGui.BeginDragDropTarget())
             {
                 if (acceptEntity()) SetParent(_dragged, Entity.Null);
-                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Prefab) is { } asset)
+                if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Prefab, AssetKind.Scene) is { } asset)
                 {
-                    if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Vector3.Zero, Entity.Null);
+                    if (asset.Kind == AssetKind.Scene) CreateSubScene(asset, Entity.Null);   // v1.14 S3 : シーンをサブシーンとして置く
+                    else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Vector3.Zero, Entity.Null);
                     else PlaceModel(asset, Vector3.Zero, Entity.Null);
                 }
                 ImGui.EndDragDropTarget();
@@ -862,12 +875,14 @@ internal sealed partial class EditorApp
         if (entity == _selected) flags |= ImGuiTreeNodeFlags.Selected;
         var inactive = !World.IsActive(entity);
         var prefab = World.Has<PrefabLink>(entity);   // プレハブの置いた物は青 (ED8)
+        var member = _multiScene && SceneSerializer.IsOutsideMainScene(World, entity);   // v1.14 S3 : メインでないシーン (サブシーンの中など) の物は紫
         if (inactive) ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetColorU32(ImGuiCol.TextDisabled));
         else if (prefab) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.55f, 0.75f, 1.0f, 1.0f));
+        else if (member) ImGui.PushStyleColor(ImGuiCol.Text, SubSceneMemberColor);
         // 名前を書いている物 (ED10) : 名前の代わりに入力の欄
         var renaming = entity == _renaming;
         var open = ImGui.TreeNodeEx(renaming ? $"##{entity.Id}" : $"{NameOf(World, entity)}##{entity.Id}", flags);
-        if (inactive || prefab) ImGui.PopStyleColor();
+        if (inactive || prefab || member) ImGui.PopStyleColor();
         if (renaming)
         {
             ImGui.SameLine();
@@ -888,9 +903,11 @@ internal sealed partial class EditorApp
         if (ImGui.BeginDragDropTarget())
         {
             if (acceptEntity() && _dragged != entity) SetParent(_dragged, entity);
-            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Material, AssetKind.Prefab, AssetKind.FbxSkeleton, AssetKind.FbxAnimation) is { } asset)
+            if (ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel, AssetKind.Material, AssetKind.Prefab, AssetKind.FbxSkeleton, AssetKind.FbxAnimation, AssetKind.Scene) is { } asset)
             {
-                if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
+                if (asset.Kind == AssetKind.Scene) CreateSubScene(asset, entity);   // v1.14 S3 : 子のサブシーンとして
+                else if (refuseReadOnly(entity, "add to")) { }                        // v1.14 S3 : サブシーンの中の物には足さない
+                else if (asset.Kind == AssetKind.Material) AssignMaterial(entity, asset);
                 else if (asset.Kind == AssetKind.FbxAnimation) AssignClip(entity, asset);   // AN3
                 else if (asset.Kind == AssetKind.FbxSkeleton) CreateAnimated(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);
                 else if (asset.Kind == AssetKind.Prefab) InstantiatePrefab(asset, Hierarchy.GetWorldMatrix(World, entity).Translation, entity);   // 子として (ED8)
@@ -898,7 +915,15 @@ internal sealed partial class EditorApp
             }
             ImGui.EndDragDropTarget();
         }
-        if (ImGui.BeginPopupContextItem())
+        if (IsReadOnly(entity) && ImGui.BeginPopupContextItem())
+        {
+            // v1.14 S3 : サブシーンの中の物 (見るだけ) : 開く / 持ち主を選ぶ だけ
+            Selected = entity;
+            if (ImGui.MenuItem($"Open Sub Scene '{Scenes.GetScene(entity)?.Name}'")) OpenOwningScene(entity);
+            if (Scenes.GetScene(entity) is { IsSubScene: true } ownerScene && ImGui.MenuItem("Select Owner")) Selected = ownerScene.Owner;
+            ImGui.EndPopup();
+        }
+        else if (!IsReadOnly(entity) && ImGui.BeginPopupContextItem())
         {
             Selected = entity;
             if (ImGui.MenuItem("Rename", "F2")) BeginRename(entity);   // ED10
@@ -921,10 +946,12 @@ internal sealed partial class EditorApp
                 if (ImGui.MenuItem("Unpack")) UnpackPrefab(entity);
                 ImGui.EndMenu();
             }
+            drawSubSceneMenu(entity);   // v1.14 S3
             if (ImGui.MenuItem("Duplicate")) Duplicate();
             if (ImGui.MenuItem("Delete")) DeleteSelected();
             ImGui.EndPopup();
         }
+        if (!renaming) drawSubSceneSuffix(entity);   // v1.14 S3 : [Sub Scene 名前 · 状態]
         if (open)
         {
             if (hasChildren) foreach (var child in children!.ToList()) drawNode(child);

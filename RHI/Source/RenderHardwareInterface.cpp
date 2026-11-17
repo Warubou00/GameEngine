@@ -50,6 +50,8 @@ namespace RHI
     {
         InitializeResult result;
         _isInitialized = false;
+        // v1.17 (S4) : 画像のデコードはワーカースレッドからも呼ばれる (DecodeTextures)。WIC のファクトリーはここ (メイン) で先に作る
+        RHI::ObjectInterface::Texture::PrepareDecoding();
 
         // 起動時間の計測 (シェーダーのキャッシュ / PSO キャッシュの効果確認用)
         Core::ScopedTimer initTimer("RHI Initialize (total)");
@@ -205,6 +207,43 @@ namespace RHI
         {
             outHandles[i].Index = handles[i].TextureID;
         }
+    }
+
+    // v1.17 (S4) : デコードだけ (どのスレッドからでも。初期化の前後に関係なく、ファイルを読むだけ)
+    DecodedTextures* RenderHardwareInterface::DecodeTextures(const wchar_t* const* filePaths, uint32_t count)
+    {
+        std::vector<std::wstring> paths;
+        paths.reserve(count);
+        for (uint32_t i = 0; filePaths && i < count; ++i)
+        {
+            paths.emplace_back(filePaths[i] ? filePaths[i] : L"");
+        }
+        return RHI::ObjectInterface::Texture::DecodeTextures(paths);
+    }
+
+    // v1.17 (S4) : デコード済みの物から GPU のテクスチャを作る (メインスレッド)。decoded はここで解放する
+    void RenderHardwareInterface::CreateDecodedTextures(DecodedTextures* decoded, TextureHandle* outHandles)
+    {
+        const size_t count = RHI::ObjectInterface::Texture::DecodedCount(decoded);
+        if (outHandles)
+        {
+            for (size_t i = 0; i < count; ++i) outHandles[i] = TextureHandle();
+        }
+        if (!_isInitialized || !outHandles)
+        {
+            RHI::ObjectInterface::Texture::ReleaseDecodedTextures(decoded);
+            return;
+        }
+        auto handles = _buffer->GetTexture()->CreateTexturesFromDecoded(_device.get(), _commandContext.get(), _buffer.get(), decoded);
+        for (size_t i = 0; i < count && i < handles.size(); ++i)
+        {
+            outHandles[i].Index = handles[i].TextureID;
+        }
+    }
+
+    void RenderHardwareInterface::ReleaseDecodedTextures(DecodedTextures* decoded)
+    {
+        RHI::ObjectInterface::Texture::ReleaseDecodedTextures(decoded);
     }
 
     MaterialHandle RenderHardwareInterface::CreateMaterial(const MaterialDesc& desc)

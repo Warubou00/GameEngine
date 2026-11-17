@@ -1,0 +1,63 @@
+v1.16.0.0 : シーンの管理 S3 (エディター)
+ブランチ : feature/v114-scene-manager (S1 / S2 と同じブランチ。未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「S3 に進んで」 : 設計の S3 = エディター (Hierarchy の表示 / Inspector のボタン / ドラッグで作る / Build Game のサブシーンの依存)
+  設計の時の「サブシーンの中の物をメインシーンを開いたまま直接編集するか」は、おすすめの「見るだけ + そのシーンを開いて直す」にした (直接の編集は次の版)
+
+■ 作った物 (GameEngine.Editor/EditorApp.Scenes.cs が中心)
+- Hierarchy
+  - SubScene を持つ物の後ろに [Sub Scene 名前 · active / standby / unloaded / loading 42%]
+  - サブシーンの中の物は紫。Transform の無い物も持ち主の下に並べる
+  - メインでない一番上のシーン (足したシーン / DontDestroyOnLoad / 非同期で読み込み中 (loading 90%)) は、枠の見出しの下にまとめる
+    (1 つのシーンだけの時は今まで通り。物ごとにシーンを引かない速い道)
+  - 持ち主の右クリック > Sub Scene : Load / Unload / Activate / Standby / Open
+  - サブシーンの中の物の右クリック : 「Open Sub Scene '名前'」と「Select Owner」だけ
+  - Project の .scene.json をドラッグ (空いた所 = 一番上 / 物の上 = 子) : SubScene を持つ物を作って読む (元に戻せる。開いているシーン自身は置けない)
+- 編集中は、サブシーンの中の物は見るだけ (メインシーンに保存されないので、直しても残らないため)
+  - 消す / 複製 / 親を変える / 子を作る / 名前 / ModifyComponent / ギズモ を止め、Console に 1 回だけ理由を出す
+  - Inspector : 上に理由と「Open Its Scene」ボタン、欄は全部触れない (ImGui.BeginDisabled)
+  - 再生中は触れる (止めると元に戻るのは他の物と同じ)
+- Inspector の SubScene の下 : 状態 (Active / Standby / Unloaded / Loading)、物の数、Load / Unload / Standby・Activate / Open
+- SubScene.Scene を変えた時 (Inspector / ModifyComponent / 元に戻す) : 読んでいる物と違えば外して読み直す
+- シーンのアセットの名前を変えた時 : 開いているシーンの SubScene.Scene も付け替える (元に戻せる)
+- 元に戻す / やり直す / 複製の後 : 戻った持ち主の LoadOnStart のサブシーンを読む
+
+■ 直した物 (S1 / S2 の時からの問題)
+- EditorWorld.WithDescendants (消す / 複製 / プレハブが使う) : 別のシーンの子 (サブシーンの中の物) は入れない
+  以前はサブシーンを持つ物を消す / 複製すると中の物まで JSON に入り、元に戻すとメインシーンの物として戻った (保存にも入った)
+
+■ Build Game
+- 変えていない。AssetDependencies はシーンの JSON の "Assets/..." の文字を全部辿るので、SubScene.Scene のファイルも入る (確認を足した)
+
+■ 変えたファイル
+- 新 : GameEngine.Editor/EditorApp.Scenes.cs
+- GameEngine.Editor : EditorApp.cs (Hierarchy / ギズモ / Inspector の繋ぎ), EditorApp.Edit.cs (見るだけの物を止める / 元に戻した後に読む),
+  EditorApp.Rename.cs (名前 / パスの付け替え), Inspector.cs (ReadOnlyReason / OpenOwningScene / DrawSubSceneInfo), UndoStack.cs (WithDescendants),
+  EditorTest.Scenes.cs (S3 の確認、目で見る用に編集中の止まりを足した), EditorTest.cs (区切り)
+- GameEngine.Runtime/Scenes/SceneManager.cs : NameOf を public に
+- CSharp_console/Engine.props : 1.16.0.0
+- Docs/Reference/template.html : 「エディター (v1.16)」の説明。index.html は作り直した
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある 3 つだけ)。C++ は変えていない
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.16.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.16.0.0 なのを確かめた)
+  ※Package/Project/SampleProject は残す設定のまま (見本のシーン / スクリプトはまだ入っていない)
+
+■ 確認
+- シーン (--editor-test-section scenes) : 63 / 63 (S3 で 15 足した)
+  見るだけ (持ち主は直せる) / 消す・複製・親・名前・値を止めて何も記録しない / 持ち主を消すと外れ、元に戻すと読み直す (中の物はメインに入らない) /
+  持ち主の複製は持ち主だけ、サブシーンはそれぞれ読む / シーンをドラッグして置く / 自分は置けない / Scene を変えると読み直す / 元に戻すと前のシーン /
+  置いたのを元に戻すと外れる / アセットの名前を変えると付け替わる / 再生中は直せる / Build Game にサブシーンのファイルが入る
+- エディターの自動の確認 (--editor-test、Release) : pass 505 / fail 0 (書き出したゲームとエディターの再生の比べ合わせ 11 件も全部 max error 0)
+- 目で見た (エディターの窓だけを PrintWindow で写した)
+  .claud/log/images/v1.16.0.0_readonly_member.png : 編集中、Room の後ろに [Sub Scene scenes_demo_room · active]、中の物は紫、
+     中の物を選ぶと Inspector に理由と Open Its Scene
+  .claud/log/images/v1.16.0.0_dontdestroyonload.png : 再生中、Scene Switcher が DontDestroyOnLoad の見出しの下
+  .claud/log/images/v1.16.0.0_loading_group.png : 非同期で読み込み中、showcase (loading 90%) の見出しの下に無効の色で並ぶ
+- 見ていない物 : 実際にマウスでドラッグして置く操作 (CreateSubScene を直接呼んで確かめた)、右クリックのメニューを開いた見た目
+
+■ まだの物
+- サブシーンの中の物を開いたまま直す (RE Engine のような直接の編集) : 次の版の候補
+- S4 : 大きなモデルの読み込みを分ける (C++。S2 の測った結果を見てから決める)

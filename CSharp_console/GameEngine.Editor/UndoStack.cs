@@ -32,7 +32,18 @@ internal static class EditorWorld
     public static List<Entity> WithDescendants(World world, Entity root)
     {
         var result = new List<Entity> { root };
-        for (int i = 0; i < result.Count; i++) result.AddRange(Hierarchy.GetChildren(world, result[i]));
+        // v1.14 S3 : 別のシーン (サブシーンの中の物) の子は入れない。サブシーンの物は持ち主の子でも持ち主のシーンの物ではない
+        //   以前 (S1) はサブシーンを持つ物を消す / 複製すると中の物まで JSON に入り、元に戻すとメインシーンの物として戻った
+        var scenes = SceneManager.Current;
+        var rootScene = scenes?.GetScene(root);
+        for (int i = 0; i < result.Count; i++)
+        {
+            foreach (var child in Hierarchy.GetChildren(world, result[i]))
+            {
+                if (scenes != null && scenes.GetScene(child) != rootScene) continue;
+                result.Add(child);
+            }
+        }
         return result;
     }
 

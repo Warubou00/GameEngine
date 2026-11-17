@@ -19,13 +19,17 @@
          1.11.0.0 : 描画パスの区切り (BeginPass) / パスごとの GPU・CPU の時間 / PIX のイベント / RenderTexture の名前 /
          1.12.0.0 : Render Graph Viewer (パス × リソースの読み書き / バリア / 寿命 / 中身)、レンダーターゲットごとの GPU のメモリ /
          1.13.0.0 : Frame Debugger (描画をイベントごとに止めて描画先を見る / 物を Hierarchy で選ぶ) /
-         1.13.1.0 : Render Graph Viewer の Live のチラつきを直す (間隔ごとに、形が変わった時だけ差し替える))
+         1.13.1.0 : Render Graph Viewer の Live のチラつきを直す (間隔ごとに、形が変わった時だけ差し替える) /
+         1.14.0.0 : シーンの管理 S1 (SceneManager : シーンの切り替え / 足す / サブシーン (SubScene) / DontDestroyOnLoad) /
+         1.15.0.0 : シーンの管理 S2 (非同期の読み込み LoadSceneAsync / LoadSubSceneAsync / SceneOperation、ロード画面の見本) /
+         1.16.0.0 : シーンの管理 S3 (エディター : Hierarchy のシーン分け / サブシーンの中は見るだけ / SubScene のボタン / シーンをドラッグして置く) /
+         1.17.0.0 : シーンの管理 S4 (モデルを別のスレッドで読む : C++ の解析 + テクスチャのデコードをワーカーへ、GPU への登録だけメイン))
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>1.13.1.0</EngineVersion>
+    <EngineVersion>1.17.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

@@ -67,6 +67,9 @@ namespace RHI
         VertexRange  UploadVertices(const Vertex* vertices, uint32_t count)override;
         IndexRange   UploadIndices(const uint32_t* indices, uint32_t count)override;
         void         LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles)override;
+        DecodedTextures* DecodeTextures(const wchar_t* const* filePaths, uint32_t count)override;   // v1.17 (S4)
+        void         CreateDecodedTextures(DecodedTextures* decoded, TextureHandle* outHandles)override;
+        void         ReleaseDecodedTextures(DecodedTextures* decoded)override;
         MaterialHandle CreateMaterial(const MaterialDesc& desc)override;
         void UpdateMaterial(MaterialHandle material, const MaterialDesc& desc)override;
         void ReleaseResources(const VertexRange* vertices, uint32_t vertexCount, const IndexRange* indices, uint32_t indexCount,

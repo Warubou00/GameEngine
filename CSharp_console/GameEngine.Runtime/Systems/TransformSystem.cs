@@ -10,6 +10,7 @@ namespace GameEngine;
 //     親の行列が変わったら、子のローカルの値が同じでも子は変わった扱い
 //     親が消えた / Transform が無い子は、親が無い物として扱う。親を辿って 64 段を超えたら (輪になっている) そこで止める
 //   - 有効・無効 (ED2) : 自分の EntityInfo.Active と親の有効を合わせて、World の「有効」(IsActive) を決める
+//     v1.14 : 自分のシーン (EntityInfo.SceneId) が無効 (サブシーンの待機など) なら無効
 //   詰めた配列を直接回す (ForEach の delegate を通さない分速い。1 万個で 0.1 ms 程度)
 // ==========================================================================
 internal sealed class TransformSystem : ISystem
@@ -29,6 +30,7 @@ internal sealed class TransformSystem : ISystem
     private ComponentPool<EntityInfo>? _infos;
     private World? _world;
     private bool _keepChanged;
+    private bool _sceneCheck;   // v1.14 : 無効なシーンがある時だけシーンの印を見る (無ければ以前と同じく Active だけ)
     private int  _changed;
 
     public void Update(World world) => update(world, keepChanged: false);
@@ -43,6 +45,7 @@ internal sealed class TransformSystem : ISystem
         _statics     = world.GetPool<Static>();
         _infos       = world.GetPool<EntityInfo>();
         _keepChanged = keepChanged;
+        _sceneCheck  = world.AnySceneInactive;
         _changed     = 0;
         _frame++;
         if (_frame == 0) _frame = 1;
@@ -58,7 +61,7 @@ internal sealed class TransformSystem : ISystem
             ref var t = ref components[i];
             if (!t.Parent.IsNull) { hierarchy = true; continue; }
             var id = entities[i].Id;
-            if (anyInfo && _infos.Has(id)) world.SetActiveInHierarchy(id, _infos.Get(id).Active);
+            if (anyInfo && _infos.Has(id)) world.SetActiveInHierarchy(id, selfActive(ref _infos.Get(id)));   // v1.14 : シーンの有効も合わせる
             if (t.HasMatrix && _statics.Has(id)) continue;   // 動かない物 (Changed は送った側が下ろす)
 
             if (!keepChanged) t.Changed = false;
@@ -91,19 +94,23 @@ internal sealed class TransformSystem : ISystem
             for (int i = 0; i < infos.Length; i++)
             {
                 var id = infoEntities[i].Id;
-                if (!_transforms.Has(id)) world.SetActiveInHierarchy(id, infos[i].Active);
+                if (!_transforms.Has(id)) world.SetActiveInHierarchy(id, selfActive(ref infos[i]));   // v1.14
             }
         }
 
         ChangedCount = keepChanged ? ChangedCount + _changed : _changed;
     }
 
+    // v1.14 : 自分の有効 (EntityInfo.Active。無効なシーンがある時だけシーンの印も見る)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private bool selfActive(ref EntityInfo info) => _sceneCheck ? _world!.IsSelfActive(info) : info.Active;
+
     // 親のある物 : 親を先に計算する。戻り値はこのフレームで行列が変わったか
     private bool compute(int id, ref Transform t, int depth)
     {
         if (t._stamp == _frame) return t.Changed;
         t._stamp = _frame;
-        var selfActive = !_infos!.Has(id) || _infos.Get(id).Active;
+        var selfActive = !_infos!.Has(id) || this.selfActive(ref _infos.Get(id));   // v1.14 : シーンの有効も合わせる
 
         var parent = t.Parent;
         var hasParent = !parent.IsNull && depth < MaxDepth && _world!.IsAlive(parent) && _transforms!.Has(parent.Id);
