@@ -113,6 +113,9 @@ public sealed partial class SceneManager
     /// 読み終わると AllowActivation (既定 true) で有効にする。Single は、その時に前のシーンを外す
     /// ゲームのコードの中から呼んでよい (World を触るのは次のフレームの頭から)
     /// </summary>
+    public SceneOperation LoadSceneAsync(SceneReference scene, LoadSceneMode mode = LoadSceneMode.Single) =>
+        LoadSceneAsync(scene.Path ?? throw new ArgumentException("SceneReference is empty (None).", nameof(scene)), mode);   // v1.20 GO3
+
     public SceneOperation LoadSceneAsync(string path, LoadSceneMode mode = LoadSceneMode.Single)
     {
         var (assetPath, file) = resolve(path);

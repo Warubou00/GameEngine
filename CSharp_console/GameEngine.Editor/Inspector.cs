@@ -8,13 +8,13 @@ namespace GameEngine.Editor;
 // ==========================================================================
 // インスペクター (ED3)。選んだエンティティのコンポーネントを、ED1 の型の情報 (ComponentRegistry) から自動で並べる
 //   - 値の種類ごとの部品 : 数 (Range ならスライダー) / 真偽 / 文字列 / 列挙 (Flags はチェックの並び) / ベクトル (名前に Color が
-//     入っていれば色) / 回転 (オイラー角の度) / エンティティ (一覧から選ぶ) / アセット (パス。Enter で読み込む) / 入れ子の struct / 配列
+//     入っていれば色) / 回転 (オイラー角の度) / エンティティ (物の欄。v1.18 で Hierarchy から落とせる / Ping / 選ぶ窓) / アセット (パス。Enter で読み込む) / 入れ子の struct / 配列
 //   - 変えた値はその場でコンポーネントに書き戻す (次のフレームから効く)
 //   - コンポーネントを足す (IComponent の一覧) / 外す (見出しの右クリック)
 //   - 変更はすべて元に戻せる (ED4。UndoStack に「前の値 → 後の値」を積む。ドラッグ中の変更は 1 つにまとめる)
 //   ※ユーザーの独自のインスペクターは ED7
 // ==========================================================================
-internal sealed class Inspector
+internal sealed partial class Inspector
 {
     private readonly Engine _engine;
     private readonly UndoStack _undo;
@@ -43,6 +43,7 @@ internal sealed class Inspector
         _undo   = undo;
         // 拡張 (ComponentEditor.DrawDefaultInspector) から既定のインスペクターを描けるように (ED7)
         EditorExtensions.DrawDefault = (ref object component, Entity owner) => drawDefault(ref component, ComponentRegistry.Get(component.GetType()), owner);
+        registerEngineAssetFields();   // v1.20 GO3 : アセットの欄の表 (Inspector.AssetField.cs)
     }
 
     // 既定のインスペクター : 全部のフィールド (以前は Draw の中に書いていた。拡張からも使うので分けた。ED7)
@@ -115,6 +116,11 @@ internal sealed class Inspector
         object? layerValue = info.Layer;
         ImGui.SetNextItemWidth(180.0f);
         if (drawLayer("Layer", ref layerValue, info.Layer) && layerValue is int newLayer) write(entity, typeof(EntityInfo), info with { Layer = newLayer }, null);
+        // v1.18 : タグ (Unity の GameObject の Tag。FindWithTag で探せる)
+        ImGui.SameLine();
+        object? tagValue = info.Tag;
+        ImGui.SetNextItemWidth(160.0f);
+        if (drawTag("Tag", ref tagValue, info.Tag)) write(entity, typeof(EntityInfo), info with { Tag = tagValue as string }, null);
         ImGui.SameLine();
         ImGui.TextDisabled($"Id {info.Id}");
         ImGui.Separator();
@@ -223,6 +229,13 @@ internal sealed class Inspector
         // レイヤー (ED6) : 名前は ProjectSettings から
         if (field?.IsLayer == true && value is int layer) return drawLayer(label, ref value, layer);
         if (field?.IsLayerMask == true && value is uint mask) return drawLayerMask(label, ref value, mask);
+        if (field?.IsTag == true && type == typeof(string)) return drawTag(label, ref value, value as string);   // v1.18
+        // v1.20 GO3 : ComponentRef<T> (T を持つ物だけの物の欄)
+        if (value is IEntityRef reference && EntityRefs.IsEntityRef(type))
+            return drawObjectField(label, type, ref value, reference.World == null || ReferenceEquals(reference.World, World) ? reference.Entity : Entity.Null, owner, reference.ComponentType);
+        // v1.20 GO3 : アセット (表から。以前は下の switch に型ごとに並べていた)
+        if (FindAssetField(type) is { } assetField)
+            return drawAssetField(label, assetField.Kinds, assetField.PathOf(value), ref value, assetField.Load, type, assetField.OnDoubleClick);
 
         switch (value)
         {
@@ -268,39 +281,13 @@ internal sealed class Inspector
             return false;
         case Quaternion q:
             return drawRotation(label, ref value, q, owner);
-        case Entity target:
-            return drawEntity(label, ref value, target);
+        case Entity target:   // v1.18 GO2 : 物の欄 (Hierarchy から落とす / Ping / 選ぶ窓。Inspector.ObjectField.cs)。以前は一覧から選ぶだけだった
+            return drawObjectField(label, type, ref value, target, owner);
+        case GameObject gameObject:   // v1.18
+            return drawObjectField(label, type, ref value, gameObject.World == null || ReferenceEquals(gameObject.World, World) ? gameObject.Entity : Entity.Null, owner);
         case Guid g:
             ImGui.LabelText(label, g.ToString());
             return false;
-        case Model model:
-            return drawAssetPath(label, model.IsValid ? model.Path : "", ref value, path => _engine.Assets.LoadModel(path));
-        case Sound sound:
-            return drawAssetPath(label, sound.IsValid ? sound.Path : "", ref value, path => _engine.Assets.LoadSound(path));
-        case Material material:
-            return drawAssetPath(label, material.Path, ref value, path => _engine.Assets.LoadMaterial(path));
-        case null when type == typeof(Material):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadMaterial(path));
-        case Skeleton skeleton:   // AN3
-            return drawAssetPath(label, skeleton.Path, ref value, path => _engine.Assets.LoadSkeleton(path));
-        case null when type == typeof(Skeleton):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadSkeleton(path));
-        case AnimationClip clip:
-            return drawAssetPath(label, clip.Path, ref value, path => _engine.Assets.LoadAnimationClip(path));
-        case null when type == typeof(AnimationClip):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadAnimationClip(path));
-        case WidgetAsset widget:   // v1.7 : UI
-            return drawAssetPath(label, widget.Path, ref value, path => _engine.Assets.LoadWidget(path));
-        case null when type == typeof(WidgetAsset):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadWidget(path));
-        case CollisionAsset collision:   // v1.9 : コリジョンアセット (ダブルクリックで窓を開く)
-        {
-            var changed = drawAssetPath(label, collision.Path, ref value, path => _engine.Assets.LoadCollisionAsset(path));
-            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) OpenCollision?.Invoke(collision.Path);
-            return changed;
-        }
-        case null when type == typeof(CollisionAsset):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadCollisionAsset(path));
         case null when type.IsArray:   // v1.9 : まだ作っていない配列 (struct の既定値) は空の配列にして出す
         {
             var empty = Array.CreateInstance(type.GetElementType()!, 0);
@@ -308,10 +295,6 @@ internal sealed class Inspector
             if (drawList(label, empty, ref boxed, owner)) { value = boxed; return true; }
             return false;
         }
-        case CollisionMesh mesh:
-            return drawAssetPath(label, mesh.Path, ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
-        case null when type == typeof(CollisionMesh):
-            return drawAssetPath(label, "", ref value, path => _engine.Assets.LoadCollisionMesh(_engine.Assets.LoadModel(path)));
         case IList list:
             return drawList(label, list, ref value, owner);
         }
@@ -404,51 +387,6 @@ internal sealed class Inspector
         float yaw   = MathF.Atan2(2.0f * (q.W * q.Y + q.X * q.Z), 1.0f - 2.0f * (q.X * q.X + q.Y * q.Y));
         float roll  = MathF.Atan2(2.0f * (q.W * q.Z + q.X * q.Y), 1.0f - 2.0f * (q.X * q.X + q.Z * q.Z));
         return new Vector3(pitch, yaw, roll) * MathEx.Rad2Deg;
-    }
-
-    // エンティティ : 一覧から選ぶ (None = 無し)
-    private bool drawEntity(string label, ref object? value, Entity target)
-    {
-        var current = World.IsAlive(target) ? EditorApp.NameOf(World, target) : "None";
-        var changed = false;
-        if (ImGui.BeginCombo(label, current))
-        {
-            if (ImGui.Selectable("None", target.IsNull)) { value = Entity.Null; changed = true; }
-            foreach (var e in World.Entities)
-            {
-                if (ImGui.Selectable($"{EditorApp.NameOf(World, e)}##{e.Id}", e == target)) { value = e; changed = true; }
-            }
-            ImGui.EndCombo();
-        }
-        return changed;
-    }
-
-    // アセット : パス (Enter で読み込む。読めなければコンソールに出して元のまま)
-    private static bool drawAssetPath<T>(string label, string path, ref object? value, Func<string, T> load)
-    {
-        var edited = path;
-        var entered = ImGui.InputText(label, ref edited, 512, ImGuiInputTextFlags.EnterReturnsTrue);
-        // Project からアセットを落とす (ED5。モデル / 当たりのメッシュはモデル、音は wav)
-        if (ImGui.BeginDragDropTarget())
-        {
-            var kind = typeof(T) == typeof(Sound) ? AssetKind.Sound : typeof(T) == typeof(Material) ? AssetKind.Material :
-                       typeof(T) == typeof(Skeleton) ? AssetKind.FbxSkeleton : typeof(T) == typeof(AnimationClip) ? AssetKind.FbxAnimation :
-                       typeof(T) == typeof(WidgetAsset) ? AssetKind.Widget : typeof(T) == typeof(CollisionAsset) ? AssetKind.Collision : AssetKind.Model;   // AN3 / v1.7 : Widget / v1.9 : コリジョン
-            var accepted = kind == AssetKind.Model ? ProjectPanel.AcceptDrop(AssetKind.Model, AssetKind.FbxModel) : ProjectPanel.AcceptDrop(kind);   // AN2 : FBX のモデルも
-            if (accepted is { } asset) { edited = asset.Path; entered = true; }
-            ImGui.EndDragDropTarget();
-        }
-        if (!entered || edited == path) return false;
-        try
-        {
-            value = string.IsNullOrWhiteSpace(edited) ? default(T) : load(edited);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Inspector] {ex.Message}");
-            return false;
-        }
     }
 
     private bool drawList(string label, IList list, ref object? value, Entity owner)
@@ -817,6 +755,27 @@ internal sealed class Inspector
             }
             ImGui.Separator();
             ImGui.TextDisabled("Name layers in Edit > Project Settings");
+            ImGui.EndCombo();
+        }
+        return changed;
+    }
+
+    // v1.18 : タグ (ProjectSettings.TagNames から選ぶ。null = Untagged)
+    private static bool drawTag(string label, ref object? value, string? tag)
+    {
+        var settings = ProjectSettings.Current;
+        var changed = false;
+        if (ImGui.BeginCombo(label, string.IsNullOrEmpty(tag) ? EntityTags.Untagged : tag))
+        {
+            if (ImGui.Selectable(EntityTags.Untagged, string.IsNullOrEmpty(tag))) { value = null; changed = true; }
+            foreach (var name in settings.TagNames.Where(n => !string.IsNullOrEmpty(n) && n != EntityTags.Untagged).Distinct())
+            {
+                if (ImGui.Selectable(name, name == tag)) { value = name; changed = true; }
+            }
+            // 一覧に無いタグ (コードで付けた物 / 一覧から消した物) もそのまま出す
+            if (!string.IsNullOrEmpty(tag) && !settings.TagNames.Contains(tag)) ImGui.Selectable($"{tag} (not in Project Settings)", true);
+            ImGui.Separator();
+            ImGui.TextDisabled("Add tags in Edit > Project Settings");
             ImGui.EndCombo();
         }
         return changed;

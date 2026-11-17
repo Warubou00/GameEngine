@@ -36,6 +36,8 @@ internal sealed partial class EditorApp
     private World World => _engine.World;
 
     private Entity  _dragged;
+    private Entity  _selectedBeforeClick;   // v1.18 GO2 : Hierarchy の行を押す前に選んでいた物 (ドラッグを始めたら戻す)
+    private int     _dragSourceFrame = -10; // 最後にドラッグの元を描いたフレーム (続いていなければ新しいドラッグ)
     private string? _scenePath;
     private (EditCommand? Top, int Revision) _savedState;
     private bool    _layoutBuilt;
@@ -122,6 +124,11 @@ internal sealed partial class EditorApp
         _inspector.OpenOwningScene = OpenOwningScene;
         _inspector.DrawSubSceneInfo = drawSubSceneInfo;
         _inspector.OpenReference = type => OpenReference(type);   // コンポーネントの右クリック > Open Reference (ED9)
+        // v1.18 GO2 : 物の欄 (Hierarchy から落とす / Ping / 選ぶ / 別のシーンの物を断る)
+        _inspector.PingEntity = Ping;
+        _inspector.SelectEntity = entity => Selected = entity;
+        _inspector.DraggedEntity = draggedFromHierarchy;
+        _inspector.ReferenceRefusal = ReferenceRefusal;
         EditorApi.App = this;   // 拡張から使う操作 (ED7)
         _projectSettings = new ProjectSettingsWindow(engine, _inspector, Path.Combine(database.ProjectRoot, ProjectSettings.FileName));
         engine.Window.FormClosing += onWindowClosing;   // 窓の × / Alt+F4 : 保存していない変更があれば聞く (ED10)
@@ -881,19 +888,26 @@ internal sealed partial class EditorApp
         else if (member) ImGui.PushStyleColor(ImGuiCol.Text, SubSceneMemberColor);
         // 名前を書いている物 (ED10) : 名前の代わりに入力の欄
         var renaming = entity == _renaming;
+        beforeHierarchyNode(entity);   // v1.18 GO2 : Ping した物の親なら開く
         var open = ImGui.TreeNodeEx(renaming ? $"##{entity.Id}" : $"{NameOf(World, entity)}##{entity.Id}", flags);
         if (inactive || prefab || member) ImGui.PopStyleColor();
+        afterHierarchyNode(entity);    // v1.18 GO2 : Ping した物を光らせる
         if (renaming)
         {
             ImGui.SameLine();
             drawRenameField(entity);
         }
-        if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) Selected = entity;
+        if (ImGui.IsItemClicked() && !ImGui.IsItemToggledOpen()) { _selectedBeforeClick = _selected; Selected = entity; }
         if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left)) { Selected = entity; FocusSelected(); }
 
         // ドラッグで親を変える
         if (ImGui.BeginDragDropSource())
         {
+            // v1.18 GO2 : ドラッグを始めたら、押した時に変えた選択を元に戻す (Inspector の物の欄へ落とせるように。Unity と同じ)
+            //   以前は押した物が選ばれたままで、Inspector がドラッグしている物の表示に変わり、落とす先の欄が消えた
+            if (_dragSourceFrame != ImGui.GetFrameCount() - 1 && World.IsAlive(_selectedBeforeClick) && _selectedBeforeClick != entity && _selected == entity)
+                Selected = _selectedBeforeClick;
+            _dragSourceFrame = ImGui.GetFrameCount();
             _dragged = entity;
             int dummy = entity.Id;
             ImGui.SetDragDropPayload("ENTITY", (IntPtr)(&dummy), sizeof(int));

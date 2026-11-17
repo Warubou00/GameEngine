@@ -193,7 +193,7 @@ internal sealed partial class EditorApp
             var link = World.Get<PrefabLink>(entity);
             var element = source[i];
             if (!isRoot && !link.IsOverridden("GameEngine.EntityInfo.Name") && element.TryGetProperty("name", out var name))
-                World.Get<EntityInfo>(entity).Name = name.GetString() ?? "";
+                World.SetName(entity, name.GetString() ?? "");   // v1.18 : 名前の索引も直す (以前は ref で書き換えていた)
             if (!link.IsOverridden("GameEngine.EntityInfo.Active") && element.TryGetProperty("active", out var active) && World.IsActive(entity) != active.GetBoolean())
                 World.SetActive(entity, active.GetBoolean());
             if (!element.TryGetProperty("components", out var components)) continue;

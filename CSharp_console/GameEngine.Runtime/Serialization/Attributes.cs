@@ -42,6 +42,12 @@ public sealed class LayerAttribute : Attribute
 {
 }
 
+/// <summary>インスペクターで、この string をタグの一覧 (ProjectSettings.TagNames) から選ぶ (v1.18)</summary>
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class TagAttribute : Attribute
+{
+}
+
 /// <summary>インスペクターで、この uint をレイヤーのビットの組 (名前のチェックの並び) で出す (ED6)</summary>
 [AttributeUsage(AttributeTargets.Field)]
 public sealed class LayerMaskAttribute : Attribute

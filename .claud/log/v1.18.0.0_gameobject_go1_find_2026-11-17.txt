@@ -1,0 +1,59 @@
+v1.18.0.0 : GameObject GO1 (GameObject の窓口 / 名前・タグ・Id・型で速く探す / タグ)
+ブランチ : feature/v118-object-reference (未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「スクリプトが GameObject を扱えるように (Inspector に入れる / シーンの物を速く探す / コンポーネントやアセットも Inspector に入れる)」
+設計 GO1〜GO4 を報告し、「GO1 から実装」の承認を受けた。GO1 = ランタイム (GameObject と速い検索、タグ)
+
+■ 作った物
+- Runtime/Ecs/GameObject.cs (新) : readonly struct (World + Entity)。Unity の GameObject に当たる窓口
+  Name / Tag / CompareTag / Layer / ActiveSelf / ActiveInHierarchy / SetActive / ref Transform / ref GetComponent<T> / TryGetComponent /
+  HasComponent / ref AddComponent / RemoveComponent / Parent / GetChildren / FindChild("子/孫") / Destroy
+  static : Find / FindWithTag / FindGameObjectsWithTag / FindObjectOfType<T> / FindObjectsOfType<T> (SceneManager.Current の World)
+  if (go) で生きているか。Entity と暗黙に行き来できる。コンポーネントのフィールドに書け、保存は相手の Id (Entity と同じ)
+- Runtime/Ecs/World.Find.cs (新。World を partial にした)
+  Find(名前 / "A/B/C" / "/A/B") / FindAll / FindWithTag / FindAllWithTag / FindById / FindObjectOfType<T> / FindObjectsOfType<T>
+  GetName / SetName / GetTag / SetTag / CompareTag / Reindex。既定は有効な物だけ (includeInactive で無効も)
+  索引 (名前 / タグ / Id の辞書) は最初に探した時に作り、EntityInfo の入れ物の Added / Removed / Replaced で少しずつ直す
+  ref で直接書き換えられた名前は、見つけた時に確かめて捨てる (間違った物は返さない)。Reindex で直せる
+- ComponentPool : internal の Replaced イベント (SetBoxed / World.Set で丸ごと置き換えた時)。SetBoxed と World.Set は共通の Set を通す (動きは同じ)
+- タグ : EntityInfo.Tag (string。null = Untagged) + [Tag] 属性 + ComponentField.IsTag + ProjectSettings.TagNames (Header "Tags")
+  シーンに "tag" を書く (Untagged は書かない。以前のファイルはそのまま読める)。EntityTags.Untagged
+- SceneSerializer : GameObject の書き方 / 読み方。FindEntity(Guid) は索引で引く (無ければ今まで通り順に見る)。Id を付けた時に Reindex
+- SceneManager : internal World (GameObject.Find 用)
+- Behaviour<T> : GameObject (今の物) / Find / FindWithTag / FindGameObjectsWithTag / FindObjectOfType<U> / FindObjectsOfType<U>
+- エディター
+  Inspector : 名前の下の Layer の横に Tag の一覧 (Project Settings の TagNames。一覧に無いタグもそのまま出す)。[Tag] の string も同じ一覧
+              GameObject のフィールドは今の Entity と同じ一覧から選ぶ (Hierarchy から落とせる欄は GO2)
+  名前を ref で書き換えていた所を SetName に (Hierarchy の名前の変更 / 複製の (copy) / プレハブの名前の反映)。UndoStack の Id を付ける所は Reindex
+- 確認 : EditorTest.Objects.cs (--editor-test-section objects : 46 件 / objects-bench : 速さ)。全体の run にも入れた
+- Docs/Reference/template.html : 「GameObject / 物を探す / タグ (v1.18)」。index.html は作り直した
+  Script Reference (エディター) は型とソースのコメントから作るので、GameObject / EntityTags / TagAttribute は自動で出る
+- Engine.props : 1.18.0.0
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある物だけ。C++ は変えていない)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.18.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.18.0.0)
+- Docs/Reference/make_reference.py : 作り直した
+
+■ 確認
+- objects (--editor-test-section objects) : 46 / 46
+  名前 / 同じ名前は前の物 / 索引の後に作った物 / SetName / ref の書き換えで古い物を返さない / Reindex / World.Set の置き換え /
+  消す・番号の使い回し / 無効 / パス (A/B/C・/A/B・途中が無い) / タグ (FindWithTag / FindAllWithTag / CompareTag / Untagged) /
+  FindById / FindObjectOfType / GameObject の各メソッド / 保存と読み込み (タグ / GameObject のフィールド / 空の GameObject) /
+  static の GameObject.Find がエンジンの World を探す / エディターの名前の変更で索引が直る
+- エディターの自動の確認 (--editor-test、Release) : pass 560 / fail 0 (以前の 514 + objects 46)
+  ※途中で Engine.props の版を上げたため 1 回目は Game.dll が 1.18 を参照して落ちた (既知の注意点)。その時に残ったテストの
+    フォルダ (Assets/_EditorTestRename / _EditorTestRenamed。未追跡) で 2 回目の名前の変更の確認が失敗したので、消してから流し直した
+- 速さ (Release、1 万個の物、1 万回、2 回測った)
+  名前で探す : 索引 0.17〜0.22 µs / 回 (索引を作るのは 1 回 4.9〜5.3 ms)。順に見る (今までのやり方) 15.1〜15.2 µs / 回 → 約 70〜90 倍
+  名前付きの物を 1000 個作って消す : 索引あり 0.67〜0.69 ms / 索引なし 0.26〜0.27 ms (索引を作った World だけ、1 個 0.4 µs 増える。探さないゲームは増えない)
+
+■ 設計からの変更
+- タグは番号ではなく string にした (Unity と同じ書き方で、ProjectSettings の一覧の並びを変えても物のタグがずれない。索引は文字列の辞書で O(1) のまま)
+
+■ 残り (設計の続き)
+- GO2 : Inspector の ObjectField (Hierarchy から落とす / Ping / 検索つきの選ぶ窓 / 別のシーンの物を断る)
+- GO3 : ComponentRef<T> / Prefab / SceneReference のフィールド、アセットの欄の表
+- GO4 : まとめの確認 / ドキュメント

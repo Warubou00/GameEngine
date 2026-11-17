@@ -1,0 +1,42 @@
+v1.21.0.0 : GameObject GO4 (見本 objects_demo / 書き出したゲームとホットリロードの確認 / 選ぶ窓の重さ / ドキュメント)
+ブランチ : feature/v118-object-reference (GO1〜GO3 と同じブランチ。未コミット)
+日付 : 2026-11-18
+
+■ 依頼
+「GO4 へ進む」 : 設計の GO4 = まとめの確認 / ドキュメント
+
+■ 作った物
+- 見本 (Project)
+  - Scripts/ObjectsDemo.cs : Enemy / Turret / Bullet と TurretSystem / BulletSystem / EnemySystem
+    Turret のフィールド : Target (ComponentRef<Enemy>) / Muzzle (GameObject) / Bullet (Prefab) / Next (SceneReference)
+    Start で FindWithTag("Player") / Find("Turret/Muzzle") (欄が空の時) / FindObjectsOfType<Enemy>() を使い、"[ObjectsDemo] ready : ..." を出す
+    Update : 狙う敵が居なければ一番近い Enemy を探して GetComponentRef、向いて、プレハブの弾を撃つ。弾は ComponentRef<Enemy> を追い、当たると Hp を減らし 0 で消す。N で Next へ
+  - Assets/Scenes/objects_demo.scene.json (+ .meta) : Sun / Main Camera / Ground (scenes_demo と同じ) + Player (tag Player) + Turret + Muzzle (Turret の子) + Enemy A/B/C (tag Enemy)
+  - Assets/Samples/Objects/Bullet.prefab.json (+ .meta、フォルダの .meta) : 金の球 + Bullet
+- 確認 (EditorTest.Objects.cs)
+  - objectsDemo : 見本を開いて 4 つの欄が戻る / 4 秒再生 (Enemy B が倒れ、次の敵を狙う、弾が飛ぶ) / 止めると元に戻る /
+    ComponentRef<Enemy> (ゲームの型) を使った後にゲームのコードを読み直して、古い Game.dll が解放される
+  - objectPickerBench (--editor-test-section objects-picker-bench) : 1 万個の物で選ぶ窓の重さ
+  - Build Game の確認 : 書き出すシーンに objects_demo を足し、書き出したゲームのログで参照が戻るか / プレハブと Next のシーンが入っているか / エディターの再生と同じに動くか
+- Docs/Reference/template.html : 見本の説明 / 確認の区分 / 速さ。index.html は作り直した
+- Engine.props : 1.21.0.0
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある物だけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.21.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.21.0.0)
+  ※Package/Project/SampleProject は make_package.py の決まりで残す (ユーザーの変更を消さない) ので、見本はまだ入っていない。入れるなら --fresh-project (SampleProject を写し直す)
+
+■ 確認
+- objects (--editor-test-section objects) : 94 / 94 (GO1 46 + GO2 22 + GO3 22 + GO4 4)
+- エディターの自動の確認 (--editor-test、Release) : pass 610 / fail 0
+  - 書き出したゲーム : objects_demo を動かし (3.2 s、exit 0)、ログに "[ObjectsDemo] ready : player=Player muzzle=Muzzle target=Enemy B enemies=3 bullet=Assets/Samples/Objects/Bullet.prefab.json next=scenes_demo"、
+    Data に Bullet.prefab.json と scenes_demo.scene.json が入っている。エディターの再生と 120 フレーム比べて max error 0
+- 再生 (エディター、1/60 秒刻みで 4 秒) : Enemy B が倒れ、2 体倒した (弾は最大 2 発同時)。最初は「Enemy B だけ倒れて 2 体残る」と見込んだが、4 秒で 2 体倒れたので確認の見込みを直した
+- 選ぶ窓の重さ (Release、1 万 20 個の物、2 回) : フレームの中央値 閉じている時 4.84 / 4.90 ms、開いている時 4.26 / 4.33 ms (増えない。Hierarchy の 1 万行が大きい)、
+  一覧を作る 0.32〜0.33 ms (開いた時と検索を変えた時だけ)
+
+■ GO1〜GO4 のまとめ (v1.18〜v1.21)
+- GameObject / 名前・タグ・Id・型で速く探す (1 万個で 0.2 µs) / タグ
+- Inspector の物の欄 (Hierarchy から落とす / Ping / 選ぶ窓 / 別のシーンを断る)。Hierarchy でドラッグを始めると選択を戻す
+- ComponentRef<T> / Prefab / SceneReference のフィールド、アセットの欄の表と選ぶ窓
+- 残り : ユーザーのアセットの型を足す公開の口 (EditorApi.RegisterAssetField) は、拡張を読んだ時に呼ぶ口が無いので入れていない

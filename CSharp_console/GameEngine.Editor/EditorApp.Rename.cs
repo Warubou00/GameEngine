@@ -23,7 +23,7 @@ internal sealed partial class EditorApp
         if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo(NameOf(World, entity)));
         if (World.Get<EntityInfo>(entity).Name == name) return;
         var before = SceneSerializer.SaveComponent(World, entity, typeof(EntityInfo));
-        World.Get<EntityInfo>(entity).Name = name;
+        World.SetName(entity, name);   // v1.18 : Find の索引も直す (以前は ref で書き換えていた)
         var after = SceneSerializer.SaveComponent(World, entity, typeof(EntityInfo));
         _undo.Record(new ComponentEdit(EditorWorld.IdOf(World, entity), typeof(EntityInfo), before, after));
         MarkOverrides(entity, typeof(EntityInfo), before, after);

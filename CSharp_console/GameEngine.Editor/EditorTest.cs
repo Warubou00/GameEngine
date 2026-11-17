@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Text.Json;
 using ImGuiNET;
 
@@ -21,7 +21,7 @@ internal sealed partial class EditorTest
     public EditorTest(EditorApp app, string? section = null)
     {
         _app = app;
-        _steps = (section == "collision" ? only(collisionAssets()) : section == "scenes" ? only(sceneManager().Concat(sceneDemo()).Concat(sceneEditor()).Concat(sceneAsyncModels())) : section == "scenes-demo-hold" ? only(sceneDemoHold()) : section == "scenes-bench-sync" ? only(sceneBench(false)) : section == "scenes-bench-async" ? only(sceneBench(true)) : section == "profiler" ? only(profilerWindows()) : section == "profiler-view" ? only(profilerView()) : section == "fd-view" ? only(frameDebuggerView()) : run()).GetEnumerator();   // v1.10 : profiler / v1.14 : scenes
+        _steps = (section == "collision" ? only(collisionAssets()) : section == "scenes" ? only(sceneManager().Concat(sceneDemo()).Concat(sceneEditor()).Concat(sceneAsyncModels())) : section == "scenes-demo-hold" ? only(sceneDemoHold()) : section == "scenes-bench-sync" ? only(sceneBench(false)) : section == "scenes-bench-async" ? only(sceneBench(true)) : section == "objects" ? only(gameObjects().Concat(objectFields()).Concat(assetRefs()).Concat(objectFieldsDrag()).Concat(objectsDemo())) : section == "objects-view" ? only(objectFieldsView()) : section == "objects-drag" ? only(objectFieldsDrag()) : section == "objects-bench" ? only(gameObjectsBench()) : section == "objects-picker-bench" ? only(objectPickerBench()) : section == "profiler" ? only(profilerWindows()) : section == "profiler-view" ? only(profilerView()) : section == "fd-view" ? only(frameDebuggerView()) : run()).GetEnumerator();   // v1.10 : profiler / v1.14 : scenes
     }
 
     private static IEnumerable<int> only(IEnumerable<int> steps)
@@ -1660,7 +1660,7 @@ internal sealed partial class EditorTest
         var buildSettings = new BuildSettings
         {
             ProductName = "Test Game", Width = 640, Height = 360, VSync = false, OutputFolder = buildFolder,
-            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene, animScene, skinScene },
+            Scenes = { "Assets/Scenes/showcase.scene.json", "Assets/Scenes/physics.scene.json", "Assets/Scenes/particles.scene.json", rigidScene, primitiveScene, customScene, cloudScene, graphScene, fbxScene, animScene, skinScene, "Assets/Scenes/objects_demo.scene.json" },   // v1.21 GO4 : 物とアセットの参照の見本
         };
         var dependencies = builder.CollectAssets(buildSettings);
         var included = dependencies.Assets;
@@ -1759,6 +1759,10 @@ internal sealed partial class EditorTest
                 check(!playerLog.Contains("[FBX]") && !playerLog.Contains("Failed to load model"), "the built game reads the FBX models");
             if (compareScene == graphScene)    // SH4 : シェーダーグラフも書き出したゲームで HLSL を作ってコンパイルする
                 check(!playerLog.Contains("compile failed") && !playerLog.Contains("Failed to load shader"), "the built game compiles the shader graph");
+            if (compareScene == "Assets/Scenes/objects_demo.scene.json")   // v1.21 GO4 : 書き出したゲームでも参照が戻る (プレハブ / シーンのファイルも入っている)
+                check(playerLog.Contains("[ObjectsDemo] ready : player=Player muzzle=Muzzle target=Enemy B enemies=3 bullet=Assets/Samples/Objects/Bullet.prefab.json next=scenes_demo") &&
+                      builtFiles.Contains("Data/Assets/Samples/Objects/Bullet.prefab.json") && builtFiles.Contains("Data/Assets/Scenes/scenes_demo.scene.json"),
+                      "the built game resolves GameObject / ComponentRef / Prefab / SceneReference fields (the prefab and the next scene are packed)");
             if (compareScene == cloudScene)    // SH3 : 雲のシェーダーと、3D ノイズはキャッシュから (作り直さない)
                 check(!playerLog.Contains("compile failed") && playerLog.Contains("PerlinWorley3D:128 : 128^3 x4 from cache"),
                       "the built game draws the clouds (shader compiled, 3D noise from the shipped cache)");
@@ -2351,6 +2355,11 @@ internal sealed partial class EditorTest
         foreach (var step in sceneDemo()) yield return step;   // v1.14 S2
         foreach (var step in sceneEditor()) yield return step;   // v1.14 S3
         foreach (var step in sceneAsyncModels()) yield return step;   // v1.17 S4
+        foreach (var step in gameObjects()) yield return step;   // v1.18 GO1
+        foreach (var step in objectFields()) yield return step;   // v1.18 GO2
+        foreach (var step in assetRefs()) yield return step;   // v1.20 GO3
+        foreach (var step in objectFieldsDrag()) yield return step;   // v1.18 GO2
+        foreach (var step in objectsDemo()) yield return step;   // v1.21 GO4
     }
 
     // v1.6 : エクスプローラーからのドロップ (写す) / AudioSource のコピーからの Play / Stop で音が止まる

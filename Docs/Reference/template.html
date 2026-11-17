@@ -521,6 +521,67 @@ if (UI.IsPointerOverUI) { /* ゲームのクリックを無視 */ }</code></pre>
 </ul>
 </article>
 
+<article data-id="gameobject" data-title="GameObject / 物を探す / タグ / 物とアセットの欄 (v1.18 - v1.21)">
+<h2>GameObject / 物を探す / タグ / 物とアセットの欄 (v1.18 - v1.21)</h2>
+<p><a href="#/t/GameEngine.GameObject">GameObject</a> は Unity の GameObject に当たる窓口。中身は World と Entity だけの小さな struct で、データはこれまで通り World のコンポーネント。<code>Entity</code> と暗黙に行き来できる。</p>
+<p>見本 (v1.21) : <code>Assets/Scenes/objects_demo.scene.json</code> + <code>Scripts/ObjectsDemo.cs</code>。砲台 (Turret) の <code>Target</code> (ComponentRef&lt;Enemy&gt;) / <code>Muzzle</code> (GameObject) / <code>Bullet</code> (Prefab) / <code>Next</code> (SceneReference) を Inspector で入れてあり、再生すると狙った敵へプレハブの弾を撃ち、倒すと <code>FindObjectsOfType&lt;Enemy&gt;()</code> で次の敵を探す。N で Next のシーンへ。</p>
+<pre><code>var player = GameObject.Find("Player");                   // 名前 (有効な物だけ)
+if (player) player.Transform.Position += Vector3.UnitY;   // 中身があるか (消えたら false)
+var hand  = GameObject.Find("Body/Arm/Hand");             // 親子のパス (先頭が / なら一番上の物から)
+var enemy = GameObject.FindWithTag("Enemy");
+foreach (var e in GameObject.FindGameObjectsWithTag("Enemy")) { ... }
+var cam   = GameObject.FindObjectOfType&lt;Camera&gt;();       // その型を持つ最初の物</code></pre>
+<h3>探す (World / Behaviour / GameObject の static)</h3>
+<ul>
+  <li><code>world.Find(nameOrPath)</code> / <code>FindAll(name, list)</code> / <code>FindWithTag</code> / <code>FindAllWithTag(tag, list)</code> / <code>FindById(guid)</code> / <code>FindObjectOfType&lt;T&gt;()</code> / <code>FindObjectsOfType&lt;T&gt;(list)</code>。どれも <code>includeInactive</code> を付けると無効な物も返す (既定は Unity と同じく有効な物だけ)</li>
+  <li>Behaviour の中は <code>Find</code> / <code>FindWithTag</code> / <code>FindGameObjectsWithTag</code> / <code>FindObjectOfType&lt;U&gt;</code>、今の物は <code>GameObject</code> (Unity の gameObject)</li>
+  <li><code>GameObject.Find</code> など static の物は今のエンジン (<code>SceneManager.Current</code>) の World を探す</li>
+  <li>速さ : 名前 / タグ / Id は World の索引 (辞書) で引く。1 万個の物で 1 回 0.2 µs (順に見ると 15 µs)。索引を作った後は、物を作る + 消すが 1 個 0.4 µs ほど増える。索引は最初に探した時に作り、その後は物を作る / 消す / EntityInfo を置き換える度に直す (一度も探さないゲームには手間がかからない)</li>
+  <li>名前 / タグは <code>GameObject.Name</code> / <code>Tag</code> か <code>world.SetName</code> / <code>SetTag</code> で変える。<code>ref EntityInfo</code> で直接書き換えた時は <code>world.Reindex(entity)</code> (呼ばなくても、古い名前で間違った物は返さない)</li>
+  <li>同じ名前が何個もある時は、シーンの中で前の物 (索引に入った順)</li>
+</ul>
+<h3>GameObject</h3>
+<ul>
+  <li><code>Name</code> / <code>Tag</code> / <code>CompareTag</code> / <code>Layer</code> / <code>ActiveSelf</code> / <code>ActiveInHierarchy</code> / <code>SetActive</code></li>
+  <li><code>ref Transform</code> / <code>ref GetComponent&lt;T&gt;()</code> / <code>TryGetComponent</code> / <code>HasComponent</code> / <code>ref AddComponent(value)</code> / <code>RemoveComponent&lt;T&gt;()</code></li>
+  <li><code>Parent</code> / <code>GetChildren()</code> / <code>FindChild("子/孫")</code> (Unity の transform.Find) / <code>Destroy()</code> (すぐ消す。Update の中は Behaviour の <code>Destroy(gameObject)</code>)</li>
+  <li>コンポーネントのフィールドにも書ける (<code>public GameObject Target;</code>)。保存すると相手の Id (Entity と同じ)。Inspector では物の欄 (下)</li>
+</ul>
+<h3>Inspector の物の欄 (v1.19。Unity の ObjectField)</h3>
+<ul>
+  <li><code>Entity</code> / <code>GameObject</code> のフィールドは <code>[ 名前 (GameObject) ][...]</code> の欄。何も無ければ None、消えた物を指していれば赤い Missing</li>
+  <li>Hierarchy の行を欄へドラッグして入れる。Hierarchy でドラッグを始めると、押した時に変わった選択は元に戻る (Inspector が欄の持ち主のまま。v1.19 から)</li>
+  <li>欄をクリック : Hierarchy のその物を光らせる (Ping。親を開いてスクロール、1.5 秒)。ダブルクリック : 選ぶ。右クリック : Ping / Select / Clear</li>
+  <li><code>[...]</code> : 選ぶ窓。名前の一部 (大文字小文字を問わない) / <code>t:Camera</code> (その型を持つ物) / <code>tag:Enemy</code> で絞る。見えている行だけを描くので物が多くても重くならない。親の名前も出す</li>
+  <li>編集中は別のシーンの物 (足したシーン / サブシーンの中 ⇔ メインシーン) を入れられない (保存すると読み込みの順で外れるため。Unity と同じ)。理由をツールチップに出す。再生中はどの物でも入れられる (保存しない)</li>
+  <li>配列 (<code>GameObject[]</code> など) の要素も同じ欄。変更は元に戻せる</li>
+</ul>
+<h3>コンポーネントとアセットへの参照 (v1.20)</h3>
+<pre><code>public struct Turret : IComponent
+{
+    public ComponentRef&lt;Rigidbody&gt; Body;   // Rigidbody を持つ物だけ入れられる
+    public Prefab? Bullet;                  // .prefab.json
+    public SceneReference Next;             // .scene.json
+}
+if (t.Body) t.Body.Value.Velocity = Vector3.Zero;           // Value は T への参照
+if (t.Bullet != null) t.Bullet.Instantiate(World, Transform.Position);
+if (t.Next) Scenes.LoadScene(t.Next);                        // LoadSceneAsync にも渡せる</code></pre>
+<ul>
+  <li><a href="#/t/GameEngine.ComponentRef&lt;&gt;">ComponentRef&lt;T&gt;</a> : 「T を持つ物」への参照。<code>IsValid</code> (生きていて T を持つ) / <code>ref Value</code> / <code>TryGet</code> / <code>GameObject</code>。保存は相手の Id。Inspector の欄は T を持つ物だけを受け付け (落としても断る / 選ぶ窓も T を持つ物だけ)、相手が T を外すと赤で <code>名前 (no T)</code>。<code>gameObject.GetComponentRef&lt;T&gt;()</code> でも作れる</li>
+  <li>型引数を知らずに扱う口は <code>IEntityRef</code> / <code>EntityRefs.Create</code> (保存と Inspector はこれを使い、ゲームの型で MakeGenericMethod をしない)</li>
+  <li><code>Prefab</code> のフィールド : 保存は他のアセットと同じ <code>{ "guid", "path" }</code>。読む時に <code>Assets.LoadPrefab</code></li>
+  <li><a href="#/t/GameEngine.SceneReference">SceneReference</a> : シーンのパスとアセットの Id。Id から今のパスを引くので、シーンの名前を変えても / 動かしても辿れる。シーンは読み込まない (LoadScene に渡した時に読む)。Build Game はパスを辿ってシーンのファイルも入れる</li>
+  <li>Inspector のアセットの欄は表 (型 → アセットの種類 / パス / 読み方) で描く。パスを書いて Enter / Project から落とす (以前と同じ) / <code>[...]</code> = その種類のアセットの選ぶ窓 (名前・パスで検索)。空の時は <code>None (型)</code></li>
+</ul>
+<h3>タグ</h3>
+<ul>
+  <li><code>EntityInfo.Tag</code> (string。null = Untagged)。Inspector の名前の下、Layer の横で選ぶ。候補は Project Settings の <code>TagNames</code> (コードからは一覧に無い名前も使える)</li>
+  <li>シーンには <code>"tag"</code> として書く (Untagged は書かない。前のファイルはそのまま読める)</li>
+  <li>確認 : <code>--editor-test --editor-test-section objects</code> (速さ : <code>objects-bench</code> = 探す、<code>objects-picker-bench</code> = 選ぶ窓。撮影用 : <code>objects-view</code>)。Build Game の確認は見本のシーンも書き出して、参照が戻るか / エディターの再生と同じに動くかを比べる</li>
+  <li>速さ (1 万個の物) : 選ぶ窓を開いてもフレームの時間は増えない (見えている行だけ描く)。一覧を作るのは開いた時と検索を変えた時だけで 0.3 ms</li>
+</ul>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

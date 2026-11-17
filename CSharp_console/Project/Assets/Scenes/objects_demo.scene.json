@@ -1,0 +1,380 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "c84b0248-4767-46c9-b01d-b2a13068a435",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "Intensity": 1.8,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.36,
+            -0.28,
+            0.11,
+            0.88
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "64ddee25-e83e-4efd-8484-5b9c2be898d6",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            4,
+            -10
+          ],
+          "Rotation": [
+            0.13053,
+            0,
+            0,
+            0.99144
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "69e0ab05-50e0-4fde-bcc7-506babc28e6b",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Ground.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            20,
+            1,
+            20
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "ed707364-a4bf-40de-b749-1211d60eb1e7",
+      "name": "Player",
+      "active": true,
+      "tag": "Player",
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1,
+            -4
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        }
+      ]
+    },
+    {
+      "id": "736bfd07-66d6-499c-b81b-7cbc678ff9d3",
+      "name": "Turret",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0.75,
+            -1
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1.5,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cylinder"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Green.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Turret",
+          "Target": "f4c02fb0-d092-4c14-8a7c-55089bc6608e",
+          "Muzzle": "9f8be4e2-534a-4f23-acca-f3e9e41c33ff",
+          "Bullet": {
+            "guid": "9d01fa22-56c5-4add-ab21-681bbc99d64b",
+            "path": "Assets/Samples/Objects/Bullet.prefab.json"
+          },
+          "Next": {
+            "guid": "20039a0d-2f27-4bc2-8836-64c2d32983ea",
+            "path": "Assets/Scenes/scenes_demo.scene.json"
+          },
+          "FireInterval": 0.5,
+          "Cooldown": 0
+        }
+      ]
+    },
+    {
+      "id": "9f8be4e2-534a-4f23-acca-f3e9e41c33ff",
+      "name": "Muzzle",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0.4,
+            0.6
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": "736bfd07-66d6-499c-b81b-7cbc678ff9d3"
+        }
+      ]
+    },
+    {
+      "id": "cb23518a-789e-4e7e-a219-4b8fda149d02",
+      "name": "Enemy A",
+      "active": true,
+      "tag": "Enemy",
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -4,
+            1,
+            5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Enemy",
+          "Hp": 3,
+          "BobSpeed": 2.0,
+          "Phase": 0.0
+        }
+      ]
+    },
+    {
+      "id": "f4c02fb0-d092-4c14-8a7c-55089bc6608e",
+      "name": "Enemy B",
+      "active": true,
+      "tag": "Enemy",
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1,
+            7
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Enemy",
+          "Hp": 3,
+          "BobSpeed": 2.5,
+          "Phase": 1.0
+        }
+      ]
+    },
+    {
+      "id": "9e087bfa-6802-4737-8b46-85d6362abfc4",
+      "name": "Enemy C",
+      "active": true,
+      "tag": "Enemy",
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            4,
+            1,
+            5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Enemy",
+          "Hp": 3,
+          "BobSpeed": 3.0,
+          "Phase": 2.0
+        }
+      ]
+    }
+  ]
+}

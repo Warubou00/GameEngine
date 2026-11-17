@@ -105,6 +105,9 @@ public sealed partial class SceneManager
         world.Cleared += onWorldCleared;
     }
 
+    /// <summary>このシーンの管理が使う World (v1.18。GameObject.Find が探す所)</summary>
+    internal World World => _world;
+
     /// <summary>永続シーン (DontDestroyOnLoad の物。Single で切り替えても残る)</summary>
     public Scene Persistent { get; }
     /// <summary>今のメインシーン (Single で読んだシーン。エディターで開いて作り直した世界などは null)</summary>
@@ -139,6 +142,9 @@ public sealed partial class SceneManager
     /// シーンを読む。Single = 今のシーンを外してから読み、メインシーンにする (永続シーンの物は残る) / Additive = 足す
     /// ゲームのコードの中で呼んだ時は次のフレームの頭で読む (戻り値は State = Loading)
     /// </summary>
+    public Scene LoadScene(SceneReference scene, LoadSceneMode mode = LoadSceneMode.Single) =>
+        LoadScene(scene.Path ?? throw new ArgumentException("SceneReference is empty (None).", nameof(scene)), mode);   // v1.20 GO3
+
     public Scene LoadScene(string path, LoadSceneMode mode = LoadSceneMode.Single)
     {
         var (assetPath, file) = resolve(path);

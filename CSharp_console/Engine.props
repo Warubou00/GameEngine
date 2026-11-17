@@ -23,13 +23,17 @@
          1.14.0.0 : シーンの管理 S1 (SceneManager : シーンの切り替え / 足す / サブシーン (SubScene) / DontDestroyOnLoad) /
          1.15.0.0 : シーンの管理 S2 (非同期の読み込み LoadSceneAsync / LoadSubSceneAsync / SceneOperation、ロード画面の見本) /
          1.16.0.0 : シーンの管理 S3 (エディター : Hierarchy のシーン分け / サブシーンの中は見るだけ / SubScene のボタン / シーンをドラッグして置く) /
-         1.17.0.0 : シーンの管理 S4 (モデルを別のスレッドで読む : C++ の解析 + テクスチャのデコードをワーカーへ、GPU への登録だけメイン))
+         1.17.0.0 : シーンの管理 S4 (モデルを別のスレッドで読む : C++ の解析 + テクスチャのデコードをワーカーへ、GPU への登録だけメイン) /
+         1.18.0.0 : GameObject (GO1 : GameObject の窓口 / 名前・タグ・Id・型で速く探す / タグ) /
+         1.19.0.0 : GameObject GO2 (Inspector の物の欄 : Hierarchy から落とす / Ping / 検索つきの選ぶ窓 / 別のシーンの物を断る) /
+         1.20.0.0 : GameObject GO3 (ComponentRef<T> / Prefab・SceneReference のフィールド / アセットの欄の表と選ぶ窓) /
+         1.21.0.0 : GameObject GO4 (見本 objects_demo / 書き出したゲームとホットリロードの確認 / 選ぶ窓の重さ))
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>1.17.0.0</EngineVersion>
+    <EngineVersion>1.21.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

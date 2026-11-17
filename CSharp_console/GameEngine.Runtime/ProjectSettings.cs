@@ -41,6 +41,12 @@ public sealed class ProjectSettings
     // レイヤー a の物がどのレイヤーと当たるか (ビット)。対称に保つ (SetLayerCollision で両方を変える)
     [HideInInspector] public uint[] LayerCollision = Enumerable.Repeat(0xFFFFFFFFu, LayerCount).ToArray();
 
+    // v1.18 : タグの候補 (インスペクターの Tag の一覧に出す名前。Unity の Tags)。Untagged (空) はいつもある
+    //   コードの FindWithTag / CompareTag は一覧に無い名前でも使える (一覧はエディターで選ぶためだけ)
+    [Header("Tags")]
+    [Tooltip("EntityInfo.Tag の候補 (Inspector の Tag の一覧)")]
+    public string[] TagNames = { "Player", "MainCamera", "Enemy", "Respawn", "Finish", "GameController" };
+
     [Header("Input")]
     [Tooltip("InputActions.Get / GetDown / GetUp(name) : どれかのキー / ボタン")]
     public InputActionBinding[] InputActions = defaultActions();
