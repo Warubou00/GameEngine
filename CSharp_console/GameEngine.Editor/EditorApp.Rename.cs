@@ -17,7 +17,7 @@ internal sealed partial class EditorApp
     /// <summary>物の名前を変える (元に戻せる)。プレハブの置いた物なら「変えた値」の印も付く</summary>
     public void RenameEntity(Entity entity, string name)
     {
-        if (!World.IsAlive(entity)) return;
+        if (!World.IsAlive(entity) || refuseReadOnly(entity, "rename")) return;   // v1.14 S3
         name = name.Trim();
         if (name.Length == 0) return;   // 空の名前にはしない (前のまま)
         if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo(NameOf(World, entity)));
@@ -32,7 +32,7 @@ internal sealed partial class EditorApp
     /// <summary>Hierarchy で名前を書き始める (F2 / 右クリック > Rename)</summary>
     public void BeginRename(Entity entity)
     {
-        if (!World.IsAlive(entity)) return;
+        if (!World.IsAlive(entity) || refuseReadOnly(entity, "rename")) return;   // v1.14 S3
         Selected     = entity;
         _renaming    = entity;
         _renameText  = NameOf(World, entity);
@@ -64,6 +64,7 @@ internal sealed partial class EditorApp
         if (_scenePath != null && map(Path.GetRelativePath(_database.ProjectRoot, _scenePath).Replace('\\', '/')) is { } moved)
             _scenePath = _database.FullPath(moved);
         _build.OnAssetRenamed(map);
+        if (!_playing) remapSubScenePaths(map);   // v1.14 S3 : SubScene のパスも
         Console.WriteLine($"[Assets] Renamed {oldPath} -> {newPath}");
     }
 }

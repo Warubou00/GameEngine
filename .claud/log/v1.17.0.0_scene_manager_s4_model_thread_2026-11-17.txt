@@ -1,0 +1,65 @@
+v1.17.0.0 : シーンの管理 S4 (モデルを別のスレッドで読む)
+ブランチ : feature/v114-scene-manager (S1〜S3 と同じブランチ。未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「S4 に進んで」 : 設計の S4 = C++ のモデルの読み込みを「CPU の解析 = 別のスレッド」と「GPU への転送 = メイン」に分ける
+  (S2 で、非同期のシーンの読み込みでも Tomimi.pmx の 1 回で 350〜1350 ms フレームが止まると分かったため)
+
+■ 先に測った (C++ に時間の計測を足した : " Model load total" / "  Model parse (file)" / " Model upload (main thread)")
+- Tomimi.pmx : 全部 361〜389 ms のうち、PMX の解析 321〜347 ms (約 9 割)、テクスチャ 35 ms、頂点などの登録 5 ms
+- テクスチャは DDS のキャッシュが冷えている時は 580 ms かかった回もある (デコード + 圧縮)
+→ 解析とテクスチャのデコードを別のスレッドへ、GPU への登録だけをメインに残す
+
+■ 作った物
+- RHI (公開 rhi.h に足しただけ。今の関数は変えていない)
+  - DecodeTextures (どのスレッドでも。並列のデコード / DDS のキャッシュ) / CreateDecodedTextures (メイン。GPU のテクスチャ) / ReleaseDecodedTextures
+  - 中身 : ObjectInterface::Texture::LoadTexturesFromFiles を DecodeTextures + CreateTexturesFromDecoded に分けた (処理と順番は同じ。LoadTextures はこの 2 つを続けて呼ぶ)
+  - デコードした画像 (RHI::DecodedTextures) は Texture.cpp の中だけで形を持つ (公開側は番号のように渡すだけ)
+  - WIC のファクトリーは RHI の初期化 (メインスレッド) で作る (以前は最初のデコードの時。ワーカースレッドで初めて作らないため)
+- Renderer (SceneRenderer)
+  - loadModelResource を prepareModel (CPU : 解析 + テクスチャのパス + 必要ならデコード) と uploadModel (GPU) に分けた。同期の LoadModel / ReloadModel は今まで通り続けて呼ぶ
+  - BeginLoadModel (std::async のワーカーで prepareModel) / FinishLoadModel (終わっていれば uploadModel して登録。wait で待つことも) / registerModel (番号の使い回しを LoadModel から分けた)
+  - Shutdown は読み込み中の物を待ってから RHI を壊す (waitModelJobs)
+  - ついで : サブメッシュのマテリアルの情報のテクスチャのパスは、解決済みの物を使う (以前はここでもう一度ファイルを探し、見つからないと 2 回ログが出た)
+  - DLL : Renderer_BeginLoadModel / Renderer_FinishLoadModel
+- C#
+  - AssetManager : BeginLoadModel (.obj / .pmx だけ。プリミティブ / FBX / 無いファイルは false = 今まで通り LoadModel が読む) / IsModelLoading / FinishModelLoads(budgetMs) / PendingModelLoads
+    LoadModel は、別のスレッドで読み込み中の物を頼まれたら終わるのを待って使う (2 回読まない)
+  - 非同期のシーン (SceneManager.Async) : 別のスレッドの解析の時に集めたアセットのパスから、.obj / .pmx を読み始め、全部終わってから物を作る
+    進み具合はモデル 1 つを物 10 個分と数える。Scenes.Update が毎フレーム、終わったモデルを予算 (AsyncBudgetMs) の分だけ登録する (取りやめた読み込みの物も)
+
+■ 変えたファイル
+- RHI : Source/Public/rhi.h, Source/RenderHardwareInterface.h / .cpp, Source/DirectX12/RHIObject/Texture.h / .cpp
+- Renderer : Source/sceneRenderer.h / .cpp, Source/rendererDll.cpp
+- C# Runtime : Native/NativeMethods.cs, Assets/Model.cs, Scenes/SceneManager.cs, Scenes/SceneManager.Async.cs (LF だったのを CRLF に揃えた)
+- C# Editor : EditorTest.Scenes.cs (S4 の確認), EditorTest.cs (区切り)
+- CSharp_console/Engine.props : 1.17.0.0
+- Docs/Reference/template.html : 「モデルを別のスレッドで読む (v1.17)」。index.html は作り直した
+
+■ ビルド
+- RHI / Renderer (C++) : Release / Debug ともエラー 0。警告は元からある C4251 (file.h / material.h / mesh.h / objLoader.h) だけで、増えていない
+  (ルートシグネチャは変えていないが、RHI は Debug / Release の両方を作り直した)
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある 3 つだけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.17.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.17.0.0、Renderer.dll に Renderer_BeginLoadModel / Renderer_FinishLoadModel があるのを確かめた)
+
+■ 確認
+- シーン (--editor-test-section scenes) : 72 / 72 (S4 で 9 足した)
+  別のスレッドで 1 つだけ読む / プリミティブ・無いファイルは断る / 同期と同じモデル (29 サブメッシュ、マテリアルとテクスチャが同じ) /
+  読み込み中もフレームが進む (255 フレーム、一番長い 23.7 ms) / 読み込み中に LoadModel → 待って同じ物 /
+  非同期のシーンはモデルを待ってから物を作る / 長いフレームが無い (一番重い物 0.2 ms、一番長いフレーム 21.9 ms) /
+  読み込み中に取りやめても残らない / 読み込み中のままエディターを閉じる (終わりのコード 0、クラッシュレポートは出ていない)
+- エディターの自動の確認 (--editor-test、Release) : pass 514 / fail 0 (書き出したゲームとエディターの再生の比べ合わせ 11 件も全部 max error 0)
+
+■ 速さ (Release、RTX 2070、エディター、軽いシーン (clouds) から showcase を初めて読む。2 回ずつ)
+                     一番長いフレーム          全部の時間
+  非同期 (S2 の時)   389 / 954 ms               450 / 1016 ms
+  非同期 (S4)        25.4 / 28.1 ms            480 / 543 ms (153 / 170 フレーム)
+  同期 (変えていない) 393 / 422 ms               397 / 426 ms
+- 非同期の一番長いフレームは、Tomimi の GPU への登録 (メインスレッド 19 ms) とそのフレームの描画
+- 非同期の全部の時間が同期より 80〜120 ms 長いのは、解析の後に毎フレームの描画を挟みながら登録するため (ロード画面が動く代わり)
+- PMX の解析自体 (324〜445 ms) は速くしていない。ifstream で値を 1 つずつ読んでいるので、ファイルを一度に読んでから解析すると速くなるはず (別の作業の候補)
+
+■ まだの物 / 変えていない物
+- 同期の LoadScene は今まで通り (モデルはメインスレッドで 1 つずつ)。複数のモデルを並列に解析すると速くなるが、作られる番号の順が変わるので今回はしない
+- FBX のモデル (C# で読む) は別のスレッドにしていない

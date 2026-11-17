@@ -31,7 +31,9 @@
 /******************************************************************
 * Include Headers
 ******************************************************************/
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "common.h"
@@ -103,6 +105,27 @@ namespace Renderer
 		 * @return uint32_t モデルのハンドル (失敗時 INVALID_HANDLE)。outSubMeshCount にサブメッシュの数
 		 ************************************************************************************/
 		uint32_t LoadModel(const std::wstring& filePath, uint32_t* outSubMeshCount);
+
+		/***********************************************************************************
+		 * @brief モデルを別のスレッドで読み始める (v1.17 S4。LoadModel を 2 つに分けた 1 段目)
+		 * @details ワーカースレッド : ファイルの解析 (.obj / .pmx) + テクスチャのデコード (CPU だけ)
+		 *          GPU への登録 (頂点 / インデックス / テクスチャ / マテリアル) は FinishLoadModel でメインスレッドが行う
+		 *          以前は LoadModel が全部をメインスレッドで行い、大きなモデル (PMX 300 ms 以上) の間フレームが止まった
+		 * @return uint32_t 読み込みの番号 (FinishLoadModel に渡す。0 = 始められなかった)
+		 ************************************************************************************/
+		uint32_t BeginLoadModel(const std::wstring& filePath);
+
+		/***********************************************************************************
+		 * @brief BeginLoadModel の読み込みを終える (2 段目。メインスレッドで呼ぶ)
+		 * @details wait = false : まだ解析中なら何もせずに 0 を返す (毎フレーム呼んで確かめる)
+		 *          wait = true  : 解析が終わるまで待つ
+		 *          終わっていれば GPU に登録して、番号を消す (同じ番号はもう使えない)
+		 * @return int 0 = まだ / 1 = できた (outHandle にモデルのハンドル) / 2 = 失敗 / 3 = 知らない番号
+		 ************************************************************************************/
+		int FinishLoadModel(uint32_t job, bool wait, uint32_t* outHandle, uint32_t* outSubMeshCount);
+
+		// 読み込み中 (BeginLoadModel から FinishLoadModel まで) の数
+		uint32_t PendingModelLoadCount()const { return static_cast<uint32_t>(_modelJobs.size()); }
 		/***********************************************************************************
 		 * @brief 頂点とインデックスの配列からモデルを作る (SH1 : プリミティブ / コードで作る形)
 		 * @details サブメッシュ 1 つ、白い不透明のマテリアル。name はモデルの名前 ("builtin:Sphere" など。空にしない)
@@ -315,11 +338,25 @@ namespace Renderer
 		bool loadModelResource(const std::wstring& filePath, ModelResource& model);
 		void releaseModelResource(ModelResource& model);
 
+		// v1.17 (S4) : 読み込みの 2 段 (loadModelResource = prepareModel + uploadModel)
+		struct PreparedModel;   // 解析したメッシュとテクスチャのパス (と、デコードした画像)。sceneRenderer.cpp で定義
+		struct ModelLoadJob;    // 別のスレッドの読み込み 1 つ
+		// CPU だけ (どのスレッドでも)。decodeTextures = true ならテクスチャのデコードもここで行う
+		bool prepareModel(const std::wstring& filePath, PreparedModel& prepared, bool decodeTextures)const;
+		// GPU への登録 (メインスレッド)
+		bool uploadModel(PreparedModel& prepared, ModelResource& model);
+		// 使い回せる番号に入れる (LoadModel / FinishLoadModel)
+		uint32_t registerModel(ModelResource&& model);
+		// 読み込み中の物を全部待って捨てる (Shutdown の前。RHI を壊す前に)
+		void waitModelJobs();
+
 		RHI::IRenderHardwareInterface* _rhi = nullptr;          // RHI_CreateRenderHardwareInterface で作り、Shutdown で破棄する
 
 		std::vector<ModelResource>     _models;
 		static ModelResource::SubMeshMaterial subMeshMaterialOf(const RHI::MaterialDesc& desc, const std::wstring& texture, const std::wstring& name);   // v1.5
 		std::vector<uint32_t>          _freeModels;             // 解放したモデルの番号 (ED5)
+		std::unordered_map<uint32_t, std::unique_ptr<ModelLoadJob>> _modelJobs;   // v1.17 (S4) : 別のスレッドで読み込み中の物
+		uint32_t                       _nextModelJob = 1;
 		std::vector<RenderObject>      _renderObjects;
 		std::vector<uint32_t>          _freeRenderObjects;      // 削除されて使い回せるハンドル
 		uint32_t                       _aliveRenderObjects = 0;

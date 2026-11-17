@@ -37,6 +37,9 @@
 
 namespace RHI
 {
+	// v1.17 (S4) : デコード済みの画像 (中身は RHI の中。DecodeTextures が作り、CreateDecodedTextures / ReleaseDecodedTextures が解放する)
+	struct DecodedTextures;
+
 	class IRenderHardwareInterface
 	{
 	public:
@@ -84,6 +87,15 @@ namespace RHI
 
 		// 画像ファイルをまとめて読み込む (デコードは並列)。失敗したものは TextureHandle::DEFAULT
 		virtual void LoadTextures(const wchar_t* const* filePaths, uint32_t count, TextureHandle* outHandles) = 0;
+
+		// ---------- v1.17 (S4) : 画像の読み込みを 2 つに分ける (モデルの非同期の読み込み用) ----------
+		// LoadTextures の中身と同じ 2 段 : 1. デコード (CPU だけ) → 2. GPU のテクスチャを作る (メインスレッド)
+		// DecodeTextures         : どのスレッドから呼んでもよい (ファイル → デコード / DDS のキャッシュ。並列)。戻り値は必ず次のどちらかに渡す
+		// CreateDecodedTextures  : メインスレッドで呼ぶ。outHandles に decoded と同じ数のハンドル (失敗した物は DEFAULT)。decoded は解放される
+		// ReleaseDecodedTextures : 使わなかった時に解放する (どのスレッドでも)
+		virtual DecodedTextures* DecodeTextures(const wchar_t* const* filePaths, uint32_t count) = 0;
+		virtual void CreateDecodedTextures(DecodedTextures* decoded, TextureHandle* outHandles) = 0;
+		virtual void ReleaseDecodedTextures(DecodedTextures* decoded) = 0;
 
 		// マテリアル (テクスチャ / 色 / ブレンドの方法) を作る。DrawItem::Material に入れて使う
 		// 満杯なら MaterialHandle::DEFAULT (白・不透明)

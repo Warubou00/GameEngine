@@ -1,0 +1,68 @@
+v1.15.0.0 : シーンの管理 S2 (非同期の読み込み / ロード画面の見本)
+ブランチ : feature/v114-scene-manager (S1 と同じブランチ。未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「S2 に進んで」 : 設計の S2 = 非同期 (LoadSceneAsync / SceneOperation / AllowActivation / 1 フレームの予算) とロード画面の見本
+
+■ 作った物
+- SceneOperation (GameEngine.Runtime/Scenes/SceneManager.Async.cs。Unity の AsyncOperation)
+  - Progress (0〜0.9 = 読んでいる / 0.9 = 待っている / 1 = 終わった)、IsReadyToActivate、AllowActivation、IsDone / IsCancelled / Error、
+    Completed イベント、await できる (続きはメインのスレッド = フレームの頭)
+  - 確認用 : Frames / MaxStepMilliseconds / PrefetchedBytes / SlowestEntity (一番時間のかかった物) / SlowestEntityMilliseconds
+- SceneManager
+  - LoadSceneAsync(path, Single | Additive) / LoadSubSceneAsync(owner, active) / Operations / AsyncBudgetMs (既定 4 ms)
+  - 別のスレッド : ファイルを読む → JSON の解析 (SceneLoader.Parse) → 使うアセットのファイルを先に読む (OS のキャッシュに載せる)
+  - フレームの頭 (Scenes.Update) : 予算の分だけ SceneLoader.Step (物を作る。アセットの読み込みと GPU への転送はメインだけ)
+  - 読み込み中のシーン (State = Loading) の物は無効。全部作ったら IsReadyToActivate、AllowActivation で有効にする
+    Single は有効にする時に前のシーンを外す (それまで前のシーンは動く)。中の LoadOnStart のサブシーンも同じ Operation で読む
+  - 取りやめ : 読み込み中のシーンを UnloadScene / 同期の Single / World.Clear / 持ち主を消す → 作りかけの物を消して IsCancelled
+- UUserWidget.KeepOnSceneChange : Single の切り替えでも外さない (ロード画面)。切り替えの UI の掃除は ClearForSceneChange
+  (コードで作った他の Widget は今まで通り外れる。シーンの UIWidget の物は持ち主が消えると次の UI の更新で外れる)
+- Input.SimulateKeyPress (確認用 : 次のフレームの GetKeyDown)
+- 見本 : Assets/Scenes/scenes_demo.scene.json (+ scenes_demo_room.scene.json = サブシーン) と Scripts/SceneLoadingDemo.cs
+  N = ロード画面つきの非同期の切り替え (最低 0.5 秒出す、切り替えた後 0.25 秒残す) / B = 同期 / 1 = Room の有効 / 待機 / 2 = Room を外す / 非同期で読む
+  切り替え役は DontDestroyOnLoad で残る (showcase → physics → 見本 と回る)
+
+■ 変えたファイル
+- 新 : GameEngine.Runtime/Scenes/SceneManager.Async.cs, Project/Scripts/SceneLoadingDemo.cs,
+       Project/Assets/Scenes/scenes_demo.scene.json (+ .meta), scenes_demo_room.scene.json (+ .meta)
+- GameEngine.Runtime : Scenes/SceneManager.cs (partial、Update から非同期を進める、unloadAllButPersistent(alsoKeep)、parentRootsToOwner、
+  読み込み中のシーンは SceneUnloading を呼ばない), Serialization/SceneSerializer.cs (SceneLoader.IsFinished / LastEntity / CollectAssetPaths),
+  UI/WidgetAsset.cs (KeepOnSceneChange), UI/UIManager.cs (ClearForSceneChange), Input.cs (SimulateKeyPress)
+- GameEngine.Editor : EditorTest.Scenes.cs (非同期 / 見本の確認、速さ、目で見る用), EditorTest.cs (区切りの名前)
+- CSharp_console/Engine.props : 1.15.0.0
+- Docs/Reference/template.html : 「非同期 (ロード画面)」の説明。index.html は作り直した
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console : Release / Debug ともエラー 0 (警告は元からある 3 つだけ)。Project/Scripts (Game.csproj) もエラー 0。C++ は変えていない
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.15.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.15.0.0 なのを確かめた)
+  ※Package/Project/SampleProject は残す設定のまま (見本のシーン / スクリプトはまだ入っていない。入れるなら --fresh-project で作り直す = 中を上書き)
+
+■ 確認
+- シーン (--editor-test-section scenes) : 48 / 48
+  非同期 : すぐ返る / 読み込み中の物は無効で前のシーンは動く / 54 フレームで読む (予算 0) / AllowActivation = false で待つ /
+  有効にすると前のシーンが外れ、Completed と await が呼ばれる / 一緒に読んだサブシーンが有効 / 非同期と同期で同じシーン (Id と値) /
+  LoadSubSceneAsync / 読み込み中の UnloadScene・World.Clear で取りやめ / 既定の予算なら 3 フレーム / KeepOnSceneChange の Widget が残る
+  見本 : Room が一緒に読まれる / 切り替え役が永続へ / 1・2 のキー / N でロード画面 → 0.51 秒で showcase へ、ロード画面は切り替えの後も残ってから消える / B で同期 / 停止で元に戻る
+- エディターの自動の確認 (--editor-test、Release) : pass 490 / fail 0 (書き出したゲームとエディターの再生の比べ合わせ 11 件も全部 max error 0。※最初は 13 件と書いたが、2 件はスキニングの精度の確認だった (v1.16 で直した))
+- 目で見た (エディターの窓だけを PrintWindow で写した) : .claud/log/images/v1.15.0.0_loading_screen.png (前のシーンの上にロード画面と 41 % のバー、
+  Hierarchy では showcase の物が無効の色で並ぶ)、v1.15.0.0_switched.png (切り替え後。Scene Switcher だけが残っている)
+
+■ 速さ (Release、RTX 2070、エディター、軽いシーン (clouds) から showcase を初めて読む = アセットがまだ無い状態)
+- 同期 : 一番長いフレーム 452〜454 ms (その間は画面が止まる)
+- 非同期 : 一番長いフレーム 354〜1356 ms (5 回)、中央値 2.5〜23 ms
+  一番長いフレームはどれも 1 つの物 'Entity 9' (Tomimi.pmx を持つ MeshRenderer) の C++ の Renderer_LoadModel
+  (PMX の解析 + テクスチャ + GPU への転送を 1 回で行う。メインのスレッドだけ)。1 つの物の中では止められないので、予算では分けられない
+  → ほかの物 (と前のシーン / ロード画面) は毎フレーム動くが、大きなモデルの所で 1 回止まる。直すのは S4 (C++ の読み込みを CPU の解析 = 別のスレッド
+    と GPU への転送 = メインに分ける)。非同期の方が長い回があるのは、読み込みが前のシーンの描画と重なるためと思われる (確かめていない)
+- 先に読む (prefetch) : 8.0 MB を別のスレッドで読んでいる (ファイルを開く時間は減るはずだが、上の 1 回の長さはほぼ C++ の処理)
+
+■ 気を付けた所
+- 非同期の Single を有効にする時の「残す物が無ければ World.Clear」の近道は使わない (読み終わったシーンの物まで消えるため)
+- ゲームのコードの中から LoadSceneAsync を呼んでよい (World を触るのはフレームの頭から)
+- エディターの停止 / World.Clear で読み込み中の物も消えるので、その Operation は次のフレームで取りやめになる
+
+■ まだの物
+- S3 : エディターの Hierarchy でのシーン / サブシーンの表示、Inspector のボタン、ドラッグで作る、Build Game のサブシーンの依存
+- S4 : 大きなモデルの読み込みを分ける (上の速さを見て、やるかを決める)

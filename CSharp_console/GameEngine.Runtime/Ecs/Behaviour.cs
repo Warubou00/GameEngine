@@ -46,6 +46,9 @@ public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollis
     /// <summary>今処理しているエンティティ (Unity の gameObject に当たる)</summary>
     protected Entity Entity { get; private set; }
 
+    /// <summary>シーンの切り替え / サブシーンの読み込み (v1.14。SceneManager.Current)。Scenes.LoadScene("Assets/Scenes/...") など</summary>
+    protected static SceneManager Scenes => SceneManager.Current ?? throw new InvalidOperationException("No engine (SceneManager) has been created.");
+
     private readonly CollisionCallbacks _callbacks;
     private readonly bool _hasUpdate, _hasAwake, _hasStart, _hasFixedUpdate, _hasLateUpdate;
     // Awake / Start を呼んだ物 (エンティティの番号 → その時の版。番号が使い回されたら版が違うので、新しい物として呼ぶ)

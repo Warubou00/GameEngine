@@ -614,6 +614,14 @@ public sealed partial class AssetManager
         }
         if (fragment.Length > 0) throw new FileNotFoundException($"Failed to load model: {key} (# is only for FBX models)", key);
 
+        // v1.17 (S4) : 別のスレッドで読み込み中なら、それが終わるのを待って使う (2 回読まない)
+        if (_modelJobs.TryGetValue(path, out var job))
+        {
+            finishModelJob(path, job, wait: true);
+            if (_models.TryGetValue(path, out var preloaded)) return preloaded;
+            throw new FileNotFoundException($"Failed to load model: {path}", path);
+        }
+
         var handle = NativeMethods.Renderer_LoadModel(file, out var subMeshCount);
         if (handle == NativeMethods.InvalidHandle)
         {
@@ -623,6 +631,71 @@ public sealed partial class AssetManager
         var model = new Model(handle, (int)subMeshCount, path);
         _models.Add(path, model);
         return model;
+    }
+
+    // ---------------------------------------------------------------------
+    // v1.17 (S4) : モデルを別のスレッドで読む (非同期のシーンの読み込みが使う)
+    //   BeginLoadModel   : C++ のワーカーで、ファイルの解析とテクスチャのデコードを始める (.obj / .pmx だけ。FBX は C# で読む)
+    //   FinishModelLoads : 終わった物を GPU に登録して LoadModel の覚えに入れる (メインスレッド。毎フレーム SceneManager が呼ぶ)
+    //   LoadModel        : 読み込み中の物を頼まれたら、終わるのを待って使う
+    //   以前は LoadModel が全部をメインスレッドで行い、大きなモデル (PMX の解析 300 ms 以上) の間フレームが止まった
+    // ---------------------------------------------------------------------
+
+    private readonly Dictionary<string, uint> _modelJobs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>別のスレッドで読み込み中のモデルの数</summary>
+    public int PendingModelLoads => _modelJobs.Count;
+
+    /// <summary>
+    /// モデルを別のスレッドで読み始める。戻り値 = 読み込み中か
+    /// (もう読んである / 別のスレッドで読めない種類 (プリミティブ / FBX) / ファイルが無い 時は false。その時は LoadModel が今まで通り読む)
+    /// </summary>
+    public bool BeginLoadModel(string path)
+    {
+        if (Primitives.IsPrimitive(path) || path.Contains('#')) return false;
+        (path, var file) = resolve(path);
+        if (_models.ContainsKey(path)) return false;
+        if (_modelJobs.ContainsKey(path)) return true;
+        var extension = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        if (extension is not (".obj" or ".pmx") || !File.Exists(file)) return false;
+        var job = NativeMethods.Renderer_BeginLoadModel(file);
+        if (job == 0) return false;
+        _modelJobs[path] = job;
+        return true;
+    }
+
+    /// <summary>このモデルを別のスレッドで読み込み中か</summary>
+    public bool IsModelLoading(string path)
+    {
+        if (_modelJobs.Count == 0) return false;
+        (path, _) = resolve(path);
+        return _modelJobs.ContainsKey(path);
+    }
+
+    /// <summary>
+    /// 別のスレッドで読み終わったモデルを GPU に登録する (メインスレッド)。budgetMs を使い切ったら次に回す (少なくとも 1 つは登録する)
+    /// 戻り値 = まだ読み込み中の数
+    /// </summary>
+    public int FinishModelLoads(double budgetMs = double.MaxValue)
+    {
+        if (_modelJobs.Count == 0) return 0;
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        foreach (var (path, job) in _modelJobs.ToArray())
+        {
+            if (finishModelJob(path, job, wait: false) && System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds >= budgetMs) break;
+        }
+        return _modelJobs.Count;
+    }
+
+    // 戻り値 = 終わったか (できた / 失敗)
+    private bool finishModelJob(string path, uint job, bool wait)
+    {
+        var state = NativeMethods.Renderer_FinishLoadModel(job, wait ? 1 : 0, out var handle, out var subMeshCount);
+        if (state == 0) return false;
+        _modelJobs.Remove(path);
+        if (state == 1) _models[path] = new Model(handle, (int)subMeshCount, path);
+        else Console.WriteLine($"[Assets] Failed to load model in the background : {path}");
+        return true;
     }
 
     // ---------------------------------------------------------------------

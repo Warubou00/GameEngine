@@ -595,6 +595,8 @@ public sealed class Engine : IDisposable
 
     public World            World    { get; } = new();
     public AssetManager     Assets   { get; } = new();
+    /// <summary>シーンの切り替え / 足す / サブシーン (v1.14)。SceneManager.Current と同じ物</summary>
+    public SceneManager     Scenes   { get; }
     public GraphicsSettings Graphics { get; } = new();
     public AudioSettings    Audio    { get; }
     public PhysicsSettings  Physics  { get; }
@@ -681,6 +683,8 @@ public sealed class Engine : IDisposable
         Gamepad.Initialize();
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
         GameEngine.UI.Manager = new UIManager(this);   // v1.7 : UI (Widget)
+        Scenes = new SceneManager(World, Assets);      // v1.14 : シーンの管理
+        SceneManager.Current = Scenes;
         _particleSystem   = new ParticleSystem(World, Graphics.Particles);
 
         // カメラを動かす System は既定で入れておく (コンポーネントを付けた物だけが動く)
@@ -926,6 +930,13 @@ public sealed class Engine : IDisposable
             Profiler.EndSample();
 
             if (IsPlaying) Time.AdvancePlayTime();   // ED8 後半
+            // v1.14 : 前のフレームのゲームのコードが頼んだシーンの読み込み / 外す、サブシーンの持ち主の確認 (全部の System の前)
+            //   SceneLoaded などのイベントはゲームのコードなので、例外は下と同じく受け取る
+            Profiler.BeginSample("Scenes");
+            try { Scenes.Update(); }
+            catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
+            Profiler.EndSample();
+            Scenes.InGameCode = true;   // v1.14 : ここから UI まではゲームのコードを呼ぶ (シーンの読み込み / 外すは次のフレームの頭へ回す)
             // v1.7 : ゲームのコード (System / Behaviour / UI のイベント) の例外は、GameCodeException があればそこへ渡して続ける (エディター)
             //   以前はどこでも受け取らず、スクリプトの例外 (無い Widget を読んだ等) でエディターごと落ちていた
             Profiler.BeginSample("Update (game systems)");
@@ -968,6 +979,7 @@ public sealed class Engine : IDisposable
             try { GameEngine.UI.Manager!.Update(World, IsPlaying, Time.DeltaTime); }
             catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
             Profiler.EndSample();
+            Scenes.InGameCode = false;   // v1.14 : エディターの GUI からの読み込みはすぐ行う
             Profiler.BeginSample("Editor GUI (LateUpdate hook)");
             LateUpdate?.Invoke();   // エディターの GUI (ED3)
             Profiler.EndSample();
@@ -1045,25 +1057,12 @@ public sealed class Engine : IDisposable
     public void SaveScene(string path) => SceneSerializer.SaveFile(World, path);
 
     /// <summary>
-    /// シーンを読み込む。additive = false なら今のエンティティを全部消してから読む
+    /// シーンを読み込む。additive = false なら今のエンティティを全部消してから読む (v1.14 : 永続シーン (DontDestroyOnLoad) の物は残る)
     /// 読めなかった物 (知らない型 / 無いアセット) はコンソールに出して飛ばす。戻り値は作ったエンティティ
+    /// v1.14 : 中身は Scenes (SceneManager) に任せた。すぐ読む (ゲームのコードの中からは Scenes.LoadScene を使う。次のフレームの頭で読む)
     /// </summary>
-    public List<Entity> LoadScene(string path, bool additive = false)
-    {
-        var start = Stopwatch.GetTimestamp();
-        CrashReporter.SetInfo(additive ? "Scene (additive)" : "Scene", path);   // v1.8 : どのシーンで落ちたか
-        if (!additive)
-        {
-            World.Clear();
-            GameEngine.UI.Manager?.Clear();   // v1.7 : シーンを替えると画面の UI は外れる (UE のレベルの切り替えと同じ)
-        }
-        var warnings = new List<string>();
-        var created = SceneSerializer.LoadFile(World, path, Assets, warnings);
-        foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");
-        Console.WriteLine($"[Scene] Loaded {path} : {created.Count} entities{(warnings.Count > 0 ? $", {warnings.Count} warnings" : "")}, " +
-                          $"{Stopwatch.GetElapsedTime(start).TotalMilliseconds:F1} ms");
-        return created;
-    }
+    public List<Entity> LoadScene(string path, bool additive = false) =>
+        Scenes.LoadSceneNow(path, additive ? LoadSceneMode.Additive : LoadSceneMode.Single);
 
     // ウィンドウを閉じる (Run が終わる)
     public void Quit()

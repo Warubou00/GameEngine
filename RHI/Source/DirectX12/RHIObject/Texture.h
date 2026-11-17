@@ -45,6 +45,8 @@
 
 namespace RHI
 {
+    struct DecodedTextures;   // v1.17 (S4) : Texture.cpp で定義 (デコードした画像と結果)
+
     namespace DirectX12
     {
         class Texture;
@@ -105,6 +107,34 @@ namespace RHI
                 RHI::ObjectInterface::ICommandContext* iCommandContext,
                 RHI::ObjectInterface::IBuffer* iBuffer,
                 const std::vector<std::wstring>& filePaths);
+
+            /***********************************************************************************
+             * @brief 画像ファイルをデコードだけする (v1.17 S4。LoadTexturesFromFiles の 1 段目)
+             * @details CPU だけの処理なので、どのスレッドから呼んでもよい (中で並列に行う)
+             *          戻り値は CreateTexturesFromDecoded か ReleaseDecodedTextures に必ず渡す
+             *
+             * @return RHI::DecodedTextures* デコードした画像 (filePaths と同じ並び)。null にはならない
+             ************************************************************************************/
+            static RHI::DecodedTextures* DecodeTextures(const std::vector<std::wstring>& filePaths);
+
+            /***********************************************************************************
+             * @brief デコード済みの画像から GPU のテクスチャを作る (v1.17 S4。LoadTexturesFromFiles の 2 段目)
+             * @details メインスレッドで呼ぶ (UploadManager はスレッドセーフではない)。decoded はここで解放する
+             *
+             * @return std::vector<TextureHandle> decoded と同じ並びのハンドル (失敗した物は既定テクスチャ)
+             ************************************************************************************/
+            std::vector<TextureHandle> CreateTexturesFromDecoded(
+                RHI::ObjectInterface::IDevice* iDevice,
+                RHI::ObjectInterface::ICommandContext* iCommandContext,
+                RHI::ObjectInterface::IBuffer* iBuffer,
+                RHI::DecodedTextures* decoded);
+
+            // v1.17 (S4) : デコード済みの画像を使わずに解放する / 数 (null なら何もしない / 0)
+            static void   ReleaseDecodedTextures(RHI::DecodedTextures* decoded);
+            static size_t DecodedCount(const RHI::DecodedTextures* decoded);
+
+            // v1.17 (S4) : WIC のファクトリーを作っておく (メインスレッドで最初に 1 回。ワーカースレッドで初めて作らないように)
+            static void PrepareDecoding();
 
             /***********************************************************************************
              * @brief 既定テクスチャ(白 1x1)を作る

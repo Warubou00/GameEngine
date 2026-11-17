@@ -1,0 +1,72 @@
+v1.14.0.0 : シーンの管理 S1 (SceneManager : シーンの切り替え / 足す / サブシーン / DontDestroyOnLoad)
+ブランチ : feature/v114-scene-manager (未コミット)
+日付 : 2026-11-17
+
+■ 依頼
+「Scene が Scene を複数持てる構造 (RE Engine 相当。スクリプトで Load / Unload (有効 / 無効化))」と
+「Unity / UE に相当する Scene を切り替える機能」を、同期 / 非同期で動くように (ロード画面が作れる汎用性)。
+設計 (S1〜S4) を報告し、「S1 から始めて」で S1 (実行時の土台 / 同期) を実装した。非同期は S2、エディターの表示は S3。
+
+■ 作った物
+- SceneManager (GameEngine.Runtime/Scenes/SceneManager.cs) : engine.Scenes / SceneManager.Current / Behaviour の Scenes
+  - LoadScene(path, Single | Additive) : Single は今のシーンを外して読み、メインシーン (ActiveScene) にする
+  - UnloadScene / GetScene(entity) / GetEntities(scene) / UnloadUnusedAssets
+  - DontDestroyOnLoad(entity) : 永続シーン (Persistent, Id 1) へ移す (Transform の子 / 持っているサブシーンも一緒)
+  - サブシーン : LoadSubScene(owner, active?) / UnloadSubScene / SetSubSceneActive / GetSubScene / FindSubSceneOwner / LoadStartSubScenes
+  - イベント : SceneLoaded / SceneUnloading / ActiveSceneChanged
+  - Scene (状態 Unloaded / Loading / Loaded、IsActiveSelf / IsActive、Parent / Owner / Children)
+- SubScene コンポーネント (Components/SubScene.cs) : Scene (.scene.json) / LoadOnStart / ActiveOnLoad
+  - 中の一番上の物 (親の無い Transform) は持ち主の子になる。持ち主を無効にする / 消すと、中も無効 / 外れる
+  - 入れ子にできる。自分を読む輪は読まずに Console に出す
+
+■ 仕組み (変えた所)
+- EntityInfo.SceneId (internal。保存しない / インスペクターに出ない) : どのシーンの物か。0 = 今のメインシーンの物 (コードで作った物など)
+- World : シーンごとの印 (Inactive / NotMain)、IsSelfActive (Active かつシーンが有効)、Clear の後の Cleared イベント
+  - World.SetActive も、無効なシーンの物は有効にしない
+- TransformSystem : 自分の有効 = EntityInfo.Active かつシーンが有効 (3 か所。配列を 1 回引くだけ)
+- SceneSerializer
+  - Load の中身を SceneLoader にした (Parse = World に触らない / Step = 1 回目で全部のエンティティを作り、その後 1 つずつコンポーネント)。
+    同期の Load はこれを最後まで回すだけ (以前と同じ物を同じ順で作る)。S2 の非同期も同じ道を通る
+  - Save(world) はメインでないシーン (サブシーン / 足したシーン / 永続) の物を書かない
+- Engine
+  - Scenes を作る。Engine.LoadScene は SceneManager に任せた (今まで通りすぐ読む。残す物が無ければ World.Clear して番号も 0 から = 以前と同じ)
+  - フレームの頭 (全部の System の前) に Scenes.Update : ゲームのコードの中で頼まれた読み込み / 外すを行う、持ち主の消えたサブシーンを外す、持ち主の有効の変化を印に反映
+  - 衝突のメソッド〜UI の間は Scenes.InGameCode = true (この間の読み込み / 外すは次のフレームの頭へ)
+- エディター (最小限。表示は S3)
+  - 停止 / スクリプトの読み直しで JSON から世界を作り直した後、LoadStartSubScenes(開いているシーン) でサブシーンを読み直す
+    (S1 の途中で見つけた不具合 : 開いているシーンを登録しないと、自分を読む輪が見つからず、メインシーンが自分の中にもう 1 つ読まれた → 登録して直した)
+
+■ 変えたファイル
+- 新 : CSharp_console/GameEngine.Runtime/Scenes/SceneManager.cs, Components/SubScene.cs, GameEngine.Editor/EditorTest.Scenes.cs
+- CSharp_console/GameEngine.Runtime : Ecs/EntityInfo.cs, Ecs/World.cs, Ecs/Behaviour.cs (Scenes), Systems/TransformSystem.cs,
+  Serialization/SceneSerializer.cs, Engine.cs
+- CSharp_console/GameEngine.Editor : EditorApp.Edit.cs (停止 / 読み直しの後のサブシーン), EditorTest.cs (scenes の区切りを足す)
+- CSharp_console/Engine.props : 1.14.0.0
+- Docs/Reference/template.html : 「シーンの管理 / サブシーン (v1.14)」の説明。index.html は作り直した
+  (エディターの Script Reference は型とソースのコメントから作るので、SceneManager / Scene / SubScene は自動で出る)
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine_console (C#) : Release / Debug ともエラー 0 (警告は元からある 3 つだけ)。C++ は変えていない
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.14.0.0 (Editor / Player の GameEngine.Runtime.dll が 1.14.0.0 なのを確かめた)
+
+■ 確認
+- シーンだけ (--editor-test-section scenes) : 22 / 22
+  読む (入れ子 / 待機 / 輪を読まない) / 持ち主の子になる / 有効・待機の切り替え (すぐ効く) / 持ち主を無効にすると中も無効 /
+  保存に中の物が入らない / Unload・Load し直し / 持ち主を消すと外れる / ゲームのコードの中の読み込みは次のフレーム /
+  停止で元に戻りサブシーンも読み直す / Single で切り替えると DontDestroyOnLoad の物 (子も) だけ残る / 永続の物は保存しない / World.Clear で一覧が空
+- エディターの自動の確認 (--editor-test、Release) : pass 464 / fail 0
+  (書き出したゲームとエディターの再生の比べ合わせも全部 max error 0)
+  ※その前の 1 回で「Destroy(Entity) in OnCollisionEnter ...」が 1 度だけ落ちた。v1.10 の記録にもある、時間の揺れで落ちる確認 (今回の変更とは関係ない所)
+- 見ていない物 : 実際のゲームの画面で目で見た確認 (S1 はエディターの表示を変えていないので、自動の確認だけ)
+
+■ 速さ
+- 変えた中で毎フレーム全部の物を回すのは TransformSystem だけ (Scenes.Update はサブシーンが無ければ何もしない)
+- 測り方 : 前 (develop の HEAD) と今の Runtime.dll を、同じ小さな計測の exe (反射で TransformSystem.Update を 400 回 × 15) で交互に動かす。1 万個、Release
+- 最初の作り (毎回シーンの印を引く) : 親の無い物 +3〜5 %、4 段の親子 +5〜9 % 遅くなった
+  → 無効なシーンが 1 つも無い時は Active だけを見るようにした (TransformSystem がフレームの頭で World.AnySceneInactive を 1 回見る)
+- 直した後 : 親の無い物 前 0.175〜0.178 ms / 今 0.176〜0.179 ms (最小)、4 段の親子は中央値が前後どちらにも振れる (0.47〜0.50 ms) = 差は揺れの中
+
+■ まだの物 (S2 / S3)
+- 非同期 (LoadSceneAsync / SceneOperation / AllowActivation / 1 フレームの予算)、ロード画面の見本 : S2
+- エディターの Hierarchy でのサブシーンの表示 / Inspector のボタン / ドラッグで作る / Build Game のサブシーンの依存 : S3
+  (S1 の間は、エディターで開いたシーンの SubScene は読まれるが、Hierarchy にはまだ中の物が親子のまま並ぶだけ。保存には入らない)

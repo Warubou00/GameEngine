@@ -23,6 +23,7 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <future>
 #include <memory>
 
 #include "mesh.h"
@@ -31,6 +32,7 @@
 #include "Loader/pmxLoader.h"
 
 #include "../../Core/Source/Log/logger.h"
+#include "../../Core/Source/Log/scopedTimer.h"
 
 namespace Renderer
 {
@@ -60,6 +62,31 @@ namespace Renderer
 		}
 	}
 
+	// v1.17 (S4) : 読み込みの途中の物 (CPU の段の結果)
+	//   Mesh = 解析したメッシュ / TexturePaths = 使うテクスチャ (同じパスは 1 つ) / Owners[m] = マテリアル m のテクスチャの番号 (無ければ SIZE_MAX)
+	//   Decoded = デコードした画像 (別のスレッドで読む時だけ。無ければ GPU の段で LoadTextures が読む)
+	struct SceneRenderer::PreparedModel
+	{
+		struct DecodedDeleter
+		{
+			RHI::IRenderHardwareInterface* Rhi = nullptr;
+			void operator()(RHI::DecodedTextures* decoded)const { if (Rhi) Rhi->ReleaseDecodedTextures(decoded); }
+		};
+
+		std::wstring                 Path;
+		MeshPtr                      Mesh;
+		std::vector<std::wstring>    TexturePaths;
+		std::vector<size_t>          Owners;
+		std::unique_ptr<RHI::DecodedTextures, DecodedDeleter> Decoded;
+	};
+
+	// v1.17 (S4) : 別のスレッドの読み込み 1 つ (Result が true = Prepared ができた)
+	struct SceneRenderer::ModelLoadJob
+	{
+		PreparedModel     Prepared;
+		std::future<bool> Result;
+	};
+
 	SceneRenderer::SceneRenderer() = default;
 	SceneRenderer::~SceneRenderer()
 	{
@@ -86,6 +113,7 @@ namespace Renderer
 	{
 		if (!_rhi) return;
 
+		waitModelJobs();   // v1.17 (S4) : 別のスレッドの読み込みを待ってから壊す (デコードした画像は RHI が解放する)
 		// RHI の破棄は RHI.dll の中で行う (GPU の完了待ちも RHI のデストラクタで行われる)
 		_rhi->Shutdown();
 		RHI_DestroyRenderHardwareInterface(_rhi);
@@ -119,9 +147,18 @@ namespace Renderer
 
 	// ファイルを読んで GPU へ登録し、使った物 (頂点 / インデックス / マテリアル / テクスチャ) を model に覚える (ED5)
 	// (以前は LoadModel の中身。読み直しでも使うので分けた)
+	// v1.17 (S4) : 中を CPU の段 (prepareModel) と GPU の段 (uploadModel) に分けた。同期の読み込みは今まで通り続けて呼ぶ
 	bool SceneRenderer::loadModelResource(const std::wstring& filePath, ModelResource& model)
 	{
+		Core::ScopedTimer totalTimer(" Model load total");   // v1.17 (S4) : どこに時間がかかるかを見る
+		PreparedModel prepared;
+		if (!prepareModel(filePath, prepared, false)) return false;   // テクスチャは GPU の段で LoadTextures (並列のデコード + 登録)
+		return uploadModel(prepared, model);
+	}
 
+	// CPU の段 : ファイルを読む (拡張子でローダーを選ぶ) + 使うテクスチャのパス (+ デコード)。RHI の GPU の物には触らないので、どのスレッドからでもよい
+	bool SceneRenderer::prepareModel(const std::wstring& filePath, PreparedModel& prepared, bool decodeTextures)const
+	{
 		// 1. ファイルを読む (CPU 側)。拡張子でローダーを選ぶ
 		std::wstring extension = std::filesystem::path(filePath).extension().wstring();
 		std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
@@ -134,13 +171,52 @@ namespace Renderer
 			Core::Logger::Log(filePath.c_str());
 			return false;
 		}
-		MeshPtr mesh(loader->LoadModel(filePath));
-		if (!mesh)
+		{
+			Core::ScopedTimer parseTimer("  Model parse (file)");
+			prepared.Mesh.reset(loader->LoadModel(filePath));
+		}
+		if (!prepared.Mesh)
 		{
 			Core::Logger::Log(L"[SceneRenderer] Failed load model.");
 			Core::Logger::Log(filePath.c_str());
 			return false;
 		}
+		prepared.Path = filePath;
+
+		// 3. テクスチャ : 使うものだけ集める (同じパスは 1 回だけ読む。PMX は多くの材質が同じテクスチャを使う)
+		const Mesh& mesh = *prepared.Mesh;
+		prepared.Owners.assign(mesh.Materials.size(), SIZE_MAX);
+		for (size_t m = 0; m < mesh.Materials.size(); ++m)
+		{
+			const Material* material = mesh.Materials[m];
+			if (!material || !material->UseTexture || material->TexturePath.empty()) continue;
+
+			const std::wstring path = resolveTexturePath(material->TexturePath);
+			auto found = std::find(prepared.TexturePaths.begin(), prepared.TexturePaths.end(), path);
+			if (found == prepared.TexturePaths.end())
+			{
+				prepared.TexturePaths.push_back(path);
+				found = prepared.TexturePaths.end() - 1;
+			}
+			prepared.Owners[m] = static_cast<size_t>(found - prepared.TexturePaths.begin());
+		}
+
+		// 別のスレッドの読み込み : デコードもここで (GPU のテクスチャはメインスレッドで作る)
+		if (decodeTextures && !prepared.TexturePaths.empty())
+		{
+			std::vector<const wchar_t*> pathPointers;
+			for (const auto& path : prepared.TexturePaths) pathPointers.push_back(path.c_str());
+			prepared.Decoded = std::unique_ptr<RHI::DecodedTextures, PreparedModel::DecodedDeleter>(
+				_rhi->DecodeTextures(pathPointers.data(), static_cast<uint32_t>(pathPointers.size())), PreparedModel::DecodedDeleter{ _rhi });
+		}
+		return true;
+	}
+
+	// GPU の段 : 頂点 / テクスチャ / インデックス / マテリアルを RHI に登録する (メインスレッド)
+	bool SceneRenderer::uploadModel(PreparedModel& prepared, ModelResource& model)
+	{
+		const Mesh* mesh = prepared.Mesh.get();
+		if (!mesh) return false;
 
 		// 2. 頂点 (メッシュ全体で 1 回)
 		const RHI::VertexRange vertices = _rhi->UploadVertices(mesh->Vertices.data(), static_cast<uint32_t>(mesh->Vertices.size()));
@@ -151,43 +227,31 @@ namespace Renderer
 		}
 		model.Vertices = vertices;
 
-		// 3. テクスチャ : 使うものだけ集めてまとめて読み込む (デコードは RHI の中で並列に行われる)
-		//    同じパスは 1 回だけ読む (PMX は多くの材質が同じテクスチャを使う)
+		// 3. テクスチャ : デコード済みなら GPU のテクスチャを作るだけ、まだなら読み込む (デコードは RHI の中で並列に行われる)
 		std::vector<RHI::TextureHandle> materialTextures(mesh->Materials.size());
+		const auto& paths  = prepared.TexturePaths;
+		const auto& owners = prepared.Owners;
+		if (!paths.empty())
 		{
-			std::vector<std::wstring> paths;
-			std::vector<size_t>       owners;     // マテリアル m のテクスチャは paths[owners[m]]
-			owners.assign(mesh->Materials.size(), SIZE_MAX);
-			for (size_t m = 0; m < mesh->Materials.size(); ++m)
+			std::vector<RHI::TextureHandle> loaded(paths.size());
+			if (prepared.Decoded)
 			{
-				const Material* material = mesh->Materials[m];
-				if (!material || !material->UseTexture || material->TexturePath.empty()) continue;
-
-				const std::wstring path = resolveTexturePath(material->TexturePath);
-				auto found = std::find(paths.begin(), paths.end(), path);
-				if (found == paths.end())
-				{
-					paths.push_back(path);
-					found = paths.end() - 1;
-				}
-				owners[m] = static_cast<size_t>(found - paths.begin());
+				Core::ScopedTimer textureTimer(" Texture create (decoded)");
+				_rhi->CreateDecodedTextures(prepared.Decoded.release(), loaded.data());   // 渡した物は RHI が解放する
 			}
-
-			if (!paths.empty())
+			else
 			{
 				std::vector<const wchar_t*> pathPointers;
 				for (const auto& path : paths) pathPointers.push_back(path.c_str());
-				std::vector<RHI::TextureHandle> loaded(paths.size());
 				_rhi->LoadTextures(pathPointers.data(), static_cast<uint32_t>(pathPointers.size()), loaded.data());
-				for (const auto& texture : loaded) if (texture.Index != RHI::TextureHandle::DEFAULT) model.Textures.push_back(texture);
-				model.TexturePaths = paths;
-				for (size_t m = 0; m < owners.size(); ++m)
-				{
-					if (owners[m] != SIZE_MAX) materialTextures[m] = loaded[owners[m]];
-				}
+			}
+			for (const auto& texture : loaded) if (texture.Index != RHI::TextureHandle::DEFAULT) model.Textures.push_back(texture);
+			model.TexturePaths = paths;
+			for (size_t m = 0; m < owners.size(); ++m)
+			{
+				if (owners[m] != SIZE_MAX) materialTextures[m] = loaded[owners[m]];
 			}
 		}
-
 		// 4. サブメッシュごとに、インデックスとマテリアルを登録する (サブメッシュ i はマテリアル i を使う)
 		//    マテリアル : テクスチャがあれば色は白 (テクスチャそのまま。不透明度だけ材質から)、無ければ材質の色
 		//    半透明の材質 (PMX は全部) は、不透明な物の後にブレンドして描く
@@ -232,7 +296,7 @@ namespace Renderer
 			item.Material   = _rhi->CreateMaterial(desc);
 			model.Materials.push_back(item.Material);
 			model.SubMeshes.push_back(item);
-			model.SubMeshMaterials.push_back(subMeshMaterialOf(desc, material && desc.Texture.Index != RHI::TextureHandle::DEFAULT ? resolveTexturePath(material->TexturePath) : std::wstring(),
+			model.SubMeshMaterials.push_back(subMeshMaterialOf(desc, material && desc.Texture.Index != RHI::TextureHandle::DEFAULT && i < owners.size() && owners[i] != SIZE_MAX ? paths[owners[i]] : std::wstring(),   // v1.17 : 解決済みのパス (以前はここでもう一度ファイルを探した)
 			                                                   material ? material->Name : std::wstring()));   // v1.5
 		}
 		if (model.SubMeshes.empty())
@@ -251,7 +315,7 @@ namespace Renderer
 		}
 		for (const auto& indices : mesh->Indecies) model.Indices.insert(model.Indices.end(), indices.begin(), indices.end());
 
-		model.Path = filePath;
+		model.Path = prepared.Path;
 		// 5. CPU 側のメッシュはここで解放される (GPU へのコピーは RHI のアップロード領域に済んでいる)
 		return true;
 	}
@@ -263,8 +327,12 @@ namespace Renderer
 		ModelResource model;
 		if (!loadModelResource(filePath, model)) return INVALID_HANDLE;
 		if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
+		return registerModel(std::move(model));
+	}
 
-		// 解放したモデルの番号があれば使い回す (ED5)
+	// 解放したモデルの番号があれば使い回す (ED5)。v1.17 (S4) : LoadModel から分けた (FinishLoadModel も使う)
+	uint32_t SceneRenderer::registerModel(ModelResource&& model)
+	{
 		if (!_freeModels.empty())
 		{
 			const uint32_t handle = _freeModels.back();
@@ -274,6 +342,68 @@ namespace Renderer
 		}
 		_models.push_back(std::move(model));
 		return static_cast<uint32_t>(_models.size() - 1);
+	}
+
+	// v1.17 (S4) : 別のスレッドで読み始める
+	uint32_t SceneRenderer::BeginLoadModel(const std::wstring& filePath)
+	{
+		if (!IsInitialized() || filePath.empty()) return 0;
+		const uint32_t id = _nextModelJob++;
+		if (_nextModelJob == 0) _nextModelJob = 1;   // 0 は「始められなかった」
+		auto job = std::make_unique<ModelLoadJob>();
+		ModelLoadJob* raw = job.get();
+		// ワーカー : 解析 + デコード (CPU だけ)。例外は失敗として返す (ワーカーの外へ投げない)
+		raw->Result = std::async(std::launch::async, [this, raw, filePath]()
+		{
+			try
+			{
+				return prepareModel(filePath, raw->Prepared, true);
+			}
+			catch (...)
+			{
+				Core::Logger::Log((L"[SceneRenderer] Exception while loading " + filePath).c_str());
+				return false;
+			}
+		});
+		_modelJobs.emplace(id, std::move(job));
+		return id;
+	}
+
+	// v1.17 (S4) : 終わっていれば GPU に登録する (メインスレッド)
+	int SceneRenderer::FinishLoadModel(uint32_t job, bool wait, uint32_t* outHandle, uint32_t* outSubMeshCount)
+	{
+		if (outHandle) *outHandle = INVALID_HANDLE;
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		auto found = _modelJobs.find(job);
+		if (found == _modelJobs.end()) return 3;
+		ModelLoadJob& entry = *found->second;
+		if (!wait && entry.Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return 0;
+
+		const bool prepared = entry.Result.get();
+		int state = 2;
+		if (prepared && IsInitialized())
+		{
+			Core::ScopedTimer uploadTimer(" Model upload (main thread)");
+			ModelResource model;
+			if (uploadModel(entry.Prepared, model))
+			{
+				if (outSubMeshCount) *outSubMeshCount = static_cast<uint32_t>(model.SubMeshes.size());
+				const uint32_t handle = registerModel(std::move(model));
+				if (outHandle) *outHandle = handle;
+				state = 1;
+			}
+		}
+		_modelJobs.erase(found);   // デコードした画像が残っていれば、ここで RHI が解放する
+		return state;
+	}
+
+	void SceneRenderer::waitModelJobs()
+	{
+		for (auto& [id, job] : _modelJobs)
+		{
+			if (job->Result.valid()) job->Result.wait();
+		}
+		_modelJobs.clear();
 	}
 
 	// 頂点とインデックスの配列からモデルを作る (SH1)。ファイルを読まない以外は loadModelResource と同じ登録をする

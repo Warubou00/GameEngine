@@ -22,6 +22,15 @@ internal sealed class Inspector
     public Action<Entity, Type, string?, string>? Written;
     // コンポーネントの右クリック > Open Reference (ED9。スクリプトリファレンスで型を出す)
     public Action<Type>? OpenReference;
+    /// <summary>
+    /// v1.14 S3 : 編集できない理由 (サブシーンの中の物など。null なら編集できる)。理由があれば、上に出して全部の欄を触れなくする
+    /// (サブシーンの中の物はメインシーンに保存されないので、ここで変えても残らないため)
+    /// </summary>
+    public Func<Entity, string?>? ReadOnlyReason;
+    /// <summary>v1.14 S3 : 編集できない物の「元のシーンを開く」ボタン (null なら出さない)</summary>
+    public Action<Entity>? OpenOwningScene;
+    /// <summary>v1.14 S3 : SubScene の下に出す、読み込みの状態とボタン (EditorApp が描く)</summary>
+    public Action<Entity>? DrawSubSceneInfo;
     // コリジョンアセットの欄をダブルクリック : コリジョンの窓で開く (v1.9)
     public Action<string>? OpenCollision;
     private World World => _engine.World;
@@ -74,6 +83,24 @@ internal sealed class Inspector
             ImGui.TextDisabled("Nothing selected");
             return;
         }
+        // v1.14 S3 : サブシーンの中の物は見るだけ (理由と、元のシーンを開くボタン)
+        if (ReadOnlyReason?.Invoke(entity) is { } reason)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.78f, 0.68f, 1.0f, 1.0f));
+            ImGui.TextWrapped(reason);
+            ImGui.PopStyleColor();
+            if (OpenOwningScene != null && ImGui.Button("Open Its Scene")) OpenOwningScene(entity);
+            ImGui.Separator();
+            ImGui.BeginDisabled();
+            try { drawEntity(entity); }
+            finally { ImGui.EndDisabled(); }
+            return;
+        }
+        drawEntity(entity);
+    }
+
+    private void drawEntity(Entity entity)
+    {
 
         // ---------- エンティティ (名前 / 有効) ----------
         if (!World.Has<EntityInfo>(entity)) World.Add(entity, new EntityInfo($"Entity {entity.Id}"));
@@ -122,6 +149,7 @@ internal sealed class Inspector
                     changed = drawDefault(ref boxed, type, entity);
                 }
                 if (changed) write(entity, pool.ComponentType, boxed, null);
+                if (pool.ComponentType == typeof(SubScene)) DrawSubSceneInfo?.Invoke(entity);   // v1.14 S3 : 読み込みの状態とボタン
                 if (pool.ComponentType == typeof(Animator)) drawAnimatorInfo(entity);   // AN3   // 以前は pool.SetBoxed (元に戻せず、Static な物の行列も作り直されなかった)
             }
             ImGui.PopID();

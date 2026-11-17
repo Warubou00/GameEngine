@@ -166,6 +166,23 @@ public sealed class UIManager
         IsPointerOverUI = false;
     }
 
+    /// <summary>
+    /// シーンを切り替えた時 (v1.14) : コードで作った物のうち KeepOnSceneChange でない物を外す
+    /// シーンの UIWidget の物は、持ち主のエンティティが消えると次の更新で外れる (永続シーンの物は残る)
+    /// 以前は切り替えで全部外していたので、ロード画面の Widget が切り替えの瞬間に消えた
+    /// </summary>
+    internal void ClearForSceneChange()
+    {
+        foreach (var widget in _widgets.ToArray())
+        {
+            if (widget.KeepOnSceneChange || !widget.Entity.IsNull) continue;
+            Remove(widget);
+        }
+        HoveredWidget = CapturedWidget = null;
+        SetFocus(null, notify: false);
+        IsPointerOverUI = false;
+    }
+
     internal UUserWidget? WidgetOf(Entity entity) =>
         _byEntity.TryGetValue(entity.Id, out var record) && record.Entity == entity ? record.Widget : null;
 

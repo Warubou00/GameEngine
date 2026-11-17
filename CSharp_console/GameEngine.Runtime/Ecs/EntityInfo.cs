@@ -15,6 +15,11 @@ public struct EntityInfo : IComponent
     public bool   Active;
     [Layer] public int Layer;   // v1.5 : レイヤー (カメラの Culling Mask で写すかを決める。Unity の GameObject.layer。名前は Project Settings)
 
+    // v1.14 : どのシーン (SceneManager の Scene.Id) から来た物か。0 = どのシーンでもない (コードで作った物など。今のメインシーンの物として扱う)
+    //   保存しない / インスペクターに出さない (public でないので ComponentRegistry のフィールドに入らない)
+    //   以前はどのシーンの物かを覚えていなかったので、一部のシーン (サブシーン) だけを外せなかった
+    internal int SceneId;
+
     public EntityInfo(string name)
     {
         Id     = Guid.NewGuid();

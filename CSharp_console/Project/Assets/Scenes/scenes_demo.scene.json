@@ -1,0 +1,202 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "c84b0248-4767-46c9-b01d-b2a13068a435",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "Intensity": 1.8,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.36,
+            -0.28,
+            0.11,
+            0.88
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "64ddee25-e83e-4efd-8484-5b9c2be898d6",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            4,
+            -10
+          ],
+          "Rotation": [
+            0.13053,
+            0,
+            0,
+            0.99144
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "69e0ab05-50e0-4fde-bcc7-506babc28e6b",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Ground.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            20,
+            1,
+            20
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "6219d80a-9501-4254-98f8-36c2c691b28f",
+      "name": "Scene Switcher",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine_console.SceneSwitcher",
+          "Scenes": "Assets/Scenes/scenes_demo.scene.json;Assets/Scenes/showcase.scene.json;Assets/Scenes/physics.scene.json",
+          "MinLoadingSeconds": 0.5,
+          "RoomName": "Room"
+        }
+      ]
+    },
+    {
+      "id": "338f012a-96e9-483d-ac73-70cb98785cac",
+      "name": "Pillar",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -4,
+            1,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            2,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Gold.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        }
+      ]
+    },
+    {
+      "id": "753607f3-26f5-4a4f-b689-4b163e742d82",
+      "name": "Room",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2,
+            0,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.SubScene",
+          "Scene": "Assets/Scenes/scenes_demo_room.scene.json",
+          "LoadOnStart": true,
+          "ActiveOnLoad": true
+        }
+      ]
+    }
+  ]
+}

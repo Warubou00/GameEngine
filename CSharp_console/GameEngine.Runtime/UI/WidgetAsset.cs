@@ -69,6 +69,8 @@ public sealed class UUserWidget
     public UIVisibility Visibility { get; set; } = UIVisibility.Visible;
     /// <summary>シーンの UIWidget コンポーネントから作った時、その持ち主 (コードで作った物は Null)</summary>
     public Entity Entity { get; internal set; }
+    /// <summary>シーンを切り替えても (SceneManager.LoadScene の Single) 外さない (v1.14。ロード画面など。コードで作った物だけに効く)</summary>
+    public bool KeepOnSceneChange { get; set; }
     internal long Order;   // 同じ ZOrder の中の順 (後で出した物が手前)
 
     public UUserWidget(UWidget? root, Vector2 designSize, WidgetAsset? asset = null)

@@ -19,6 +19,7 @@ internal sealed partial class EditorApp
     {
         if (_playing) return;
         _undo.Undo(World, _engine.Assets);
+        syncSubScenes();   // v1.14 S3 : 戻った持ち主のサブシーンを読む
         reselect();
     }
 
@@ -26,12 +27,14 @@ internal sealed partial class EditorApp
     {
         if (_playing) return;
         _undo.Redo(World, _engine.Assets);
+        syncSubScenes();   // v1.14 S3
         reselect();
     }
 
     // 空のエンティティ (Transform だけ) を作る。parent があればその子に
     public Entity CreateEntity(Entity parent)
     {
+        if (World.IsAlive(parent) && refuseReadOnly(parent, "add a child to")) parent = Entity.Null;   // v1.14 S3
         var entity = World.CreateEntity("Entity");
         World.Add(entity, new Transform { Parent = World.IsAlive(parent) && World.Has<Transform>(parent) ? parent : Entity.Null });
         Selected = entity;
@@ -310,13 +313,14 @@ internal sealed partial class EditorApp
 
     public void ModifyComponent<T>(Entity entity, Func<T, T> change) where T : struct
     {
-        if (!World.Has<T>(entity)) return;
+        if (!World.Has<T>(entity) || refuseReadOnly(entity, "edit")) return;   // v1.14 S3
         var id = EditorWorld.IdOf(World, entity);
         var before = SceneSerializer.SaveComponent(World, entity, typeof(T));
         EditorWorld.WriteComponent(World, entity, typeof(T), change(World.Get<T>(entity)));
         var after = SceneSerializer.SaveComponent(World, entity, typeof(T));
         _undo.Record(new ComponentEdit(id, typeof(T), before, after));
         MarkOverrides(entity, typeof(T), before, after);
+        if (typeof(T) == typeof(SubScene)) reloadSubSceneIfChanged(entity);   // v1.14 S3
     }
 
     // ---------------------------------------------------------------------
@@ -353,6 +357,7 @@ internal sealed partial class EditorApp
         var warnings = new List<string>();
         SceneSerializer.Load(World, json, _engine.Assets, warnings);
         foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");
+        _engine.Scenes.LoadStartSubScenes(_scenePath);   // v1.14 : JSON にはサブシーンの中の物が入らないので、読み直す
         reselect();
         _undo.Clear();
         _savedState = dirty ? (null, -1) : _undo.State;   // 保存していない変更があった時は * のまま
@@ -371,7 +376,7 @@ internal sealed partial class EditorApp
     // 選んだ物を子ごと消す
     public void DeleteSelected()
     {
-        if (!World.IsAlive(_selected)) return;
+        if (!World.IsAlive(_selected) || refuseReadOnly(_selected, "delete")) return;   // v1.14 S3
         var entities = EditorWorld.WithDescendants(World, _selected);
         var json = SceneSerializer.Save(World, entities);
         var ids = entities.Select(e => EditorWorld.IdOf(World, e)).ToList();
@@ -384,7 +389,7 @@ internal sealed partial class EditorApp
     // 選んだ物を子ごと複製する (外の物への参照はそのまま、中の物どうしの参照は複製した物どうしに繋がる)
     public Entity Duplicate()
     {
-        if (!World.IsAlive(_selected)) return Entity.Null;
+        if (!World.IsAlive(_selected) || refuseReadOnly(_selected, "duplicate")) return Entity.Null;   // v1.14 S3
         var source = EditorWorld.WithDescendants(World, _selected);
         var created = SceneSerializer.Load(World, SceneSerializer.Save(World, source), _engine.Assets);
         if (created.Count == 0) return Entity.Null;
@@ -392,6 +397,7 @@ internal sealed partial class EditorApp
         info.Name = $"{info.Name} (copy)";
         var ids = created.Select(e => EditorWorld.IdOf(World, e)).ToList();
         _undo.Record(new EntitiesEdit("Duplicate", SceneSerializer.Save(World, created), ids, create: true));
+        syncSubScenes();   // v1.14 S3 : 複製した持ち主のサブシーンも読む
         Selected = created[0];
         return created[0];
     }
@@ -400,6 +406,7 @@ internal sealed partial class EditorApp
     public bool SetParent(Entity child, Entity parent)
     {
         if (!World.IsAlive(child)) return false;
+        if (refuseReadOnly(child, "move") || (World.IsAlive(parent) && refuseReadOnly(parent, "add a child to"))) return false;   // v1.14 S3
         if (World.IsAlive(parent) && (parent == child || Hierarchy.IsAncestor(World, child, parent)))
         {
             Console.WriteLine("[Editor] Cannot make a cycle in the hierarchy.");
@@ -516,6 +523,7 @@ internal sealed partial class EditorApp
         var warnings = new List<string>();
         SceneSerializer.Load(World, _playSnapshot!, _engine.Assets, warnings);
         foreach (var warning in warnings) Console.WriteLine($"[Scene] {warning}");
+        _engine.Scenes.LoadStartSubScenes(_scenePath);   // v1.14 : 写しにはサブシーンの中の物が入らないので、読み直す
         _playSnapshot = null;
         _undo.Enabled = true;
         reselect();

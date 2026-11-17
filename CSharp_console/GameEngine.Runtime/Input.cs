@@ -91,6 +91,8 @@ public static class Input
         // 確認用の入力 (v1.7) を次のフレームへ
         _buttonsPressed = _simPressed; _buttonsReleased = _simReleased; _mouseDelta = _simDelta; _typed.AddRange(_simTyped);
         _simPressed = _simReleased = MouseButtons.None; _simDelta = Vector2.Zero; _simTyped.Clear();
+        foreach (var key in _simKeys) _pressed.Add(key);   // v1.14 : 押したことにしたキー (GetKeyDown だけ。押しっぱなしにはしない)
+        _simKeys.Clear();
     }
 
     // 確認用 (v1.7) : マウスの位置 / ボタンを入れる (エディターの自動の確認で UI のクリックを試す)
@@ -99,6 +101,7 @@ public static class Input
     private static MouseButtons _simPressed, _simReleased;
     private static Vector2 _simDelta;
     private static readonly List<char> _simTyped = new();
+    private static readonly List<Keys> _simKeys = new();
 
     public static void Simulate(Vector2 position, MouseButtons buttons)
     {
@@ -111,4 +114,7 @@ public static class Input
 
     /// <summary>確認用 (v1.7) : 文字を打ったことにする (次のフレーム)</summary>
     public static void SimulateTyping(string text) => _simTyped.AddRange(text);
+
+    /// <summary>確認用 (v1.14) : キーを押したことにする (次のフレームの GetKeyDown が true。GetKey は変わらない)</summary>
+    public static void SimulateKeyPress(Keys key) => _simKeys.Add(key);
 }

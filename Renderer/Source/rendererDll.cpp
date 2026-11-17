@@ -457,6 +457,23 @@ extern "C"
 		return g_renderer->LoadModel(filePath, outSubMeshCount);
 	}
 
+	// v1.17 (S4) : モデルを別のスレッドで読み始める (解析 + テクスチャのデコード)。戻り値 = 読み込みの番号 (0 = 始められなかった)
+	RENDERER_API uint32_t Renderer_BeginLoadModel(const wchar_t* filePath)
+	{
+		if (g_renderer == nullptr || filePath == nullptr) return 0;
+		return g_renderer->BeginLoadModel(filePath);
+	}
+
+	// v1.17 (S4) : 読み込みを終える (メインスレッド。GPU への登録)。wait = 0 なら終わっていない時はすぐ戻る
+	// 戻り値 = 0 まだ / 1 できた (outHandle) / 2 失敗 / 3 知らない番号
+	RENDERER_API int32_t Renderer_FinishLoadModel(uint32_t job, int32_t wait, uint32_t* outHandle, uint32_t* outSubMeshCount)
+	{
+		if (outHandle) *outHandle = Renderer::INVALID_HANDLE;
+		if (outSubMeshCount) *outSubMeshCount = 0;
+		if (g_renderer == nullptr) return 3;
+		return g_renderer->FinishLoadModel(job, wait != 0, outHandle, outSubMeshCount);
+	}
+
 	// モデルの形 (位置 xyz とインデックス) を写す (衝突判定のメッシュ用)。positions / indices が nullptr なら数だけ
 	RENDERER_API bool Renderer_GetModelGeometry(uint32_t model, float* positions, uint32_t maxVertices, uint32_t* indices, uint32_t maxIndices,
 	                                            uint32_t* outVertexCount, uint32_t* outIndexCount)

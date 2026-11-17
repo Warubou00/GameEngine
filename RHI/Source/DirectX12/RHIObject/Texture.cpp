@@ -55,6 +55,14 @@
 
 namespace RHI
 {
+    // v1.17 (S4) : デコードした画像 (公開側は形を知らない。Texture だけが作って解放する)
+    struct DecodedTextures
+    {
+        std::vector<std::wstring>             Paths;
+        std::vector<::DirectX::ScratchImage>  Images;
+        std::vector<HRESULT>                  Results;
+    };
+
 	namespace ObjectInterface
 	{
 		namespace
@@ -90,9 +98,95 @@ namespace RHI
             const std::vector<std::wstring>& filePaths)
         {
             // 失敗したものは既定テクスチャ(白)のハンドルのまま
-            std::vector<TextureHandle> handles(filePaths.size());
-
             if (!iDevice || !iCommandContext || !iBuffer || filePaths.empty())
+            {
+                return std::vector<TextureHandle>(filePaths.size());
+            }
+
+            Core::ScopedTimer timer(" Texture load total");
+
+            // v1.17 (S4) : 中身を 2 つに分けた (デコード = どのスレッドでも / GPU = メイン)。モデルの非同期の読み込みは別々に呼ぶ
+            //   以前はここに両方が書いてあった (処理の中身と順番は同じ)
+            return CreateTexturesFromDecoded(iDevice, iCommandContext, iBuffer, DecodeTextures(filePaths));
+        }
+
+        void Texture::PrepareDecoding()
+        {
+            // WIC のファクトリーはメインスレッドで先に作っておく
+            // (ワーカースレッドで初めて作ると、そのスレッドの終了と一緒に使えなくなる恐れがある)
+            bool isWIC2 = false;
+            ::DirectX::GetWICFactory(isWIC2);
+        }
+
+        RHI::DecodedTextures* Texture::DecodeTextures(const std::vector<std::wstring>& filePaths)
+        {
+            auto decoded = std::make_unique<RHI::DecodedTextures>();
+            decoded->Paths   = filePaths;
+            decoded->Images  = std::vector<::DirectX::ScratchImage>(filePaths.size());
+            decoded->Results = std::vector<HRESULT>(filePaths.size(), E_FAIL);
+            if (filePaths.empty())
+            {
+                return decoded.release();
+            }
+
+            // ==========================================================
+            // 1. デコードを並列に行う (CPU だけの処理なので複数スレッドで同時にできる)
+            // ==========================================================
+            // 読み込み (DDS キャッシュがあれば読むだけ、無ければデコード + 圧縮) を並列に行う
+            Core::ScopedTimer decodeTimer(" Texture load (parallel)");
+
+            // 同時に動かすスレッド数は CPU のコア数まで
+            const size_t hardwareThreads = (std::max)(1u, std::thread::hardware_concurrency());
+            const size_t workerCount     = (std::min)(filePaths.size(), hardwareThreads);
+            auto& images  = decoded->Images;
+            auto& results = decoded->Results;
+
+            std::vector<std::future<void>> workers;
+            workers.reserve(workerCount);
+            for (size_t worker = 0; worker < workerCount; ++worker)
+            {
+                // ワーカー w は w, w+workerCount, w+2*workerCount ... 番目を担当する
+                workers.push_back(std::async(std::launch::async, [&, worker]()
+                {
+                    // WIC (COM) を使うので、スレッドごとに COM を初期化する
+                    const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+                    for (size_t i = worker; i < filePaths.size(); i += workerCount)
+                    {
+                        results[i] = RHI::DirectX12::Texture::LoadImageFile(filePaths[i], images[i]);
+                    }
+                    if (SUCCEEDED(coInit))
+                    {
+                        CoUninitialize();
+                    }
+                }));
+            }
+            for (auto& w : workers)
+            {
+                w.get();
+            }
+            return decoded.release();
+        }
+
+        void Texture::ReleaseDecodedTextures(RHI::DecodedTextures* decoded)
+        {
+            delete decoded;
+        }
+
+        size_t Texture::DecodedCount(const RHI::DecodedTextures* decoded)
+        {
+            return decoded ? decoded->Paths.size() : 0;
+        }
+
+        std::vector<TextureHandle> Texture::CreateTexturesFromDecoded(
+            RHI::ObjectInterface::IDevice* iDevice,
+            RHI::ObjectInterface::ICommandContext* iCommandContext,
+            RHI::ObjectInterface::IBuffer* iBuffer,
+            RHI::DecodedTextures* decodedTextures)
+        {
+            // 受け取った物はこの関数を出る時に必ず解放する
+            std::unique_ptr<RHI::DecodedTextures> decoded(decodedTextures);
+            std::vector<TextureHandle> handles(decoded ? decoded->Paths.size() : 0);
+            if (!decoded || !iDevice || !iCommandContext || !iBuffer)
             {
                 return handles;
             }
@@ -102,51 +196,9 @@ namespace RHI
             auto commandContext = static_cast<RHI::ObjectInterface::CommandContext*>(iCommandContext);
             auto buffer         = static_cast<RHI::ObjectInterface::Buffer*>(iBuffer);
             auto textureManager = getTextureManager();
-
-            Core::ScopedTimer timer(" Texture load total");
-
-            // ==========================================================
-            // 1. デコードを並列に行う (CPU だけの処理なので複数スレッドで同時にできる)
-            // ==========================================================
-            std::vector<::DirectX::ScratchImage> images(filePaths.size());
-            std::vector<HRESULT>                 results(filePaths.size(), E_FAIL);
-            {
-                // 読み込み (DDS キャッシュがあれば読むだけ、無ければデコード + 圧縮) を並列に行う
-                Core::ScopedTimer decodeTimer(" Texture load (parallel)");
-
-                // WIC のファクトリーはメインスレッドで先に作っておく
-                // (ワーカースレッドで初めて作ると、そのスレッドの終了と一緒に使えなくなる恐れがある)
-                bool isWIC2 = false;
-                ::DirectX::GetWICFactory(isWIC2);
-
-                // 同時に動かすスレッド数は CPU のコア数まで
-                const size_t hardwareThreads = (std::max)(1u, std::thread::hardware_concurrency());
-                const size_t workerCount     = (std::min)(filePaths.size(), hardwareThreads);
-
-                std::vector<std::future<void>> workers;
-                workers.reserve(workerCount);
-                for (size_t worker = 0; worker < workerCount; ++worker)
-                {
-                    // ワーカー w は w, w+workerCount, w+2*workerCount ... 番目を担当する
-                    workers.push_back(std::async(std::launch::async, [&, worker]()
-                    {
-                        // WIC (COM) を使うので、スレッドごとに COM を初期化する
-                        const HRESULT coInit = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-                        for (size_t i = worker; i < filePaths.size(); i += workerCount)
-                        {
-                            results[i] = RHI::DirectX12::Texture::LoadImageFile(filePaths[i], images[i]);
-                        }
-                        if (SUCCEEDED(coInit))
-                        {
-                            CoUninitialize();
-                        }
-                    }));
-                }
-                for (auto& w : workers)
-                {
-                    w.get();
-                }
-            }
+            const auto& filePaths = decoded->Paths;
+            auto& images          = decoded->Images;
+            const auto& results   = decoded->Results;
 
             // ==========================================================
             // 2. アップロードの登録と SRV の作成 (メインスレッドで順番に)

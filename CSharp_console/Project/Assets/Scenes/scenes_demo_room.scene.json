@@ -1,0 +1,138 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "1d8a163a-fad0-49f0-accf-2393ead37da1",
+      "name": "Room Cube Red",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -1.5,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": 45
+        }
+      ]
+    },
+    {
+      "id": "a7900938-8f1b-4af6-a1d5-4edfdc67a511",
+      "name": "Room Cube Green",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Green.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": -60
+        }
+      ]
+    },
+    {
+      "id": "953955fb-c957-4cf2-a170-52e1b56d621b",
+      "name": "Room Cube Blue",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            1.5,
+            1,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cube"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.Spin",
+          "DegreesPerSecond": 90
+        }
+      ]
+    }
+  ]
+}
