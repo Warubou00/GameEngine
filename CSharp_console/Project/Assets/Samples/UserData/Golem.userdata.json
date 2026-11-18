@@ -1,0 +1,14 @@
+{
+  "format": "GameEngineUserData",
+  "version": 1,
+  "type": "GameEngine_console.EnemyType",
+  "values": {
+    "DisplayName": "ゴーレム",
+    "Body": {
+      "path": "Assets/Samples/UserData/Golem.prefab.json"
+    },
+    "Scale": 1.5,
+    "Hp": 10,
+    "Speed": 1
+  }
+}

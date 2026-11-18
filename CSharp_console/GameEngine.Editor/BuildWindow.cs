@@ -232,6 +232,7 @@ internal sealed class BuildWindow
         ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1), $"Built {Path.GetFileName(result.ExePath)}");
         ImGui.Text($"{result.AssetCount} assets ({result.AssetBytes / 1024.0 / 1024.0:F1} MB) / {result.FileCount} files ({result.Bytes / 1024.0 / 1024.0:F1} MB)");
         if (result.PakBytes > 0) ImGui.Text($"Data.pak : {result.PakOriginalBytes / 1024.0 / 1024.0:F1} MB -> {result.PakBytes / 1024.0 / 1024.0:F1} MB ({result.PakFiles} files)");
+        if (result.UserDataCount > 0) ImGui.Text($"UserData : {result.UserDataCount} files to binary ({result.UserDataJsonBytes / 1024.0:F1} KB -> {result.UserDataBinaryBytes / 1024.0:F1} KB)");   // v2.0 UD3
         if (result.IconFile != null) ImGui.Text($"Icon : {result.IconFile}");
         ImGui.Text($"compile {result.CompileMs / 1000:F1} s, copy {result.CopyMs:F0} ms, total {result.TotalMs / 1000:F1} s");
         if (result.Warnings.Count > 0 && ImGui.TreeNode($"Warnings ({result.Warnings.Count})##warnings"))

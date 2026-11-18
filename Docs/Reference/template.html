@@ -582,6 +582,49 @@ if (t.Next) Scenes.LoadScene(t.Next);                        // LoadSceneAsync �
 </ul>
 </article>
 
+<article data-id="userdata" data-title="UserData / 設定のファイル (v2.0。Unity の ScriptableObject)">
+<h2>UserData / 設定のファイル (v2.0。Unity の ScriptableObject / RE Engine の UserData)</h2>
+<p>エディターを使う人が自分で型を決められる「設定のファイル」(<code>名前.userdata.json</code>)。敵の種類 / 出てくる順の表 / 調整の値などを、シーンとは別のアセットにして、いくつもの物・シーンから同じ物を使う。</p>
+<pre><code>[UserData(Menu = "Samples/Enemy Type", FileName = "New Enemy Type")]   // Create &gt; UserData の下の名前 / 作る時のファイルの名前
+public sealed class EnemyType : UserData
+{
+    public string DisplayName = "Enemy";
+    public Prefab? Body;                       // アセット (プレハブ / モデル / 音 / マテリアル ...)
+    [Range(1, 50)] public int Hp = 3;
+    public List&lt;Wave&gt; Waves = new();           // リスト / 入れ子の struct / [Serializable] なクラス
+    public EnemyType? Next;                    // 別の UserData (自分を指しても良い)
+    protected override void OnValidate() { if (Hp &lt; 1) Hp = 1; }   // Inspector で変えた後
+}
+public struct Spawner : IComponent { public EnemyType? Type; }   // コンポーネントの欄 (同じ型のファイルだけ選べる)
+var type = engine.Assets.LoadUserData&lt;EnemyType&gt;("Assets/Data/Slime.userdata.json");</code></pre>
+<h3>決まり</h3>
+<ul>
+  <li><a href="#/t/GameEngine.UserData">UserData</a> を継いだ public で abstract でないクラス (引数なしのコンストラクター)。登録は要らない (ComponentRegistry と同じく読み込み済みのアセンブリから探す)</li>
+  <li>保存するフィールドはコンポーネントと同じ (public か [SerializeField]。readonly / [NonSerialized] / プロパティは保存しない)。[Range] / [Header] / [Tooltip] / [HideInInspector] も効く</li>
+  <li>書ける値 : 数 / bool / string / enum / Vector / Quaternion / List・配列 / 入れ子の struct / <b>[Serializable] なクラス (UserData の中だけ。10 段まで)</b> / アセット / 別の UserData</li>
+  <li><b>シーンの物 (Entity / GameObject / ComponentRef&lt;T&gt;) は持てない</b> (Unity / RE Engine と同じ。アセットはシーンの外にあるので)。書くと null、Inspector では灰色で触れない。物を作る元はプレハブで持つ</li>
+  <li>同じパスは同じインスタンス (<code>AssetManager.LoadUserData</code>)。1 つのファイルを直すと、使っている物が全部変わる。<code>Version</code> / <code>Changed</code> で変わったことが分かる</li>
+  <li>型に無い値 (フィールドの名前を変えた / 消した) はファイルに残し、保存する時に書き戻す (<code>UnknownValueNames</code>)</li>
+  <li>ファイル : <code>{"format": "GameEngineUserData", "version": 1, "type": "名前空間.型", "values": {...}}</code>。アセットは <code>{guid, path}</code></li>
+</ul>
+<h3>エディター</h3>
+<ul>
+  <li>Project の右クリック &gt; Create &gt; UserData &gt; (Menu の名前)。ゲームのコードを書くと増える</li>
+  <li>Project で選ぶと Inspector に出る。触り終わるとファイルに書き、<code>OnValidate</code> を呼ぶ。Ctrl+Z で戻せる (シーンの「保存していない変更」にはならない)</li>
+  <li>再生中に変えた値 (ゲームのコード / Inspector) はファイルに書かず、Stop でファイルの値に戻る (<code>AssetManager.RevertUserData</code>)</li>
+  <li>型が見つからない時 (ビルドの失敗など) は理由とファイルの中身を見せるだけ (書き換えない)。ゲームのコードを読み直すと、古い型のインスタンスは捨てて新しい型で作り直す (<code>ForgetUserData</code>)</li>
+</ul>
+<h3>書き出したゲーム (.userdata.bin)</h3>
+<ul>
+  <li>Build Game は <code>.userdata.json</code> を <a href="#/t/GameEngine.UserDataBinary">UserDataBinary</a> の形の <code>.userdata.bin</code> にして書く (<code>.userdata.json</code> は入らない)。ゲームのコード / シーンのパスは <code>.userdata.json</code> のままで良い (AssetManager が隣の .bin を読む)</li>
+  <li>形 : 値の木を bin にし (名前と文字列は 1 回だけの表、整数は可変長、float は 4 byte) → Brotli → 鍵の流れで混ぜる → HMAC-SHA256。1 byte でも書き換えると読まない (シーンの警告に「modified」と出て、そのフィールドは空)</li>
+  <li>型を知らなくても読み書きできる形 (JSON の木と同じ) なので、型を変えても前の値を失わない。※鍵は Player の中にある (Data.pak と同じ)。本気で解析すれば読めるが、開いて値を書き換えることはできない</li>
+  <li>大きさ : 見本の 3 ファイル 1409 → 741 byte (見出し 68 byte を含む)、2000 行の表 139810 → 4831 byte (3.5 %)。読むのは 2000 行で 1.8 ms</li>
+</ul>
+<p>見本 (v2.0) : <code>Assets/Scenes/userdata_demo.scene.json</code> + <code>Scripts/UserDataDemo.cs</code> + <code>Assets/Samples/UserData</code>。<code>EnemyType</code> (スライム / ゴーレム) と <code>WaveTable</code> (Stage1) を UserData で作り、Spawner が表の順に、EnemyType の Body (プレハブ) から Hp / Speed / Scale の敵を出す。</p>
+<p>確認 : <code>--editor-test --editor-test-section userdata</code> (撮影用 <code>userdata-view</code>、書き出し <code>userdata-build</code>、速さ <code>userdata-bench</code>)</p>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

@@ -1,0 +1,50 @@
+{
+  "format": "GameEngineUserData",
+  "version": 1,
+  "type": "GameEngine_console.WaveTable",
+  "values": {
+    "StartDelay": 0.25,
+    "WaveGap": 0.75,
+    "Waves": [
+      {
+        "Enemy": {
+          "path": "Assets/Samples/UserData/Slime.userdata.json"
+        },
+        "Count": 3,
+        "Interval": 0.3,
+        "SpawnPoints": [
+          [
+            -6,
+            0.5,
+            6
+          ],
+          [
+            0,
+            0.5,
+            8
+          ],
+          [
+            6,
+            0.5,
+            6
+          ]
+        ]
+      },
+      {
+        "Enemy": {
+          "path": "Assets/Samples/UserData/Golem.userdata.json"
+        },
+        "Count": 1,
+        "Interval": 0.5,
+        "SpawnPoints": [
+          [
+            0,
+            0.75,
+            8
+          ]
+        ]
+      }
+    ],
+    "Loop": true
+  }
+}

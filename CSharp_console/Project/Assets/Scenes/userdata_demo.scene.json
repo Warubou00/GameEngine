@@ -1,0 +1,162 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "d92a9973-4459-4999-a2a7-81bd17c5d2bf",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.94,
+            0.85
+          ],
+          "Intensity": 1.8,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            50,
+            0
+          ],
+          "Rotation": [
+            0.36,
+            -0.28,
+            0.11,
+            0.88
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "54003387-cf9c-4be6-8abb-53cac6d46003",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            9,
+            -7
+          ],
+          "Rotation": [
+            0.38268,
+            0,
+            0,
+            0.92388
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "202fb5b7-a664-4056-88b3-cc4e9ae86932",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Ground.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            20,
+            1,
+            20
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "8c41d524-735d-499c-a9ab-4b94c13f2c97",
+      "name": "Spawner",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0.25,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.8,
+            0.5,
+            0.8
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Cylinder"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Blue.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        },
+        {
+          "type": "GameEngine_console.WaveSpawner",
+          "Table": {
+            "path": "Assets/Samples/UserData/Stage1.userdata.json"
+          }
+        }
+      ]
+    }
+  ]
+}

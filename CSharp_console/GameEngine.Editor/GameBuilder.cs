@@ -59,6 +59,8 @@ internal sealed class BuildResult
     public int     PakFiles, PakUniqueFiles;
     public double  PackMs;
     public long    DotnetBytes;                  // 入れた .NET の大きさ
+    public int     UserDataCount;                // v2.0 UD3 : bin にした UserData の数
+    public long    UserDataJsonBytes, UserDataBinaryBytes;   // v2.0 UD3 : 元の .userdata.json の合計 / .userdata.bin の合計
     public string? IconFile;                     // exe に付けたアイコン (Project Settings の Icon。無ければ null)
     public double  CompileMs, CopyMs, TotalMs;
     public List<string> Assets = new();
@@ -199,7 +201,23 @@ internal sealed class GameBuilder
         {
             var source = _database.FullPath(asset);
             var target = Path.Combine(data, asset.Replace('/', Path.DirectorySeparatorChar));
-            copyFile(source, target);
+            // v2.0 UD3 : UserData は bin (UserDataBinary : 詰めて混ぜ、書き換えを確かめる) にして .userdata.bin で書く (外から開いて書き換えられないように)
+            if (AssetDatabase.KindOf(asset) == AssetKind.UserData && asset.EndsWith(UserDataFile.Extension, StringComparison.OrdinalIgnoreCase))
+            {
+                byte[] binary;
+                try { binary = UserDataBinary.Encode(File.ReadAllText(source, System.Text.Encoding.UTF8)); }
+                catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+                {
+                    return fail($"Cannot convert {asset} to binary : {ex.Message}");
+                }
+                target = UserDataBinary.BinaryPathOf(target);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.WriteAllBytes(target, binary);
+                result.UserDataCount++;
+                result.UserDataJsonBytes += new FileInfo(source).Length;
+                result.UserDataBinaryBytes += binary.Length;
+            }
+            else copyFile(source, target);
             result.AssetBytes += new FileInfo(source).Length;
             if (File.Exists(source + ".meta")) copyFile(source + ".meta", target + ".meta");   // Id (シーンは guid でアセットを探す)
             result.Assets.Add(asset);
@@ -272,6 +290,9 @@ internal sealed class GameBuilder
             Console.WriteLine($"[Build] Data.pak : {result.PakFiles} files ({result.PakUniqueFiles} unique), {result.PakOriginalBytes / 1024.0 / 1024.0:F1} MB -> {result.PakBytes / 1024.0 / 1024.0:F1} MB, {result.PackMs:F0} ms");
         Console.WriteLine($"[Build] {settings.ProductName} -> {output} : {result.AssetCount} assets ({result.AssetBytes / 1024.0 / 1024.0:F1} MB), " +
                           $"{result.FileCount} files ({result.Bytes / 1024.0 / 1024.0:F1} MB), {result.ShaderCacheFiles} compiled shaders, compile {result.CompileMs:F0} ms, copy {result.CopyMs:F0} ms");
+        if (result.UserDataCount > 0)   // v2.0 UD3
+            Console.WriteLine($"[Build] UserData : {result.UserDataCount} files to binary, {result.UserDataJsonBytes} -> {result.UserDataBinaryBytes} bytes " +
+                              $"({100.0 * result.UserDataBinaryBytes / Math.Max(1, result.UserDataJsonBytes):F0} %)");
         foreach (var warning in result.Warnings) Console.WriteLine($"[Build] warning : {warning}");
         return result;
     }

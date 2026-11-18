@@ -1,0 +1,46 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "c91341b6-bd15-4fa8-b9f4-1a18e42bafea",
+      "name": "Golem",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.6,
+            1.0,
+            0.6
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Capsule"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Red.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        }
+      ]
+    }
+  ]
+}

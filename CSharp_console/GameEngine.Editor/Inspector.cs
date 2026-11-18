@@ -230,9 +230,19 @@ internal sealed partial class Inspector
         if (field?.IsLayer == true && value is int layer) return drawLayer(label, ref value, layer);
         if (field?.IsLayerMask == true && value is uint mask) return drawLayerMask(label, ref value, mask);
         if (field?.IsTag == true && type == typeof(string)) return drawTag(label, ref value, value as string);   // v1.18
+        // v2.0 UD2 : UserData の中 (入れ子の struct / リストの中も) のシーンの物への参照は触れない (保存されないので)
+        if (_drawingUserData && UserDataTypes.IsSceneReference(type))
+        {
+            ImGui.BeginDisabled();
+            ImGui.LabelText(label, "(scene objects cannot be referenced)");
+            ImGui.EndDisabled();
+            return false;
+        }
         // v1.20 GO3 : ComponentRef<T> (T を持つ物だけの物の欄)
         if (value is IEntityRef reference && EntityRefs.IsEntityRef(type))
             return drawObjectField(label, type, ref value, reference.World == null || ReferenceEquals(reference.World, World) ? reference.Entity : Entity.Null, owner, reference.ComponentType);
+        // v2.0 UD2 : UserData (別のアセット)。派生クラス全部をここで扱う (型ごとに表に入れない。同じ型のファイルだけを選べる)
+        if (typeof(UserData).IsAssignableFrom(type)) return drawUserDataField(label, type, ref value);
         // v1.20 GO3 : アセット (表から。以前は下の switch に型ごとに並べていた)
         if (FindAssetField(type) is { } assetField)
             return drawAssetField(label, assetField.Kinds, assetField.PathOf(value), ref value, assetField.Load, type, assetField.OnDoubleClick);
@@ -320,6 +330,8 @@ internal sealed partial class Inspector
             }
             return changed;
         }
+        // v2.0 UD2 : UserData の中の [Serializable] なクラス (中身はその場で書き換える。シーンのコンポーネントでは保存されないので、UserData の時だけ)
+        if (_drawingUserData && UserDataTypes.IsSerializableClass(type)) return drawSerializableClass(label, type, ref value, owner);
         ImGui.LabelText(label, value?.ToString() ?? "(null)");
         return false;
     }
@@ -416,7 +428,7 @@ internal sealed partial class Inspector
                 ImGui.PopID();
             }
             // 足す / 消す (ED6) : 配列は 1 つ長い / 短い写しを作って差し替える
-            if (ImGui.SmallButton("+ Add")) { list = resizeList(list, elementType, list.Count, insert: true); changed = true; }
+            if (ImGui.SmallButton("+ Add")) { list = resizeList(list, elementType, list.Count, insert: true, _drawingUserData); changed = true; }
             if (list.Count > 0)
             {
                 ImGui.SameLine();
@@ -430,10 +442,11 @@ internal sealed partial class Inspector
     }
 
     // 1 個足した (最後に既定の値) / 1 個消した写し
-    private static IList resizeList(IList list, Type elementType, int index, bool insert)
+    // v2.0 UD2 : userData = UserData の中のリスト ([Serializable] なクラスは空の物を作って足す。以前は null だった)
+    private static IList resizeList(IList list, Type elementType, int index, bool insert, bool userData = false)
     {
         var items = list.Cast<object?>().ToList();
-        if (insert) items.Add(elementType == typeof(string) ? "" : elementType.IsValueType ? Activator.CreateInstance(elementType) : null);
+        if (insert) items.Add(elementType == typeof(string) ? "" : elementType.IsValueType || (userData && UserDataTypes.IsSerializableClass(elementType)) ? Activator.CreateInstance(elementType) : null);
         else items.RemoveAt(index);
         if (list is Array)
         {

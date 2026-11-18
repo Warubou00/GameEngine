@@ -342,6 +342,7 @@ internal sealed partial class EditorApp
     {
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_playing) stop();
+        _inspector.FlushUserData();   // v2.0 UD2 : 変えたままの UserData を先に書く (読み直すと古い型のインスタンスは捨てる)
         var dirty = _undo.State != _savedState;
         var json = SceneSerializer.Save(World);
         World.Clear();
@@ -518,6 +519,10 @@ internal sealed partial class EditorApp
         _stepRequest = false;
         _stepping = false;
         _gameView = false;
+        // v2.0 UD2 : 再生中にゲームのコード (や Inspector) が変えた UserData の値を、ファイルの値に戻す (アセットに残さない)
+        var revertedUserData = _engine.Assets.RevertUserData();
+        _inspector.ResetUserDataEditing();
+        if (revertedUserData > 0) Console.WriteLine($"[Editor] Reverted {revertedUserData} UserData changed while playing");
         World.Clear();
         var warnings = new List<string>();
         SceneSerializer.Load(World, _playSnapshot!, _engine.Assets, warnings);

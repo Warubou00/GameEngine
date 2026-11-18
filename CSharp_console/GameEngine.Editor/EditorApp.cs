@@ -117,6 +117,7 @@ internal sealed partial class EditorApp
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _inspector.OpenCollision = path => OpenCollision(path);   // v1.9
+        _inspector.SelectAsset = path => _project.Select(_database.Find(path));   // v2.0 UD2 : UserData の欄のダブルクリック
         _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
         _inspector.BuildBones = entity => BuildBones(entity).Count;    // AN3
         _inspector.Written = onComponentWritten;   // プレハブの変えた値の印 (ED8)。v1.14 S3 : SubScene のシーンを変えたら読み直す
@@ -990,11 +991,17 @@ internal sealed partial class EditorApp
         {
             _seenAssetSelection = _project.SelectionVersion;
             _inspectAsset = _project.Selected?.Kind is AssetKind.Material or AssetKind.Shader or AssetKind.ShaderGraph
-                            or AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation;   // SH2 : シェーダーも / SH4 : グラフも / AN1 : FBX も
+                            or AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation or AssetKind.UserData;   // SH2 : シェーダーも / SH4 : グラフも / AN1 : FBX も / v2.0 : UserData も
         }
+        // v2.0 UD2 : UserData を出していない時は、変えたまま残っている値を書く (別の物を選んだフレームに書き損ねないように)
+        if (!(_inspectAsset && _project.Selected is { Kind: AssetKind.UserData }) && !_playing) _inspector.FlushUserData();
         if (ImGui.Begin("Inspector", ref _showInspector))
         {
-            if (_inspectAsset && _project.Selected is { Kind: AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation } fbxEntry)
+            if (_inspectAsset && _project.Selected is { Kind: AssetKind.UserData } userDataEntry)
+            {
+                _inspector.DrawUserData(userDataEntry.Path, _playing);   // v2.0 UD2 (読めない時の理由も中で出す)
+            }
+            else if (_inspectAsset && _project.Selected is { Kind: AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation } fbxEntry)
             {
                 try { _inspector.DrawFbx(_engine.Assets.LoadFbx(fbxEntry.Path)); }   // AN1
                 catch (Exception ex) { ImGui.TextColored(new Vector4(1, 0.4f, 0.4f, 1), ex.Message); }

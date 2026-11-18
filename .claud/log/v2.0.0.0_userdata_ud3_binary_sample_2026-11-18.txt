@@ -1,0 +1,69 @@
+v2.0.0.0 : UserData UD3 (書き出したゲームは .userdata.bin / 見本 userdata_demo / ドキュメント)。UserData (UD1〜UD3) の完了 = v2.0.0.0
+ブランチ : feature/v20-userdata (UD1 / UD2 と同じブランチ。未コミット)
+日付 : 2026-11-18
+
+■ 依頼
+「UD3 へ進む。制約 : 1. Build したデータは UserData を bin 化し、外部からの直接的な書き換えを防止する  2. 圧縮による容量削減ができれば行う」
+
+■ 決めたこと
+- bin の中身は「値の木」の bin (型を知らなくても読める形)。型ごとの bin (フィールドを順に書くだけ) も考えたが、
+  ・フィールドの名前を変えた / 消した時に前の値を残す決まり (UD1) をそのまま守れる
+  ・Brotli をかけた後の大きさはほぼ同じ (名前は文字の表で 1 回だけなので、リストの中で何度出ても 1 回分)
+  のでこちらにした
+- 書き換えの防止 = HMAC-SHA256 で確かめ、1 byte でも違えば読まない (シーンの警告に「modified」、そのフィールドは空)。
+  加えて Brotli + 鍵の流れで混ぜる (Data.pak と同じ混ぜ方) ので、開いても名前や値は読めない
+  ※鍵は Player の中にある (Data.pak と同じ)。本気で解析すれば作り直せる。暗号の署名 (秘密鍵を Player に入れない形) にするなら別の作業
+- ゲームのコード / シーンのパスは .userdata.json のまま (AssetManager が隣の .userdata.bin を読む)。書き出し前と後でコードを変えなくて良い
+
+■ 作った物 / 変えた物
+- 新 GameEngine.Runtime/Assets/UserDataBinary.cs
+  形 : 見出し 68 byte ("TSMGUSD\0" / 版 / 印 (Brotli) / 塩 16 / 元の大きさ / 中身の大きさ / HMAC 32) + 中身 (値の木 → Brotli → 混ぜる)
+  値 : null / bool / 整数 (ZigZag 可変長) / float32 (一番短い書き方が元と同じ時だけ。UserData の float は全部これ) / float64 / 文字列 (表の番号) /
+       配列 / オブジェクト (名前は表の番号) / 数の文字 (long に入らない整数)
+  Encode(json) / Decode(bytes) / IsBinary / BinaryPathOf / JsonPathOf。壊れた・書き換えた物は InvalidDataException (長さ / 版 / HMAC / 展開 / 表の番号 / 深さ / 残り)
+- Pak.cs : scramble を internal に (UserDataBinary も使う)
+- AssetManager.UserData.cs : resolveUserData (.bin のパスは .json の名前で覚える / .json が無ければ隣の .bin) / readUserDataText (bin なら Decode)。
+  Load / Reload / Revert が使う。AssetId は .bin の .meta からも引く
+- AssetDatabase.cs : *.userdata.bin も AssetKind.UserData、名前を変える時の二重の拡張子
+- GameBuilder.cs : 使っている .userdata.json を UserDataBinary.Encode して .userdata.bin (+ .userdata.bin.meta) で書く (.json は入れない)。
+  変換できなければ書き出しを止める。BuildResult.UserDataCount / UserDataJsonBytes / UserDataBinaryBytes、ログ "[Build] UserData : ..."
+- BuildWindow.cs : 結果に UserData の数と大きさ
+- ScriptReference.cs : UserData / [UserData] を Basics に、ゲームの UserData の型を "UserData/Game" に
+- 見本
+  - Project/Scripts/UserDataDemo.cs : EnemyType (UserData。DisplayName / Body (Prefab) / Scale / Hp / Speed / OnValidate) /
+    Wave ([Serializable] クラス。Enemy / Count / Interval / SpawnPoints) / WaveTable (UserData。StartDelay / WaveGap / Waves / Loop) /
+    WaveSpawner (Table) / Walker、WaveSpawnerSystem (表の順に EnemyType の Body から敵を作る) / WalkerSystem (Speed で Spawner へ歩き、着くと消える)
+  - Project/Assets/Samples/UserData : Slime / Golem (EnemyType)、Stage1 (WaveTable)、Slime / Golem のプレハブ (+ .meta)
+  - Project/Assets/Scenes/userdata_demo.scene.json (+ .meta) : Sun / Main Camera / Ground / Spawner (WaveSpawner.Table = Stage1)
+- 確認 (EditorTest.UserData.cs / EditorTest.cs)
+  - userDataBinary : 往復 (整数・float・double・long に入らない整数・1.5e300・日本語・入れ子・空) / 開いても型・名前・文字が見えない / 詰まる /
+    書き出すたびに塩が違う / 1 byte 変える・塩・HMAC・大きさを変える・切る・足すを全部断る / .bin だけある時に .json のパスで読める /
+    .bin のパスと Id で同じ物 / 型に無い値も残る / 書き換えた .bin は読まない / 速さ
+  - userDataDemo : 見本のシーンが WaveTable → Wave → EnemyType → Prefab を読む / Create メニューにゲームの型 / 再生で敵が出る / 止めると戻る /
+    ゲームのコードを読み直すと古い Game.dll が解放され、WaveTable が新しい型で作り直される
+  - userDataBuild (--editor-test-section userdata-build) : pak にまとめない形で見本だけを書き出し、.userdata.bin と .meta だけで .json が無い /
+    書き出したゲームが読む / .userdata.bin の 1 byte を変えると書き出したゲームは読まない
+  - userDataDemoView (撮影用) / 全部の確認の Build Game に userdata_demo を足した (pak の形で動かし、エディターの再生と比べる)
+  - UD2 の確認の直し : 「再生中の変更はファイルに書かない」を "42" の有無で見ていたので guid の中の "42" に当たって落ちた → 値の所 ("Speed": 42) で見る
+- Docs/Reference/template.html : 「UserData / 設定のファイル (v2.0)」の説明を足した。index.html は make_reference.py で作り直した
+- Engine.props : 2.0.0.0
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player / GameEngine.Launcher : Release / Debug ともエラー 0 (警告は元からある物だけ)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v2.0.0.0 (古い版のフォルダは消えた)。ランチャーは System.Version で比べるので 2.0.0.0 を選ぶ
+  ※Package/Project/SampleProject は make_package.py の決まりで残す (ユーザーの変更を消さない) ので、見本はまだ入っていない。入れるなら --fresh-project
+
+■ 確認
+- userdata (--editor-test-section userdata) : 全部 PASS (UD1 42 + UD2 24 + UD3 bin 13 + 見本 6)。userdata-build : 7 / 7
+- エディターの自動の確認 (--editor-test、Release) : pass 696 / fail 0
+  書き出したゲーム : "the built game reads the UserData from .userdata.bin (no .userdata.json in the build, 3 files 1409 -> 741 bytes)"、
+  userdata_demo をエディターの再生と 120 フレーム比べて max error 0
+- 大きさと速さ (Release、1 回)
+  - 見本の 3 ファイル : 1409 → 741 byte (53 %。1 ファイル 68 byte の見出しを含む。小さいファイルは見出しの分が目立つ)
+  - 確認の UserData (50 行のリスト) : 4321 → 655 byte (15 %)
+  - 2000 行の表 : 139810 → 4831 byte (3.5 %)、作る 38.5 ms (Brotli 11。書き出しの時だけ)、読む 1.8 ms
+- 見た目 (userdata-demo-view を PrintWindow で撮影) : 緑のスライム (Scale 1) と赤いゴーレム (Scale 1.5) が Spawner (青) へ歩く。Hierarchy に Slime x4 / Golem
+
+■ 気付いたこと
+- 書き出したゲームの Data.pak は起動の時に一時フォルダへ展開されるので、以前は .userdata.json がそこに普通の文字で出ていた。今は .userdata.bin
+- Bash の here-document の中の \r\n が本当の改行になり C# の文字が壊れた (1 回)。スクリプトは Write で書いた

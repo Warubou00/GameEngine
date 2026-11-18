@@ -45,6 +45,8 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.widget.json
 # コリジョンアセット (v1.9。見本の Humanoid)
 !CSharp_console/Project/Assets/**/*.collision.json
+# UserData (v2.0。見本の EnemyType / WaveTable)
+!CSharp_console/Project/Assets/**/*.userdata.json
 # 自作の FBX のサンプル (AN1。Assets > Create FBX Samples で作り直せる)
 !CSharp_console/Project/Assets/Samples/Fbx/*.fbx
 !CSharp_console/Project/Assets/Textures/Noise/*.png

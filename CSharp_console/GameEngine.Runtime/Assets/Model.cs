@@ -97,6 +97,7 @@ public sealed partial class AssetManager
         rekey(_modelSkins);   // AN4
         rekey(_clips, (clip, path) => clip.Path = path);
         rekey(_widgets, (widget, path) => widget.Path = path);   // v1.7
+        rekey(_userData, (data, path) => data.Path = path);   // v2.0
     }
 
     // パス → (覚える名前, 読むファイル)

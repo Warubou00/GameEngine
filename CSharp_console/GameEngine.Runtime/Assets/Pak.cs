@@ -199,7 +199,8 @@ public static class Pak
         return BinaryPrimitives.ReadUInt64LittleEndian(hash);
     }
 
-    private static void scramble(Span<byte> data, ulong key, ulong position)
+    // v2.0 UD3 : UserData の bin (UserDataBinary) も同じ混ぜ方を使うので internal にした
+    internal static void scramble(Span<byte> data, ulong key, ulong position)
     {
         var state = key ^ (position * 0x9E3779B97F4A7C15ul);
         int i = 0;
