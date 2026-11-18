@@ -27,13 +27,16 @@
          1.18.0.0 : GameObject (GO1 : GameObject の窓口 / 名前・タグ・Id・型で速く探す / タグ) /
          1.19.0.0 : GameObject GO2 (Inspector の物の欄 : Hierarchy から落とす / Ping / 検索つきの選ぶ窓 / 別のシーンの物を断る) /
          1.20.0.0 : GameObject GO3 (ComponentRef<T> / Prefab・SceneReference のフィールド / アセットの欄の表と選ぶ窓) /
-         1.21.0.0 : GameObject GO4 (見本 objects_demo / 書き出したゲームとホットリロードの確認 / 選ぶ窓の重さ))
+         1.21.0.0 : GameObject GO4 (見本 objects_demo / 書き出したゲームとホットリロードの確認 / 選ぶ窓の重さ) /
+         1.22.0.0 : UserData UD1 (ScriptableObject 相当 : .userdata.json / 読み込み・保存・読み直し / コンポーネントのフィールド。v2.0.0.0 への途中) /
+         1.23.0.0 : UserData UD2 (エディター : Create > UserData / Inspector で編集・元に戻す / 同じ型だけの選ぶ窓 / 再生を止めるとファイルの値に戻す) /
+         2.0.0.0 : UserData UD3 (書き出したゲームは .userdata.bin (詰めて混ぜ、書き換えを確かめる) / 見本 userdata_demo / ドキュメント))
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>1.21.0.0</EngineVersion>
+    <EngineVersion>2.0.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

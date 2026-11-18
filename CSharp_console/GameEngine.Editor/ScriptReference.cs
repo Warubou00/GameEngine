@@ -68,7 +68,7 @@ internal sealed class ScriptReference
                 var info = ComponentRegistry.Get(type);
                 add("R:", type, "Components/Engine" + (info.Category.Length > 0 ? "/" + info.Category : ""));
             }
-            else if (type == typeof(ISystem) || type == typeof(IFixedSystem) || type == typeof(GameSystemAttribute) || type == typeof(IComponent)) add("R:", type, "Basics");
+            else if (type == typeof(ISystem) || type == typeof(IFixedSystem) || type == typeof(GameSystemAttribute) || type == typeof(IComponent) || type == typeof(UserData) || type == typeof(UserDataAttribute)) add("R:", type, "Basics");   // v2.0 : UserData も
             else add("R:", type, "Engine API");
         }
         foreach (var type in publicTypes(EditorAssembly)) add("E:", type, "Editor API");
@@ -78,6 +78,7 @@ internal sealed class ScriptReference
             {
                 if (typeof(IComponent).IsAssignableFrom(type) && type.IsValueType) add("G:", type, "Components/Game");
                 else if (type.IsDefined(typeof(GameSystemAttribute), false)) add("G:", type, "Systems/Game");
+                else if (typeof(UserData).IsAssignableFrom(type)) add("G:", type, "UserData/Game");   // v2.0
                 else add("G:", type, "Game");
             }
         }
@@ -93,6 +94,7 @@ internal sealed class ScriptReference
         _ when group.StartsWith("Components/Engine") => 1,
         "Components/Game" => 2,
         "Systems/Game" => 3,
+        "UserData/Game" => 3,   // v2.0
         "Game" => 4,
         "Engine API" => 5,
         "Editor API" => 6,

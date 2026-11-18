@@ -14,6 +14,8 @@ internal abstract class EditCommand
 {
     public abstract string Name { get; }
     public int Revision;   // まとめた (After を差し替えた) 回数 (保存した時と同じ状態かを見る)
+    /// <summary>シーンを変える変更か (v2.0 UD2 : UserData の変更はアセットのファイルに書くので、シーンの「保存していない変更」にしない)</summary>
+    public virtual bool AffectsScene => true;
     public abstract void Undo(World world, AssetManager assets);
     public abstract void Redo(World world, AssetManager assets);
 }
@@ -122,6 +124,39 @@ internal sealed class EntitiesEdit : EditCommand
     }
 }
 
+// v2.0 UD2 : UserData (.userdata.json) の変更。前 / 後の JSON を同じインスタンスに入れ、ファイルにも書く
+//   インスタンスは持たない (パスで引く。ゲームの DLL を読み直すと型が変わるので、古い型を持たないように)
+internal sealed class UserDataEdit : EditCommand
+{
+    public readonly string Path;
+    public readonly string Before;
+    public readonly string After;
+
+    public UserDataEdit(string path, string before, string after)
+    {
+        Path = path; Before = before; After = after;
+    }
+
+    public override string Name => $"Edit {UserDataFile.NameOf(Path)}";
+    public override bool AffectsScene => false;
+    public override void Undo(World world, AssetManager assets) => apply(assets, Before);
+    public override void Redo(World world, AssetManager assets) => apply(assets, After);
+
+    private void apply(AssetManager assets, string json)
+    {
+        try
+        {
+            var data = assets.LoadUserData(Path);
+            assets.SetUserDataJson(data, json);
+            assets.SaveUserData(data);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[UserData] Undo / Redo failed {Path} : {ex.Message}");
+        }
+    }
+}
+
 internal sealed class CompoundEdit : EditCommand
 {
     private readonly string _name;
@@ -145,7 +180,18 @@ internal sealed class UndoStack
 
     // 今の状態の印 (一番上の変更とそのまとめた回数)。保存した時の印と比べて「保存していない変更があるか」を出す
     // (以前は Version で比べていたので、元に戻して保存した時の状態に戻っても「変更あり」のままだった)
-    public (EditCommand? Top, int Revision) State => _undo.Count > 0 ? (_undo[^1], _undo[^1].Revision) : (null, 0);
+    // v2.0 UD2 : シーンを変えない変更 (UserData) は飛ばして、一番上のシーンの変更で見る (以前は一番上の変更そのもの)
+    public (EditCommand? Top, int Revision) State
+    {
+        get
+        {
+            for (int i = _undo.Count - 1; i >= 0; i--)
+            {
+                if (_undo[i].AffectsScene) return (_undo[i], _undo[i].Revision);
+            }
+            return (null, 0);
+        }
+    }
     public bool Enabled { get; set; } = true;   // 再生中は記録しない (止めると再生前に戻るので)
 
     public bool CanUndo => _undo.Count > 0;

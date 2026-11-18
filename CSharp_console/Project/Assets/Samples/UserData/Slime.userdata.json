@@ -1,0 +1,14 @@
+{
+  "format": "GameEngineUserData",
+  "version": 1,
+  "type": "GameEngine_console.EnemyType",
+  "values": {
+    "DisplayName": "スライム",
+    "Body": {
+      "path": "Assets/Samples/UserData/Slime.prefab.json"
+    },
+    "Scale": 1,
+    "Hp": 2,
+    "Speed": 2.5
+  }
+}

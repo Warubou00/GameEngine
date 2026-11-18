@@ -146,6 +146,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Prefab   => _engine.Assets.ReloadPrefab(path) is { } prefab ? PrefabChanged?.Invoke(prefab) ?? 1 : 0,   // ED8 : 置いた物を作り直す
                     AssetKind.Widget   => _engine.Assets.ReloadWidget(path) ? 1 : 0,   // v1.7
                     AssetKind.Collision => _engine.Assets.ReloadCollisionAsset(path) ? 1 : 0,   // v1.9 : 外で書き換えた時 (使っている CompoundCollider は作り直す)
+                    AssetKind.UserData => _engine.Assets.ReloadUserData(path) ? 1 : 0,   // v2.0 : 同じインスタンスの中身を差し替える
                     _ => 0,
                 };
                 if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); UI.Manager?.Resources.Textures.Forget(path); }   // サムネイルも作り直す (v1.7 : UI の画像も)
@@ -503,6 +504,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
         AssetKind.Widget   => ("Widget", 0xFF2F9AD8u),   // v1.7 : UI
         AssetKind.Collision => ("Collide", 0xFF30A060u),  // v1.9 : コリジョンアセット
+        AssetKind.UserData => ("Data", 0xFF9060C0u),   // v2.0 : UserData
         AssetKind.FbxModel     => ("FBX Mod", 0xFF5A7A2Au),   // AN1
         AssetKind.FbxSkeleton  => ("FBX Skl", 0xFF7A5A2Au),
         AssetKind.FbxAnimation => ("FBX Anm", 0xFF2A5A9Au),
@@ -1004,7 +1006,59 @@ internal sealed class ProjectPanel : IDisposable
         ImGui.Separator();
         if (ImGui.MenuItem("Widget")) { _folder = folder; if (CreateWidget() is { } widget) OpenWidget?.Invoke(widget); }   // v1.7 : UI
         if (ImGui.MenuItem("Collision Asset")) { _folder = folder; if (CreateCollisionAsset() is { } collision) OpenCollision?.Invoke(collision); }   // v1.9
+        // v2.0 UD2 : UserData (ゲームのコードの UserData の派生クラス。[UserData(Menu = "A/B")] の / で入れ子のメニュー)
+        if (ImGui.BeginMenu("UserData"))
+        {
+            var types = UserDataTypes.Known();
+            if (types.Count == 0) ImGui.TextDisabled("No UserData classes yet (write  public sealed class X : UserData  in Scripts)");
+            else drawUserDataMenu(types.Select(t => (UserDataTypes.MenuOf(t).Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), t)).ToList(), 0, folder);
+            ImGui.EndMenu();
+        }
         ImGui.EndMenu();
+    }
+
+    // UserData の作るメニュー (Menu の / ごとに入れ子)。depth = 今の段
+    private void drawUserDataMenu(List<(string[] Parts, Type Type)> items, int depth, string folder)
+    {
+        foreach (var group in items.GroupBy(i => i.Parts.Length > depth + 1 ? i.Parts[depth] : null).OrderBy(g => g.Key == null).ThenBy(g => g.Key, StringComparer.Ordinal))
+        {
+            if (group.Key == null)
+            {
+                foreach (var (parts, type) in group.OrderBy(i => i.Parts.Length > depth ? i.Parts[depth] : i.Type.Name, StringComparer.Ordinal))
+                {
+                    var name = parts.Length > depth ? parts[depth] : type.Name;
+                    if (ImGui.MenuItem($"{name}##{type.FullName}")) { _folder = folder; CreateUserData(type); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(type.FullName);
+                }
+            }
+            else if (ImGui.BeginMenu(group.Key))
+            {
+                drawUserDataMenu(group.ToList(), depth + 1, folder);
+                ImGui.EndMenu();
+            }
+        }
+    }
+
+    /// <summary>今のフォルダに type の UserData (.userdata.json。フィールドは型の既定の値) を作って選ぶ (v2.0 UD2)。戻り値 = パス</summary>
+    public string? CreateUserData(Type type, string? name = null)
+    {
+        try
+        {
+            name ??= UserDataTypes.FileNameOf(type);
+            var path = $"{_folder}/{name}{UserDataFile.Extension}";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}{UserDataFile.Extension}";
+            if (Activator.CreateInstance(type) is not UserData data) return null;
+            _engine.Assets.SaveUserData(data, path);
+            _database.Refresh();
+            Select(_database.Find(path));
+            Console.WriteLine($"[Assets] Created {path} ({type.Name})");
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MissingMethodException or InvalidOperationException or System.Reflection.TargetInvocationException)
+        {
+            Console.WriteLine($"[Assets] Failed to create {type.Name} : {(ex is System.Reflection.TargetInvocationException { InnerException: { } inner } ? inner.Message : ex.Message)}");
+            return null;
+        }
     }
 
     /// <summary>

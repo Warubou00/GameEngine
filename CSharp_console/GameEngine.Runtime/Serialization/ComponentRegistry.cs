@@ -189,6 +189,7 @@ public static class ComponentRegistry
             if (_knownTypes != null && !rescan) return _knownTypes;
             var runtime = typeof(World).Assembly;
             var map = new Dictionary<string, Type>(StringComparer.Ordinal);
+            var userData = new Dictionary<string, Type>(StringComparer.Ordinal);   // v2.0
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
                 // エンジンと、エンジンを参照するアセンブリ (ゲームのコード) だけを見る。捨てたアセンブリは見ない (ED7)
@@ -199,12 +200,46 @@ public static class ComponentRegistry
                 catch (ReflectionTypeLoadException e) { types = e.Types.Where(t => t != null).ToArray()!; }
                 foreach (var type in types)
                 {
+                    // v2.0 : UserData の派生クラス (public / abstract でない / 入れ子なら外の型も public) も同じ時に集める
+                    if (type.IsClass && !type.IsAbstract && type.IsVisible && !type.IsGenericTypeDefinition && typeof(UserData).IsAssignableFrom(type) && type.FullName != null)
+                    {
+                        userData[type.FullName] = type;
+                        continue;
+                    }
                     if (!type.IsValueType || type.IsEnum || type.IsPrimitive || type.IsGenericTypeDefinition || !type.IsPublic) continue;
                     if (type.FullName != null) map[type.FullName] = type;
                 }
             }
             _knownTypes = map;
+            _knownUserData = userData;
+            _knownUserDataList = null;
             return map;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // v2.0 UD1 : UserData の型 (アセンブリを見る決まりは上の struct と同じ。捨てたアセンブリも見ない)
+    // ---------------------------------------------------------------------
+    private static Dictionary<string, Type> _knownUserData = new(StringComparer.Ordinal);
+    private static IReadOnlyList<Type>? _knownUserDataList;
+
+    internal static Type? FindUserDataType(string typeName)
+    {
+        knownTypes(rescan: false);
+        lock (_lock)
+        {
+            if (_knownUserData.TryGetValue(typeName, out var found)) return found;
+        }
+        knownTypes(rescan: true);
+        lock (_lock) return _knownUserData.GetValueOrDefault(typeName);
+    }
+
+    internal static IReadOnlyList<Type> KnownUserDataTypes(bool rescan)
+    {
+        knownTypes(rescan);
+        lock (_lock)
+        {
+            return _knownUserDataList ??= _knownUserData.Values.OrderBy(t => t.FullName, StringComparer.Ordinal).ToList();
         }
     }
 }

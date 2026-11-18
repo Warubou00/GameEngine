@@ -1,0 +1,68 @@
+v1.22.0.0 : UserData UD1 (ScriptableObject / RE Engine の UserData に当たる設定のファイル。ランタイム)
+ブランチ : feature/v20-userdata (develop から。未コミット)
+日付 : 2026-11-18
+
+■ 依頼
+「エディター利用者が独自に定義できる設定ファイル (int / float の他に List や GameObject などの参照も)。これを以て v2.0.0.0」
+設計 UD1〜UD3 を承認。UD1 から。
+「Unity / RE Engine のように Scene 上の参照は取れないようにしても構わない」→ シーンの物への参照は持てないことにした (設計から変えた点)
+
+■ 決めたこと (設計から変えた点)
+- シーンの物 (Entity / GameObject / ComponentRef<T>) は UserData に保存しない。書く時は null、読むと空。
+  (設計では「シーンと物の Id で後から引く」案だったが、ユーザーの指示で Unity / RE Engine と同じにした。物を作る元はプレハブの参照で持つ)
+- [Serializable] なクラス (と、そのリスト) も UserData の中に書ける (Unity と同じ。入れ子は 10 段まで)。
+  シーンのコンポーネントの書き方は今まで通り (UserDataMode の時だけ)
+
+■ 作った物 / 変えた物
+- 新 GameEngine.Runtime/Assets/UserData.cs
+  - abstract class UserData : Path / AssetId / Version / Changed / Name / MarkChanged / ToJson、仮想 OnLoaded / OnValidate (OnValidate は UD2 のエディターが呼ぶ)
+    UnknownValues (型に無い値。保存する時に書き戻す)
+  - [UserData(Menu, FileName)] / UserDataFile (拡張子 .userdata.json, format "GameEngineUserData", NameOf, ReadTypeName) /
+    UserDataTypes (Find / Known / MenuOf / FileNameOf / IsSceneReference)
+- 新 GameEngine.Runtime/Serialization/SceneSerializer.UserData.cs (SceneSerializer を partial にした)
+  - SaveUserData / CreateUserData / PopulateUserData (resetFirst : 読み直しで消した値を既定に戻す)。値の読み書きはシーンの writeValue / readValue をそのまま使う
+- SceneSerializer.cs
+  - WriteContext / ReadContext に UserDataMode / Depth (internal)
+  - writeValue / readValue : UserData の時はシーンの物への参照を書かない・読まない / [Serializable] なクラス
+  - UserData の派生クラスのフィールド (コンポーネントの中 / UserData の中 / リストの中) は {guid, path}。型ごとの登録は要らない。
+    読んだ物の型が違う時は null (警告)
+- ComponentRegistry.cs : 型の一覧を作る時に UserData の派生クラス (public / abstract でない) も集める (FindUserDataType / KnownUserDataTypes)。
+  捨てたゲームの DLL は今まで通り見ない
+- 新 GameEngine.Runtime/Assets/AssetManager.UserData.cs
+  - LoadUserData(path) / LoadUserData<T> / LoadUserData(Guid) : 同じパスは同じインスタンス。中身を読む前に覚える (互いを指していても止まらない)
+  - ReloadUserData : 同じインスタンスの中身を差し替え、Version / Changed / OnLoaded。壊れたファイルなら前の値のまま
+  - SaveUserData(data, path?) : パスを先に入れてから JSON にする (自分を指すフィールドのため)。NoteOwnWrite
+  - FindLoadedUserData / LoadedUserData / ForgetUserData(Assembly)
+- AssetDatabase.cs : AssetKind.UserData (enum の最後)、KindOf、名前を変える時の二重の拡張子に .userdata.json
+- Model.cs (AssetManager.onRenamed) : 名前を変えると読み込んだ UserData の Path も変える
+- エディター (UD1 で要る分だけ)
+  - ProjectPanel.cs : 外でファイルを変えたら ReloadUserData / 一覧の印 "Data"
+  - ScriptHost.cs : ゲームの DLL を読み直す前に ForgetUserData (Game.dll / GameEditor.dll。古い型のインスタンスを持つと DLL が解放されない)
+- 確認 : 新 GameEngine.Editor/EditorTest.UserData.cs (--editor-test-section userdata / userdata-bench)。全体の確認にも入れた
+- Engine.props : 1.22.0.0
+
+■ ビルド
+- GameEngine.Editor / GameEngine.Player : Release / Debug ともエラー 0 (警告は元からある物だけ。Type.IsSerializable の旧形式の警告は IsDefined にして消した)
+- python Tools/make_package.py : Package/Editor/TsumugiEngine_v1.22.0.0
+
+■ 確認
+- userdata (--editor-test-section userdata) : 42 / 42
+  型を探す / Menu・FileName / .userdata.json の種類 / コードで作って保存 / シーンの物への参照は保存しない / [NonSerialized]・readonly・プロパティは保存しない /
+  int・float・string・Vector3・enum・List<int>・int[]・struct のリスト・入れ子の [Serializable] クラス・そのリスト / Prefab / 自分を指す / 別の UserData (フィールドとリスト、共有) /
+  OnLoaded / 型違いの LoadUserData<T> は例外 / Guid で読む / 読み直し (同じインスタンス、消した値は既定へ、Version・Changed) / 壊れたファイル /
+  読めない値は飛ばす / 知らない値を保存で残す / 知らない型は例外で覚えない / コンポーネントのフィールド ({guid, path}、共有、空、型違いは null) /
+  名前を変える (拡張子を残す、インスタンスが付いて行く、前のパスの JSON も guid で見つかる) / ForgetUserData の後に解放される
+- エディターの自動の確認 (--editor-test、Release) : pass 651 / fail 0
+- 速さ (userdata-bench、Release、1000 個、1 回) : 保存 1052.7 ms (1 個 約 1.05 ms。ほぼファイルを書く時間)、
+  読み込み 228.1 ms (1 個 約 228 µs、ファイルを読む + 解析 + リフレクション)、読み込み済みを引く 0.31 ms
+  ゲームの毎フレームの処理には関わらない (UserData は普通のクラスのフィールドを読むだけ)
+
+■ 気付いたこと
+- World は型ごとに「最後に使った World の入れ物」を static に覚えている (World.PoolCache)。確認で解放を見る時は空の World で上書きした。
+  ゲームの DLL を読み直す時は World.RemovePools で外れるので、今の動きは問題にならない
+- Build Game : AssetDependencies はすべての .json の中の {guid, path} を辿るので、.userdata.json とその中の参照も書き出しに入る (実際の書き出しは UD3 で確かめる)
+
+■ 次 (UD2 : エディター)
+- Create > UserData > (Menu の名前) / Project で選ぶと Inspector で編集 (Undo / 保存 / OnValidate) / 型が見つからない時は見るだけ /
+  コンポーネントの UserData の欄 (落とす / [...] で同じ型の物だけを選ぶ。.meta に型の名前) / Inspector のシーンの物の欄は UserData では出さない (理由を出す) /
+  Play 中の変更は Stop で捨てる / ゲームの型の UserData でホットリロード後に古い DLL が解放されるか

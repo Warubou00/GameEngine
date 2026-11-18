@@ -1,0 +1,46 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "1c653a06-efb5-46b3-8e9a-020ae62a744f",
+      "name": "Slime",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            0.6,
+            0.45,
+            0.6
+          ],
+          "Parent": null
+        },
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Sphere"
+          },
+          "Materials": [
+            {
+              "path": "Assets/Materials/MC_Green.material.json"
+            }
+          ],
+          "CastShadows": true,
+          "ReceiveShadows": true
+        }
+      ]
+    }
+  ]
+}

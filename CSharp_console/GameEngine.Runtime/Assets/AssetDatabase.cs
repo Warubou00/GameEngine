@@ -15,7 +15,7 @@ namespace GameEngine;
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 //   - 表示名 : .meta の "displayName" (エディターの Project に出す名前だけ。ファイル / フォルダの名前とパスはそのまま)
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script, Widget, Collision }
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script, Widget, Collision, UserData }   // v2.0 : UserData は最後に足した (.meta には名前で書くので順番は変えない)
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -60,6 +60,8 @@ public sealed class AssetDatabase
         if (name.EndsWith(".prefab.json"))   return AssetKind.Prefab;   // ED8
         if (name.EndsWith(".widget.json"))   return AssetKind.Widget;   // v1.7 : UI
         if (name.EndsWith(".collision.json")) return AssetKind.Collision;   // v1.9 : コリジョンアセット
+        if (name.EndsWith(".userdata.json")) return AssetKind.UserData;    // v2.0 : UserData
+        if (name.EndsWith(".userdata.bin")) return AssetKind.UserData;     // v2.0 UD3 : 書き出したゲームの UserData (UserDataBinary)
         if (name.EndsWith(".shadergraph.json")) return AssetKind.ShaderGraph;   // SH4
         if (name.EndsWith(".mod.fbx")) return AssetKind.FbxModel;       // AN1 : FBX は名前で種類が決まる (ただの .fbx は Other)
         if (name.EndsWith(".skl.fbx")) return AssetKind.FbxSkeleton;
@@ -295,7 +297,7 @@ public sealed class AssetDatabase
     {
         if (isFolder) return (fileName, "");
         //   v1.7 : .widget.json も (以前は無く、"New Widget.widget.json" の名前を変えると ".widget" が消えて Widget として読めなくなった)
-        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json", ".shadergraph.json", ".widget.json", ".collision.json", ".mod.fbx", ".skl.fbx", ".anm.fbx" })
+        foreach (var compound in new[] { ".scene.json", ".material.json", ".prefab.json", ".shadergraph.json", ".widget.json", ".collision.json", ".userdata.json", ".userdata.bin", ".mod.fbx", ".skl.fbx", ".anm.fbx" })
             if (fileName.EndsWith(compound, StringComparison.OrdinalIgnoreCase)) return (fileName[..^compound.Length], fileName[^compound.Length..]);
         var extension = Path.GetExtension(fileName);
         return (fileName[..^extension.Length], extension);

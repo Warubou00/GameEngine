@@ -211,11 +211,12 @@ internal sealed class ScriptHost : IDisposable
         if (Assembly == null) return;
         var old = Assembly;
         EditorExtensions.Clear();   // 拡張 (古い型を持っている) を先に捨てる
-        if (EditorAssembly != null) ComponentRegistry.Forget(EditorAssembly);   // 型の一覧を作り直す時に、古い GameEditor.dll も見ないように
+        if (EditorAssembly != null) { _engine.Assets.ForgetUserData(EditorAssembly); ComponentRegistry.Forget(EditorAssembly); }   // v2.0 : 古い型の UserData も捨てる   // 型の一覧を作り直す時に、古い GameEditor.dll も見ないように
         EditorAssembly = null;
         _engine.RemoveSystems(_systems);
         _systems.Clear();
         world.RemovePools(t => t.Assembly == old);
+        _engine.Assets.ForgetUserData(old);   // v2.0 : 古い型の UserData を捨てる (次に読む時は新しい型で作り直す)
         ComponentRegistry.Forget(old);
         Assembly = null;
         _lastContext = new WeakReference(_context);

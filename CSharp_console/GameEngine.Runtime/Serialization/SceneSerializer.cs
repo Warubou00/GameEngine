@@ -21,7 +21,7 @@ namespace GameEngine;
 //     (アセットの GUID は ED5 の Assets フォルダで)
 //   - 値の書き方は型ごとに足せる (RegisterConverter。ユーザーの型も)
 // ==========================================================================
-public static class SceneSerializer
+public static partial class SceneSerializer
 {
     public const string Format  = "GameEngineScene";
     public const int    Version = 1;
@@ -31,6 +31,8 @@ public static class SceneSerializer
     {
         internal readonly Dictionary<Entity, Guid> Ids = new();
         public World World { get; }
+        internal bool UserDataMode;   // v2.0 : UserData を書いている (シーンの物への参照は書かない / [Serializable] なクラスを書く)
+        internal int Depth;           // v2.0 : 入れ子のクラスの深さ (自分を指すクラスで止まらないように)
         internal WriteContext(World world) => World = world;
         // 表に無い物は World から引く (コンポーネント 1 つだけを書く時に、全部の物の表を作らないため。ED4)
         public Guid? IdOf(Entity entity)
@@ -52,6 +54,8 @@ public static class SceneSerializer
         public World         World  { get; }
         public AssetManager? Assets { get; }
         public List<string>  Warnings { get; } = new();
+        internal bool UserDataMode;   // v2.0 : UserData を読んでいる
+        internal int Depth;
         internal ReadContext(World world, AssetManager? assets) { World = world; Assets = assets; }
         public Entity EntityOf(Guid id) =>
             Entities.TryGetValue(id, out var e) ? e : Existing != null && Existing.TryGetValue(id, out var found) && World.IsAlive(found) ? found : Entity.Null;
@@ -463,9 +467,13 @@ public static class SceneSerializer
         var underlying = Nullable.GetUnderlyingType(type);
         if (underlying != null) type = underlying;
         if (value == null) { w.WriteNullValue(); return; }
+        // v2.0 : UserData の中のシーンの物への参照は書かない (アセットはシーンの外にあるので。Unity / RE Engine と同じ)
+        if (context.UserDataMode && UserDataTypes.IsSceneReference(type)) { w.WriteNullValue(); return; }
         Converter? converter;
         lock (_converters) _converters.TryGetValue(type, out converter);
         if (converter != null) { converter.Write(w, value, context); return; }
+        // v2.0 : UserData (別のアセット) はパス。型ごとに登録しないで、派生クラス全部をここで扱う
+        if (value is UserData userData) { writeAsset(w, userData.Path); return; }
         // v1.20 GO3 : ComponentRef<T> など (型引数ごとに書き方を登録しないで、相手の Id を書く)
         if (value is IEntityRef reference)
         {
@@ -506,6 +514,20 @@ public static class SceneSerializer
             w.WriteEndObject();
             return;
         }
+        // v2.0 : UserData の中の [Serializable] なクラス (Unity と同じ。深すぎる入れ子は null)
+        if (context.UserDataMode && isSerializableClass(type) && context.Depth < MaxClassDepth)
+        {
+            context.Depth++;
+            w.WriteStartObject();
+            foreach (var field in ComponentType.SerializedFields(type))
+            {
+                w.WritePropertyName(field.Name);
+                writeValue(w, field.FieldType, field.GetValue(value), context);
+            }
+            w.WriteEndObject();
+            context.Depth--;
+            return;
+        }
         w.WriteNullValue();   // 書き方の分からないクラス (RegisterConverter で足せる)
     }
 
@@ -514,9 +536,15 @@ public static class SceneSerializer
         var underlying = Nullable.GetUnderlyingType(type);
         if (e.ValueKind == JsonValueKind.Null) return underlying != null || !type.IsValueType ? null : Activator.CreateInstance(type);
         if (underlying != null) type = underlying;
+        // v2.0 : UserData の中のシーンの物への参照は読まない (空のまま)
+        if (context.UserDataMode && UserDataTypes.IsSceneReference(type)) return Activator.CreateInstance(type);
         Converter? converter;
         lock (_converters) _converters.TryGetValue(type, out converter);
         if (converter != null) return converter.Read(e, context);
+        // v2.0 : UserData (別のアセット)。読んだ物の型が合わなければ読まない (警告に入れる)
+        if (typeof(UserData).IsAssignableFrom(type))
+            return readAsset<UserData?>(e, context, path => context.Assets!.LoadUserData(path) is var data && type.IsInstanceOfType(data) ? data :
+                                        throw new InvalidDataException($"'{path}' is {data.GetType().Name}, not {type.Name}"), null);
         // v1.20 GO3 : ComponentRef<T> など (読み込み先の World の物。無い物は空の値)
         if (EntityRefs.IsEntityRef(type))
             return EntityRefs.Create(type, context.World, e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var refGuid) ? context.EntityOf(refGuid) : Entity.Null);
@@ -556,6 +584,19 @@ public static class SceneSerializer
                 if (e.TryGetProperty(field.Name, out var value)) field.SetValue(boxed, readValue(value, field.FieldType, context));
             }
             return boxed;
+        }
+        // v2.0 : UserData の中の [Serializable] なクラス
+        if (context.UserDataMode && isSerializableClass(type) && e.ValueKind == JsonValueKind.Object)
+        {
+            if (context.Depth >= MaxClassDepth) return null;
+            context.Depth++;
+            var instance = Activator.CreateInstance(type)!;
+            foreach (var field in ComponentType.SerializedFields(type))
+            {
+                if (e.TryGetProperty(field.Name, out var value)) field.SetValue(instance, readValue(value, field.FieldType, context));
+            }
+            context.Depth--;
+            return instance;
         }
         throw new NotSupportedException($"Cannot read {type.Name} from {e.ValueKind}");
     }

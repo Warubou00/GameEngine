@@ -50,6 +50,7 @@ internal sealed partial class Inspector
 
     private string? _assetPickerField;
     private AssetKind[] _assetPickerKinds = Array.Empty<AssetKind>();
+    private Type? _assetPickerUserDataType;   // v2.0 UD2 : UserData の欄の型 (窓を開いている間だけ。閉じたら捨てる)
     private string _assetPickerSearch = "";
     private bool _assetPickerFocus;
     private readonly List<AssetEntry> _assetPickerItems = new();
@@ -62,7 +63,8 @@ internal sealed partial class Inspector
     internal IReadOnlyList<AssetEntry> AssetPickerItems => _assetPickerItems;
 
     /// <summary>アセットの選ぶ窓の一覧を作る (確認からも呼ぶ)。search : 名前 / パスの一部</summary>
-    internal void BuildAssetPickerItems(AssetKind[] kinds, string search)
+    //   v2.0 UD2 : userDataType = UserData の欄の型 (その型 / 派生の型のファイルだけ。null なら型で絞らない)
+    internal void BuildAssetPickerItems(AssetKind[] kinds, string search, Type? userDataType = null)
     {
         _assetPickerItems.Clear();
         _assetPickerBuiltFor = search;
@@ -72,6 +74,7 @@ internal sealed partial class Inspector
         foreach (var entry in database.Entries)
         {
             if (Array.IndexOf(kinds, entry.Kind) < 0) continue;
+            if (userDataType != null && !IsUserDataOf(entry, userDataType)) continue;
             if (search.Length > 0 && entry.Path.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0 &&
                 entry.Label.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
             _assetPickerItems.Add(entry);
@@ -105,6 +108,7 @@ internal sealed partial class Inspector
             AssetPickerOpenRequest = null;
             _assetPickerField = label;
             _assetPickerKinds = kinds;
+            _assetPickerUserDataType = typeof(UserData).IsAssignableFrom(valueType) ? valueType : null;   // v2.0 UD2
             _assetPickerSearch = "";
             _assetPickerBuiltFor = null;
             _assetPickerFocus = true;
@@ -141,14 +145,15 @@ internal sealed partial class Inspector
         if (!ImGui.BeginPopup(AssetPickerPopup))
         {
             _assetPickerField = null;
+            _assetPickerUserDataType = null;   // v2.0 : ゲームの型を持ち続けない (読み直した古い DLL が解放されるように)
             return null;
         }
         string? result = null;
         if (_assetPickerFocus) { ImGui.SetKeyboardFocusHere(); _assetPickerFocus = false; }
         ImGui.SetNextItemWidth(-1);
         ImGui.InputTextWithHint("##search", "Search name or path", ref _assetPickerSearch, 128);
-        if (_assetPickerBuiltFor != _assetPickerSearch) BuildAssetPickerItems(_assetPickerKinds, _assetPickerSearch);
-        ImGui.TextDisabled($"{_assetPickerItems.Count} {string.Join(" / ", _assetPickerKinds)}");
+        if (_assetPickerBuiltFor != _assetPickerSearch) BuildAssetPickerItems(_assetPickerKinds, _assetPickerSearch, _assetPickerUserDataType);
+        ImGui.TextDisabled($"{_assetPickerItems.Count} {(_assetPickerUserDataType != null ? _assetPickerUserDataType.Name : string.Join(" / ", _assetPickerKinds))}");
         ImGui.Separator();
         if (ImGui.BeginChild("list", new Vector2(0, 0)))
         {
