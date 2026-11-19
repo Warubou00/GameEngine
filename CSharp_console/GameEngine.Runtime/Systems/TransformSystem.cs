@@ -35,7 +35,7 @@ internal sealed class TransformSystem : ISystem
 
     public void Update(World world) => update(world, keepChanged: false);
 
-    // 剛体が位置を書いた後に、子だけ計算し直す (Changed は下ろさない。剛体の行列を描画へ送る印を消さないため)
+    // 剛体が位置を書いた後 / LateUpdate の後 (v2.1) に計算し直す (Changed は下ろさない。このフレームで動いた物を描画へ送る印を消さないため)
     internal void UpdateAgain(World world) => update(world, keepChanged: true);
 
     private void update(World world, bool keepChanged)

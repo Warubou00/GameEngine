@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 
 namespace GameEngine.Editor;
 
@@ -9,6 +9,7 @@ internal sealed partial class EditorApp
 {
     public UndoStack UndoHistory => _undo;
     public Engine Engine => _engine;
+    internal ImGuiBackend ImGuiHost => _imgui;   // v2.1 : 確認 (窓の並びの ini)
     public string? PlaySnapshot => _playSnapshot;
     public bool IsPlaying => _playing;
     public bool IsPaused  => _paused;

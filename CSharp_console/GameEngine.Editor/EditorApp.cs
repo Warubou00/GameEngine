@@ -182,6 +182,7 @@ internal sealed partial class EditorApp
             _undo.Clear();
             _savedState = _undo.State;
             focusSceneCamera();
+            rememberScene();   // v2.1 : 次に開いた時もこのシーン
         }
         catch (Exception ex)
         {
@@ -210,6 +211,7 @@ internal sealed partial class EditorApp
         _engine.SaveScene(path);
         _scenePath = path;
         _savedState = _undo.State;
+        rememberScene();   // v2.1 (名前を付けて保存した時は新しい名前を覚える)
         Console.WriteLine($"[Editor] Saved {path}");
     }
 
@@ -295,6 +297,7 @@ internal sealed partial class EditorApp
         _widgetDesigner.Draw(ref _showWidgetDesigner);   // v1.7
         _preview.Draw();               // AN5
         _collisionEditor.Draw();       // v1.9
+        drawLayoutsWindow();           // v2.1
         _shaders?.Update();
         _scripts.Update();
 
@@ -458,7 +461,8 @@ internal sealed partial class EditorApp
                 if (Preferences != null) { Preferences.RunInBackground = runInBackground; Preferences.Save(); }
             }
             ImGui.Separator();
-            if (ImGui.MenuItem("Reset Layout")) _resetLayout = true;
+            drawLayoutMenu();   // v2.1 : 窓の並びのプリセット (Default + 登録した 5 つまで)
+            if (ImGui.MenuItem("Reset Layout")) ApplyDefaultLayout();   // 以前は _resetLayout を立てるだけ (窓の出す / 出さないは戻らなかった)
             ImGui.EndMenu();
         }
         // ヘルプ (ED9)
