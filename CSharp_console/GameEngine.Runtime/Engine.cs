@@ -970,7 +970,10 @@ public sealed class Engine : IDisposable
                 Profiler.BeginSample("LateUpdate (game systems)");
                 try { updateLateSystems(); }
                 catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }   // v1.7
-                _transformSystem.Update(World);
+                // v2.1 : Changed を下ろさずに計算し直す (UpdateAgain)。
+                //   以前は Update を呼んでいて、Update / 物理で動いた物の Changed を下ろしてしまい、RenderSyncSystem が何も送らなかった
+                //   (Behaviour<T> は全部 ILateSystem なので、Behaviour を 1 つでも使うと動いた物が描画で止まって見えた)
+                _transformSystem.UpdateAgain(World);
                 Profiler.EndSample();
             }
             // v1.7 : UI (シーンの UIWidget の反映 / 並べる / クリック / 描く)。エディターの GUI より前 (シーンビューの絵の上に描くため)

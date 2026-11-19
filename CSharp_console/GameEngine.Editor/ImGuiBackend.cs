@@ -93,6 +93,28 @@ internal sealed unsafe class ImGuiBackend : IDisposable
     [DllImport("imm32.dll")] private static extern bool ImmSetCompositionWindow(IntPtr himc, ref COMPOSITIONFORM form);
     [DllImport("imm32.dll")] private static extern bool ImmSetCandidateWindow(IntPtr himc, ref CANDIDATEFORM form);
 
+    // 記号の字の範囲 (ImGui は文字の表を作り終わるまでポインタを持つので、解放しないメモリに置く。0 で終わる)
+    private static readonly IntPtr SymbolRanges = makeRanges(
+        0x2010, 0x206F,   // 句読点 (― ‥ … ※ ‼)
+        0x2100, 0x214F,   // 文字のような記号 (℃ № ™)
+        0x2150, 0x218F,   // 数の形 (Ⅰ Ⅱ ⅰ)
+        0x2190, 0x21FF,   // 矢印 (→ ⇒)
+        0x2200, 0x22FF,   // 数学の記号 (∞ ≠ ≦)
+        0x2460, 0x24FF,   // 囲み数字 (① ⑳ ⓐ)
+        0x2500, 0x257F,   // 罫線 (─ │)
+        0x25A0, 0x25FF,   // 図形 (■ □ ▲ △ ◆ ○ ●)
+        0x2600, 0x26FF,   // その他の記号 (★ ☆ ♪ ♥)
+        0x3200, 0x32FF);  // 囲みの CJK (㈱ ㊤)
+
+    private static IntPtr makeRanges(params ushort[] ranges)
+    {
+        var memory = Marshal.AllocHGlobal((ranges.Length + 1) * sizeof(ushort));
+        var span = new Span<ushort>((void*)memory, ranges.Length + 1);
+        ranges.CopyTo(span);
+        span[^1] = 0;
+        return memory;
+    }
+
     private void buildFont(ImGuiIOPtr io)
     {
         // 英数字 : Segoe UI / 日本語 : メイリオ (ttc の 0 番) を重ねる (MergeMode。先に入れた字が優先)
@@ -113,6 +135,11 @@ internal sealed unsafe class ImGuiBackend : IDisposable
             var config = newFontConfig(merge: loaded);
             io.Fonts.AddFontFromFileTTF(meiryo, 17.0f, config, io.Fonts.GetGlyphRangesJapanese());
             ImGuiNative.ImFontConfig_destroy(config);
+            // v2.1 : 日本語の文でよく使う記号 (① ★ ※ → … など。窓の並びの名前など自由な名前のため)。GetGlyphRangesJapanese には入っていない
+            //   以前はこれらが「?」で出ていた
+            var symbols = newFontConfig(merge: true);
+            io.Fonts.AddFontFromFileTTF(meiryo, 17.0f, symbols, SymbolRanges);
+            ImGuiNative.ImFontConfig_destroy(symbols);
             loaded = true;
         }
         if (!loaded) io.Fonts.AddFontDefault();
@@ -163,8 +190,22 @@ internal sealed unsafe class ImGuiBackend : IDisposable
         }
         // 欄を書いている間に WinForms が IME を外した時 (窓のフォーカスを戻した時など) は付け直す (v1.3)
         if (_imeWanted && !ImeEnabled) ImmAssociateContextEx(_engine.Window.Handle, IntPtr.Zero, IACE_DEFAULT);
+        // v2.1 : 窓の並びのプリセット。ImGui はフレームの外でしか ini を読めないので、ここ (NewFrame の前) で読む
+        if (_pendingLayout is { } layout)
+        {
+            _pendingLayout = null;
+            ImGui.LoadIniSettingsFromMemory(layout);
+        }
         ImGui.NewFrame();
     }
+
+    private string? _pendingLayout;
+
+    /// <summary>今の窓の並び (imgui.ini と同じ文字列。v2.1)</summary>
+    public string SaveLayout() => ImGui.SaveIniSettingsToMemory();
+
+    /// <summary>次のフレームの頭で窓の並びを読む (v2.1。フレームの途中では読めないため)</summary>
+    public void LoadLayout(string ini) => _pendingLayout = ini;
 
     // フレームの終わり : ImGui の描画の内容を 1 つの配列にまとめて C++ へ
     public void Render()

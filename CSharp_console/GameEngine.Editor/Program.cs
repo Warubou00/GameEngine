@@ -114,6 +114,14 @@ internal static class Program
         var defaultScene = Path.Combine(scenes, "showcase.scene.json");
         if (!File.Exists(defaultScene) && Directory.Exists(scenes))
             defaultScene = Directory.EnumerateFiles(scenes, "*.scene.json").Order(StringComparer.OrdinalIgnoreCase).FirstOrDefault() ?? defaultScene;
+        // v2.1 : --scene が無ければ、前に開いていたシーン (プロジェクトの Library/EditorState.json。ランチャーから開いた時も)
+        //   以前はいつも showcase (無ければ Scenes の最初のシーン) だった
+        editor.RememberLastScene = !args.Contains("--editor-test") && !options.ContainsKey("--quit-after");
+        if (!options.ContainsKey("--scene") && !args.Contains("--editor-test") && EditorApp.ReadLastScene(database) is { } lastScene)
+        {
+            defaultScene = lastScene;
+            Console.WriteLine($"[Editor] Last opened scene : {database.ToAssetPath(lastScene)}");
+        }
         var scenePath = options.GetValueOrDefault("--scene", defaultScene);
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
         else if (!options.ContainsKey("--scene") && !Directory.EnumerateFiles(database.AssetsRoot, "*.scene.json", SearchOption.AllDirectories).Any())

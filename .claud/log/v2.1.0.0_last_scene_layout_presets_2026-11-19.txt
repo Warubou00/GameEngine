@@ -1,0 +1,61 @@
+v2.1.0.0 : 前に開いていたシーンを開く / 窓の並びのプリセット / Behaviour があると動いた物が描画されないのを直す
+ブランチ : feature/v21-editor-layout-presets (develop から。未コミット)
+日付 : 2026-11-19
+
+■ 依頼
+「先ほどのエンジンの修正とともに、以下の機能を追加。
+ 1. Luncher から開いたとき、前回開いていた Scene を開いた状態にする
+ 2. レイアウトのプリセット登録 (最大 5 つ + デフォルト。名前は日本語を含む任意の名前)
+ v2.1.0.0 として Package まで」
+「先ほどのエンジンの修正」= PazzleGame の仕様書 §10 #10 (別のセッションで見つけた、エンジン側の修正の待ち) と判断した。
+
+■ 1. エンジンの修正 (§10 #10 : Behaviour<T> を 1 つでも使うと、動いた物が描画に送られない)
+- 原因 : Behaviour<T> は全部 ILateSystem。Engine.Run は LateUpdate の後に _transformSystem.Update(World) を呼び、
+  Update / 物理で立てた Transform.Changed を下ろしていた (行列は同じなので立て直さない) → RenderSyncSystem が何も送らない
+- 直し : そこを UpdateAgain (keepChanged: true。剛体の後の計算と同じ) にした (GameEngine.Runtime/Engine.cs)
+  TransformSystem.cs はコメントだけ
+- 確認 : 直しを一時的に戻すと確認が FAIL (0 / 5 フレーム)、直すと PASS (5 / 5) になることを見た
+
+■ 2. 前に開いていたシーン
+- シーンを開く / 保存する / 名前を変えると、プロジェクトの Library/EditorState.json ({"LastScene": "Assets/..."}) に書く
+  (Library は git に入れない。新しいプロジェクトの .gitignore にも Library/ がある。Unity も Library に覚える)
+- Program.cs : --scene が無ければそのシーンを開く (ランチャーは --project だけを渡すので、ランチャーから開いた時も効く)。
+  無い / Assets の外 / 壊れたファイルなら今まで通り showcase → Scenes の最初のシーン
+- --editor-test / --quit-after では書かない (EditorApp.RememberLastScene = false)。--editor-test では読まない
+- 確認 : EditorState.json に physics.scene.json を書いて --project ... --quit-after 60 で起動 → "[Editor] Last opened scene : Assets/Scenes/physics.scene.json"
+
+■ 3. 窓の並びのプリセット (View > Layout)
+- Default (既定の並び) + 登録した並び 5 つまで。選ぶとその並び + 窓を出すか (Hierarchy / Inspector / Console / Project / Profiler 系 /
+  Render Graph Viewer / Frame Debugger) に戻る
+- Save Layout... / Manage Layouts... → Layouts の窓 : 名前を付けて登録 (Save As New / Enter)、Load / Overwrite / Rename / Delete (2 回押す) / 上下
+- 名前 : 日本語可、32 文字まで、前後の空白は取る。空 / 同じ名前 (大文字小文字を区別しない) / "Default" は断る (理由を窓に出す)
+- 置き場 : %LOCALAPPDATA%\Tsumugi Engine\Editor\layouts.json (クラッシュレポートと同じフォルダ)。
+  Package のエディターのフォルダは版を上げると消えるので、exe の隣 (editor_prefs.json / imgui.ini の所) には置かなかった。
+  プロジェクトにも依らない (Unity の Layout と同じ)。書く時は .tmp に書いてから置き換える
+- 読み方 : ImGui はフレームの途中で ini を読めないので、ImGuiBackend.LoadLayout で預け、次の NewFrame の前に LoadIniSettingsFromMemory
+- View > Reset Layout は Default と同じにした (以前は docking だけ戻し、閉じた窓は閉じたままだった)
+- フォント : 名前に使いそうな記号 (① ★ ※ → … ℃ Ⅱ ■ ♪ ㈱ など) が「?」で出ていたので、メイリオから記号の範囲も重ねた
+  (GetGlyphRangesJapanese に入っていない。起動時に 1 回作るだけ)
+
+■ 作った物 / 変えた物
+- 新 GameEngine.Editor/LayoutPresets.cs (保存 / 名前の確かめ / 追加・上書き・名前の変更・消す・並べ替え)
+- 新 GameEngine.Editor/EditorApp.Layouts.cs (View > Layout のメニュー / Layouts の窓 / 前に開いていたシーン)
+- 新 GameEngine.Editor/EditorTest.Layouts.cs (確認 layouts / 撮影 layouts-view)
+- EditorApp.cs (OpenScene・SaveSceneTo で覚える / メニュー / 窓を描く)、EditorApp.Rename.cs、EditorApp.Edit.cs (ImGuiHost。確認用)、
+  ImGuiBackend.cs (SaveLayout / LoadLayout / 記号の字)、Program.cs (起動のシーン)、EditorTest.cs (section と全体の確認に追加)
+- GameEngine.Runtime/Engine.cs、Systems/TransformSystem.cs (上の直し)
+- Engine.props : 2.1.0.0
+- Docs/Reference/template.html : 「窓の並びのプリセット / 前に開いていたシーン (v2.1)」の記事、起動の引数の説明
+
+■ 確認
+- ビルド : GameEngine.Editor (Release x64) エラー 0。警告 3 つは前からの物 (EditorApp.cs 117 / 536、EditorTest.cs 1939)
+- --editor-test-section layouts : 18 / 0
+  (Behaviour があっても動いた物の Changed が残る / Default で Hierarchy と Console が別 / 名前の確かめ / 日本語の名前で登録 /
+   docking と窓の出す・出さないが残る / 同じ名前を断る / Default で戻る / 登録した並びで戻る / 5 つまで / 名前の変更・並べ替え・消す /
+   ファイルから読み直す / 日本語が \u にならない / シーンを覚える / 無い・外・壊れたファイルを無視)
+- --editor-test (全部) : 713 / 0 (フォントを変えた後にもう一度回した結果は下の追記)
+- layouts-view を撮影して、日本語と記号の名前 (作業用 レイアウト① / ★ステージ編集 → 確認※ / UI 調整 (大きい画面)) が正しく出ることを見た
+
+■ 残り / 注意
+- 実際のマウスでのメニュー操作 (View > Layout) は撮影していない (Layouts の窓は撮影で確認)
+- PazzleGame の仕様書 §10 #10 の記述 (代わりに ISystem で書く) は、このエンジンの版からは不要になる。仕様書の更新はそちらのセッションで

@@ -62,7 +62,10 @@ internal sealed partial class EditorApp
             path.StartsWith(oldPath + "/", StringComparison.OrdinalIgnoreCase) ? newPath + path[oldPath.Length..] : null;
         // 開いているシーン (またはそれを含むフォルダ) の名前が変わった : 保存先を新しいパスに
         if (_scenePath != null && map(Path.GetRelativePath(_database.ProjectRoot, _scenePath).Replace('\\', '/')) is { } moved)
+        {
             _scenePath = _database.FullPath(moved);
+            rememberScene();   // v2.1 : 覚えたシーンのパスも新しい名前に
+        }
         _build.OnAssetRenamed(map);
         if (!_playing) remapSubScenePaths(map);   // v1.14 S3 : SubScene のパスも
         Console.WriteLine($"[Assets] Renamed {oldPath} -> {newPath}");

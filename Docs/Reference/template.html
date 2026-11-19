@@ -205,6 +205,7 @@ svg .bandlabel { fill: var(--faint); font-size: 12px; font-weight: 700; letter-s
 <h3>エディターの起動の引数</h3>
 <pre><code>GameEngine.Editor.exe [--project &lt;folder&gt;] [--scene &lt;path&gt;] [--open-graph Assets/....shadergraph.json]
                       [--editor-test] [--resave-scenes] [--quit-after N]</code></pre>
+<p>v2.1 : <code>--scene</code> が無ければ、前に開いていたシーン (プロジェクトの <code>Library/EditorState.json</code>) を開く。</p>
 </article>
 
 <article data-id="ecs" data-title="コンポーネントと System を足す">
@@ -623,6 +624,28 @@ var type = engine.Assets.LoadUserData&lt;EnemyType&gt;("Assets/Data/Slime.userda
 </ul>
 <p>見本 (v2.0) : <code>Assets/Scenes/userdata_demo.scene.json</code> + <code>Scripts/UserDataDemo.cs</code> + <code>Assets/Samples/UserData</code>。<code>EnemyType</code> (スライム / ゴーレム) と <code>WaveTable</code> (Stage1) を UserData で作り、Spawner が表の順に、EnemyType の Body (プレハブ) から Hp / Speed / Scale の敵を出す。</p>
 <p>確認 : <code>--editor-test --editor-test-section userdata</code> (撮影用 <code>userdata-view</code>、書き出し <code>userdata-build</code>、速さ <code>userdata-bench</code>)</p>
+</article>
+
+<article data-id="layouts" data-title="窓の並びのプリセット / 前に開いていたシーン (v2.1)">
+<h2>窓の並びのプリセット / 前に開いていたシーン (v2.1)</h2>
+<h3>窓の並びのプリセット (View &gt; Layout)</h3>
+<ul>
+  <li><b>Default</b> (既定の並び。消せない) と、自分で登録した並び <b>5 つまで</b>。メニューで選ぶと、その並び (窓の位置 / 大きさ / docking) と「どの窓を出すか」に戻る</li>
+  <li><b>Save Layout...</b> / <b>Manage Layouts...</b> で Layouts の窓 : 今の並びを名前を付けて登録 (Save As New)、Load / Overwrite (今の並びで上書き) / Rename / Delete (2 回押す) / 上下で並べ替え</li>
+  <li>名前は自由 (日本語も可、32 文字まで)。前後の空白は取る。空 / 同じ名前 (大文字小文字を区別しない) / "Default" は断る</li>
+  <li>中身 = ImGui の ini (<code>ImGui.SaveIniSettingsToMemory</code>) + ini に入らない窓を出すかの印 (Hierarchy / Inspector / Console / Project / Profiler / CPU / GPU / Rendering Stats / Memory / Render Graph Viewer / Frame Debugger)。読むのは次のフレームの頭 (<code>ImGuiBackend.LoadLayout</code> → NewFrame の前に <code>LoadIniSettingsFromMemory</code>。ImGui はフレームの途中では ini を読めない)</li>
+  <li>置き場 : <code>%LOCALAPPDATA%\Tsumugi Engine\Editor\layouts.json</code> (プロジェクトにもエディターの版にも依らない。Package のエディターのフォルダは版を上げると消えるので exe の隣に置かない)。コードは <code>LayoutPresets.cs</code> / <code>EditorApp.Layouts.cs</code></li>
+  <li>View &gt; Reset Layout は Default と同じ (以前は窓の出す / 出さないは戻らなかった)</li>
+</ul>
+<h3>前に開いていたシーン</h3>
+<ul>
+  <li>シーンを開く / 保存する / 名前を変えると、プロジェクトの <code>Library/EditorState.json</code> (<code>{"LastScene": "Assets/..."}</code>。Library は git に入れない) に覚える</li>
+  <li>次にエディターを開いた時 (ランチャーから <code>--project</code> で開いた時も)、<code>--scene</code> が無ければそのシーンを開く。無い / Assets の外 / 壊れたファイルなら、今まで通り showcase → Scenes の最初のシーン</li>
+  <li><code>--editor-test</code> / <code>--quit-after</code> では覚えない・読まない (リポジトリの Project の次の起動を変えないため)</li>
+</ul>
+<h3>直したこと : Behaviour があると動いた物が描画されない</h3>
+<p>Behaviour&lt;T&gt; は全部 ILateSystem なので、1 つでもあると Engine.Run は LateUpdate の後に Transform を計算し直す。以前はそこで <code>TransformSystem.Update</code> を呼び、Update / 物理で立てた <code>Transform.Changed</code> を下ろしていたため、RenderSyncSystem が何も送らなかった。今は <code>UpdateAgain</code> (Changed を下ろさない)。</p>
+<p>確認 : <code>--editor-test --editor-test-section layouts</code></p>
 </article>
 
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
