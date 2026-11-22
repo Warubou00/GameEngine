@@ -1,0 +1,76 @@
+v2.2.0.0 : 点光源 / スポットライト (UE 相当) + クラスター + エディターのスプラッシュ画面  (2026-11-22, branch feature/v22-local-lights-splash)
+=====================================================================================================
+
+■ 依頼
+  1. ポイントライト、スポットライトの機能。UE 相当
+  2. ランチャーからエディターを起動する時に白い窓が出て分かりづらい → スプラッシュ画面
+  + CLAUD.md 5-11 : 前の版のエディターを残す (Package)
+
+■ 変更 (L1 : スポットライト / UE の項目)
+  RHI/Source/Public/rhiTypes.h
+    - LightType::Spot、LIGHT_NO_SHADOW。LightData 48 → 80 byte
+      (SpotScale / SpotOffset / SourceRadius / FalloffExponent / ShadowIndex / ShadowNear / ShadowBias / ShadowTan)
+    - LightingSettings 16 → 32 byte (Flags : LIGHTING_FLAG_CLUSTERED)
+    - ShadowSettings 48 → 64 byte (LocalShadowMap / LocalSoftness / LocalSliceCount)、MAX_LOCAL_SHADOW_SLICES = 24、LOCAL_SHADOW_VIEW_BEGIN
+  RHI/Source/Shader/hlslTemplate.shader
+    - LightData を 80 byte に。localAttenuation (UE の Inverse Squared / 指数)、spotAttenuation (内側 / 外側の角度)
+    - SourceRadius : 鏡面反射を Representative Point (Karis 2013) + 粗さを広げた分の明るさを下げる
+    - shadeLights を shadeOneLight に分けた (計算は以前と同じ。平行光源 / 点光源の見た目は変わらない)
+  C# : Components/Light.cs (PointLight に UE の項目、SpotLight を新規)、Systems/LightSystem.cs (並び : 平行 → 点 → スポット)、
+       Native/NativeMethods.cs (構造体)
+  エディター : EditorApp.Lights.cs (GameObject > Light / シーンビューのライトの印 (クリックで選べる) / 選んだライトの範囲)
+
+■ 変更 (L2 : 点光源 / スポットライトの影)
+  - 影の枚の割り当ては C# の LightSystem (カメラから届く球の端までの近い順。Max Shadow Slices まで。スポット 1 / 点光源 6)
+  - Buffer::computeLocalShadowViews : 枚ごとの行列 (スポット = 透視 1 枚 / 点光源 = 6 方向 90 度 + 縁の余白)
+  - シェーダーの localShadow は行列を受け取らず LightData から同じ投影を作り直す (frame constants を増やさない)
+  - カリング : Buffer::GetShadowCullPlanes (点光源の 6 面はライトを囲む箱で 1 回)。CommandContext の影の視点の判定を広げた
+  - ShadowPass : Local Shadow Map (Depth32 の配列、6 枚単位で増やす)。カメラが何台でも 1 フレーム 1 回
+  - FrameConstants の ShadowPadding[3] → LocalShadowTexture / TexelSize / Softness (大きさは 768 byte の枠の中)
+
+■ 変更 (L3 : クラスター)
+  - Buffer::buildClusters (CPU) : 16 x 9 x 24 段 (対数)。球を画面に映す (Mara & McGuire 2013)。スポットは円錐を囲む球
+  - Buffer::WriteClusters : フレームの始めに全部のカメラの分を VRAM へ (変わった枠だけ。途中で状態を変えない)
+  - ルートシグネチャ [9] = t6 (StructuredBuffer<uint> g_Clusters)。Pipeline.h / Pipeline.cpp
+  - Project Settings > Rendering > Local Lights (Clustered / Shadows / Shadow Resolution / Max Shadow Slices / Shadow Softness)
+
+■ 変更 (スプラッシュ画面)
+  - GameEngine.Editor/SplashScreen.cs : 別スレッド (STA) の枠なしの窓。段階 / 経過時間 / 進み具合 / 最後のログの行
+  - EngineSettings.ShowWindow (既定 true = 以前と同じ)。false なら最初のフレームを描いてから出す (Engine.WindowShown)
+    隠している間は後ろにあっても止めない
+  - Editor/Program.cs : 段階を出す。--editor-test / --quit-after / --resave-scenes / --no-splash では出さない
+  - ConsoleLog.LineWritten (ログの行をスプラッシュへ)
+
+■ Package (CLAUD.md 5-11)
+  - Tools/make_package.py : 今の版の Editor/<名前>_v<版> だけ作り直し、前の版は残す (README にも書いた)
+
+■ 見本 / 計測
+  - GameEngine_console --scene lights (--view spot / --small-lights off)、--light-bench N (--clustered on|off)、--gpu-stats on
+  - エディターのテスト : --editor-test-section lights (EditorTest.Lights.cs)
+
+■ ビルド
+  - RHI / Renderer : Debug / Release とも成功 (警告は以前からの C4251 だけ)
+  - Runtime / Editor / GameEngine_console / Launcher / Player : 成功 (警告は以前からの物だけ)
+
+■ 確認
+  - 見本 (--scene lights) を窓だけ撮って確認 : 点光源の影 (球 / 柱)、スポットの円錐と影 (柱の影が円錐の中に入る)、色つきの小さな点光源。
+    Forward / Deferred / MSAA4 とも見た目が出る
+  - Debug (D3D12 デバッグレイヤー) : Deferred + クラスター / 影の切り替え、Forward + MSAA4 でエラー / 警告なし
+  - エディターのテスト : lights 16 / 0、全体 728 / 0
+  - スプラッシュ画面 : 起動 2 秒で表示 (Building game scripts... / 経過時間 / ログの行)、読み込みが終わるとエディターの窓に替わる
+
+■ 計測 (RTX 2070 / Release / 1280x720 / GPU の描画パスの合計 / 起動 3 秒以降の平均)
+  --light-bench N (点光源 N 個、影なし)   クラスター OFF → ON
+    2 個     0.295 → 0.289 ms
+    4 個     0.328 → 0.294 ms
+    8 個     0.383 → 0.300 ms
+    64 個    1.276 → 0.419 ms
+    256 個   4.386 → 0.935 ms
+  見本のシーン (showcase。点光源 2 / 平行光源 1)   OFF 0.682 / 0.674 → ON 0.697 / 0.686 ms (+0.01 ms、ほぼ誤差の範囲)
+  --scene lights (影の枚 8 : 点光源 1 + スポット 2)   影 OFF 0.496 ms → ON 0.708 ms (+0.21 ms)
+
+■ 気を付けること
+  - LightData / LightingSettings / ShadowSettings の大きさを変えたので、RHI と Renderer を Debug / Release の両方でビルドし直すこと
+    (古い Renderer.dll は LightingSettings を 16 byte しか写さない)
+  - 既存のシーンの PointLight は CastShadows = false のまま (見た目と重さを変えない)。新しい SpotLight は既定で影あり
+  - 点光源 / スポットの影は 1 フレームごとに全部描き直す (UE のような動かない物のキャッシュはまだ無い)

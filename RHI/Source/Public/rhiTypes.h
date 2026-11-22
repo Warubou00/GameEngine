@@ -340,19 +340,33 @@ namespace RHI
 	{
 		Directional = 0,   // 太陽 (向きだけ)
 		Point       = 1,   // 点光源 (位置と届く距離)
+		Spot        = 2,   // v2.2 : スポットライト (位置 + 向き + 円錐の角度)
 	};
 
-	// シェーダーの struct LightData と同じ並び (48byte)
+	// LightData.ShadowIndex : 影を持たないライト
+	static constexpr uint32_t LIGHT_NO_SHADOW = 0xFFFFFFFFu;
+
+	// シェーダーの struct LightData と同じ並び (80byte。v2.2 で 48byte から増やした)
+	//   v2.2 : スポットライト / UE と同じ項目 (光源の大きさ・減衰の指数) / 点光源・スポットライトの影
 	struct LightData
 	{
 		float     Position[3] = {};
-		float     Range       = 10.0f;
-		float     Direction[3] = { 0.0f, -1.0f, 0.0f };   // 光が進む向き (Directional)
+		float     Range       = 10.0f;                       // 届く距離 (UE の Attenuation Radius)
+		float     Direction[3] = { 0.0f, -1.0f, 0.0f };      // 光が進む向き (Directional / Spot)
 		LightType Type        = LightType::Directional;
 		float     Color[3]    = { 1.0f, 1.0f, 1.0f };
 		float     Intensity   = 1.0f;
+		// ---------- v2.2 ----------
+		float     SpotScale       = 0.0f;   // スポット : 1 / (cos(内側) - cos(外側))
+		float     SpotOffset      = 0.0f;   // スポット : -cos(外側) × SpotScale  (円錐の減衰 = saturate(L・D × Scale + Offset)²)
+		float     SourceRadius    = 0.0f;   // 光源の半径 (鏡面反射のハイライトが広がる。UE の Source Radius)
+		float     FalloffExponent = 0.0f;   // 0 : 距離の 2 乗で弱くなる (物理的。UE の Inverse Squared Falloff) / それ以外 : (1 - (d/r)²)^指数
+		uint32_t  ShadowIndex     = LIGHT_NO_SHADOW;   // 影 : シャドーマップの配列の何枚目から (点光源は 6 枚)。RHI は SetLights で受けたまま使う
+		float     ShadowNear      = 0.05f;  // 影 : ライトの視点の手前の面
+		float     ShadowBias      = 1.5f;   // 影 : 法線方向へずらす量 (シャドーマップの 1 texel の何倍か)
+		float     ShadowTan       = 1.0f;   // 影 : 視野の半分の tan (スポット = tan(外側の角度) / 点光源 = 1 + 縁の余白)
 	};
-	static_assert(sizeof(LightData) == 48, "LightData must be 48 bytes (same as HLSL)");
+	static_assert(sizeof(LightData) == 80, "LightData must be 80 bytes (same as HLSL / C#)");
 
 	enum class LightingModel : uint32_t
 	{
@@ -361,11 +375,20 @@ namespace RHI
 		PBR     = 2,   // 物理ベース (GGX / 金属・粗さ)
 	};
 
+	// v2.2 : ライティングの印
+	enum LightingFlags : uint32_t
+	{
+		LIGHTING_FLAG_CLUSTERED = 1,   // クラスター : 画面を区切り、そこに届く点光源 / スポットライトだけを回す (オフ = 全部のライトを回す)
+	};
+
 	struct LightingSettings
 	{
 		LightingModel Model      = LightingModel::PBR;
 		float         Ambient[3] = { 0.25f, 0.27f, 0.30f };   // 環境光 (空の明るさ)
+		uint32_t      Flags      = LIGHTING_FLAG_CLUSTERED;   // v2.2 : LightingFlags (以前は 16byte だった)
+		uint32_t      Padding[3] = {};
 	};
+	static_assert(sizeof(LightingSettings) == 32, "LightingSettings must be 32 bytes (same as C#)");
 
 	// ==========================================================================
 	// 影 (平行光源 1 つのシャドーマップ)
@@ -447,9 +470,19 @@ namespace RHI
 		float    CascadeBlend = 0.1f;                       // 段の境目をなめらかにつなぐ幅 (段の奥行きに対する割合。0 なら切り替えるだけ)
 		uint32_t Flags        = 0;                          // ShadowFlags
 		uint32_t FrozenMask   = 0;                          // このフレームは行列を作り直さない (描き直さない) カスケード (ビット)
-		uint32_t Padding      = 0;
+		// ---------- v2.2 : 点光源 / スポットライトの影 (Enabled とは別。LocalShadowMap が INVALID なら無し) ----------
+		//   以前はここが Padding (48byte) だった
+		uint32_t LocalShadowMap  = RenderTargetHandle::INVALID;   // Depth32 の配列 (LightData.ShadowIndex 番目の枚から読む)
+		float    LocalSoftness   = 1.0f;                          // PCF で読む間隔 (texel)
+		uint32_t LocalSliceCount = 0;                             // 使う枚数 (視点の数。MAX_LOCAL_SHADOW_SLICES まで)
+		uint32_t Padding         = 0;
+		uint32_t Padding1        = 0;
 	};
-	static_assert(sizeof(ShadowSettings) == 48, "ShadowSettings must be 48 bytes (same as C#)");
+	static_assert(sizeof(ShadowSettings) == 64, "ShadowSettings must be 64 bytes (same as C#)");
+
+	// v2.2 : 点光源 / スポットライトの影の枚数の上限 (スポット 1 枚 / 点光源 6 枚)。視点の番号は 1 + MAX_SHADOW_CASCADES + 枚の番号
+	static constexpr uint32_t MAX_LOCAL_SHADOW_SLICES = 24;
+	static constexpr uint32_t LOCAL_SHADOW_VIEW_BEGIN = 1 + MAX_SHADOW_CASCADES;
 
 	enum ShadowFlags : uint32_t
 	{

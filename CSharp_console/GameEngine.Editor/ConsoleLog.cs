@@ -20,6 +20,9 @@ internal sealed class ConsoleLog : TextWriter
 
     public ConsoleLog(TextWriter original) => _original = original;
 
+    // v2.2 : 1 行書き終えた時 (スプラッシュ画面に今の作業を出す)。書いたスレッドから呼ばれる
+    public Action<string>? LineWritten { get; set; }
+
     public override Encoding Encoding => _original.Encoding;
 
     public override void Write(char value)
@@ -43,6 +46,7 @@ internal sealed class ConsoleLog : TextWriter
         _lines.Add(line);
         if (_lines.Count > MaxLines) _lines.RemoveRange(0, _lines.Count - MaxLines);
         _scrollToBottom = true;
+        LineWritten?.Invoke(line);
     }
 
     public void Draw(ref bool open)

@@ -576,6 +576,9 @@ namespace RHI
 			_materialAddress = buffer->WriteMaterials(_frameIndex, cmdList);   // AN5 : プレビューでも使う
 			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_MATERIAL_SRV, _materialAddress);
 			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_LIGHT_SRV,    buffer->WriteLights(_frameIndex, cmdList));
+			// v2.2 : クラスター (全部のカメラの分をここで写す。カメラを切り替えた時はアドレスだけ付け替える)
+			buffer->WriteClusters(_frameIndex, cmdList);
+			cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_CLUSTER_SRV,  buffer->GetClusterAddress(_frameIndex));
 
 			// 描画ごとのデータ (DrawData) と引数を用意する (描画リストが同じなら前回のものを使い回す)
 			_scene.Reused = updateDraws(frame, buffer, items, count);
@@ -825,6 +828,7 @@ namespace RHI
 					{
 						_frameConstantsAddress = buffer->WriteFrameConstants(_frameIndex);
 						cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
+						cmdList->SetGraphicsRootShaderResourceView(Pipeline::ROOT_PARAM_CLUSTER_SRV, buffer->GetClusterAddress(_frameIndex));   // v2.2
 						_scene.Culled = false;
 						_culledView   = 0xFFFFFFFFu;
 					}
@@ -1379,7 +1383,8 @@ namespace RHI
 			const bool        opaque  = queue == static_cast<uint32_t>(RHI::RenderQueue::Opaque);
 			if (!opaque && gbuffer) return;   // 半透明は G-Buffer に書けない (ディファードでも Forward で重ねる)
 
-			if (view > buffer->GetShadowViewCount()) return;   // 影の視点が無い (影なし / カスケードの数を超えた)
+			// 影の視点が無い (影なし / カスケードの数を超えた / v2.2 : 使っていない点光源・スポットライトの枚)
+			if (buffer->IsLocalShadowView(view) ? !buffer->IsLocalShadowViewValid(view) : view > buffer->GetShadowViewCount()) return;
 			if (view == 0) ensureShadowReadable();              // カメラの描画は影を読む
 
 			// シーンの深度も深度のレンダーターゲットも D32_FLOAT (以前はシーンの深度だけ)
@@ -1472,13 +1477,13 @@ namespace RHI
 				else
 				{
 					// 段ごとにカリングする (既定) / 全カスケードを囲む箱で 1 回だけ数えて全段で使う (SHADOW_FLAG_UNION_CULLING)
-					const bool     unionCulling = buffer->IsShadowUnionCulling();
-					const uint32_t cullKey      = unionCulling ? SHADOW_UNION_VIEW : view;
+					// v2.2 : 点光源の 6 面はライトを囲む箱で 1 回 (key が同じ視点は数え直さない)
+					uint32_t cullKey = 0;
+					const ::DirectX::XMFLOAT4* cullPlanes = buffer->GetShadowCullPlanes(view, cullKey);
 					if (_culledView != cullKey)
 					{
 						_cullShadowView = true;   // v1.5 : 影を落とさない物を外す
-						recordCulling(frame, buffer, _scene.ObjectData, 0, true,
-							unionCulling ? buffer->GetShadowUnionPlanes() : buffer->GetFrustumPlanes(view), false);
+						recordCulling(frame, buffer, _scene.ObjectData, 0, true, cullPlanes, false);
 						_cullShadowView = false;
 						_culledView = cullKey;
 					}
@@ -1636,12 +1641,17 @@ namespace RHI
 
 		void CommandContext::ensureShadowReadable()
 		{
-			if (_shadowMapTarget >= _renderTargets.size() || _shadowMapTarget == _boundDepth) return;
-			RenderTarget& target = _renderTargets[_shadowMapTarget];
-			if (!target.Alive || target.State == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) return;
-			const auto barrier = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-			_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
-			target.State = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			// v2.2 : 点光源 / スポットライトのシャドーマップも (以前は平行光源の 1 枚だけ)
+			const uint32_t handles[] = { _shadowMapTarget, _localShadowMapTarget };
+			for (const uint32_t handle : handles)
+			{
+				if (handle >= _renderTargets.size() || handle == _boundDepth) continue;
+				RenderTarget& target = _renderTargets[handle];
+				if (!target.Alive || target.State == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) continue;
+				const auto barrier = makeTransitionBarrier(target.Resource.Get(), target.State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+				_frameCommandList->GetCmdList()->ResourceBarrier(1, &barrier);
+				target.State = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			}
 		}
 
 		void CommandContext::SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings)
@@ -1661,8 +1671,23 @@ namespace RHI
 			{
 				s.Enabled = 0;   // シャドーマップが無い / 深度でない
 			}
+			// v2.2 : 点光源 / スポットライトの影のシャドーマップ (Depth32 の配列)
+			_localShadowMapTarget = RHI::RenderTargetHandle::INVALID;
+			uint32_t localTexture = 0xFFFFFFFFu, localResolution = 1;
+			if (s.LocalSliceCount > 0 && s.LocalShadowMap < _renderTargets.size() && _renderTargets[s.LocalShadowMap].Alive && _renderTargets[s.LocalShadowMap].IsDepth)
+			{
+				const RenderTarget& target = _renderTargets[s.LocalShadowMap];
+				localTexture          = target.SrvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+				localResolution       = target.Width;
+				_localShadowMapTarget = s.LocalShadowMap;
+			}
+			else
+			{
+				s.LocalSliceCount = 0;
+			}
 			_shadowBuffer = buffer;
 			buffer->SetShadowSettings(s, texture, resolution);
+			buffer->SetLocalShadowMap(localTexture, localResolution);
 		}
 
 		void CommandContext::transitionDepth(D3D12_RESOURCE_STATES after)
@@ -2069,6 +2094,12 @@ namespace RHI
 				// 影が読んでいるシャドーマップ : 消える SRV を読まないように影を止める (C# が次に設定し直すまで)
 				_shadowMapTarget = RHI::RenderTargetHandle::INVALID;
 				_shadowBuffer->SetShadowSettings(RHI::ShadowSettings(), 0, 1);
+			}
+			if (handle.Index == _localShadowMapTarget && _shadowBuffer)
+			{
+				// v2.2 : 点光源 / スポットライトのシャドーマップも同じ
+				_localShadowMapTarget = RHI::RenderTargetHandle::INVALID;
+				_shadowBuffer->SetLocalShadowMap(0xFFFFFFFFu, 1);
 			}
 			RenderTarget& target = _renderTargets[handle.Index];
 			if (_heapManager && target.SrvIndex != DirectX12::DescriptorHeapManager::INVALID_INDEX) _heapManager->FreeSrv(target.SrvIndex);

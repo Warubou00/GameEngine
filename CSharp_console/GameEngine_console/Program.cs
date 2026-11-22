@@ -37,6 +37,10 @@ namespace GameEngine_console;
 //                                 J 噴水のエミッターを外す・付け直す。--view fountain|smoke で近くから見る
 //   --particle-bench N          : GPU パーティクルを N 個保ち続ける (計測。[ParticleBench] を出す)
 //   --particle-sort on|off / --particle-collision on|off / --particle-capacity N / --particle-half on|off : GPU パーティクルの設定
+//   --scene lights              : v2.2 点光源 / スポットライトの見本 (影を落とす点光源 1 / スポット 2 / 小さな点光源 16)。--view spot
+//   --light-bench N             : v2.2 点光源を N 個動かす (計測。[LightBench] を出す)。--clustered on|off / --local-shadows on|off
+//                                 L : クラスターの ON / OFF、K : 点光源 / スポットライトの影の ON / OFF
+//   --gpu-stats on              : v2.2 どのシーンでも、GPU の時間 (描画パスの合計) の平均を [LightBench] に出す
 //   見本のシーン (ED6) : 見本 (既定 / --scene physics / --scene particles) は、プロジェクトのシーンのファイル
 //                       (CSharp_console/Project/Assets/Scenes/showcase|physics|particles.scene.json) から読む。
 //                       --view を付けた時 / 計測の時はコードで作る
@@ -100,8 +104,10 @@ internal static class Program
         var physicsScene = options.GetValueOrDefault("--scene", "") == "physics";
         var particleScene = options.GetValueOrDefault("--scene", "") == "particles";
         var particleBench = options.TryGetValue("--particle-bench", out var particleText) && int.TryParse(particleText, out var pn) ? pn : 0;
-        // 物理 / パーティクルの見本は、見本のシーン (Showcase) と原点の箱を置かない
-        var physicsOnly  = physicsScene || physicsBench > 0 || particleScene || particleBench > 0;
+        var lightScene = options.GetValueOrDefault("--scene", "") == "lights";   // v2.2
+        var lightBench = options.TryGetValue("--light-bench", out var lightText) && int.TryParse(lightText, out var ln) ? ln : 0;
+        // 物理 / パーティクル / ライトの見本は、見本のシーン (Showcase) と原点の箱を置かない
+        var physicsOnly  = physicsScene || physicsBench > 0 || particleScene || particleBench > 0 || lightScene || lightBench > 0;
 
         // 原点に 1 個 (動かないので Static)
         if (!physicsOnly)
@@ -130,6 +136,16 @@ internal static class Program
         if (particleScene) ParticleDemo.Spawn(engine, box);
         if (particleBench > 0) ParticleBench.Spawn(engine, box, particleBench);
         if (particleScene || particleBench > 0) engine.AddSystem(new ParticleHotkeySystem(engine.Graphics.Particles));
+        // v2.2 : 点光源 / スポットライトの見本 / 計測
+        if (lightScene) LightDemo.Spawn(engine, box, options.GetValueOrDefault("--small-lights", "on") != "off");
+        if (lightBench > 0) LightBench.Spawn(engine, box, lightBench);
+        if (options.TryGetValue("--clustered", out var clustered))         engine.Graphics.LocalLights.Clustered = clustered != "off";
+        if (options.TryGetValue("--local-shadows", out var localShadows))  engine.Graphics.LocalLights.Shadows   = localShadows != "off";
+        if (options.GetValueOrDefault("--gpu-stats", "off") == "on" && lightBench == 0)   // どのシーンでも GPU の時間を [LightBench] に出す (計測)
+        {
+            engine.AddSystem(new LightBenchSystem(engine.Graphics, 0));
+            Profiler.PassTimingEnabled = true;
+        }
         if (options.TryGetValue("--particle-sort", out var particleSort))           engine.Graphics.Particles.Sorting   = particleSort != "off";
         if (options.TryGetValue("--particle-collision", out var particleCollision)) engine.Graphics.Particles.Collision = particleCollision != "off";
         if (options.TryGetValue("--particle-half", out var particleHalf))           engine.Graphics.Particles.HalfResolution = particleHalf != "off";
@@ -172,6 +188,8 @@ internal static class Program
         // ---------- カメラ ----------
         var camera = world.CreateEntity();
         var cameraStart = particleScene ? ParticleDemo.CameraFor(view)
+                        : lightScene ? LightDemo.CameraFor(view)
+                        : lightBench > 0 ? Transform.LookingAt(new Vector3(0, 14, -26), new Vector3(0, 0, 0))
                         : particleBench > 0 ? Transform.LookingAt(new Vector3(0, 6, -20), new Vector3(0, 4, 4))
                         : physicsOnly ? Transform.LookingAt(new Vector3(0, 9, -24), new Vector3(0, 2, 0))
                         : Transform.LookingAt(new Vector3(0, 5, -10), Vector3.Zero);
@@ -205,9 +223,13 @@ internal static class Program
 
         // ---------- ライト / 描画パイプライン ----------
         // 太陽 (斜め上から)。見本のシーンには点光源も置く (Showcase)
-        var sun = world.CreateEntity();
-        world.Add(sun, Transform.LookingAt(Vector3.Zero, new Vector3(0.4f, -1.0f, 0.6f)));
-        world.Add(sun, new DirectionalLight { Color = new Vector3(1.0f, 0.95f, 0.88f), Intensity = 1.6f });
+        //   v2.2 : ライトの見本 / 計測には置かない (夜のシーン。自分で暗い月明かりを置く)
+        if (!lightScene && lightBench == 0)
+        {
+            var sun = world.CreateEntity();
+            world.Add(sun, Transform.LookingAt(Vector3.Zero, new Vector3(0.4f, -1.0f, 0.6f)));
+            world.Add(sun, new DirectionalLight { Color = new Vector3(1.0f, 0.95f, 0.88f), Intensity = 1.6f });
+        }
 
         if (options.TryGetValue("--pipeline", out var pipelineName) && GraphicsHotkeySystem.ParsePipeline(pipelineName) is { } pipeline)
         {
@@ -310,7 +332,7 @@ internal static class Program
     private static string? sampleSceneFile(string? project, Dictionary<string, string> options, int stressCount, int benchCount, int physicsBench, int particleBench)
     {
         if (project == null || options.GetValueOrDefault("--code-scene", "off") == "on" || options.ContainsKey("--view")) return null;
-        if (stressCount > 0 || benchCount > 0 || physicsBench > 0 || particleBench > 0) return null;
+        if (stressCount > 0 || benchCount > 0 || physicsBench > 0 || particleBench > 0 || options.ContainsKey("--light-bench")) return null;
         var name = options.GetValueOrDefault("--scene", "showcase");
         var file = Path.Combine(project, "Assets", "Scenes", $"{name}.scene.json");
         return File.Exists(file) ? file : null;

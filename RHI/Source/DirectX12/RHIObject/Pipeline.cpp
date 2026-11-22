@@ -428,6 +428,15 @@ namespace RHI
             customData.Descriptor.Flags                    = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
             customData.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
+            // [9]: v2.2 クラスター (t6) - Root SRV (StructuredBuffer<uint>)。段ごとの (先頭 | 数 << 20) とライトの番号の並び
+            //      ピクセルシェーダーが自分の段の一覧だけを回す (Buffer::WriteClusters がフレームの始めに VRAM へ写す)
+            auto& clusterData = rootParams[ROOT_PARAM_CLUSTER_SRV];
+            clusterData.ParameterType                      = D3D12_ROOT_PARAMETER_TYPE_SRV;
+            clusterData.Descriptor.ShaderRegister          = 6;
+            clusterData.Descriptor.RegisterSpace           = 0;
+            clusterData.Descriptor.Flags                   = D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE;
+            clusterData.ShaderVisibility                   = D3D12_SHADER_VISIBILITY_PIXEL;
+
             // 静的サンプラーの設定 (s0)
             D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
             samplerDesc.Filter                    = D3D12_FILTER_MIN_MAG_MIP_LINEAR; // ミップマップ間も線形補間 (トライリニア)

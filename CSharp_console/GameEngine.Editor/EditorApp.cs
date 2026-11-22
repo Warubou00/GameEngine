@@ -375,6 +375,7 @@ internal sealed partial class EditorApp
                     if (ImGui.MenuItem(shape.ToString())) CreatePrimitive(shape, ImGui.GetIO().KeyShift ? _selected : Entity.Null);
                 ImGui.EndMenu();
             }
+            drawLightMenu();   // v2.2 : Directional / Point / Spot
             ImGui.Separator();
             if (ImGui.MenuItem("Camera"))          CreateCamera();   // v1.5 (以前は Render Settings。描き方はカメラごとになった)
             if (ImGui.MenuItem("Volume (Box)"))    CreateVolume(VolumeShape.Box);
@@ -562,13 +563,17 @@ internal sealed partial class EditorApp
                 var camera = new SceneCamera(_cameraPosition, cameraRotation, FieldOfView, min, new Vector2(width, height));
                 drawSelection(camera, draw);
                 drawVolume(camera, draw);
+                drawLightRange(camera, draw);   // v2.2
+                drawLightIcons(camera, draw);
                 drawExtensionGizmos(camera, draw);
                 updateGizmo(camera, draw);
                 // クリックで選ぶ (ギズモを掴んだ時 / カメラを回している時は選ばない)
                 if (_sceneHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_gizmo.Dragging && !_flying)
                 {
                     var mouse = ImGui.GetIO().MousePos;
-                    Selected = _picker.Pick(_cameraPosition, camera.RayDirection(mouse), out _);
+                    // v2.2 : ライトの印を先に見る (ライトには形が無いので、物の選び方では選べない)
+                    var light = pickLightIcon(mouse);
+                    Selected = !light.IsNull ? light : _picker.Pick(_cameraPosition, camera.RayDirection(mouse), out _);
                 }
                 draw.AddText(min + new Vector2(8, 6), 0xC0FFFFFF, "Click : select / Right drag : look (+ WASD QE : move) / Wheel : zoom / W E R : gizmo / F : focus");
             }

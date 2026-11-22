@@ -3,7 +3,7 @@
 # Package を作る (Visual Studio / .NET / DirectX の SDK を入れていない PC へ持っていくためのフォルダ)
 #   python Tools/make_package.py [--skip-build] [--out <フォルダ>]
 #     --skip-build : ビルドしない (前にビルドした物を写すだけ)
-#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher (Data 以外) / Editor は作り直す
+#     --out        : 書き出し先 (既定はリポジトリの Package)。中の Luncher (Data 以外) / Editor の今の版は作り直す (前の版は残す。v2.2)
 #                    (Project の中は消さない。--fresh-project で SampleProject だけ写し直す)
 #
 #   Package/
@@ -136,19 +136,25 @@ def main():
     # 作り直す (v1.3 : 動かさない。以前は Luncher/Data と SampleProject を一度 _keep へ動かしていたが、
     #   Visual Studio が SampleProject を開いていると途中で止まり、Luncher/Data が _keep に残った。また Project の他の物 (ランチャーで
     #   作ったプロジェクト) を消していた)
-    #   Luncher : Data (ランチャーの設定) 以外を作り直す / Editor : 全部作り直す (前の版も消す。いつも一番新しい版だけ)
+    #   Luncher : Data (ランチャーの設定) 以外を作り直す
+    #   Editor  : v2.2 : 今の版のフォルダだけ作り直し、前の版のフォルダは残す (前の版で作り始めたゲームを、その版のエディターで開き続けられるように。
+    #             ランチャーの Installs / 版の選択に全部の版が出る。以前は全部消して、いつも一番新しい版だけだった)
     #   Project : 消さない (SampleProject が無い時か --fresh-project の時だけ写す。ある時は csproj だけ新しくする)
     os.makedirs(out, exist_ok=True)
     launcher_dir = os.path.join(out, "Luncher")
     os.makedirs(launcher_dir, exist_ok=True)
     for entry in os.listdir(launcher_dir):
-        if entry.lower() == "data":
+        # v2.2 : 自分で置いたショートカット (.lnk) も残す (以前は Data 以外を全部消していた)
+        if entry.lower() == "data" or entry.lower().endswith(".lnk"):
             continue
         path = os.path.join(launcher_dir, entry)
         shutil.rmtree(path) if os.path.isdir(path) else os.remove(path)
-    if os.path.isdir(os.path.join(out, "Editor")):
-        shutil.rmtree(os.path.join(out, "Editor"))
-    os.makedirs(os.path.join(out, "Editor"))
+    os.makedirs(os.path.join(out, "Editor"), exist_ok=True)
+    if os.path.isdir(os.path.join(out, "Editor", folder_name)):
+        shutil.rmtree(os.path.join(out, "Editor", folder_name))   # 同じ版を作り直す時だけ消す
+    kept = sorted(d for d in os.listdir(os.path.join(out, "Editor")) if d != folder_name)
+    if kept:
+        print(f"Editor : keep previous versions {', '.join(kept)}")
     os.makedirs(os.path.join(out, "Project"), exist_ok=True)
 
     no_pdb = lambda rel: rel.lower().endswith(".pdb")
@@ -214,6 +220,7 @@ Visual Studio / .NET / DirectX の SDK を入れていない PC でも動くよ�
 
 メモ
   ランチャーの設定は Luncher\\Data に書きます (フォルダごと持ち運べます)
+  前の版のエディターも Editor の下に残します。ランチャーの版の選択で、前の版を選んでプロジェクトを開けます
   書き出したゲームにも .NET が入ります (Build Settings の Include .NET。約 100 MB)
 """)
 

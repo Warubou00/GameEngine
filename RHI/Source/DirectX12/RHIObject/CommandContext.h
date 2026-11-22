@@ -539,6 +539,7 @@ namespace RHI
             bool recreateSceneTargets();   // 深度 / Hi-Z / 画面に合わせるレンダーターゲットを今の大きさで作り直す
             uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ
             Buffer*                                              _shadowBuffer    = nullptr;   // SetShadowSettings の Buffer (所有しない)
+            uint32_t                                             _localShadowMapTarget = RHI::RenderTargetHandle::INVALID;   // v2.2 : 点光源 / スポットライトの影
             // GPU カリングの結果 (Culled) が今どの視点のものか (カメラ 0 / 影 1〜。フレームの初めは無し)
             uint32_t                                             _culledView      = 0xFFFFFFFFu;
             bool                                                 _cullShadowView  = false;   // v1.5 : 今のカリングは影の視点 (影を落とさない物を外す)
