@@ -235,7 +235,8 @@ internal sealed unsafe partial class CollisionSystem
         _settings.IslandMs           = stats.IslandMs;
         _settings.SystemMs      = (float)System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;   // 表示の線を描く前まで
 
-        if (_settings.ShowColliders) drawColliders(world);
+        if (_settings.ShowCollidersSolid) drawCollidersSolid(world);   // v2.2 : 塗りつぶし (CollisionMap)
+        else if (_settings.ShowColliders) drawColliders(world);
         if (_settings.ShowColliders || _settings.ShowJoints) drawJoints(world);   // ED6 : ジョイントだけも出せる
         if (_settings.ShowContacts)  drawContacts();
         _retired.Clear();   // 消した体のイベントは、このフレームで受け取り終わった (v1.9)
@@ -321,6 +322,95 @@ internal sealed unsafe partial class CollisionSystem
     }
 
     // 確認用 : コライダーを線で描く (C++ と同じ計算でワールドの形にする)
+    // ==============================================================
+    // v2.2 : コライダーを塗りつぶしで描く (エディターの CollisionMap)
+    //   色 : 動かない物 灰 / 剛体 緑 / 眠っている剛体 青 / 重なっている 赤 / トリガー 黄 (半透明) / コリジョンアセットの部品 水色
+    //        ColliderColorsByLayer ならレイヤーごとの色 (トリガーは半透明のまま)
+    //   メッシュのコライダーは三角形をそのまま描く (CollisionMesh が持つ形)
+    // ==============================================================
+    private void drawCollidersSolid(World world)
+    {
+        var byLayer = _settings.ColliderColorsByLayer;
+        uint stateColor(bool trigger, bool sleeping, bool overlap, bool isStatic, int layer, bool part)
+        {
+            var alpha = trigger ? 0.35f : 1.0f;
+            if (byLayer) { var h = CollisionDraw.LayerHue(layer); return DebugDraw.Color(h.X, h.Y, h.Z, alpha); }
+            if (trigger)  return DebugDraw.Color(1.0f, 0.85f, 0.2f, alpha);
+            if (sleeping) return DebugDraw.Color(0.35f, 0.55f, 1.0f);
+            if (overlap)  return DebugDraw.Color(1.0f, 0.3f, 0.25f);
+            if (isStatic) return part ? DebugDraw.Color(0.45f, 0.75f, 0.85f) : DebugDraw.Color(0.62f, 0.62f, 0.64f);
+            return DebugDraw.Color(0.35f, 0.9f, 0.45f);
+        }
+
+        // コリジョンアセット (v1.9) の部品
+        var compounds = world.GetPool<CompoundCollider>();
+        var compoundEntities = compounds.Entities;
+        var transforms = world.GetPool<Transform>();
+        for (int i = 0; i < compoundEntities.Length; i++)
+        {
+            var entity = compoundEntities[i];
+            if ((uint)entity.Id >= (uint)_compoundStates.Length || !world.IsActive(entity)) continue;
+            ref var cs = ref _compoundStates[entity.Id];
+            if (!cs.Active || cs.Handles == null) continue;
+            ref var transform = ref transforms.TryGet(entity.Id, out var found);
+            if (!found) continue;
+            var sleeping = cs.OwnsBody && (uint)entity.Id < (uint)_rigidStates.Length && _states[entity.Id].Rigid != 0 && _rigidStates[entity.Id].Sleeping;
+            foreach (var handle in cs.Handles)
+            {
+                var index = (int)(handle & 0xFFFF);
+                if (handle == PhysicsNativeMethods.InvalidHandle || index >= _bodyParts.Length || _bodyHandles[index] != handle) continue;
+                var part = _bodyParts[index];
+                if (part.Asset == null) continue;
+                CollisionPart? data = null;
+                foreach (ref readonly var p in part.Asset.Parts) if (p.NodeIndex == part.NodeIndex) { data = p; break; }
+                if (data is not { } d) continue;
+                var color = stateColor(d.IsTrigger, sleeping, _partOverlaps[index] > 0, cs.IsStatic, d.Layer, true);
+                CollisionDraw.SolidPart(d, transform.WorldPosition, transform.WorldRotation, transform.WorldScale, color);
+            }
+        }
+
+        var colliders  = world.GetPool<Collider>();
+        var entities   = colliders.Entities;
+        var components = colliders.Components;
+        for (int i = 0; i < components.Length; i++)
+        {
+            ref var transform = ref transforms.TryGet(entities[i].Id, out var found);
+            if (!found || (uint)entities[i].Id >= (uint)_states.Length) continue;
+            ref var state = ref _states[entities[i].Id];
+            if (!state.Active || state.Shape == CompoundShape) continue;
+            if (!world.IsActive(entities[i])) continue;
+            ref var c = ref components[i];
+            var sleeping = state.Rigid != 0 && (uint)entities[i].Id < (uint)_rigidStates.Length && _rigidStates[entities[i].Id].Sleeping;
+            var color = stateColor(c.IsTrigger, sleeping, state.Overlaps > 0, state.IsStatic, c.Layer, false);
+            var worldScale    = transform.WorldScale;
+            var worldRotation = transform.WorldRotation;
+            var scale  = Vector3.Abs(worldScale);
+            var center = transform.WorldPosition + Vector3.Transform(c.Center * worldScale, worldRotation);
+            switch (c.Shape)
+            {
+            case ColliderShape.Sphere:
+                DebugDraw.SolidSphere(center, c.Size.X * MathF.Max(MathF.Max(scale.X, scale.Y), scale.Z), color);
+                break;
+            case ColliderShape.Box:
+                DebugDraw.SolidBox(center, worldRotation, c.Size * scale, color);
+                break;
+            case ColliderShape.Capsule:
+                DebugDraw.SolidCapsule(center, worldRotation, c.Size.X * MathF.Max(scale.X, scale.Z), c.Size.Y * scale.Y, color);
+                break;
+            case ColliderShape.Mesh:
+                if (c.Mesh is { } mesh)
+                {
+                    var matrix = Matrix4x4.CreateScale(worldScale) * Matrix4x4.CreateFromQuaternion(worldRotation) * Matrix4x4.CreateTranslation(transform.WorldPosition);
+                    var p = mesh.Positions;
+                    var idx = mesh.Indices;
+                    Vector3 vertex(uint k) => Vector3.Transform(new Vector3(p[k * 3], p[k * 3 + 1], p[k * 3 + 2]), matrix);
+                    for (int t = 0; t + 2 < idx.Length; t += 3) DebugDraw.Triangle(vertex(idx[t]), vertex(idx[t + 1]), vertex(idx[t + 2]), color);
+                }
+                break;
+            }
+        }
+    }
+
     private void drawColliders(World world)
     {
         var overlapColor = DebugDraw.Color(1.0f, 0.25f, 0.2f);

@@ -388,6 +388,12 @@ extern "C"
 		if (g_renderer) g_renderer->SetDebugLines(vertices, vertices ? count : 0);
 	}
 
+	// v2.2 : 確認用の塗りつぶしの三角形 (3 頂点で 1 枚)。描画パスの DrawDebugTriangles で描く。毎フレーム呼ぶ (0 で消える)
+	RENDERER_API void Renderer_SetDebugTriangles(const RHI::DebugLineVertex* vertices, uint32_t count)
+	{
+		if (g_renderer) g_renderer->SetDebugTriangles(vertices, vertices ? count : 0);
+	}
+
 	// 影 (平行光源 1 つのシャドーマップ)。変わった時だけ呼べばよい
 	RENDERER_API void Renderer_SetShadowSettings(const RHI::ShadowSettings* settings)
 	{

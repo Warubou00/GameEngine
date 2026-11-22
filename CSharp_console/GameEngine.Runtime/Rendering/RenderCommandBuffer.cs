@@ -10,6 +10,7 @@ public enum ScenePass : uint
     GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ (3 枚に描く)
     ForwardSplitAmbient = 2,   // Forward + SSAO 用 : 1 枚目にライトの光、2 枚目に環境光 (後で 環境光 × 遮蔽 を足す)
     Shadow  = 3,   // シャドーマップ : 深度だけ (DrawScene の view でライトの視点を選ぶ。半透明はアルファテスト)
+    Overdraw = 4,  // v2.2 : 重なりを数える (深度を見ずに 1 を加算。描画先は R16F など 1 枚。エディターの DrawMap)
 }
 
 // シーンのどの物を描くか (C++ の RHI::RenderQueue と同じ番号)
@@ -86,6 +87,18 @@ public sealed unsafe class RenderCommandBuffer
     {
         ref var command = ref Add(2);
         command.ClearDepth = depth;
+    }
+
+    /// <summary>
+    /// v2.2 : DebugDraw の塗りつぶしの三角形 (Triangle / SolidBox など) を今の描画先へ描く (深度があれば深度を見て書く)
+    /// wireframe : 辺だけを描く (陰なし。深度は見るが書かない。少し手前にずらすので、同じ三角形の塗りつぶしの上に重ねられる)
+    /// brightness : 色の明るさの倍率 (塗りつぶしに重ねる辺を暗くする時など)
+    /// </summary>
+    public void DrawDebugTriangles(bool wireframe = false, float brightness = 1.0f)
+    {
+        ref var command = ref Add(13);
+        command.Arg0 = wireframe ? 1u : 0u;
+        command.Params[0] = MathF.Max(brightness, 0.0f);
     }
 
     // ---------- 描画 ----------

@@ -183,6 +183,8 @@ namespace RHI
 		virtual void SetShadowSettings(const ShadowSettings& settings) = 0;
 		// 確認用の線 (毎フレーム呼ぶ。0 本で消える)。描くのはこのフレームの描画の最後
 		virtual void SetDebugLines(const DebugLineVertex* vertices, uint32_t count) = 0;
+		// v2.2 : 確認用の塗りつぶしの三角形 (次のフレームの DrawDebugTriangles で描く。3 頂点で 1 枚)
+		virtual void SetDebugTriangles(const DebugLineVertex* vertices, uint32_t count) = 0;
 
 		// UI (毎フレーム呼ぶ。0 個で消える)。描くのはこのフレームの一番最後 (画面へ。プロファイラーの下)
 		virtual void SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,

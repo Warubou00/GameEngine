@@ -13,12 +13,19 @@ public sealed class CollisionMesh
     public int    TriangleCount { get; }
     public string Path          { get; }
 
-    internal CollisionMesh(uint handle, int vertexCount, int triangleCount, string path)
+    // v2.2 : 形 (位置 xyz の並び / 三角形のインデックス)。確認用の表示 (エディターの CollisionMap) で三角形を描く
+    //   C++ へ渡した配列をそのまま持つ (写し直さない)
+    internal float[] Positions { get; }
+    internal uint[]  Indices   { get; }
+
+    internal CollisionMesh(uint handle, int vertexCount, int triangleCount, string path, float[]? positions = null, uint[]? indices = null)
     {
         Handle        = handle;
         VertexCount   = vertexCount;
         TriangleCount = triangleCount;
         Path          = path;
+        Positions     = positions ?? Array.Empty<float>();
+        Indices       = indices ?? Array.Empty<uint>();
     }
 
     public override string ToString() => $"CollisionMesh({Path}, {TriangleCount} triangles)";

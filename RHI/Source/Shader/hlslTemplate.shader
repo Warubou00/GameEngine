@@ -654,6 +654,12 @@ Surface getSurface(VSOutput input)
 // シャドーマップ (半透明) : 深度だけを書く。透明な所 (α < 0.5) は影を落とさない
 //   getSurface は使わない (カメラの行列で位置を戻すので、ライトの視点では合わない。色も要らない)
 // ==============================================================
+// v2.2 : 重なりを数える (エディターの DrawMap)。深度を見ずに 1 を加算する (隠れた面も、半透明も 1 枚と数える)
+float4 PSOverdraw(VSOutput input) : SV_TARGET
+{
+    return float4(1.0f, 0.0f, 0.0f, 0.0f);
+}
+
 void PSShadowAlpha(VSOutput input)
 {
     const MaterialData material = g_Materials[input.MaterialIndex];
@@ -790,4 +796,100 @@ float4 PSDeferredLighting(FullscreenOutput input) : SV_TARGET
 
     const float  ao    = g_Textures[g_Inputs[1].x].SampleLevel(g_LinearClamp, input.UV, 0).r;
     return float4(shade(albedo, normal, V, P, material.x, material.y, ao), 1.0f);
+}
+
+// ==============================================================
+// v2.2 : DrawMap (エディターのシーンビュー。どこに描画の負荷が掛かっているかを、青 → 赤 で出す)
+//   負荷は推定 (GPU の実測ではない。UE の Shader Complexity と同じ考え方) :
+//     重なり (Overdraw) : そのピクセルを塗った面の数 (ScenePass.Overdraw で数えた R16F。隠れた面 / 半透明も数える)
+//     ライト (Lights)   : 一番手前の面の位置に実際に届くライトの数 (平行光源 + 範囲 / 円錐の中の点光源・スポット)
+//     合わせた (Combined) : 重なり × (1 + ライト × 重み)   … ピクセルシェーダーの仕事の量に近い
+//   g_Inputs[0].x = 重なりのテクスチャ / .y = シーンの深度
+//   g_Params[0].x = モード (0 Combined / 1 Overdraw / 2 Lights) / .y = 赤になる値 / .z = ライトの重み / .w = 形の陰の強さ
+// ==============================================================
+
+// 0 → 1 を 青 → 水色 → 緑 → 黄 → 赤 (1 を超えた分は白へ)
+float3 heatColor(float t)
+{
+    static const float3 STOPS[5] = { float3(0.05f, 0.10f, 0.60f), float3(0.0f, 0.70f, 0.95f), float3(0.10f, 0.85f, 0.25f),
+                                     float3(1.0f, 0.90f, 0.10f), float3(1.0f, 0.12f, 0.05f) };
+    const float x = saturate(t) * 4.0f;
+    const uint  i = min((uint)x, 3u);
+    float3 color = lerp(STOPS[i], STOPS[i + 1], x - i);
+    if (t > 1.0f) color = lerp(color, 1.0f.xxx, saturate((t - 1.0f) * 0.5f));
+    return color;
+}
+
+// 位置 P に実際に届くライトの数 (クラスターがあれば自分の段の一覧だけを調べる)
+uint countLightsAt(float3 P)
+{
+    uint count = 0;
+    uint first = 0, total = g_LightCount, start = 0;
+    if (g_ClusterEnabled != 0)
+    {
+        count = g_DirectionalCount;
+        const float4 viewPos = mul(float4(P, 1.0f), g_ViewMatrix);
+        const float4 clip    = mul(viewPos, g_ProjectionMatrix);
+        const float2 ndc     = clip.xy / clip.w;
+        const uint cx = min((uint)max((ndc.x * 0.5f + 0.5f) * CLUSTER_X, 0.0f), CLUSTER_X - 1);
+        const uint cy = min((uint)max((0.5f - ndc.y * 0.5f) * CLUSTER_Y, 0.0f), CLUSTER_Y - 1);
+        const uint cz = (uint)clamp(floor(log2(max(viewPos.z, 1e-4f)) * g_ClusterZScale + g_ClusterZBias), 0.0f, (float)(CLUSTER_Z - 1));
+        const uint header = g_Clusters[(cz * CLUSTER_Y + cy) * CLUSTER_X + cx];
+        first = CLUSTER_COUNT + (header & 0xFFFFFu);
+        total = header >> 20;
+        for (uint n = 0; n < total; ++n)
+        {
+            const LightData light = g_Lights[g_Clusters[first + n]];
+            const float3 toLight = light.Position - P;
+            const float  distance = length(toLight);
+            if (distance >= light.Range) continue;
+            if (light.Type == LIGHT_SPOT && spotAttenuation(light, toLight / max(distance, 1e-4f)) <= 0.0f) continue;
+            count++;
+        }
+        return count;
+    }
+    for (uint i = 0; i < g_LightCount; ++i)
+    {
+        const LightData light = g_Lights[i];
+        if (light.Type == LIGHT_DIRECTIONAL) { count++; continue; }
+        const float3 toLight = light.Position - P;
+        const float  distance = length(toLight);
+        if (distance >= light.Range) continue;
+        if (light.Type == LIGHT_SPOT && spotAttenuation(light, toLight / max(distance, 1e-4f)) <= 0.0f) continue;
+        count++;
+    }
+    return count;
+}
+
+float4 PSDrawMap(FullscreenOutput input) : SV_TARGET
+{
+    const int3  pixel    = int3(input.Position.xy, 0);
+    const float overdraw = g_Textures[g_Inputs[0].x].Load(pixel).r;
+    const float depth    = g_Textures[g_Inputs[0].y].Load(pixel).r;
+    const uint  mode     = (uint)g_Params[0].x;
+    const float maxValue = max(g_Params[0].y, 1e-3f);
+
+    float lights = 0.0f;
+    float shading = 1.0f;
+    if (depth < 1.0f)
+    {
+        const float2 ndc   = float2(input.UV.x * 2.0f - 1.0f, 1.0f - input.UV.y * 2.0f);
+        const float4 world = mul(float4(ndc, depth, 1.0f), g_InvViewProj);
+        const float3 P     = world.xyz / world.w;
+        if (mode != 1) lights = (float)countLightsAt(P);
+        // 形が分かるように、深度から作った面の向きで少し陰を付ける
+        const float3 N = normalize(cross(ddy(P), ddx(P)));
+        const float3 V = normalize(g_CameraPosition - P);
+        shading = lerp(1.0f, 0.55f + 0.45f * abs(dot(N, V)), saturate(g_Params[0].w));
+    }
+    else if (overdraw <= 0.0f)
+    {
+        return float4(0.02f, 0.02f, 0.03f, 1.0f);   // 何も無い所
+    }
+
+    float value;
+    if (mode == 1)      value = overdraw;
+    else if (mode == 2) value = lights;
+    else                value = max(overdraw, 1.0f) * (1.0f + lights * g_Params[0].z);
+    return float4(heatColor(value / maxValue) * shading, 1.0f);
 }

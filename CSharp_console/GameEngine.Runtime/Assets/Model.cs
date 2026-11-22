@@ -324,7 +324,7 @@ public sealed partial class AssetManager
         }
         if (mesh == PhysicsNativeMethods.InvalidHandle) throw new InvalidOperationException($"Failed to create a collision mesh: {model.Path}");
 
-        var result = new CollisionMesh(mesh, (int)vertexCount, (int)(indexCount / 3), model.Path);
+        var result = new CollisionMesh(mesh, (int)vertexCount, (int)(indexCount / 3), model.Path, positions, indices);   // v2.2 : 形も持つ (CollisionMap)
         _collisionMeshes.Add(model.Handle, result);
         return result;
     }

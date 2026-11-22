@@ -107,6 +107,7 @@ namespace RHI
         void                   SetLightingSettings(const LightingSettings& settings)override;
         void                   SetShadowSettings(const ShadowSettings& settings)override;
         void                   SetDebugLines(const DebugLineVertex* vertices, uint32_t count)override;
+        void                   SetDebugTriangles(const DebugLineVertex* vertices, uint32_t count)override;   // v2.2
         void                   SetUIDrawData(const UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
                                              const UIDrawCommand* commands, uint32_t commandCount)override;
         uint32_t               CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba)override;

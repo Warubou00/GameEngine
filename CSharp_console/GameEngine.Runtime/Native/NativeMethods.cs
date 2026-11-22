@@ -486,6 +486,10 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetDebugLines(DebugLineVertex* vertices, uint count);
 
+    // v2.2 : 確認用の塗りつぶしの三角形 (3 頂点で 1 枚)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Renderer_SetDebugTriangles(DebugLineVertex* vertices, uint count);
+
     // ---------- エディター (ED3) ----------
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]

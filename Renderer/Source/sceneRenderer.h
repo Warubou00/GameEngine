@@ -258,6 +258,7 @@ namespace Renderer
 		void SetLightingSettings(const RHI::LightingSettings& settings);
 		void SetShadowSettings(const RHI::ShadowSettings& settings);
 		void SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
+		void SetDebugTriangles(const RHI::DebugLineVertex* vertices, uint32_t count);   // v2.2
 		// エディター (ED3) : シーンを描く大きさ / UI
 		bool     SetRenderSize(uint32_t width, uint32_t height);
 		void     SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,

@@ -1128,6 +1128,11 @@ namespace Renderer
 		if (IsInitialized()) _rhi->SetDebugLines(vertices, count);
 	}
 
+	void SceneRenderer::SetDebugTriangles(const RHI::DebugLineVertex* vertices, uint32_t count)
+	{
+		if (IsInitialized()) _rhi->SetDebugTriangles(vertices, count);   // v2.2
+	}
+
 	void SceneRenderer::SetShadowSettings(const RHI::ShadowSettings& settings)
 	{
 		if (IsInitialized()) _rhi->SetShadowSettings(settings);

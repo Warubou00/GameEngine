@@ -452,6 +452,7 @@ namespace RHI
 
 			// Global定数バッファ (b1) : このフレーム専用の領域に View / Projection を書いてからセットする
 			// (GPU が前のフレームで読んでいる領域を CPU が上書きしないよう、フレームごとに領域を分けている)
+			_debugTrianglesDrawn = false;   // v2.2 : 確認用の三角形はこのフレームで最初に描く時に写す
 			buffer->SelectCamera(0);   // v1.5 : フレームの始めは 0 番のカメラ (カメラが 1 台も無ければ今の行列のまま)
 			_frameConstantsAddress = buffer->WriteFrameConstants(_frameIndex);   // AN5 : プレビューの後に戻す
 			cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
@@ -852,6 +853,11 @@ namespace RHI
 				case RHI::RenderCommandType::EndPass:
 					endPass();                 // v1.10 P2
 					break;
+
+				case RHI::RenderCommandType::DrawDebugTriangles:
+					drawDebugTriangles(command);   // v2.2 : 確認用の塗りつぶしの三角形 (今の描画先へ。Arg0 bit0 = ワイヤーフレーム)
+					graphBoundWrite(true);
+					break;
 				}
 				fdAfterCommand(buffer);   // v1.13 P4 : 止めるイベントを越えたら描画先を写す
 			}
@@ -1210,6 +1216,63 @@ namespace RHI
 			if (_frameConstantsAddress != 0) cmdList->SetGraphicsRootConstantBufferView(Pipeline::ROOT_PARAM_GLOBAL_CBV, _frameConstantsAddress);
 			cmdList->SetPipelineState(_currentPipeline->GetPipelineState());
 			_uiReadTargets.push_back(_boundColors[0]);
+		}
+
+		void CommandContext::SetDebugTriangles(const RHI::DebugLineVertex* vertices, uint32_t count)
+		{
+			count = (std::min)(count, RHI::MAX_DEBUG_TRIANGLE_VERTICES);
+			count -= count % 3;   // 3 頂点で 1 枚
+			_debugTriangles.assign(vertices, vertices + (vertices ? count : 0));
+		}
+
+		// ==============================================================
+		// v2.2 : 確認用の塗りつぶしの三角形 (エディターの CollisionMap など)
+		//   今の描画先 (色 + 深度があれば深度) へ描く。PSO は描画先の形式ごと。面の向きから陰を付ける (debug.shader の PSDebugTriangle)
+		//   UPLOAD バッファはフレームごと。足りなければ大きくして作り直す (そのフレームの領域なので、GPU が読んでいない)
+		//   同じフレームで 2 回描く時 (カメラが 2 台など) は、写すのは最初の 1 回だけ
+		// ==============================================================
+		void CommandContext::drawDebugTriangles(const RHI::RenderCommand& command)
+		{
+			if (_debugTriangles.empty() || !_currentPipeline) return;
+			const DXGI_FORMAT dsvFormat = _boundDepth != RHI::RenderTargetHandle::INVALID ? DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+			const bool wireframe = (command.Arg0 & 1u) != 0;   // v2.2 : ワイヤーフレーム (CollisionMap の Style)
+			ID3D12PipelineState* pso = _currentPipeline->GetDebugTrianglePso(_boundFormats, _boundColorCount, dsvFormat, _boundSamples, wireframe);
+			if (!pso) return;
+			const UINT64 bytes = static_cast<UINT64>(_debugTriangles.size()) * sizeof(RHI::DebugLineVertex);
+			auto& upload = _debugTriangleBuffer[_frameIndex];
+			if (!_debugTrianglesDrawn)
+			{
+				if (!upload || _debugTriangleCapacity[_frameIndex] < bytes)
+				{
+					const UINT64 capacity = (std::max)(bytes * 3 / 2, static_cast<UINT64>(64 * 1024));
+					upload = std::make_unique<DirectX12::ResourceBuffer>();
+					if (FAILED(upload->Create(_device->GetDevice()->GetDevice(), capacity, D3D12_HEAP_TYPE_UPLOAD)) || FAILED(upload->Map()))
+					{
+						Core::Logger::Log("[CommandContext] Failed create debug triangle buffer.");
+						upload.reset();
+						_debugTriangleCapacity[_frameIndex] = 0;
+						return;
+					}
+					_debugTriangleCapacity[_frameIndex] = capacity;
+				}
+				std::memcpy(upload->GetMappedData(), _debugTriangles.data(), static_cast<size_t>(bytes));
+				_debugTrianglesDrawn = true;
+			}
+			if (!upload) return;
+
+			D3D12_VERTEX_BUFFER_VIEW view = {};
+			view.BufferLocation = upload->Get()->GetGPUVirtualAddress();
+			view.SizeInBytes    = static_cast<UINT>(bytes);
+			view.StrideInBytes  = sizeof(RHI::DebugLineVertex);
+			auto cmdList = _frameCommandList->GetCmdList();
+			cmdList->SetPipelineState(pso);
+			// 色の明るさの倍率 (g_Params[0].x。0 なら 1)。ルート定数は全画面のパスと同じ所 (次のパスが自分の値で上書きする)
+			uint32_t constants[Pipeline::PASS_CONSTANT_COUNT] = {};
+			const float brightness = command.Params[0] > 0.0f ? command.Params[0] : 1.0f;
+			std::memcpy(&constants[RHI::MAX_PASS_INPUTS], &brightness, sizeof(brightness));
+			cmdList->SetGraphicsRoot32BitConstants(Pipeline::ROOT_PARAM_PASS_CONSTANTS, Pipeline::PASS_CONSTANT_COUNT, constants, 0);
+			cmdList->IASetVertexBuffers(0, 1, &view);
+			cmdList->DrawInstanced(static_cast<UINT>(_debugTriangles.size()), 1, 0, 0);
 		}
 
 		void CommandContext::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
