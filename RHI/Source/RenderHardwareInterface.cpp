@@ -293,6 +293,11 @@ namespace RHI
         if (_isInitialized) _commandContext->DestroyRenderTarget(handle);
     }
 
+    void RenderHardwareInterface::SetDebugTriangles(const DebugLineVertex* vertices, uint32_t count)
+    {
+        if (_isInitialized) _commandContext->SetDebugTriangles(vertices, count);   // v2.2
+    }
+
     void RenderHardwareInterface::SetDebugLines(const DebugLineVertex* vertices, uint32_t count)
     {
         if (_isInitialized) _commandContext->SetDebugLines(vertices, count);

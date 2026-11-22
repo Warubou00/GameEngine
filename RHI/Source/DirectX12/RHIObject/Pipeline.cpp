@@ -107,6 +107,7 @@ namespace RHI
             Shader::CompiledShader PsForwardSplit;   // PSForwardSplit : ライトの光と環境光を分けて書く (Forward + SSAO)
             Shader::CompiledShader PsForwardAlphaSplit;   // PSForwardAlphaSplit : 半透明 (Forward + SSAO)。環境光を覆った分だけ減らす
             Shader::CompiledShader PsShadowAlpha;    // PSShadowAlpha : シャドーマップ (半透明をアルファテストで描く。不透明はピクセルシェーダー無し)
+            Shader::CompiledShader PsOverdraw;       // v2.2 PSOverdraw : 重なりを数える (1 を加算。エディターの DrawMap)
         };
 
         // 自分のシェーダー (SH2)。PS だけ持つ (VS はシーンの VSMain)。Version は中身を替えるたびに増やす (PSO の鍵に入れる)
@@ -508,6 +509,7 @@ namespace RHI
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit", Shader::Stage::Pixel,  shaders.PsForwardSplit)) return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlphaSplit", Shader::Stage::Pixel, shaders.PsForwardAlphaSplit)) return RHI_FAILED_COMPILED_SHADER;
             if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSShadowAlpha", Shader::Stage::Pixel, shaders.PsShadowAlpha)) return RHI_FAILED_COMPILED_SHADER;
+            if (!_shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSOverdraw",    Shader::Stage::Pixel, shaders.PsOverdraw))    return RHI_FAILED_COMPILED_SHADER;   // v2.2
 
             // 既定の PSO (Forward / 不透明 / HDR + 深度)。コマンドリストのリセットに使い、PSO キャッシュも温める
             const DXGI_FORMAT hdr = HDR_FORMAT;
@@ -601,7 +603,8 @@ namespace RHI
                 _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSGBuffer",           Shader::Stage::Pixel,  scene->PsGBuffer) &&
                 _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardSplit",      Shader::Stage::Pixel,  scene->PsForwardSplit) &&
                 _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSForwardAlphaSplit", Shader::Stage::Pixel,  scene->PsForwardAlphaSplit) &&
-                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSShadowAlpha",       Shader::Stage::Pixel,  scene->PsShadowAlpha);
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSShadowAlpha",       Shader::Stage::Pixel,  scene->PsShadowAlpha) &&
+                _shaderCompiler->Compile(DEFAULT_SHADER_PATH, "PSOverdraw",          Shader::Stage::Pixel,  scene->PsOverdraw);   // v2.2
             if (sceneOk) _sceneShaders = std::move(scene);
             else { Core::Logger::Log("[Pipeline] Scene shader has errors. Keep the previous one."); ok = false; }
 
@@ -647,6 +650,10 @@ namespace RHI
             _psoMap.clear();
             _debugLinePso.Reset();
             _debugLineFailed = false;
+            _debugTriangleVs.clear();   // v2.2 : 次に使う時にコンパイルし直す
+            _debugTrianglePs.clear();
+            _debugWirePs.clear();
+            _debugTriangleFailed = false;
             for (auto& pso : _previewPsos) pso.Reset();   // AN5
             _previewFailed = false;
             _uiPso.Reset();
@@ -700,6 +707,7 @@ namespace RHI
             const bool gbuffer = scenePass == static_cast<uint32_t>(RHI::ScenePass::GBuffer);
             const bool split   = scenePass == static_cast<uint32_t>(RHI::ScenePass::ForwardSplitAmbient);
             const bool shadow  = scenePass == static_cast<uint32_t>(RHI::ScenePass::Shadow);
+            const bool overdraw = scenePass == static_cast<uint32_t>(RHI::ScenePass::Overdraw);   // v2.2
             // 裏面カリング : 片面の不透明な物だけ (ピクセルシェーダーの実行が減る。見本のシーンで GPU 時間 -16%)
             //   面の向き : ローダーの頂点の並びは、カメラから見て時計回りが表 (OBJ / PMX とも。確認済み)
             //   両面の物 / 半透明 (描く順番を崩せないので両面のまま) はカリングしない
@@ -745,6 +753,21 @@ namespace RHI
                 ambient.BlendOp     = D3D12_BLEND_OP_ADD;
             }
 
+            if (overdraw)
+            {
+                // v2.2 : 重なりを数える (エディターの DrawMap)。深度を見ず書かず、1 を加算する (隠れた面も数える)
+                //   不透明の片面は裏面カリングのまま (実際の描画と同じく、裏面はピクセルシェーダーが走らない)
+                desc.PS = shaders.PsOverdraw.View();
+                auto& rt = desc.BlendState.RenderTarget[0];
+                rt.BlendEnable = TRUE;
+                rt.SrcBlend = rt.DestBlend = D3D12_BLEND_ONE;
+                rt.BlendOp  = D3D12_BLEND_OP_ADD;
+                rt.SrcBlendAlpha = rt.DestBlendAlpha = D3D12_BLEND_ONE;
+                rt.BlendOpAlpha  = D3D12_BLEND_OP_ADD;
+                desc.DepthStencilState.DepthEnable    = FALSE;
+                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+            }
+
             desc.NumRenderTargets = rtvCount;
             for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
             desc.DSVFormat = dsvFormat;
@@ -752,7 +775,7 @@ namespace RHI
             // MSAA : 描画先 (色と深度) と同じサンプル数。ピクセルシェーダーは 1 ピクセル 1 回のまま (縁のサンプルだけ増える)
             desc.SampleDesc.Count = (std::max)(1u, sampleCount);
 
-            return createPso(key, shadow ? L"SceneShadow" : gbuffer ? L"SceneGBuffer" : L"SceneForward", desc);
+            return createPso(key, shadow ? L"SceneShadow" : gbuffer ? L"SceneGBuffer" : overdraw ? L"SceneOverdraw" : L"SceneForward", desc);
         }
 
         // ==============================================================
@@ -958,6 +981,59 @@ namespace RHI
             if (!pso) { _debugLineFailed = true; return nullptr; }
             _debugLinePso = pso;
             return pso;
+        }
+
+        // v2.2 : 確認用の塗りつぶしの三角形 (描画先の形式ごと)。深度があれば深度を見て書く。両面を描き、半透明はアルファブレンド
+        //   wireframe : 辺だけ (FillMode = WIREFRAME)。陰を付けない PSDebugWire。塗りつぶしと重ねた時に埋もれないよう少し手前へずらす
+        ID3D12PipelineState* Pipeline::GetDebugTrianglePso(const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount, bool wireframe)
+        {
+            if (rtvCount == 0 || rtvCount > RHI::MAX_PASS_COLOR_TARGETS || _debugTriangleFailed) return nullptr;
+            uint64_t key = fnv1a("DebugTriangle", 13, 0xDEB7A1ull);
+            key = fnv1a(&sampleCount, sizeof(sampleCount), key);
+            key = fnv1a(&wireframe, sizeof(wireframe), key);
+            key = hashFormats(key, rtvFormats, rtvCount, dsvFormat);
+            auto found = _psoMap.find(key);
+            if (found != _psoMap.end()) return found->second.Get();
+
+            if (_debugTriangleVs.empty() || _debugTrianglePs.empty() || _debugWirePs.empty())
+            {
+                Shader::CompiledShader vs, ps, wire;
+                if (!_shaderCompiler->Compile(DEBUG_SHADER_PATH, "VSDebugTriangle", Shader::Stage::Vertex, vs) ||
+                    !_shaderCompiler->Compile(DEBUG_SHADER_PATH, "PSDebugTriangle", Shader::Stage::Pixel, ps) ||
+                    !_shaderCompiler->Compile(DEBUG_SHADER_PATH, "PSDebugWire", Shader::Stage::Pixel, wire))
+                {
+                    Core::Logger::Log("[Pipeline] Failed compile debug triangle shader.");
+                    _debugTriangleFailed = true;
+                    return nullptr;
+                }
+                _debugTriangleVs = std::move(vs.Bytecode);
+                _debugTrianglePs = std::move(ps.Bytecode);
+                _debugWirePs     = std::move(wire.Bytecode);
+            }
+            static const D3D12_INPUT_ELEMENT_DESC inputElements[] = {
+                { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+            };
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = makeBaseDesc(_rootSignature->Get());
+            desc.VS = { _debugTriangleVs.data(), _debugTriangleVs.size() };
+            desc.PS = wireframe ? D3D12_SHADER_BYTECODE{ _debugWirePs.data(), _debugWirePs.size() } : D3D12_SHADER_BYTECODE{ _debugTrianglePs.data(), _debugTrianglePs.size() };
+            desc.InputLayout = { inputElements, _countof(inputElements) };
+            desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+            if (wireframe)
+            {
+                desc.RasterizerState.FillMode             = D3D12_FILL_MODE_WIREFRAME;
+                desc.RasterizerState.DepthBias            = -200;      // 塗りつぶしと同じ深さの辺が埋もれないように少し手前へ (確認用の線の PSO と同じ)
+                desc.RasterizerState.SlopeScaledDepthBias = -1.0f;
+                desc.RasterizerState.DepthBiasClamp       = 0.0f;
+                desc.DepthStencilState.DepthWriteMask     = D3D12_DEPTH_WRITE_MASK_ZERO;   // 辺は深度を書かない (塗りつぶしの深度で隠す)
+            }
+            setAlphaBlend(desc.BlendState.RenderTarget[0]);
+            desc.NumRenderTargets = rtvCount;
+            for (uint32_t i = 0; i < rtvCount; ++i) desc.RTVFormats[i] = rtvFormats[i];
+            desc.DSVFormat = dsvFormat;
+            if (dsvFormat == DXGI_FORMAT_UNKNOWN) desc.DepthStencilState.DepthEnable = FALSE;
+            desc.SampleDesc.Count = (std::max)(1u, sampleCount);
+            return createPso(key, wireframe ? L"DebugWire" : L"DebugTriangle", desc);
         }
 
         ID3D12PipelineState* Pipeline::GetPreviewPso(PreviewPso kind)

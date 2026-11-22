@@ -648,8 +648,8 @@ var type = engine.Assets.LoadUserData&lt;EnemyType&gt;("Assets/Data/Slime.userda
 <p>確認 : <code>--editor-test --editor-test-section layouts</code></p>
 </article>
 
-<article data-id="locallights" data-title="点光源 / スポットライト / クラスター / スプラッシュ画面 (v2.2)">
-<h2>点光源 / スポットライト / クラスター / スプラッシュ画面 (v2.2)</h2>
+<article data-id="locallights" data-title="点光源 / スポットライト / クラスター / スプラッシュ画面 / シーンビューの表示モード (v2.2)">
+<h2>点光源 / スポットライト / クラスター / スプラッシュ画面 / シーンビューの表示モード (v2.2)</h2>
 <h3>コンポーネント (UE の Point Light / Spot Light と同じ項目)</h3>
 <ul>
   <li><code>PointLight</code> : Color / Intensity / Range (UE の Attenuation Radius) / SourceRadius / UseInverseSquaredFalloff / FalloffExponent / CastShadows (既定 off。v2.2 より前のシーンの見た目を変えない) / ShadowBias</li>
@@ -685,7 +685,31 @@ var type = engine.Assets.LoadUserData&lt;EnemyType&gt;("Assets/Data/Slime.userda
 </ul>
 <h3>Package : 前の版のエディターを残す</h3>
 <p><code>Tools/make_package.py</code> は今の版の <code>Editor/&lt;名前&gt;_v&lt;版&gt;</code> だけを作り直し、前の版のフォルダは残す (前の版で作り始めたゲームを、その版で開き続けられるように)。ランチャーの版の選択に全部の版が出る。</p>
-<p>確認 : <code>--editor-test --editor-test-section lights</code> / 見本 <code>GameEngine_console --scene lights</code> (<code>--view spot</code> / <code>--small-lights off</code>)、計測 <code>--light-bench N --clustered on|off</code> / <code>--gpu-stats on</code></p>
+<h3>シーンビューの表示モード (View のプルダウン)</h3>
+<ul>
+  <li>シーンビューのツールバーの <b>View : Default ▼</b>。選んだモードはメインのカメラ (シーンビュー) の描画だけを変える (<code>Graphics.ViewPipelineOverride</code>。ゲームのカメラ / 書き出したゲームには関係しない)。コードは <code>SceneViewModes.cs</code></li>
+  <li><b>Default</b> : 普段の描画</li>
+  <li><b>DrawMap</b> : 描画の負荷の推定を 青 → 水色 → 緑 → 黄 → 赤 で出す (凡例と目盛りつき)。Metric = Combined (重なり × (1 + ライトの数 × 重み)) / Overdraw (塗った面の数。<code>ScenePass.Overdraw</code> で深度を見ずに 1 を加算) / Lights (一番手前の面に実際に届くライトの数。クラスターを使う)。シェーダーは <code>hlslTemplate.shader</code> の <code>PSDrawMap</code>。GPU の実測ではない (UE の Shader Complexity と同じ考え方)。自分のシェーダーの物 / パーティクルは数えない</li>
+  <li><b>CollisionMap</b> : 普段の物を描かず、コライダーの形だけを塗りつぶしで描く (<code>Physics.ShowCollidersSolid</code> → <code>CollisionSystem.drawCollidersSolid</code> が <code>DebugDraw.SolidBox / SolidSphere / SolidCapsule / Triangle</code> を足し、パイプラインが <code>RenderCommandBuffer.DrawDebugTriangles</code> で深度つきで描く)。メッシュのコライダーは三角形そのまま (<code>CollisionMesh</code> が形を持つ)。色は状態 (動かない / 剛体 / 眠っている / 重なっている / トリガー (半透明) / アセットの部品) か、Color by layer でレイヤー</li>
+  <li>CollisionMap の <b>Style</b> : Solid (塗りつぶし) / Wireframe (辺だけ。深度を書かないので裏の辺も透けて見える) / Solid + Wireframe (塗りつぶし + 暗くした辺。隠れた辺は出ない)。<code>cmd.DrawDebugTriangles(wireframe: true, brightness)</code> = <code>FillMode WIREFRAME</code> の PSO (少し手前へずらし、深度は書かない。debug.shader の <code>PSDebugWire</code>)</li>
+  <li>C++ : <code>RHI::ScenePass::Overdraw</code> (加算・深度なしの PSO)、<code>RenderCommandType::DrawDebugTriangles</code> と <code>Renderer_SetDebugTriangles</code> (今の描画先の形式ごとの PSO。debug.shader の <code>VSDebugTriangle / PSDebugTriangle</code>。面の向きは位置の ddx / ddy から)</li>
+</ul>
+<h3>プロジェクトごとに表示モードを足す</h3>
+<pre>// Project/Scripts/Editor/*.cs (GameEditor.csproj)。保存するとエディターが読み直す
+[SceneViewMode("Unlit (Albedo)", 200)]
+public sealed class UnlitViewMode : SceneViewMode
+{
+    private LightingModel _saved;
+    public override void OnEnable()  { _saved = Engine.Graphics.LightingModel; Engine.Graphics.LightingModel = LightingModel.Unlit; }
+    public override void OnDisable() =&gt; Engine.Graphics.LightingModel = _saved;
+}</pre>
+<ul>
+  <li>上書きできる所 : <code>CreatePipeline()</code> (自分の <code>RenderPipeline</code> で描く。選んだ時に作り、外す時に Dispose) / <code>OnEnable</code>・<code>OnDisable</code> (設定を変えて戻す) / <code>OnUpdate</code> (毎フレーム。DebugDraw で足す) / <code>OnOptionsGUI</code> (プルダウンの中) / <code>OnOverlayGUI</code> (絵の上。<code>DrawLegend</code> で凡例)</li>
+  <li>見本 : SampleProject の <code>Scripts/Editor/SampleViewModes.cs</code> (Unlit (Albedo) / Light Ranges)。組み込みと同じ名前は断る。例外はコンソールに出して Default に戻す</li>
+  <li>ゲームのコードを読み直す時は、プロジェクトのモードを一度外し (<code>EditorExtensions.BeforeClear</code>)、読み直した後に同じ名前のモードへ戻す (古い GameEditor.dll を持ち続けない)</li>
+  <li>起動時に選ぶ : <code>GameEngine.Editor.exe --view-mode DrawMap</code></li>
+</ul>
+<p>確認 : <code>--editor-test --editor-test-section lights</code> / <code>--editor-test-section viewmodes</code> / 見本 <code>GameEngine_console --scene lights</code> (<code>--view spot</code> / <code>--small-lights off</code>)、計測 <code>--light-bench N --clustered on|off</code> / <code>--gpu-stats on</code></p>
 </article>
 
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">

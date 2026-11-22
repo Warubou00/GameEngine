@@ -25,6 +25,7 @@ internal sealed partial class EditorApp
     private readonly ConsoleLog   _log;
     private readonly UndoStack    _undo = new();
     private readonly Picker       _picker;
+    private readonly SceneViewModes _viewModes;   // v2.2 : シーンビューの表示モード (Default / DrawMap / CollisionMap / プロジェクトの物)
     private readonly Gizmo        _gizmo = new();
     private readonly string       _scenesDirectory;
     private readonly AssetDatabase _database;
@@ -135,6 +136,7 @@ internal sealed partial class EditorApp
         engine.Window.FormClosing += onWindowClosing;   // 窓の × / Alt+F4 : 保存していない変更があれば聞く (ED10)
         _build = new BuildWindow(database, () => (_scenePath != null ? _database.ToAssetPath(_scenePath) : null, IsDirty));
         _picker = new Picker(engine);
+        _viewModes = new SceneViewModes(engine);   // v2.2
         engine.GameCodeException = onGameCodeException;   // v1.7 : スクリプトの例外でエディターが落ちないように
         engine.LateUpdate += update;
     }
@@ -148,6 +150,8 @@ internal sealed partial class EditorApp
 
     private Entity _selected;
     private Guid   _selectedId;
+
+    public SceneViewModes ViewModes => _viewModes;   // v2.2 (確認用)
 
     public Entity Selected
     {
@@ -272,6 +276,7 @@ internal sealed partial class EditorApp
         if (!World.IsAlive(_selected)) _selected = Entity.Null;
 
         _frameMs = _frameMs * 0.95 + Time.DeltaTime * 1000.0 * 0.05;
+        _viewModes.Update();   // v2.2 : 表示モードの毎フレームの処理 (DebugDraw の形など。描画の命令を積む前)
         _imgui.NewFrame();
         drawMenu();
         var dockspace = ImGui.DockSpaceOverViewport();
@@ -556,6 +561,7 @@ internal sealed partial class EditorApp
             var min = ImGui.GetItemRectMin();
             var draw = ImGui.GetWindowDrawList();
             drawGameUI(draw, min, new Vector2(width, height));   // v1.7 : 再生中のゲームの UI (絵の上)
+            _viewModes.DrawOverlay(draw, min, new Vector2(width, height));   // v2.2 : 表示モードの凡例など
             if (_playing) draw.AddRect(min, min + new Vector2(width, height), _paused ? 0xFF20B0FFu : 0xFF3080FFu, 0, ImDrawFlags.None, 3.0f);   // 再生中は枠の色
 
             if (!_gameView)
@@ -624,6 +630,7 @@ internal sealed partial class EditorApp
         toolButton("Step", false, Step);
         ImGui.SameLine(0, 14);
         toolButton(_gameView ? "Game Camera" : "Editor Camera", _gameView, () => _gameView = !_gameView);
+        _viewModes.DrawCombo();   // v2.2 : View : Default / DrawMap / CollisionMap / プロジェクトの物
         ImGui.NewLine();   // 最後のボタンの SameLine を終わらせる (シーンの画像は次の行)
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - 2);
     }

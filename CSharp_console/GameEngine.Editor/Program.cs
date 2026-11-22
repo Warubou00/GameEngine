@@ -6,6 +6,7 @@
 //     --open-graph : シェーダーグラフの窓でそのグラフを開いて始める (SH4)
 //     --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (v1.8。クラッシュレポートは %LOCALAPPDATA%\<エンジン>\CrashReports\Editor)
 //     --no-splash : v2.2 スプラッシュ画面を出さない (エディターの窓をすぐ出す。以前と同じ)
+//     --view-mode <名前> : v2.2 シーンビューの表示モードを選んで始める (Default / DrawMap / CollisionMap / プロジェクトの物)
 //     ランチャー (ED9) は --project で開くプロジェクトを渡す
 //     プロジェクト : 既定は CSharp_console/Project (中の Assets フォルダがアセットの置き場。ED5)
 //       最初の 1 回だけ、見本のモデル (見本の出力フォルダの Model) を Assets/Models へ写す (元のファイルは変えない)
@@ -155,6 +156,8 @@ internal static class Program
         }
         else Console.WriteLine($"[Editor] Scene not found : {scenePath} (File > Open Scene)");
         if (options.TryGetValue("--open-graph", out var graphPath)) editor.OpenShaderGraph(graphPath);   // SH4
+        if (options.TryGetValue("--view-mode", out var viewMode) && !editor.ViewModes.Select(viewMode))   // v2.2
+            Console.WriteLine($"[Editor] Unknown view mode : {viewMode} ({string.Join(" / ", editor.ViewModes.Names)})");
         if (options.TryGetValue("--open-widget", out var widgetPath)) editor.OpenWidget(widgetPath);   // v1.7 : Widget Designer
         if (options.TryGetValue("--open-collision", out var collisionPath)) editor.OpenCollision(collisionPath);   // v1.9 : コリジョンの窓
         // v1.8 : --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (クラッシュレポートの確認用)

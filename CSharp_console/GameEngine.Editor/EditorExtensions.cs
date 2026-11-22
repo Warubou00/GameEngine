@@ -11,6 +11,7 @@ namespace GameEngine.Editor;
 //   - [EditorWindow("メニュー/名前")] + EditorWindow   : 自分の窓 (メニューから開く)
 //   - [MenuItem("メニュー/名前")] (static メソッド)       : メニューの項目
 //   - [AssetImporter(".拡張子")] + AssetImporter      : その拡張子のファイルを Assets に置いた / 書き換えた時の処理、Project のタイル
+//   - [SceneViewMode("名前")] + SceneViewMode         : v2.2 シーンビューの View のプルダウンに表示のモードを足す (SceneViewModes.cs)
 //   GameEditor.dll は Game.dll と一緒にビルドし直して読み直す (.cs を保存すると)
 // ==========================================================================
 
@@ -230,8 +231,12 @@ internal static class EditorExtensions
     public static readonly List<(string Path, EditorWindow Window)> Windows = new();
     public static readonly List<(string Path, MethodInfo Method)> MenuItems = new();
     public static readonly List<(string[] Extensions, AssetImporter Importer)> Importers = new();
+    public static readonly List<(SceneViewMode Mode, int Order)> ViewModes = new();   // v2.2
 
-    public static int Count => Editors.Count + Windows.Count + MenuItems.Count + Importers.Count;
+    // v2.2 : Clear の前 (シーンビューのモードが、プロジェクトのモードを外す)
+    public static event Action? BeforeClear;
+
+    public static int Count => Editors.Count + Windows.Count + MenuItems.Count + Importers.Count + ViewModes.Count;
 
     public static void Scan(Assembly assembly)
     {
@@ -245,6 +250,18 @@ internal static class EditorExtensions
                     Windows.Add((window.MenuPath, (EditorWindow)Activator.CreateInstance(type)!));
                 if (type.GetCustomAttribute<AssetImporterAttribute>() is { } importer && typeof(AssetImporter).IsAssignableFrom(type))
                     Importers.Add((importer.Extensions, (AssetImporter)Activator.CreateInstance(type)!));
+                if (type.GetCustomAttribute<SceneViewModeAttribute>() is { } viewMode && typeof(SceneViewMode).IsAssignableFrom(type) && !type.IsAbstract)
+                {
+                    // 組み込みの名前 (Default / DrawMap / CollisionMap) と同じ名前は使えない
+                    if (viewMode.Name is SceneViewModes.DefaultName or "DrawMap" or "CollisionMap" || ViewModes.Any(v => v.Mode.Name == viewMode.Name))
+                        Console.WriteLine($"[Editor] Scene view mode '{viewMode.Name}' ({type.FullName}) : the name is already used");
+                    else
+                    {
+                        var mode = (SceneViewMode)Activator.CreateInstance(type)!;
+                        mode.Name = viewMode.Name;
+                        ViewModes.Add((mode, viewMode.Order));
+                    }
+                }
                 foreach (var method in type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
                 {
                     if (method.GetCustomAttribute<MenuItemAttribute>() is { } item && method.GetParameters().Length == 0) MenuItems.Add((item.Path, method));
@@ -255,11 +272,13 @@ internal static class EditorExtensions
                 Console.WriteLine($"[Editor] Cannot use {type.FullName} : {(ex.InnerException ?? ex).Message}");
             }
         }
-        Console.WriteLine($"[Editor] Extensions : {Editors.Count} inspectors, {Windows.Count} windows, {MenuItems.Count} menu items, {Importers.Count} importers");
+        Console.WriteLine($"[Editor] Extensions : {Editors.Count} inspectors, {Windows.Count} windows, {MenuItems.Count} menu items, {Importers.Count} importers, {ViewModes.Count} view modes");
     }
 
     public static void Clear()
     {
+        BeforeClear?.Invoke();   // v2.2
+        ViewModes.Clear();
         Editors.Clear();
         Windows.Clear();
         MenuItems.Clear();

@@ -321,7 +321,8 @@ public sealed class GraphicsSettings
         for (int i = 0; i < count; i++)
         {
             var camera   = i < RenderCameras.Count ? RenderCameras[i] : main;
-            var pipeline = i == 0 ? _pipeline! : pipelineOf(i, camera.RenderPath);
+            // v2.2 : メインのカメラは、ViewPipelineOverride があればそれで描く (エディターのシーンビューの表示モード)
+            var pipeline = i == 0 ? (viewOverride() ?? _pipeline!) : pipelineOf(i, camera.RenderPath);
             using var cameraPass = cmd.BeginPass(CameraPassNames[Math.Min(i, CameraPassNames.Length - 1)]);   // v1.10 P2 : カメラごとの描画パス
             pipeline.SharedShadows = i == 0 ? null : _pipeline!.OwnShadows;   // v1.5 : シャドーマップは 1 つを使い回す
             _pipeline!.OwnShadows.DrawEveryCascade = count > 1;
@@ -358,6 +359,25 @@ public sealed class GraphicsSettings
         CurrentCamera = 0;
         ClearFlags    = mainClear;
         CameraTarget  = RenderTexture.BackBuffer;
+    }
+
+    // ---------- v2.2 : メインのカメラの描き方の差し替え (エディターのシーンビューの DrawMap / CollisionMap など) ----------
+    /// <summary>
+    /// メインのカメラ (0 番) を、Pipeline / カメラの RenderPath の代わりにこのパイプラインで描く (null で元に戻る)。
+    /// 初めて使うフレームに Initialize を呼ぶ。Dispose は置いた側がする (エンジンは持ち主にならない)
+    /// </summary>
+    public RenderPipeline? ViewPipelineOverride { get; set; }
+    private RenderPipeline? _initializedOverride;
+
+    private RenderPipeline? viewOverride()
+    {
+        var pipeline = ViewPipelineOverride;
+        if (pipeline != null && !ReferenceEquals(pipeline, _initializedOverride))
+        {
+            pipeline.Initialize(this);
+            _initializedOverride = pipeline;
+        }
+        return pipeline;
     }
 
     private RenderPipeline pipelineOf(int index, RenderPath path)

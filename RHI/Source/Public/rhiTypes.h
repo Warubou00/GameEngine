@@ -284,6 +284,7 @@ namespace RHI
 		GBuffer = 1,   // ディファード用 : アルベド / 法線 / 金属・粗さ を書く (半透明は描けないので Forward で)
 		ForwardSplitAmbient = 2,   // Forward + SSAO 用 : RT0 にライトの光、RT1 に環境光を分けて書く (後で 環境光 × 遮蔽 を足す)
 		Shadow  = 3,   // シャドーマップ : 深度だけ (ライトの視点。DrawScene の Inputs[0] で視点を選ぶ。半透明はアルファテスト)
+		Overdraw = 4,  // v2.2 : 重なりを数える (深度を見ずに 1 を加算。エディターの DrawMap。描画先は R16F など 1 枚)
 	};
 
 	// シーンのどの物を描くか
@@ -311,6 +312,8 @@ namespace RHI
 		BeginPass        = 11,  // v1.10 P2 : 描画パスの始め。Arg0 = 名前の番号 (RegisterPassName)。入れ子にできる。
 		                        //   PIX / RenderDoc のイベント、プロファイラーのパスごとの時間 (GPU / CPU) に使う。描画には影響しない
 		EndPass          = 12,  // v1.10 P2 : 最後に始めたパスの終わり (閉じ忘れはフレームの終わりで閉じる)
+		DrawDebugTriangles = 13, // v2.2 : SetDebugTriangles の塗りつぶしの三角形を今の描画先へ描く (深度があれば深度を見て書く。エディターの CollisionMap)
+		                         //   Arg0 bit0 = ワイヤーフレーム (辺だけ。陰なし。少し手前にずらす) / Params[0] = 色の明るさの倍率 (0 なら 1)
 	};
 
 	constexpr uint32_t MAX_PASS_COLOR_TARGETS = 4;
@@ -407,6 +410,8 @@ namespace RHI
 	};
 	static_assert(sizeof(DebugLineVertex) == 16, "DebugLineVertex must be 16 bytes (same as C#)");
 	static constexpr uint32_t MAX_DEBUG_LINE_VERTICES = 256 * 1024;
+	// v2.2 : 確認用の塗りつぶしの三角形 (3 頂点で 1 枚。頂点は DebugLineVertex と同じ)。RenderCommandType::DrawDebugTriangles で描く
+	static constexpr uint32_t MAX_DEBUG_TRIANGLE_VERTICES = 3 * 1024 * 1024;
 
 	// ==============================================================
 	// UI (エディターの ImGui など。ED3)。全部描いた後に、画面 (スワップチェーン) へ一番上に描く

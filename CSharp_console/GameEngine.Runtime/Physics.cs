@@ -59,6 +59,11 @@ public sealed class PhysicsSettings
     public bool ShowColliders { get; set; }
     // 確認用 : 接触点を黄色の印と法線の線で描く
     public bool ShowContacts { get; set; }
+    // v2.2 : 確認用 : コライダーを塗りつぶしの形で描く (DebugDraw の三角形。描画パスが DrawDebugTriangles を積んだ所に出る。
+    //   エディターの CollisionMap)。メッシュのコライダーも三角形を描く。トリガーは半透明
+    public bool ShowCollidersSolid { get; set; }
+    // v2.2 : 塗りつぶしの色をレイヤーで分ける (false なら 動かない物 / 剛体 / 眠っている / 重なっている / トリガー で分ける)
+    public bool ColliderColorsByLayer { get; set; }
     // 確認用 : ジョイント (繋いだ 2 点を線で)。ShowColliders の時も出る (ED6)
     public bool ShowJoints { get; set; }
 

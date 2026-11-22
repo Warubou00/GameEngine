@@ -370,6 +370,29 @@ public static class CollisionDraw
         return (center, worldRotation, size);
     }
 
+    // v2.2 : レイヤーの色 (黄金比で色相を回す。0 番は灰色に近い色)
+    public static Vector3 LayerHue(int layer)
+    {
+        if (layer <= 0) return new Vector3(0.62f, 0.62f, 0.64f);
+        var h = (layer * 0.618034f) % 1.0f;
+        var r = Math.Clamp(MathF.Abs(h * 6 - 3) - 1, 0, 1);
+        var g = Math.Clamp(2 - MathF.Abs(h * 6 - 2), 0, 1);
+        var b = Math.Clamp(2 - MathF.Abs(h * 6 - 4), 0, 1);
+        return new Vector3(0.25f + r * 0.7f, 0.25f + g * 0.7f, 0.25f + b * 0.7f);
+    }
+
+    /// <summary>v2.2 : 部品を DebugDraw の塗りつぶしの三角形で描く (エディターの CollisionMap)</summary>
+    public static void SolidPart(in CollisionPart part, Vector3 position, Quaternion rotation, Vector3 scale, uint color)
+    {
+        var (center, worldRotation, size) = WorldShape(part, position, rotation, scale);
+        switch (part.Shape)
+        {
+        case ColliderShape.Sphere:  DebugDraw.SolidSphere(center, size.X, color); break;
+        case ColliderShape.Capsule: DebugDraw.SolidCapsule(center, worldRotation, size.X, size.Y, color); break;
+        default:                    DebugDraw.SolidBox(center, worldRotation, size, color); break;
+        }
+    }
+
     /// <summary>部品を DebugDraw の線で描く</summary>
     public static void Part(in CollisionPart part, Vector3 position, Quaternion rotation, Vector3 scale, uint color)
     {

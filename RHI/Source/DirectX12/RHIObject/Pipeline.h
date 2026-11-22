@@ -264,6 +264,8 @@ namespace RHI
 
             // 確認用の線の PSO (debug.shader。バックバッファへ、深度なし、アルファブレンド。初めて使う時に作る)
             ID3D12PipelineState* GetDebugLinePso();
+            // v2.2 : 確認用の塗りつぶしの三角形 (描画先の形式ごと)
+            ID3D12PipelineState* GetDebugTrianglePso(const DXGI_FORMAT* rtvFormats, uint32_t rtvCount, DXGI_FORMAT dsvFormat, uint32_t sampleCount, bool wireframe = false);
             ID3D12PipelineState* GetUIPso();   // UI (エディターの ImGui。ED3)
 
             // プレビューの窓 (AN5。preview.shader)。描画先は RGBA8 1 枚 + Depth32。初めて使う時に作る
@@ -358,6 +360,10 @@ namespace RHI
             Microsoft::WRL::ComPtr<ID3D12PipelineState>    _previewPsos[PREVIEW_PSO_COUNT];   // AN5
             bool                                           _previewFailed = false;
             bool                                           _debugLineFailed = false;
+            std::vector<uint8_t>                           _debugTriangleVs;       // v2.2 : シェーダーのバイトコード (初めて使う時にコンパイル)
+            std::vector<uint8_t>                           _debugTrianglePs;
+            std::vector<uint8_t>                           _debugWirePs;           // v2.2 : ワイヤーフレーム (陰なし)
+            bool                                           _debugTriangleFailed = false;
             Microsoft::WRL::ComPtr<ID3D12PipelineState>    _uiPso;
             bool                                           _uiFailed = false;
             // 作った PSO (鍵 = シェーダー / 描き方 / 描画先の形式 のハッシュ)

@@ -172,6 +172,7 @@ namespace RHI
             void                    SetShadowSettings(Buffer* buffer, const RHI::ShadowSettings& settings);
             // 確認用の線 (このフレームの描画の最後に、バックバッファへ描く)
             void                    SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count);
+            void                    SetDebugTriangles(const RHI::DebugLineVertex* vertices, uint32_t count);   // v2.2
             // シーンを描く大きさ (ED3。0 x 0 = 画面と同じ)。決めるとシーンは「見る用のテクスチャ」に描き、画面には UI を描く
             bool                    SetRenderSize(Buffer* buffer, uint32_t width, uint32_t height);
             void                    SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
@@ -524,6 +525,12 @@ namespace RHI
             std::vector<RHI::DebugLineVertex>                    _debugLines;      // 確認用の線 (CPU 側の写し)
             std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _debugLineBuffer[FRAME_COUNT];   // UPLOAD (フレームごと。初めて使う時に作る)
             void drawDebugLines();
+            // v2.2 : 確認用の塗りつぶしの三角形 (DrawDebugTriangles の命令で、今の描画先へ)
+            std::vector<RHI::DebugLineVertex>                    _debugTriangles;
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer>      _debugTriangleBuffer[FRAME_COUNT];
+            uint64_t                                             _debugTriangleCapacity[FRAME_COUNT] = {};   // バイト (足りなくなったら作り直す)
+            bool                                                 _debugTrianglesDrawn = false;              // このフレームで写したか (2 回目は写さない)
+            void drawDebugTriangles(const RHI::RenderCommand& command);
 
             // ---------- エディター (ED3) ----------
             uint32_t _renderWidth  = 0;   // シーンを描く大きさ (0 = 画面と同じ)

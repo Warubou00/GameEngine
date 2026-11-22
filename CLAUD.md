@@ -57,6 +57,7 @@
 8. Review the changes and report the results as a text file in the .claud/log folder.
 9. When adding functions to or updating the game engine, you upgrade the game engine and package it.
 10. Export the runtime environment to Editor/Launcher/Project inside the package folder, respectively.
+11. Since game development has already started on the existing version, if you're going to update in the future, please keep the engine editor of the previous version.
 
 ## 6\. Code Modification Restrictions
 

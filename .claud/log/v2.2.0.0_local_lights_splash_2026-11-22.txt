@@ -74,3 +74,54 @@ v2.2.0.0 : 点光源 / スポットライト (UE 相当) + クラスター + エ
     (古い Renderer.dll は LightingSettings を 16 byte しか写さない)
   - 既存のシーンの PointLight は CastShadows = false のまま (見た目と重さを変えない)。新しい SpotLight は既定で影あり
   - 点光源 / スポットの影は 1 フレームごとに全部描き直す (UE のような動かない物のキャッシュはまだ無い)
+
+
+=====================================================================================================
+追加 (同じ v2.2.0.0) : シーンビューの表示モード (Default / DrawMap / CollisionMap + プロジェクトごとに足せる)  branch feature/v22-scene-view-modes
+=====================================================================================================
+
+■ 依頼
+  シーンビューにプルダウンで切り替える表示を足す (RE Engine の機能)。Default / DrawMap (負荷を青 → 赤) / CollisionMap (コリジョンの形だけ)。
+  プロジェクトごとに足せるように
+
+■ 変更
+  C++
+    - rhiTypes.h : ScenePass::Overdraw (4)、RenderCommandType::DrawDebugTriangles (13)、MAX_DEBUG_TRIANGLE_VERTICES
+    - Pipeline : PSOverdraw の PSO (深度なし・1 を加算)、GetDebugTrianglePso (描画先の形式ごと。両面・アルファブレンド・深度あり)
+    - CommandContext : SetDebugTriangles / drawDebugTriangles (フレームごとの UPLOAD。足りなければ大きくする。同じフレームは 1 回だけ写す)
+    - rhi.h / RenderHardwareInterface / Renderer (Renderer_SetDebugTriangles)
+    - Shader : hlslTemplate.shader に PSOverdraw / PSDrawMap (heatColor / countLightsAt)、debug.shader に VSDebugTriangle / PSDebugTriangle
+  C# (Runtime)
+    - DebugDraw : Triangle / Quad / SolidBox / SolidSphere / SolidCapsule / LastTriangleCount
+    - RenderCommandBuffer.DrawDebugTriangles / ScenePass.Overdraw
+    - GraphicsSettings.ViewPipelineOverride (メインのカメラだけ差し替える。初めて使うフレームに Initialize)
+    - Physics.ShowCollidersSolid / ColliderColorsByLayer、CollisionSystem.drawCollidersSolid、CollisionDraw.SolidPart / LayerHue
+    - CollisionMesh が形 (位置 / インデックス) を持つ (メッシュのコライダーの三角形を描くため)
+  C# (Editor)
+    - SceneViewModes.cs : SceneViewModeAttribute / SceneViewMode (拡張の API)、SceneViewModes (一覧 / 切り替え / プルダウン / 凡例)、
+      DrawMapViewMode (Combined / Overdraw / Lights、Red at / Light weight / Shape)、CollisionMapViewMode (状態 / レイヤーの色)
+    - EditorExtensions : [SceneViewMode] を読む / BeforeClear (読み直す前にプロジェクトのモードを外し、後で名前で戻す)
+    - EditorApp : ツールバーに「View : ...」、絵の上に凡例。Program.cs : --view-mode <名前>
+  見本 : Project/Scripts/Editor/SampleViewModes.cs (Unlit (Albedo) / Light Ranges)。Package の SampleProject にも足した (今ある物は消していない)
+  テスト : EditorTest.ViewModes.cs (--editor-test-section viewmodes)
+
+■ ビルド
+  RHI / Renderer : Debug / Release 成功 (警告は以前からの C4251 だけ)。Runtime / Editor / GameEngine_console : 成功 (以前からの警告だけ)
+
+■ 確認
+  - viewmodes 12 / 0、エディターのテスト全体 739 / 0
+  - 窓だけ撮って確認 : DrawMap (キャラクターの髪 / 服の重なりが赤、床は青、点光源の届く範囲が明るい)、CollisionMap (岩のメッシュ / 箱 / 球 / カプセルが色分け)
+  - Debug (D3D12 デバッグレイヤー) : DrawMap / CollisionMap ともエラー / 警告なし
+    (CollisionMap は最初、カメラの描画先を別の色で消して「クリア値が違う」警告が出た → 自分の描画先に描いて写すようにした)
+  - Package の v2.2 のエディターで SampleProject を開き、プロジェクトのモード 2 つが読まれるのを確認
+
+■ 気を付けること
+  - DrawMap は推定 (GPU の実測ではない)。自分のシェーダーの物 / パーティクルは数えない
+  - 表示モードはエディターだけ。Default の時は以前と同じ描画 (ViewPipelineOverride = null)
+
+■ 追加 : CollisionMap のワイヤーフレーム (Style)
+  - Style : Solid / Wireframe (辺だけ。裏の辺も透けて見える) / Solid + Wireframe (塗りつぶし + 暗くした辺。隠れた辺は出ない)
+  - C++ : DrawDebugTriangles の Arg0 bit0 = ワイヤーフレーム / Params[0] = 明るさ。GetDebugTrianglePso(wireframe) = FillMode WIREFRAME
+          (DepthBias -200 / SlopeScaled -1 で手前へ、深度は書かない)。debug.shader に PassConstants と PSDebugWire
+  - C# : RenderCommandBuffer.DrawDebugTriangles(wireframe, brightness)。CollisionMapViewMode.Style (プルダウンの中の Style)
+  - 確認 : viewmodes 15 / 0、全体 742 / 0。窓を撮って確認 (images/v2.2.0.0_collisionmap_*.png)。Debug のデバッグレイヤーでエラー / 警告なし
