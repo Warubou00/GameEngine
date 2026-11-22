@@ -170,6 +170,18 @@ namespace RHI
 					return RHI_FAILED_INITIALIZED;
 				}
 			}
+			// v2.2 : クラスター (フレーム × カメラごとの UPLOAD 領域と VRAM 側)
+			{
+				const UINT64 size = CLUSTER_SLOT_SIZE * RHI::MAX_CAMERAS * CommandContext::FRAME_COUNT;
+				_clusterUpload = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				_clusterGpu    = std::make_unique<RHI::DirectX12::ResourceBuffer>();
+				if (!makeBuffer(device, _clusterUpload.get(), size, D3D12_HEAP_TYPE_UPLOAD) || FAILED(_clusterUpload->Map()) ||
+					!makeBuffer(device, _clusterGpu.get(), size, D3D12_HEAP_TYPE_DEFAULT))
+				{
+					return RHI_FAILED_INITIALIZED;
+				}
+				_clusterData.reserve(CLUSTER_COUNT + 4096);
+			}
 
 			return RHI_SUCCEEDED;
 		}
@@ -939,6 +951,253 @@ namespace RHI
 			extractPlanes(::DirectX::XMMatrixMultiply(lightRotation, unionProj), _shadowUnionPlanes);
 		}
 
+		// ==============================================================
+		// v2.2 : 点光源 / スポットライトの影の視点
+		//   スポット : ライトの位置から向きへ見る透視投影 (視野 = 外側の角度 × 2) を 1 枚
+		//   点光源   : 6 方向 (+X -X +Y -Y +Z -Z) の透視投影を 6 枚 (キューブマップと同じ向き)。視野は 90 度より
+		//              少し広い (ShadowTan = 1 + 縁の余白。面の境目でも PCF が面の外を読まないように)
+		//   シェーダー (localShadow) はこの行列を受け取らず、LightData から同じ向き・投影を作り直して読む
+		//   (LookToLH の上の向き・手前の面 (ShadowNear)・奥 (Range) をここと同じにすること)
+		// ==============================================================
+		void Buffer::computeLocalShadowViews()
+		{
+			if (_localVersion == _lightsVersion) return;
+			_localVersion = _lightsVersion;
+			for (bool& valid : _localValid) valid = false;
+
+			using namespace ::DirectX;
+			for (uint32_t i = 0; i < static_cast<uint32_t>(_lights.size()); ++i)
+			{
+				const RHI::LightData& light = _lights[i];
+				if (light.ShadowIndex == RHI::LIGHT_NO_SHADOW || light.Type == RHI::LightType::Directional) continue;
+				const XMVECTOR eye   = XMVectorSet(light.Position[0], light.Position[1], light.Position[2], 1.0f);
+				const float    nearZ = (std::max)(light.ShadowNear, 1e-3f);
+				const float    farZ  = (std::max)(light.Range, nearZ + 0.01f);
+				const float    fov   = 2.0f * std::atan((std::max)(light.ShadowTan, 1e-3f));
+				const XMMATRIX proj  = XMMatrixPerspectiveFovLH(fov, 1.0f, nearZ, farZ);
+
+				auto store = [&](uint32_t slice, XMVECTOR dir, XMVECTOR up)
+				{
+					if (slice >= RHI::MAX_LOCAL_SHADOW_SLICES) return;
+					const XMMATRIX view = XMMatrixLookToLH(eye, dir, up);
+					XMStoreFloat4x4(&_localView[slice], view);
+					XMStoreFloat4x4(&_localProj[slice], proj);
+					extractPlanes(XMMatrixMultiply(view, proj), _localPlanes[slice]);
+					_localCullKey[slice] = slice;
+					_localValid[slice]   = true;
+				};
+
+				if (light.Type == RHI::LightType::Spot)
+				{
+					const XMVECTOR dir = XMVector3Normalize(XMVectorSet(light.Direction[0], light.Direction[1], light.Direction[2], 0.0f));
+					// 上の向きはシェーダーと同じ決め方 (真上 / 真下を向く時だけ X)
+					const XMVECTOR up  = std::fabs(XMVectorGetY(dir)) > 0.99f ? XMVectorSet(1, 0, 0, 0) : XMVectorSet(0, 1, 0, 0);
+					store(light.ShadowIndex, dir, up);
+					continue;
+				}
+
+				// 点光源 : 6 面 (シェーダーの localShadow の面の選び方と同じ並び : +X -X +Y -Y +Z -Z)
+				static const float faces[6][6] = {
+					{  1, 0, 0,  0, 1, 0 }, { -1, 0, 0,  0, 1, 0 },
+					{  0, 1, 0,  0, 0,-1 }, {  0,-1, 0,  0, 0, 1 },
+					{  0, 0, 1,  0, 1, 0 }, {  0, 0,-1,  0, 1, 0 },
+				};
+				for (uint32_t f = 0; f < 6; ++f)
+					store(light.ShadowIndex + f, XMVectorSet(faces[f][0], faces[f][1], faces[f][2], 0), XMVectorSet(faces[f][3], faces[f][4], faces[f][5], 0));
+				// 6 面はライトを囲む箱で 1 回だけカリングする (面ごとに数えると、前の面の描画を 6 回待つ)
+				const float r = light.Range;
+				const XMMATRIX box = XMMatrixOrthographicOffCenterLH(light.Position[0] - r, light.Position[0] + r, light.Position[1] - r, light.Position[1] + r,
+				                                                     light.Position[2] - r, light.Position[2] + r);
+				for (uint32_t f = 0; f < 6 && light.ShadowIndex + f < RHI::MAX_LOCAL_SHADOW_SLICES; ++f)
+				{
+					extractPlanes(box, _localPlanes[light.ShadowIndex + f]);
+					_localCullKey[light.ShadowIndex + f] = light.ShadowIndex;   // 6 面とも最初の面の番号
+				}
+			}
+		}
+
+		const ::DirectX::XMFLOAT4* Buffer::GetShadowCullPlanes(uint32_t view, uint32_t& key)
+		{
+			if (IsLocalShadowView(view))
+			{
+				const uint32_t slice = view - RHI::LOCAL_SHADOW_VIEW_BEGIN;
+				key = 0x10000u + _localCullKey[slice];   // カスケード (1〜4) / 全カスケードの箱と重ならない番号
+				return _localPlanes[slice];
+			}
+			const bool unionCulling = IsShadowUnionCulling();
+			key = unionCulling ? 0xFFFFFFF0u : view;
+			return unionCulling ? _shadowUnionPlanes : GetFrustumPlanes(view);
+		}
+
+		// ==============================================================
+		// v2.2 : クラスター (Clustered shading。UE のローカルライトの分け方と同じ考え方)
+		//   画面を 16 x 9 の区画と、奥行き 24 段 (対数。近くほど細かい) に分け、各段に届く点光源 / スポットライトの番号を並べる
+		//   ピクセルシェーダーは自分の段の一覧だけを回す (以前は全部のライトを回していた。ライトが多いほど重かった)
+		//   作るのは CPU (ライトごとに、届く球を画面に映した範囲の段に入れるだけ)。カメラ / ライトが変わった時だけ
+		//   球 : 点光源は位置と Range / スポットは円錐を囲む球 (細い円錐ほど小さい)
+		// ==============================================================
+		bool Buffer::buildClusters(float& zScale, float& zBias)
+		{
+			using namespace ::DirectX;
+			const XMMATRIX view = XMMatrixTranspose(XMLoadFloat4x4(&_viewMatrix));
+			XMFLOAT4X4 p;
+			XMStoreFloat4x4(&p, XMMatrixTranspose(XMLoadFloat4x4(&_projMatrix)));
+			if (p._34 == 0.0f || p._33 == 0.0f) return false;   // 平行投影のカメラ : 全部のライトを回す
+			clusterDepthRange(p, zScale, zBias);
+			const float nearZ = (std::max)(-p._43 / p._33, 1e-3f);
+			const float farZ  = std::exp2((static_cast<float>(CLUSTER_Z) - zBias) / zScale);
+
+			const uint32_t lightCount = static_cast<uint32_t>(_lights.size());
+			_clusterRanges.assign(static_cast<size_t>(lightCount) * 6 + CLUSTER_COUNT, 0);
+			_clusterData.assign(CLUSTER_COUNT, 0);
+			auto sliceOf = [&](float z) { return (std::min)((std::max)(static_cast<int>(std::floor(std::log2((std::max)(z, nearZ)) * zScale + zBias)), 0), static_cast<int>(CLUSTER_Z) - 1); };
+
+			for (uint32_t i = 0; i < lightCount; ++i)
+			{
+				const RHI::LightData& light = _lights[i];
+				uint32_t* range = &_clusterRanges[static_cast<size_t>(i) * 6];
+				range[0] = 1; range[1] = 0;   // 空 (x0 > x1)
+				if (light.Type == RHI::LightType::Directional) continue;
+				// 届く球 (ワールド)
+				XMVECTOR center = XMVectorSet(light.Position[0], light.Position[1], light.Position[2], 1.0f);
+				float radius = light.Range;
+				if (light.Type == RHI::LightType::Spot && light.SpotScale > 0.0f)
+				{
+					const float cosOuter = (std::min)((std::max)(-light.SpotOffset / light.SpotScale, 0.0f), 1.0f);
+					const float sinOuter = std::sqrt((std::max)(1.0f - cosOuter * cosOuter, 0.0f));
+					const XMVECTOR dir = XMVector3Normalize(XMVectorSet(light.Direction[0], light.Direction[1], light.Direction[2], 0.0f));
+					if (cosOuter < 0.7071f) { center = XMVectorMultiplyAdd(dir, XMVectorReplicate(light.Range * cosOuter), center); radius = light.Range * sinOuter; }
+					else                    { const float h = light.Range / (2.0f * cosOuter); center = XMVectorMultiplyAdd(dir, XMVectorReplicate(h), center); radius = h; }
+				}
+				XMFLOAT3 c;
+				XMStoreFloat3(&c, XMVector3TransformCoord(center, view));
+				if (c.z + radius < nearZ) continue;   // カメラの後ろ
+
+				// 画面の範囲 (NDC) : 中心から球への 2 本の接線 (Mara & McGuire 2013)。球がカメラの手前の面にかかる時は画面全体
+				float minX = -1.0f, maxX = 1.0f, minY = -1.0f, maxY = 1.0f;
+				if (c.z - radius > nearZ)
+				{
+					auto bounds = [&](float a, float z, float scale, float& lo, float& hi)
+					{
+						const float t  = std::sqrt((std::max)(a * a + z * z - radius * radius, 0.0f));
+						// 中心の向きを ±θ (sinθ = r / d, cosθ = t / d) 回した 2 本。傾き a / z を射影の倍率で NDC にする
+						const float a1 = a * t - z * radius, z1 = z * t + a * radius;
+						const float a2 = a * t + z * radius, z2 = z * t - a * radius;
+						const float s1 = a1 / (std::max)(z1, 1e-4f) * scale, s2 = a2 / (std::max)(z2, 1e-4f) * scale;
+						lo = (std::max)((std::min)(s1, s2), -1.0f);
+						hi = (std::min)((std::max)(s1, s2),  1.0f);
+					};
+					bounds(c.x, c.z, p._11, minX, maxX);
+					bounds(c.y, c.z, p._22, minY, maxY);
+					if (minX > maxX || minY > maxY) continue;   // 画面の外
+				}
+				// 区画 : x は左から、y は上から (シェーダーは SV_Position と同じ向きで数える)
+				const int x0 = (std::max)(static_cast<int>((minX * 0.5f + 0.5f) * CLUSTER_X), 0);
+				const int x1 = (std::min)(static_cast<int>((maxX * 0.5f + 0.5f) * CLUSTER_X), static_cast<int>(CLUSTER_X) - 1);
+				const int y0 = (std::max)(static_cast<int>((0.5f - maxY * 0.5f) * CLUSTER_Y), 0);
+				const int y1 = (std::min)(static_cast<int>((0.5f - minY * 0.5f) * CLUSTER_Y), static_cast<int>(CLUSTER_Y) - 1);
+				const int z0 = sliceOf(c.z - radius), z1 = sliceOf((std::min)(c.z + radius, farZ));
+				if (x0 > x1 || y0 > y1 || z0 > z1) continue;
+				range[0] = x0; range[1] = x1; range[2] = y0; range[3] = y1; range[4] = z0; range[5] = z1;
+				for (int z = z0; z <= z1; ++z)
+					for (int y = y0; y <= y1; ++y)
+						for (int x = x0; x <= x1; ++x)
+							_clusterData[(z * CLUSTER_Y + y) * CLUSTER_X + x]++;
+			}
+
+			// 段ごとの先頭 (数を前から足す)。入りきらない段は数を減らす
+			uint32_t offset = 0;
+			bool overflow = false;
+			for (uint32_t k = 0; k < CLUSTER_COUNT; ++k)
+			{
+				uint32_t count = _clusterData[k];
+				if (offset + count > CLUSTER_MAX_INDICES) { count = CLUSTER_MAX_INDICES - offset; overflow = true; }
+				_clusterData[k] = offset | (count << 20);   // 先頭は 20bit (CLUSTER_MAX_INDICES まで)、数は 12bit (MAX_LIGHTS まで)
+				offset += count;
+			}
+			if (overflow && !_clusterWarned) { Core::Logger::Log("[Buffer] Too many lights in clusters. Some lights are skipped."); _clusterWarned = true; }
+			_clusterIndexCount = offset;
+			_clusterData.resize(CLUSTER_COUNT + static_cast<size_t>(offset), 0);
+
+			// 番号を入れる (ライトの番号の小さい順 = 平行光源の後の並び。段ごとに入れた数を数えながら)
+			uint32_t* used = &_clusterRanges[static_cast<size_t>(lightCount) * 6];
+			for (uint32_t i = 0; i < lightCount; ++i)
+			{
+				const uint32_t* range = &_clusterRanges[static_cast<size_t>(i) * 6];
+				if (range[0] > range[1]) continue;
+				for (uint32_t z = range[4]; z <= range[5]; ++z)
+					for (uint32_t y = range[2]; y <= range[3]; ++y)
+						for (uint32_t x = range[0]; x <= range[1]; ++x)
+						{
+							const uint32_t k = (z * CLUSTER_Y + y) * CLUSTER_X + x;
+							const uint32_t header = _clusterData[k];
+							if (used[k] >= (header >> 20)) continue;   // 入りきらなかった段
+							_clusterData[CLUSTER_COUNT + (header & 0xFFFFFu) + used[k]] = i;
+							used[k]++;
+						}
+			}
+			return true;
+		}
+
+		// 奥行きの段の式 (段 = log2(z) × Scale + Bias。手前の面で 0、奥の面で CLUSTER_Z)。フレームの定数とクラスター作りで同じ値にする
+		void Buffer::clusterDepthRange(const ::DirectX::XMFLOAT4X4& p, float& zScale, float& zBias)
+		{
+			const float nearZ = (std::max)(-p._43 / p._33, 1e-3f);
+			float farZ = p._43 / (1.0f - p._33);   // LH の透視投影 : _33 = f / (f - n) / _43 = -n f / (f - n)
+			if (!(farZ > nearZ * 1.01f) || farZ > 1e6f) farZ = (std::max)(nearZ * 1e4f, 1000.0f);   // 奥が無い / 遠すぎる投影
+			zScale = static_cast<float>(CLUSTER_Z) / std::log2(farZ / nearZ);
+			zBias  = -std::log2(nearZ) * zScale;
+		}
+
+		// v2.2 : 全部のカメラのクラスターを作って VRAM へ写す (フレームの始めに 1 回。カメラ / ライトが変わった枠だけ)
+		//   フレームの途中で写すと、前のカメラの描画が読んでいる間に状態を変えることになるので、始めにまとめて写す
+		//   (バッファはコマンドリストの実行が終わると COMMON に戻り、コピーで COPY_DEST に自動で上がる。最後に 1 回だけ読む状態へ)
+		void Buffer::WriteClusters(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList)
+		{
+			if (!_clusterGpu || !cmdList || frameIndex >= CommandContext::FRAME_COUNT) return;
+			if ((_lightingSettings.Flags & RHI::LIGHTING_FLAG_CLUSTERED) == 0) return;
+
+			const uint32_t cameras = (std::max)(_cameraCount, 1u);
+			const uint32_t current = _cameraSlot;
+			bool copied = false;
+			for (uint32_t camera = 0; camera < cameras; ++camera)
+			{
+				if (_cameraCount > 0 && camera != _cameraSlot) SelectCamera(camera);
+				ClusterKey& key = _clusterKeys[frameIndex][camera];
+				const bool same = key.LightsVersion == _lightsVersion && key.ScreenWidth == _screenWidth && key.ScreenHeight == _screenHeight &&
+				                  std::memcmp(&key.View, &_viewMatrix, sizeof(key.View)) == 0 && std::memcmp(&key.Projection, &_projMatrix, sizeof(key.Projection)) == 0;
+				if (same) continue;
+				float zScale = 0.0f, zBias = 0.0f;
+				if (!buildClusters(zScale, zBias)) { _clusterData.assign(CLUSTER_COUNT, 0); }   // 平行投影 : シェーダーは使わないが空にしておく
+				const UINT64 offset = CLUSTER_SLOT_SIZE * (static_cast<UINT64>(frameIndex) * RHI::MAX_CAMERAS + camera);
+				const UINT64 bytes  = static_cast<UINT64>(_clusterData.size()) * sizeof(uint32_t);
+				if (!_clusterUpload->WriteData(offset, _clusterData.data(), static_cast<size_t>(bytes))) continue;
+				cmdList->CopyBufferRegion(_clusterGpu->Get(), offset, _clusterUpload->Get(), offset, bytes);
+				copied = true;
+				key.LightsVersion = _lightsVersion;
+				key.ScreenWidth   = _screenWidth;
+				key.ScreenHeight  = _screenHeight;
+				key.View          = _viewMatrix;
+				key.Projection    = _projMatrix;
+			}
+			if (_cameraCount > 0 && _cameraSlot != current) SelectCamera(current);
+			if (!copied) return;
+
+			D3D12_RESOURCE_BARRIER barrier = {};
+			barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+			barrier.Transition.pResource   = _clusterGpu->Get();
+			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+			barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+			barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			cmdList->ResourceBarrier(1, &barrier);
+		}
+
+		D3D12_GPU_VIRTUAL_ADDRESS Buffer::GetClusterAddress(uint32_t frameIndex)const
+		{
+			if (!_clusterGpu || frameIndex >= CommandContext::FRAME_COUNT) return 0;
+			return _clusterGpu->GetGPUVirtualAddress() + CLUSTER_SLOT_SIZE * (static_cast<UINT64>(frameIndex) * RHI::MAX_CAMERAS + _cameraSlot);
+		}
+
 		const ::DirectX::XMFLOAT4* Buffer::GetFrustumPlanes(uint32_t view)
 		{
 			if (view == 0 || view > _shadowViewCount) return GetFrustumPlanes();
@@ -1009,6 +1268,22 @@ namespace RHI
 				constants.ShadowSoftness     = _shadowSettings.Softness;
 				constants.ShadowBlend        = (std::min)((std::max)(_shadowSettings.CascadeBlend, 0.0f), 0.5f);
 				constants.ShadowShowCascades = (_shadowSettings.Flags & RHI::SHADOW_FLAG_SHOW_CASCADES) ? 1u : 0u;
+				// v2.2 : 点光源 / スポットライトの影
+				computeLocalShadowViews();
+				const uint32_t localSlices = (std::min)(_shadowSettings.LocalSliceCount, RHI::MAX_LOCAL_SHADOW_SLICES);
+				constants.LocalShadowTexture   = localSlices > 0 ? _localShadowTexture : 0xFFFFFFFFu;
+				constants.LocalShadowTexelSize = 1.0f / static_cast<float>(_localShadowResolution);
+				constants.LocalShadowSoftness  = _shadowSettings.LocalSoftness;
+				// v2.2 : クラスター (段の式は buildClusters と同じ。平行投影のカメラは使わない = 全部のライトを回す)
+				{
+					uint32_t directional = 0;
+					while (directional < _lights.size() && _lights[directional].Type == RHI::LightType::Directional) ++directional;
+					constants.DirectionalCount = directional;
+					::DirectX::XMFLOAT4X4 p;
+					::DirectX::XMStoreFloat4x4(&p, ::DirectX::XMMatrixTranspose(::DirectX::XMLoadFloat4x4(&_projMatrix)));
+					constants.ClusterEnabled = ((_lightingSettings.Flags & RHI::LIGHTING_FLAG_CLUSTERED) != 0 && p._34 != 0.0f && p._33 != 0.0f) ? 1u : 0u;
+					if (constants.ClusterEnabled) clusterDepthRange(p, constants.ClusterZScale, constants.ClusterZBias);
+				}
 				for (uint32_t c = 0; c < _shadowViewCount; ++c)
 				{
 					const ::DirectX::XMMATRIX viewProj = ::DirectX::XMMatrixMultiply(
@@ -1028,6 +1303,18 @@ namespace RHI
 					shadowView.Projection = transposeForShader(_shadowProj[c]);
 					shadowView.ShadowCascadeCount = 0;
 					written = _commonCB->WriteData(offset + FRAME_SLOT_SIZE * (c + 1), &shadowView, sizeof(shadowView));
+				}
+				// v2.2 : 点光源 / スポットライトの影の視点 (使う枚だけ)
+				for (uint32_t s = 0; s < localSlices && written; ++s)
+				{
+					if (!_localValid[s]) continue;
+					FrameConstants shadowView = constants;
+					shadowView.View       = transposeForShader(_localView[s]);
+					shadowView.Projection = transposeForShader(_localProj[s]);
+					shadowView.ShadowCascadeCount = 0;
+					shadowView.LocalShadowTexture = 0xFFFFFFFFu;
+					shadowView.ClusterEnabled     = 0;
+					written = _commonCB->WriteData(offset + FRAME_SLOT_SIZE * (RHI::LOCAL_SHADOW_VIEW_BEGIN + s), &shadowView, sizeof(shadowView));
 				}
 
 				if (written)

@@ -5,6 +5,7 @@
 //   GameEngine.Editor.exe [--project <folder>] [--scene <path>] [--open-graph <Assets/....shadergraph.json>] [--editor-test] [--resave-scenes] [--quit-after N]
 //     --open-graph : シェーダーグラフの窓でそのグラフを開いて始める (SH4)
 //     --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (v1.8。クラッシュレポートは %LOCALAPPDATA%\<エンジン>\CrashReports\Editor)
+//     --no-splash : v2.2 スプラッシュ画面を出さない (エディターの窓をすぐ出す。以前と同じ)
 //     ランチャー (ED9) は --project で開くプロジェクトを渡す
 //     プロジェクト : 既定は CSharp_console/Project (中の Assets フォルダがアセットの置き場。ED5)
 //       最初の 1 回だけ、見本のモデル (見本の出力フォルダの Model) を Assets/Models へ写す (元のファイルは変えない)
@@ -66,6 +67,12 @@ internal static class Program
         var projectRoot = options.GetValueOrDefault("--project",
             root != null ? Path.Combine(root.FullName, "CSharp_console", "Project") :
             DotnetTool.IsPackaged && Directory.Exists(packageSample) ? packageSample : Path.Combine(exeDirectory, "Project"));
+        // v2.2 : スプラッシュ画面 (読み込みの間に出す。エディターの窓は最初のフレームを描いてから出す)
+        //   以前は読み込みの間、何も描かれない白い窓が出ていた。自動の確認 / 書き直しだけの時は出さない
+        var useSplash = !args.Contains("--editor-test") && !options.ContainsKey("--quit-after") && !args.Contains("--resave-scenes") && !args.Contains("--no-splash");
+        using var splash = useSplash ? SplashScreen.Show(Path.GetFileName(Path.TrimEndingDirectorySeparator(projectRoot))) : null;
+        if (splash != null) log.LineWritten = splash.SetDetail;
+        splash?.SetStatus("Loading project assets...", 0.1f);
         var database = new AssetDatabase(projectRoot);
         var created = database.Refresh();
         EditorVersion.WriteProjectVersion(database.ProjectRoot);   // どの版のエディターで開いたか (ED9。ランチャーが出す)
@@ -73,7 +80,18 @@ internal static class Program
         Console.WriteLine($"[Assets] {database.AssetsRoot} : {database.Entries.Count()} assets{(created > 0 ? $" ({created} new .meta)" : "")}");
         var scenes = Path.Combine(database.AssetsRoot, "Scenes");
 
-        using var engine = new Engine(new EngineSettings { Title = $"{EngineInfo.Name} Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory });
+        splash?.SetStatus("Starting the renderer...", 0.3f);
+        using var engine = new Engine(new EngineSettings { Title = $"{EngineInfo.Name} Editor", Width = 1600, Height = 900, WorkingDirectory = workingDirectory,
+                                                           ShowWindow = splash == null });   // v2.2 : スプラッシュ画面の時は、最初のフレームを描いてから出す
+        if (splash != null)
+        {
+            engine.WindowShown += () =>
+            {
+                log.LineWritten = null;
+                splash.SetStatus("Ready", 1.0f);
+                splash.Close();
+            };
+        }
         engine.IsPlaying       = false;   // 編集中 (シーンを動かさない)
         engine.Graphics.ProfilerVisible = false;
         // v1.10 : C++ (RHI.dll) の F1 の窓は使わない (エディターの View > Analysis の窓で出す)
@@ -90,6 +108,7 @@ internal static class Program
         editor.Preferences = preferences;
         // ゲームのコード (ED7) : Project/Scripts/Game.csproj をビルドして読み込む (コンポーネントの型と [GameSystem])。シーンを開く前に
         //   (以前は見本 (GameEngine_console) を参照して型を読み、System をここで 1 つずつ登録していた)
+        splash?.SetStatus("Building game scripts...", 0.5f);
         editor.LoadScripts();
         if (args.Contains("--resave-scenes"))
         {
@@ -123,6 +142,7 @@ internal static class Program
             Console.WriteLine($"[Editor] Last opened scene : {database.ToAssetPath(lastScene)}");
         }
         var scenePath = options.GetValueOrDefault("--scene", defaultScene);
+        splash?.SetStatus("Opening scene...", 0.75f);
         if (File.Exists(scenePath)) editor.OpenScene(scenePath);
         else if (!options.ContainsKey("--scene") && !Directory.EnumerateFiles(database.AssetsRoot, "*.scene.json", SearchOption.AllDirectories).Any())
         {
@@ -144,6 +164,7 @@ internal static class Program
             engine.LateUpdate += () => { if (++crashFrames == 10) CrashReporter.TestCrash(crashKind); };
         }
 
+        splash?.SetStatus("Preparing the first frame...", 0.9f);
         engine.Run();
         DotnetTool.ShutdownBuildServers();   // Package : 同梱の SDK のビルドのサーバーを残さない (フォルダを掴んだままになるため)
     }

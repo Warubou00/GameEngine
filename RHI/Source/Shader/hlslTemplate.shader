@@ -70,16 +70,29 @@ struct MaterialData
     float  Roughness;   // PBR : 粗さ
 };
 
-// ライト (RHI::LightData と同じ並び : 48byte)
+// ライト (RHI::LightData と同じ並び : 80byte。v2.2 で 48byte から増やした)
 struct LightData
 {
-    float3 Position;    // 点光源の位置
-    float  Range;       // 点光源の届く距離
-    float3 Direction;   // 平行光源の光が進む向き
-    uint   Type;        // 0 : 平行光源 (太陽) / 1 : 点光源
+    float3 Position;    // 点光源 / スポットライトの位置
+    float  Range;       // 届く距離 (UE の Attenuation Radius)
+    float3 Direction;   // 光が進む向き (平行光源 / スポットライト)
+    uint   Type;        // 0 : 平行光源 (太陽) / 1 : 点光源 / 2 : スポットライト (v2.2)
     float3 Color;
     float  Intensity;
+    // ---------- v2.2 ----------
+    float  SpotScale;        // 1 / (cos(内側) - cos(外側))
+    float  SpotOffset;       // -cos(外側) × SpotScale
+    float  SourceRadius;     // 光源の半径 (鏡面反射のハイライトが広がる)
+    float  FalloffExponent;  // 0 : 距離の 2 乗で弱くなる / それ以外 : (1 - (d/r)²)^指数 (UE の Inverse Squared Falloff を切った時)
+    uint   ShadowIndex;      // 影 : シャドーマップの配列の何枚目から (0xFFFFFFFF = 無し。点光源は 6 枚)
+    float  ShadowNear;       // 影 : ライトの視点の手前の面
+    float  ShadowBias;       // 影 : 法線方向へずらす量 (texel の何倍か)
+    float  ShadowTan;        // 影 : 視野の半分の tan
 };
+
+static const uint LIGHT_DIRECTIONAL = 0;
+static const uint LIGHT_POINT       = 1;
+static const uint LIGHT_SPOT        = 2;
 
 struct VSOutput
 {
@@ -135,6 +148,13 @@ Texture3D g_Textures3D[4096] : register(t0, space4);
 //   シーンの共通のシェーダーは使わない (宣言だけ。自分のシェーダーはこのファイルの後ろに付けてコンパイルされる)
 StructuredBuffer<float4> g_CustomData : register(t5);
 
+// [ROOT_PARAM_CLUSTER_SRV]: v2.2 クラスター (Buffer::WriteClusters)。[0, CLUSTER_COUNT) = 段ごとの (先頭 | 数 << 20)、その後ろ = ライトの番号
+StructuredBuffer<uint> g_Clusters : register(t6);
+static const uint CLUSTER_X = 16;
+static const uint CLUSTER_Y = 9;
+static const uint CLUSTER_Z = 24;
+static const uint CLUSTER_COUNT = CLUSTER_X * CLUSTER_Y * CLUSTER_Z;
+
 // (Root Signature の StaticSampler)
 SamplerState g_Sampler      : register(s0);   // 線形・繰り返し (モデルのテクスチャ)
 SamplerState g_PointClamp   : register(s1);   // 点・端で止める
@@ -168,7 +188,15 @@ cbuffer FrameData : register(b0)
     float  g_ShadowSoftness;       // PCF で読む間隔 (texel)
     float  g_ShadowBlend;          // 段の境目をつなぐ幅 (段の奥行きに対する割合)
     uint   g_ShadowShowCascades;   // 1 : 段ごとに色を付ける (確認用)
-    float3 g_ShadowPadding;
+    // ---------- v2.2 : 点光源 / スポットライトの影 (以前はここが float3 g_ShadowPadding) ----------
+    uint   g_LocalShadowTexture;   // g_DepthArrays の番号 (0xFFFFFFFF なら無し)
+    float  g_LocalShadowTexelSize; // 1 / 解像度
+    float  g_LocalShadowSoftness;  // PCF で読む間隔 (texel)
+    // ---------- v2.2 : クラスター ----------
+    uint   g_ClusterEnabled;       // 0 なら全部のライトを回す
+    uint   g_DirectionalCount;     // 先頭の平行光源の数 (いつも回す)
+    float  g_ClusterZScale;        // 奥行きの段 = log2(z) × Scale + Bias
+    float  g_ClusterZBias;
 };
 
 // [ROOT_PARAM_PASS_CONSTANTS]: 全画面のパスの値 (ルート定数 16 個)
@@ -204,6 +232,24 @@ float pointAttenuation(float distance, float range)
     float falloff = saturate(1.0f - x * x * x * x);
     falloff *= falloff;
     return falloff / (distance * distance + 1.0f);
+}
+
+// v2.2 : 点光源 / スポットライトの距離の減衰 (UE と同じ 2 通り)
+//   FalloffExponent = 0 : 距離の 2 乗 (物理的。上の pointAttenuation)
+//   それ以外           : (1 - (d / r)²)^指数 (UE の Inverse Squared Falloff を切った時。光源のすぐ近くでも明るすぎない)
+float localAttenuation(LightData light, float distance)
+{
+    if (light.FalloffExponent <= 0.0f) return pointAttenuation(distance, light.Range);
+    const float x = distance / max(light.Range, 1e-4f);
+    return pow(saturate(1.0f - x * x), light.FalloffExponent);
+}
+
+// v2.2 : スポットライトの円錐の減衰 (UE の SpotAttenuation : 内側の角度までは 1、外側の角度で 0。間はなめらか)
+//   L : 物 → ライト
+float spotAttenuation(LightData light, float3 L)
+{
+    const float t = saturate(dot(-L, light.Direction) * light.SpotScale + light.SpotOffset);
+    return t * t;
 }
 
 // 環境光の鏡面反射の近似 (Karis "Physically Based Shading on Mobile")。環境マップ無しで、粗さに応じた反射の量だけ求める
@@ -326,67 +372,188 @@ float3 cascadeTint(float3 P)
     return TINT[selectCascade(depth)];
 }
 
+// ==============================================================
+// v2.2 : 点光源 / スポットライトの影 (シャドーマップの配列の ShadowIndex 枚目から)
+//   スポット : ライトの向きを奥にした透視投影 1 枚 / 点光源 : 一番大きい軸の面 (+X -X +Y -Y +Z -Z の順に 6 枚)
+//   行列は受け取らず、C++ (Buffer::computeLocalShadowViews) と同じ向き・投影をここで作り直す
+//   (LookToLH : 奥 = z / 横 = normalize(cross(上, z)) / 縦 = cross(z, 横)。深度 = Far / (Far - Near) × (1 - Near / z))
+//   法線方向へずらす量は、その距離での 1 texel の大きさに比例させる (遠い所ほど大きく)
+// ==============================================================
+float localShadow(LightData light, float3 P, float3 N)
+{
+    if (light.ShadowIndex == 0xFFFFFFFFu || g_LocalShadowTexture == 0xFFFFFFFFu || !g_ReceiveShadows) return 1.0f;
+
+    float3 toP = P - light.Position;   // ライト → 物
+    float3 axis, up;
+    uint slice = light.ShadowIndex;
+    if (light.Type == LIGHT_SPOT)
+    {
+        axis = light.Direction;
+        up   = abs(axis.y) > 0.99f ? float3(1, 0, 0) : float3(0, 1, 0);
+    }
+    else
+    {
+        const float3 a = abs(toP);
+        if (a.x >= a.y && a.x >= a.z) { axis = float3(sign(toP.x), 0, 0); up = float3(0, 1, 0); slice += toP.x >= 0.0f ? 0 : 1; }
+        else if (a.y >= a.z)          { axis = float3(0, sign(toP.y), 0); up = float3(0, 0, toP.y >= 0.0f ? -1 : 1); slice += toP.y >= 0.0f ? 2 : 3; }
+        else                          { axis = float3(0, 0, sign(toP.z)); up = float3(0, 1, 0); slice += toP.z >= 0.0f ? 4 : 5; }
+    }
+    const float3 right = normalize(cross(up, axis));
+    const float3 upAxis = cross(axis, right);
+
+    // 法線方向へずらす (1 texel の大きさ = 2 × z × tan / 解像度)
+    const float zRaw = max(dot(toP, axis), light.ShadowNear);
+    toP += N * (light.ShadowBias * 2.0f * zRaw * light.ShadowTan * g_LocalShadowTexelSize);
+
+    const float z = dot(toP, axis);
+    if (z <= light.ShadowNear) return 1.0f;
+    const float2 ndc = float2(dot(toP, right), dot(toP, upAxis)) / (z * light.ShadowTan);
+    const float2 uv  = ndc * float2(0.5f, -0.5f) + 0.5f;
+    if (any(uv < 0.0f) || any(uv > 1.0f)) return 1.0f;   // スポットの円錐の外 (光も当たらない)
+    const float farZ  = max(light.Range, light.ShadowNear + 0.01f);
+    const float depth = farZ / (farZ - light.ShadowNear) * (1.0f - light.ShadowNear / z);
+
+    Texture2DArray<float> shadowMap = g_DepthArrays[g_LocalShadowTexture];
+    const float step = g_LocalShadowTexelSize * g_LocalShadowSoftness;
+    float lit = 0.0f;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            lit += shadowMap.SampleCmpLevelZero(g_ShadowSampler, float3(uv + float2(x, y) * step, slice), depth);
+        }
+    }
+    return lit / 9.0f;
+}
+
+// v2.2 : 1 つのライトの光 (shadeLights の中身を分けた。平行光源 / 点光源 / スポットライト)
+//   点光源 / スポットライト : UE と同じく
+//     - 距離の減衰 (localAttenuation) / スポットの円錐 (spotAttenuation)
+//     - 光源の半径 (SourceRadius) : 鏡面反射だけ、反射の向きに一番近い球の上の点から来た光にする (Karis 2013 の Representative Point)。
+//       粗さを広げた分だけ明るさを下げる (エネルギーを保つ)
+struct ShadeParams
+{
+    float3 albedo;
+    float3 diffuseColor;
+    float3 f0;
+    float3 N;
+    float3 V;
+    float3 P;
+    float  NoV;
+    float  a;
+    float  k;
+    bool   pbr;
+};
+
+float3 shadeOneLight(ShadeParams s, uint i)
+{
+    const LightData light = g_Lights[i];
+    float3 L;
+    float3 Ls;              // 鏡面反射に使う向き (光源の半径があると L と違う)
+    float  attenuation = 1.0f;
+    float  energy = 1.0f;   // 光源の半径でハイライトを広げた分、明るさを下げる
+    if (light.Type == LIGHT_DIRECTIONAL)
+    {
+        L  = -light.Direction;
+        Ls = L;
+    }
+    else
+    {
+        const float3 toLight  = light.Position - s.P;
+        const float  distance = length(toLight);
+        if (distance >= light.Range) return 0.0f.xxx;
+        L = toLight / max(distance, 1e-4f);
+        attenuation = localAttenuation(light, distance);
+        if (light.Type == LIGHT_SPOT)
+        {
+            attenuation *= spotAttenuation(light, L);
+            if (attenuation <= 0.0f) return 0.0f.xxx;
+        }
+        Ls = L;
+        if (light.SourceRadius > 0.0f && s.pbr)
+        {
+            const float3 R = reflect(-s.V, s.N);
+            const float3 centerToRay = dot(toLight, R) * R - toLight;
+            const float3 closest = toLight + centerToRay * saturate(light.SourceRadius / max(length(centerToRay), 1e-4f));
+            Ls = normalize(closest);
+            const float aWide = saturate(s.a + light.SourceRadius / (2.0f * max(distance, 1e-4f)));
+            energy = (s.a / aWide) * (s.a / aWide);
+        }
+    }
+
+    const float NoL = saturate(dot(s.N, L));
+    if (NoL <= 0.0f) return 0.0f.xxx;
+    // 影 : 光が当たっていない面は上で飛ばすので、シャドーマップを読むのは当たる面だけ
+    if (i == g_ShadowLightIndex && g_ReceiveShadows)   // v1.5 : 影を受けない物は読まない
+    {
+        attenuation *= shadowFactor(s.P, s.N);
+        if (attenuation <= 0.0f) return 0.0f.xxx;
+    }
+    else if (light.Type != LIGHT_DIRECTIONAL)
+    {
+        attenuation *= localShadow(light, s.P, s.N);   // v2.2
+        if (attenuation <= 0.0f) return 0.0f.xxx;
+    }
+    const float3 radiance = light.Color * (light.Intensity * attenuation * NoL);
+
+    if (!s.pbr) return s.albedo * radiance;   // Lambert : 拡散反射だけ
+
+    // PBR (Cook-Torrance) : GGX の分布 × Smith の遮蔽 × Schlick のフレネル
+    const float  a2  = s.a * s.a;
+    const float3 H   = normalize(Ls + s.V);
+    const float  NoH = saturate(dot(s.N, H));
+    const float  VoH = saturate(dot(s.V, H));
+    const float  d   = NoH * NoH * (a2 - 1.0f) + 1.0f;
+    const float  D   = a2 / (PI * d * d) * energy;
+    const float  vis = 1.0f / ((NoL * (1.0f - s.k) + s.k) * (s.NoV * (1.0f - s.k) + s.k) * 4.0f);   // G / (4 N・L N・V)
+    const float3 F   = s.f0 + (1.0f - s.f0) * pow(1.0f - VoH, 5.0f);
+    const float3 specular = D * vis * F * PI;     // π 倍 : 拡散反射の 1/π を光に含めた分 (上の説明)
+    const float3 kd = 1.0f - F;                   // 鏡面で反射した分は拡散しない
+    return (kd * s.diffuseColor + specular) * radiance;
+}
+
 float3 shadeLights(float3 albedo, float3 N, float3 V, float3 P, float metallic, float roughness)
 {
     if (g_LightingModel == LIGHTING_UNLIT) return albedo;
     if (g_ShadowShowCascades != 0) albedo *= cascadeTint(P);   // 確認用 : 段ごとに色を付ける (ライトの光だけ)
 
-    const bool  pbr = g_LightingModel == LIGHTING_PBR;
-    const float NoV = saturate(dot(N, V)) + 1e-4f;
+    ShadeParams s;
+    s.pbr = g_LightingModel == LIGHTING_PBR;
+    s.NoV = saturate(dot(N, V)) + 1e-4f;
     roughness = clamp(roughness, 0.045f, 1.0f);   // 0 だとハイライトが 1 ピクセルに潰れる
-    const float  a   = roughness * roughness;
-    const float  a2  = a * a;
-    const float  k   = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;   // Smith-Schlick (UE4)
-    const float3 f0  = lerp(0.04f.xxx, albedo, metallic);                // 非金属は 4% 反射、金属は自分の色で反射
-    const float3 diffuseColor = pbr ? albedo * (1.0f - metallic) : albedo;
+    s.a   = roughness * roughness;
+    s.k   = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;   // Smith-Schlick (UE4)
+    s.f0  = lerp(0.04f.xxx, albedo, metallic);                // 非金属は 4% 反射、金属は自分の色で反射
+    s.diffuseColor = s.pbr ? albedo * (1.0f - metallic) : albedo;
+    s.albedo = albedo;
+    s.N = N;
+    s.V = V;
+    s.P = P;
 
     float3 color = 0.0f.xxx;
-    for (uint i = 0; i < g_LightCount; ++i)
+    [branch]
+    if (g_ClusterEnabled == 0)
     {
-        const LightData light = g_Lights[i];
-        float3 L;
-        float  attenuation = 1.0f;
-        if (light.Type == 0)
-        {
-            L = -light.Direction;
-        }
-        else
-        {
-            const float3 toLight  = light.Position - P;
-            const float  distance = length(toLight);
-            if (distance >= light.Range) continue;
-            L = toLight / max(distance, 1e-4f);
-            attenuation = pointAttenuation(distance, light.Range);
-        }
-
-        const float NoL = saturate(dot(N, L));
-        if (NoL <= 0.0f) continue;
-        // 影 : 影を付けるライトだけ (光が当たっていない面は上で飛ばすので、シャドーマップを読むのは当たる面だけ)
-        if (i == g_ShadowLightIndex && g_ReceiveShadows)   // v1.5 : 影を受けない物は読まない
-        {
-            attenuation *= shadowFactor(P, N);
-            if (attenuation <= 0.0f) continue;
-        }
-        const float3 radiance = light.Color * (light.Intensity * attenuation * NoL);
-
-        if (!pbr)
-        {
-            color += albedo * radiance;   // Lambert : 拡散反射だけ
-            continue;
-        }
-
-        // PBR (Cook-Torrance) : GGX の分布 × Smith の遮蔽 × Schlick のフレネル
-        const float3 H   = normalize(L + V);
-        const float  NoH = saturate(dot(N, H));
-        const float  VoH = saturate(dot(V, H));
-        const float  d   = NoH * NoH * (a2 - 1.0f) + 1.0f;
-        const float  D   = a2 / (PI * d * d);
-        const float  vis = 1.0f / ((NoL * (1.0f - k) + k) * (NoV * (1.0f - k) + k) * 4.0f);   // G / (4 N・L N・V)
-        const float3 F   = f0 + (1.0f - f0) * pow(1.0f - VoH, 5.0f);
-        const float3 specular = D * vis * F * PI;     // π 倍 : 拡散反射の 1/π を光に含めた分 (上の説明)
-        const float3 kd = 1.0f - F;                   // 鏡面で反射した分は拡散しない
-        color += (kd * diffuseColor + specular) * radiance;
+        // 全部のライトを回す (v2.2 より前と同じ)
+        for (uint i = 0; i < g_LightCount; ++i) color += shadeOneLight(s, i);
+        return color;
     }
+
+    // v2.2 : 平行光源 (先頭) はいつも回し、点光源 / スポットライトは自分の段の一覧だけ (Buffer::buildClusters)
+    for (uint d = 0; d < g_DirectionalCount; ++d) color += shadeOneLight(s, d);
+
+    const float4 viewPos = mul(float4(P, 1.0f), g_ViewMatrix);
+    const float4 clip    = mul(viewPos, g_ProjectionMatrix);
+    const float2 ndc     = clip.xy / clip.w;
+    const uint cx = min((uint)max((ndc.x * 0.5f + 0.5f) * CLUSTER_X, 0.0f), CLUSTER_X - 1);
+    const uint cy = min((uint)max((0.5f - ndc.y * 0.5f) * CLUSTER_Y, 0.0f), CLUSTER_Y - 1);
+    const uint cz = (uint)clamp(floor(log2(max(viewPos.z, 1e-4f)) * g_ClusterZScale + g_ClusterZBias), 0.0f, (float)(CLUSTER_Z - 1));
+    const uint header = g_Clusters[(cz * CLUSTER_Y + cy) * CLUSTER_X + cx];
+    const uint first  = CLUSTER_COUNT + (header & 0xFFFFFu);
+    const uint count  = header >> 20;
+    for (uint n = 0; n < count; ++n) color += shadeOneLight(s, g_Clusters[first + n]);
     return color;
 }
 

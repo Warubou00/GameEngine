@@ -170,6 +170,13 @@ internal sealed class RenderSettingsSystem
         if (s.Shadows.SplitLambda != last.Shadows.SplitLambda)   shadows.SplitLambda  = s.Shadows.SplitLambda;
         if (s.Shadows.CascadeBlend != last.Shadows.CascadeBlend) shadows.CascadeBlend = s.Shadows.CascadeBlend;
 
+        var local = g.LocalLights;   // v2.2
+        if (s.LocalLights.Clustered != last.LocalLights.Clustered)               local.Clustered        = s.LocalLights.Clustered;
+        if (s.LocalLights.Shadows != last.LocalLights.Shadows)                   local.Shadows          = s.LocalLights.Shadows;
+        if (s.LocalLights.ShadowResolution != last.LocalLights.ShadowResolution) local.ShadowResolution = Math.Clamp(s.LocalLights.ShadowResolution, 256, 4096);
+        if (s.LocalLights.MaxShadowSlices != last.LocalLights.MaxShadowSlices)   local.MaxShadowSlices  = Math.Clamp(s.LocalLights.MaxShadowSlices, 0, 24);
+        if (s.LocalLights.ShadowSoftness != last.LocalLights.ShadowSoftness)     local.ShadowSoftness   = s.LocalLights.ShadowSoftness;
+
         var particles = g.Particles;
         if (s.Particles.Enabled != last.Particles.Enabled)                       particles.Enabled            = s.Particles.Enabled;
         if (s.Particles.Capacity != last.Particles.Capacity)                     particles.Capacity           = Math.Clamp(s.Particles.Capacity, 1024, 1 << 21);

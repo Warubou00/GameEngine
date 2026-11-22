@@ -196,8 +196,9 @@ namespace RHI
 
 		void CommandContext::graphShadowRead()
 		{
-			if (!_graphRecording || _shadowMapTarget == RHI::RenderTargetHandle::INVALID) return;
-			graphAccess(_shadowMapTarget, RHI::RENDER_GRAPH_READ | RHI::RENDER_GRAPH_IMPLICIT);
+			if (!_graphRecording) return;
+			if (_shadowMapTarget != RHI::RenderTargetHandle::INVALID) graphAccess(_shadowMapTarget, RHI::RENDER_GRAPH_READ | RHI::RENDER_GRAPH_IMPLICIT);
+			if (_localShadowMapTarget != RHI::RenderTargetHandle::INVALID) graphAccess(_localShadowMapTarget, RHI::RENDER_GRAPH_READ | RHI::RENDER_GRAPH_IMPLICIT);   // v2.2
 		}
 
 		void CommandContext::RecordGraphBarrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)

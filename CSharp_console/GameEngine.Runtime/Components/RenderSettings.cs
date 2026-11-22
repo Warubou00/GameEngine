@@ -29,6 +29,7 @@ public struct RenderingProjectValues
 
     public ShadowValues   Shadows   = new();
     public ParticleValues Particles = new();
+    public LocalLightValues LocalLights = new();   // v2.2 : 点光源 / スポットライト (クラスター / 影)
 
     public RenderingProjectValues()
     {
@@ -57,6 +58,22 @@ public struct ShadowValues
     [Range(0.0f, 1.0f)]  public float SplitLambda  = 0.75f;
     [Range(0.0f, 0.5f)]  public float CascadeBlend = 0.1f;
     public ShadowValues() { }
+}
+
+// v2.2 : 点光源 / スポットライト (Graphics.LocalLights)
+public struct LocalLightValues
+{
+    [Tooltip("Shade each pixel only with the lights that reach its screen cluster (16 x 9 x 24). Off: every light on every pixel")]
+    public bool  Clustered = true;
+    [Tooltip("Point / spot lights with Cast Shadows get shadows (nearest to the camera first)")]
+    public bool  Shadows = true;
+    [Range(256, 4096), Tooltip("Size of one shadow map face")]
+    public int   ShadowResolution = 1024;
+    [Range(0, 24), Tooltip("Shadow map faces for local lights (spot = 1, point = 6)")]
+    public int   MaxShadowSlices = 12;
+    [Range(0.0f, 4.0f), Tooltip("Shadow edge blur (PCF step in texels)")]
+    public float ShadowSoftness = 1.0f;
+    public LocalLightValues() { }
 }
 
 public struct FxaaValues

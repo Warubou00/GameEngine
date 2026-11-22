@@ -51,18 +51,35 @@ public sealed class ShadowPass : IDisposable
 
     public RenderTexture? ShadowMap => _map;
 
+    // ---------- v2.2 : 点光源 / スポットライトの影 (Depth32 の配列。LightSystem が割り当てた枚に描く) ----------
+    private RenderTexture? _localMap;
+    private int  _localResolution;
+    private int  _localSlicesAllocated;
+    private long _localDrawnFrame = -1;
+    public RenderTexture? LocalShadowMap => _localMap;
+    private static readonly string[] LocalPassNames = Enumerable.Range(0, NativeMethods.MaxLocalShadowSlices).Select(i => $"Local {i}").ToArray();
+
     /// <summary>影を使うなら、シャドーマップを描く命令を積んで true を返す</summary>
     private static readonly string[] CascadePassNames = ["Cascade 0", "Cascade 1", "Cascade 2", "Cascade 3"];   // v1.10 P2 (毎フレーム文字列を作らない)
 
     public bool Render(RenderCommandBuffer cmd, GraphicsSettings graphics)
     {
+        // v2.2 : 点光源 / スポットライトの影の枚数とシャドーマップ (平行光源の影とは別に決める)
+        var localSlices = prepareLocal(graphics);
+        var localMap    = localSlices > 0 ? _localMap!.Handle : NativeMethods.InvalidHandle;
+        var localSoftness = MathF.Max(graphics.LocalLights.ShadowSoftness, 0.0f);
+
         var settings = graphics.Shadows;
         var use = settings.Enabled && graphics.ShadowLightIndex >= 0 && graphics.LightingModel != LightingModel.Unlit;
         if (!use)
         {
-            Send(default);   // 影なし (変わった時だけ送る)
+            // 平行光源の影なし (変わった時だけ送る)
+            Send(new NativeMethods.ShadowSettings { LocalShadowMap = localMap, LocalSoftness = localSoftness, LocalSliceCount = (uint)localSlices });
             _drawAll = true;
-            return false;
+            if (localSlices == 0) return false;
+            using var localOnly = cmd.BeginPass("Shadows");
+            renderLocal(cmd, localSlices);
+            return true;
         }
 
         var resolution = Math.Clamp(settings.Resolution, 256, 8192);
@@ -105,6 +122,9 @@ public sealed class ShadowPass : IDisposable
             CascadeBlend = Math.Clamp(settings.CascadeBlend, 0.0f, 0.5f),
             Flags        = flags,
             FrozenMask   = frozen,
+            LocalShadowMap  = localMap,        // v2.2
+            LocalSoftness   = localSoftness,
+            LocalSliceCount = (uint)localSlices,
         });
 
         // 段ごとに : 配列の c 枚目を消して、視点 c + 1 (ライトのカスケード c) で描く。カリングは C++ が段ごと (または 1 回) に行う
@@ -118,7 +138,44 @@ public sealed class ShadowPass : IDisposable
             cmd.DrawScene(ScenePass.Shadow, RenderQueue.Opaque, view: c + 1);
             cmd.DrawScene(ScenePass.Shadow, RenderQueue.Transparent, view: c + 1);
         }
+        renderLocal(cmd, localSlices);
         return true;
+    }
+
+    // v2.2 : 影の枚数を決めて、足りなければシャドーマップを作り直す (大きくするだけ。6 枚単位)
+    private int prepareLocal(GraphicsSettings graphics)
+    {
+        var local  = graphics.LocalLights;
+        var slices = local.Shadows && graphics.LightingModel != LightingModel.Unlit ? Math.Clamp(graphics.LocalShadowSlices, 0, NativeMethods.MaxLocalShadowSlices) : 0;
+        if (slices == 0) return 0;
+        var resolution = Math.Clamp(local.ShadowResolution, 256, 4096);
+        if (_localMap == null || resolution != _localResolution || slices > _localSlicesAllocated)
+        {
+            _localMap?.Dispose();
+            var allocate = Math.Min((slices + 5) / 6 * 6, NativeMethods.MaxLocalShadowSlices);
+            _localMap = RenderTexture.CreateFixed(RenderTextureFormat.Depth32, (uint)resolution, (uint)resolution, arraySize: allocate, name: "Local Shadow Map");
+            _localResolution      = resolution;
+            _localSlicesAllocated = allocate;
+            _hasSent              = false;
+            _localDrawnFrame      = -1;
+        }
+        return slices;
+    }
+
+    // v2.2 : 枚ごとに消して、その視点 (LocalShadowViewBegin + 枚) で描く。カリングは C++ (点光源の 6 面は 1 回)
+    //   ライトの影はカメラに関係ないので、カメラが何台でも 1 フレームに 1 回だけ描く
+    private void renderLocal(RenderCommandBuffer cmd, int slices)
+    {
+        if (slices == 0 || _localMap == null || _localDrawnFrame == Time.FrameCount) return;
+        _localDrawnFrame = Time.FrameCount;
+        for (int s = 0; s < slices; s++)
+        {
+            using var slicePass = cmd.BeginPass(LocalPassNames[s]);
+            cmd.SetRenderTargets(ReadOnlySpan<RenderTexture>.Empty, _localMap, depthSlice: s);
+            cmd.ClearDepth();
+            cmd.DrawScene(ScenePass.Shadow, RenderQueue.Opaque, view: NativeMethods.LocalShadowViewBegin + s);
+            cmd.DrawScene(ScenePass.Shadow, RenderQueue.Transparent, view: NativeMethods.LocalShadowViewBegin + s);
+        }
     }
 
     private void Send(NativeMethods.ShadowSettings settings)
@@ -133,6 +190,9 @@ public sealed class ShadowPass : IDisposable
     {
         _map?.Dispose();
         _map = null;
+        _localMap?.Dispose();   // v2.2
+        _localMap = null;
+        _localSlicesAllocated = 0;
         _hasSent = false;
     }
 }

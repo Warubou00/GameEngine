@@ -107,6 +107,7 @@ namespace RHI
                 ROOT_PARAM_LIGHT_SRV           = 6,  // t4        : ライト (Root SRV)
                 ROOT_PARAM_PASS_CONSTANTS      = 7,  // b1        : パスごとの値 (ルート定数 16 個 : 読むテクスチャの番号 8 + 値 8)
                 ROOT_PARAM_CUSTOM_DATA_SRV     = 8,  // t5        : 自分のシェーダーのパラメーター (Root SRV。StructuredBuffer<float4>。SH2)
+                ROOT_PARAM_CLUSTER_SRV         = 9,  // t6        : v2.2 クラスター (段ごとのライトの番号。Root SRV。StructuredBuffer<uint>)
                 ROOT_PARAM_COUNT
             };
             static constexpr uint32_t PASS_CONSTANT_COUNT = 16;

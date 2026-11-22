@@ -648,6 +648,46 @@ var type = engine.Assets.LoadUserData&lt;EnemyType&gt;("Assets/Data/Slime.userda
 <p>確認 : <code>--editor-test --editor-test-section layouts</code></p>
 </article>
 
+<article data-id="locallights" data-title="点光源 / スポットライト / クラスター / スプラッシュ画面 (v2.2)">
+<h2>点光源 / スポットライト / クラスター / スプラッシュ画面 (v2.2)</h2>
+<h3>コンポーネント (UE の Point Light / Spot Light と同じ項目)</h3>
+<ul>
+  <li><code>PointLight</code> : Color / Intensity / Range (UE の Attenuation Radius) / SourceRadius / UseInverseSquaredFalloff / FalloffExponent / CastShadows (既定 off。v2.2 より前のシーンの見た目を変えない) / ShadowBias</li>
+  <li><code>SpotLight</code> (新規) : 上と同じ + InnerConeAngle / OuterConeAngle (中心からの半分の角度。既定 0 / 44 度。外側は 1〜80 度)。向きは Transform の Forward (+Z)。CastShadows は既定 on</li>
+  <li>減衰 : <code>localAttenuation</code> (hlslTemplate.shader)。Inverse Squared = <code>(1 - (d/r)⁴)² / (d² + 1)</code> (以前の点光源と同じ) / 切ると <code>(1 - (d/r)²)^FalloffExponent</code>。円錐 = <code>saturate(L・D × SpotScale + SpotOffset)²</code></li>
+  <li>SourceRadius : 鏡面反射だけ、反射の向きに一番近い球の上の点から光が来るとして計算し (Karis 2013 の Representative Point)、粗さを広げた分の明るさを下げる</li>
+  <li>エディター : GameObject &gt; Light (Directional / Point / Spot)。シーンビューに全部のライトの印 (クリックで選べる)、選んだライトの範囲 (球 / 円錐 / 矢印)。コードは <code>EditorApp.Lights.cs</code></li>
+</ul>
+<h3>C++ への渡し方</h3>
+<ul>
+  <li><code>RHI::LightData</code> は 80 byte (以前 48)。並びは 平行光源 → 点光源 → スポット (<code>LightSystem</code>)。C# の <code>NativeMethods.LightData</code> / HLSL の <code>struct LightData</code> も同じ並び</li>
+  <li><code>RHI::LightingSettings</code> は 32 byte (Flags : <code>LIGHTING_FLAG_CLUSTERED</code>)、<code>RHI::ShadowSettings</code> は 64 byte (LocalShadowMap / LocalSoftness / LocalSliceCount)。構造体を変えたら RHI と Renderer を Debug / Release の両方でビルドし直す (古い Renderer.dll は 16 byte しか写さない)</li>
+</ul>
+<h3>点光源 / スポットライトの影</h3>
+<ul>
+  <li>Depth32 の配列 1 つ (<code>ShadowPass</code> の Local Shadow Map。使う枚数に合わせて 6 枚単位で増やす)。スポット = 1 枚 (外側の角度の透視投影) / 点光源 = 6 枚 (+X −X +Y −Y +Z −Z。90 度 + 縁の余白)</li>
+  <li>割り当て : <code>LightSystem</code> が CastShadows のライトを「カメラから届く球の端までの距離」の近い順に並べ、Project Settings &gt; Rendering &gt; Local Lights &gt; Max Shadow Slices (既定 12、最大 24) に入る物から <code>LightData.ShadowIndex</code> を付ける。入らないライトは光だけ</li>
+  <li>視点の番号 : <code>1 + MAX_SHADOW_CASCADES + 枚</code> (<code>RHI::LOCAL_SHADOW_VIEW_BEGIN</code>)。行列は C++ (<code>Buffer::computeLocalShadowViews</code>) が作り、シェーダー (<code>localShadow</code>) は行列を受け取らず LightData から同じ向き・投影を作り直す (両方の上の向き / Near / Far をそろえること)</li>
+  <li>カリング : スポットは透視の視錐台、点光源の 6 面はライトを囲む箱で 1 回 (<code>Buffer::GetShadowCullPlanes</code> の key が同じ視点は数え直さない)。カメラが何台でも 1 フレームに 1 回だけ描く</li>
+</ul>
+<h3>クラスター (Clustered shading)</h3>
+<ul>
+  <li>画面を 16 x 9 の区画 × 奥行き 24 段 (対数) に分け、各段に届く点光源 / スポットの番号を並べる。作るのは CPU (<code>Buffer::buildClusters</code>。球を画面に映した範囲 : Mara &amp; McGuire 2013)。フレームの始めに全部のカメラの分を VRAM へ写す (<code>Buffer::WriteClusters</code>。カメラ / ライトが変わった枠だけ)</li>
+  <li>ルートシグネチャ [9] = t6 (<code>StructuredBuffer&lt;uint&gt; g_Clusters</code>。段ごとの <code>先頭 | 数 &lt;&lt; 20</code> + 番号の並び)。ピクセルシェーダーは平行光源 (先頭の <code>g_DirectionalCount</code> 個) をいつも回し、残りは自分の段の一覧だけ</li>
+  <li>切り替え : Project Settings &gt; Rendering &gt; Local Lights &gt; Clustered (<code>Graphics.LocalLights.Clustered</code>)。平行投影のカメラは使わない (全部のライトを回す)</li>
+  <li>計測 (RTX 2070 / Release / 1280x720 / <code>--light-bench N</code>、GPU の描画パスの合計) : 8 個 0.383 → 0.300 ms / 64 個 1.276 → 0.419 ms / 256 個 4.386 → 0.935 ms。見本のシーン (点光源 2) は 0.68 → 0.69 ms (ほぼ同じ)</li>
+</ul>
+<h3>スプラッシュ画面</h3>
+<ul>
+  <li>エディターの起動中、別のスレッド (STA) の枠なしの窓に 段階 / 経過時間 / 進み具合 / 最後のログの行 を出す (<code>SplashScreen.cs</code>)。メインのスレッドがビルドなどで止まっていても動き続ける</li>
+  <li>エディターの窓は <code>EngineSettings.ShowWindow = false</code> で隠したまま作り、最初のフレームを描き終えてから出す (<code>Engine.WindowShown</code>)。隠している間は後ろにあっても止めない (止めると最初のフレームを描かず、いつまでも出ない)</li>
+  <li>出さない : <code>--editor-test</code> / <code>--quit-after</code> / <code>--resave-scenes</code> / <code>--no-splash</code></li>
+</ul>
+<h3>Package : 前の版のエディターを残す</h3>
+<p><code>Tools/make_package.py</code> は今の版の <code>Editor/&lt;名前&gt;_v&lt;版&gt;</code> だけを作り直し、前の版のフォルダは残す (前の版で作り始めたゲームを、その版で開き続けられるように)。ランチャーの版の選択に全部の版が出る。</p>
+<p>確認 : <code>--editor-test --editor-test-section lights</code> / 見本 <code>GameEngine_console --scene lights</code> (<code>--view spot</code> / <code>--small-lights off</code>)、計測 <code>--light-bench N --clustered on|off</code> / <code>--gpu-stats on</code></p>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

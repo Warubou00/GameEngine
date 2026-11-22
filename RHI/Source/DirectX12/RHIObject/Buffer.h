@@ -140,11 +140,29 @@ namespace RHI
                 float                 ShadowSoftness;       // PCF の間隔 (texel)
                 float                 ShadowBlend;          // 段の境目をつなぐ幅 (割合)
                 uint32_t              ShadowShowCascades;   // 1 : 段ごとに色を付ける (確認用)
-                float                 ShadowPadding[3];
+                // ---------- v2.2 : 点光源 / スポットライトの影 (以前はここが ShadowPadding[3]) ----------
+                uint32_t              LocalShadowTexture;   // g_DepthArrays の番号 (0xFFFFFFFF なら無し)
+                float                 LocalShadowTexelSize; // 1 / 解像度
+                float                 LocalShadowSoftness;  // PCF の間隔 (texel)
+                // ---------- v2.2 : クラスター (画面を 16 x 9 x 奥行き 24 に分け、そこに届くライトだけを回す) ----------
+                uint32_t              ClusterEnabled;       // 0 なら全部のライトを回す (以前と同じ)
+                uint32_t              DirectionalCount;     // 先頭の平行光源の数 (クラスターに入れず、いつも回す)
+                float                 ClusterZScale;        // 奥行きの段 = log2(z) × Scale + Bias
+                float                 ClusterZBias;
             };
             static constexpr uint64_t FRAME_SLOT_SIZE = 768;   // 1 視点の枠 (Root CBV は 256byte の倍数)
             static_assert(sizeof(FrameConstants) <= FRAME_SLOT_SIZE, "FrameConstants must fit in FRAME_SLOT_SIZE");
-            static constexpr uint32_t VIEW_COUNT = 1 + RHI::MAX_SHADOW_CASCADES;   // カメラ + 影のカスケード
+            // カメラ + 影のカスケード + 点光源 / スポットライトの影 (v2.2 で足した)
+            static constexpr uint32_t VIEW_COUNT = 1 + RHI::MAX_SHADOW_CASCADES + RHI::MAX_LOCAL_SHADOW_SLICES;
+
+            // ---------- v2.2 : クラスター (シェーダーの CLUSTER_* と同じ) ----------
+            //   StructuredBuffer<uint> : [0, CLUSTER_COUNT) = 段ごとの (先頭 | 数 << 20)、その後ろ = ライトの番号の並び
+            static constexpr uint32_t CLUSTER_X           = 16;
+            static constexpr uint32_t CLUSTER_Y           = 9;
+            static constexpr uint32_t CLUSTER_Z           = 24;
+            static constexpr uint32_t CLUSTER_COUNT       = CLUSTER_X * CLUSTER_Y * CLUSTER_Z;
+            static constexpr uint32_t CLUSTER_MAX_INDICES = 64 * 1024;   // 1 カメラで入れられるライトの番号の数 (超えた分は入れない)
+            static constexpr uint64_t CLUSTER_SLOT_SIZE   = static_cast<uint64_t>(CLUSTER_COUNT + CLUSTER_MAX_INDICES) * sizeof(uint32_t);
 
             // Scene定数バッファの容量 (フレームの数で等分して使う)
             static constexpr uint64_t SCENE_CB_SIZE        = 16ull * 1024ull * 1024ull;
@@ -351,6 +369,21 @@ namespace RHI
             uint32_t GetShadowViewCount()const { return _shadowViewCount; }   // 今のフレームで描く影の視点の数 (0 なら影なし)
             bool     IsShadowUnionCulling()const { return (_shadowSettings.Flags & RHI::SHADOW_FLAG_UNION_CULLING) != 0; }
             const ::DirectX::XMFLOAT4* GetShadowUnionPlanes()const { return _shadowUnionPlanes; }   // 全カスケードを囲む箱
+            // v2.2 : 影の視点のカリング (view : 1〜)。key が同じ視点は同じカリングの結果を使ってよい (点光源の 6 面はライトを囲む箱で 1 回)
+            const ::DirectX::XMFLOAT4* GetShadowCullPlanes(uint32_t view, uint32_t& key);
+            bool     IsLocalShadowView(uint32_t view)const { return view >= RHI::LOCAL_SHADOW_VIEW_BEGIN && view < VIEW_COUNT; }
+            bool     IsLocalShadowViewValid(uint32_t view)const
+            {
+                const uint32_t slice = view - RHI::LOCAL_SHADOW_VIEW_BEGIN;
+                return slice < (std::min)(_shadowSettings.LocalSliceCount, RHI::MAX_LOCAL_SHADOW_SLICES) && _localValid[slice];
+            }
+            void     SetLocalShadowMap(uint32_t texture, uint32_t resolution) { _localShadowTexture = texture; _localShadowResolution = (std::max)(1u, resolution); _frameConstantsVersion++; }
+
+            // v2.2 : クラスター (ライトの一覧を段ごとに分けた物)。WriteClusters : フレームの始めに 1 回、全部のカメラの分を作って VRAM へ写す
+            //        (カメラ / ライトが変わった枠だけ)。GetClusterAddress : 今のカメラの枠のアドレス
+            void     WriteClusters(uint32_t frameIndex, ID3D12GraphicsCommandList* cmdList);
+            D3D12_GPU_VIRTUAL_ADDRESS GetClusterAddress(uint32_t frameIndex)const;
+            uint32_t GetClusterIndexCount()const { return _clusterIndexCount; }   // 確認用 (最後に作った時のライトの番号の数)
 
             // 画面の大きさ (フレームの定数に入れる。全画面のシェーダーが使う)
             void SetScreenSize(uint32_t width, uint32_t height);
@@ -461,6 +494,35 @@ namespace RHI
             ::DirectX::XMFLOAT4                             _shadowUnionPlanes[6] = {};
             bool                                            _shadowValid[RHI::MAX_SHADOW_CASCADES] = {};   // 一度でも作ったか (止めてよいか)
             void computeShadowViews();   // カメラとライトから、カスケードごとのライトの行列を作る (WriteFrameConstants の中)
+
+            // ---------- v2.2 : 点光源 / スポットライトの影 (LightData.ShadowIndex の枚に描く) ----------
+            uint32_t                                        _localShadowTexture    = 0xFFFFFFFFu;   // g_DepthArrays の番号
+            uint32_t                                        _localShadowResolution = 1;
+            ::DirectX::XMFLOAT4X4                           _localView[RHI::MAX_LOCAL_SHADOW_SLICES] = {};
+            ::DirectX::XMFLOAT4X4                           _localProj[RHI::MAX_LOCAL_SHADOW_SLICES] = {};
+            ::DirectX::XMFLOAT4                             _localPlanes[RHI::MAX_LOCAL_SHADOW_SLICES][6] = {};
+            uint32_t                                        _localCullKey[RHI::MAX_LOCAL_SHADOW_SLICES] = {};   // 点光源の 6 面は同じ (ライトの番号)
+            bool                                            _localValid[RHI::MAX_LOCAL_SHADOW_SLICES] = {};
+            uint64_t                                        _localVersion = 0;   // 作った時の _lightsVersion
+            void computeLocalShadowViews();   // ライトの位置 / 向き / 角度から、枚ごとの行列を作る (ライトが変わった時だけ)
+
+            // ---------- v2.2 : クラスター ----------
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _clusterUpload;   // [フレーム][カメラ] ごとに CLUSTER_SLOT_SIZE
+            std::unique_ptr<RHI::DirectX12::ResourceBuffer> _clusterGpu;
+            struct ClusterKey   // 作った時のカメラ / ライト (同じなら作り直さない)
+            {
+                ::DirectX::XMFLOAT4X4 View = {};
+                ::DirectX::XMFLOAT4X4 Projection = {};
+                uint64_t              LightsVersion = 0;
+                uint32_t              ScreenWidth = 0, ScreenHeight = 0;
+            };
+            ClusterKey                                      _clusterKeys[CommandContext::FRAME_COUNT][RHI::MAX_CAMERAS] = {};
+            uint32_t                                        _clusterIndexCount = 0;
+            bool                                            _clusterWarned = false;
+            std::vector<uint32_t>                           _clusterData;     // 作業用 (CLUSTER_COUNT + 番号)
+            std::vector<uint32_t>                           _clusterRanges;   // 作業用 (ライトごとの x0 x1 y0 y1 z0 z1)
+            bool buildClusters(float& zScale, float& zBias);   // 今のカメラで _clusterData を作る (平行投影のカメラは false)
+            static void clusterDepthRange(const ::DirectX::XMFLOAT4X4& projection, float& zScale, float& zBias);   // 奥行きの段の式 (転置していない投影)
 
             // ---------- マテリアル (CPU 側と、フレームごとの UPLOAD / VRAM) ----------
             std::vector<MaterialData>                       _materials;

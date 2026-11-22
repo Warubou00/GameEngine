@@ -97,27 +97,41 @@ internal static unsafe class NativeMethods
         public fixed float  Params[MaxPassParams];
     }
 
-    // C++ の RHI::LightData と同じ並び (48byte)
+    // C++ の RHI::LightData と同じ並び (80byte。v2.2 で 48byte から増やした)
     [StructLayout(LayoutKind.Sequential)]
     public struct LightData
     {
         public Vector3 Position;
         public float   Range;
         public Vector3 Direction;
-        public uint    Type;        // 0 : 平行光源 / 1 : 点光源
+        public uint    Type;        // 0 : 平行光源 / 1 : 点光源 / 2 : スポットライト (v2.2)
         public Vector3 Color;
         public float   Intensity;
+        // ---------- v2.2 ----------
+        public float   SpotScale;        // 1 / (cos(内側) - cos(外側))
+        public float   SpotOffset;       // -cos(外側) × SpotScale
+        public float   SourceRadius;
+        public float   FalloffExponent;  // 0 : 距離の 2 乗で弱くなる
+        public uint    ShadowIndex;      // 影のシャドーマップの枚の番号 (NoShadow = 無し)
+        public float   ShadowNear;
+        public float   ShadowBias;
+        public float   ShadowTan;
     }
+    public const uint NoShadow = 0xFFFFFFFFu;            // C++ の RHI::LIGHT_NO_SHADOW
+    public const int  MaxLocalShadowSlices = 24;          // C++ の RHI::MAX_LOCAL_SHADOW_SLICES
+    public const int  LocalShadowViewBegin = 1 + 4;       // C++ の RHI::LOCAL_SHADOW_VIEW_BEGIN (カメラ + カスケード 4 段)
 
-    // C++ の RHI::LightingSettings と同じ並び (16byte)
+    // C++ の RHI::LightingSettings と同じ並び (32byte。v2.2 で 16byte から増やした)
     [StructLayout(LayoutKind.Sequential)]
     public struct LightingSettings
     {
         public uint    Model;       // LightingModel
         public Vector3 Ambient;
+        public uint    Flags;       // v2.2 : 1 = クラスター
+        public uint    Padding0, Padding1, Padding2;
     }
 
-    // C++ の RHI::ShadowSettings と同じ並び (48byte。以前は 32byte)
+    // C++ の RHI::ShadowSettings と同じ並び (64byte。以前は 48byte。その前は 32byte)
     [StructLayout(LayoutKind.Sequential)]
     public struct ShadowSettings
     {
@@ -132,13 +146,18 @@ internal static unsafe class NativeMethods
         public float CascadeBlend;
         public uint  Flags;          // 1 : 全カスケードを囲む箱で 1 回だけカリング / 2 : 段ごとに色を付ける
         public uint  FrozenMask;     // このフレームは描き直さないカスケード (ビット)
-        public uint  Padding;
+        // ---------- v2.2 : 点光源 / スポットライトの影 (以前はここが Padding) ----------
+        public uint  LocalShadowMap;   // Depth32 の配列 (InvalidHandle なら無し)
+        public float LocalSoftness;
+        public uint  LocalSliceCount;  // 使う枚数
+        public uint  Padding0, Padding1;
 
         // 値の比較 (Equals は object を受け取るので箱詰めが起きる。毎フレーム比べるので自分で比べる)
         public readonly bool SameAs(in ShadowSettings o) =>
             Enabled == o.Enabled && LightIndex == o.LightIndex && ShadowMap == o.ShadowMap && CascadeCount == o.CascadeCount &&
             Distance == o.Distance && NormalBias == o.NormalBias && Softness == o.Softness && SplitLambda == o.SplitLambda &&
-            CascadeBlend == o.CascadeBlend && Flags == o.Flags && FrozenMask == o.FrozenMask;
+            CascadeBlend == o.CascadeBlend && Flags == o.Flags && FrozenMask == o.FrozenMask &&
+            LocalShadowMap == o.LocalShadowMap && LocalSoftness == o.LocalSoftness && LocalSliceCount == o.LocalSliceCount;
     }
 
     // C++ の RHI::DebugLineVertex と同じ並び (16byte)

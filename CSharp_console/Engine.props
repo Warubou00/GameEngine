@@ -31,13 +31,15 @@
          1.22.0.0 : UserData UD1 (ScriptableObject 相当 : .userdata.json / 読み込み・保存・読み直し / コンポーネントのフィールド。v2.0.0.0 への途中) /
          1.23.0.0 : UserData UD2 (エディター : Create > UserData / Inspector で編集・元に戻す / 同じ型だけの選ぶ窓 / 再生を止めるとファイルの値に戻す) /
          2.0.0.0 : UserData UD3 (書き出したゲームは .userdata.bin (詰めて混ぜ、書き換えを確かめる) / 見本 userdata_demo / ドキュメント) /
-         2.1.0.0 : 前に開いていたシーンを開く / 窓の並びのプリセット (Default + 5 つ。日本語の名前) / Behaviour があると動いた物が描画されないのを直す)
+         2.1.0.0 : 前に開いていたシーンを開く / 窓の並びのプリセット (Default + 5 つ。日本語の名前) / Behaviour があると動いた物が描画されないのを直す /
+         2.2.0.0 : スポットライト / 点光源・スポットライトに UE と同じ項目 (光源の半径・減衰の指数・影) / 点光源・スポットライトの影 /
+                   クラスターでライトを分ける (多いライトが軽い) / GameObject > Light とシーンビューのライトの印・範囲 / エディターのスプラッシュ画面)
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>2.1.0.0</EngineVersion>
+    <EngineVersion>2.2.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

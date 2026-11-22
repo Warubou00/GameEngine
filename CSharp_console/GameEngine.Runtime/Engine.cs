@@ -16,6 +16,9 @@ public sealed class EngineSettings
     public bool   VSync  { get; init; } = false;  // false : 対応環境ではテアリングを許可して上限なしで描く
     // 相対パス (モデル / シェーダー / キャッシュ) の起点。null なら実行ファイルのフォルダ (ED3 : エディターは見本の出力フォルダを使う)
     public string? WorkingDirectory { get; init; }
+    // v2.2 : false なら窓を隠したまま作り、最初のフレームを描いた後に出す (エディターのスプラッシュ画面。読み込み中に白い窓を見せない)
+    //   以前はいつもすぐ出していた (読み込みの間、何も描かれない白い窓が出ていた)
+    public bool   ShowWindow { get; init; } = true;
 }
 
 // シーンのカメラの代わりに使うカメラ (エディターのカメラ。ED3)
@@ -146,6 +149,11 @@ public sealed class GraphicsSettings
     public ParticleSettings Particles { get; } = new();
     // 影を落とすライトの番号 (LightSystem が決める。-1 なら影を落とすライトが無い)
     public int ShadowLightIndex { get; internal set; } = -1;
+    // v2.2 : 点光源 / スポットライト (クラスター / 影)
+    public LocalLightSettings LocalLights { get; } = new();
+    // v2.2 : 点光源 / スポットライトの影に使う枚数 (LightSystem が決める。ShadowPass が描く)
+    public int LocalShadowSlices { get; internal set; }
+    private uint _sentLightingFlags = uint.MaxValue;
     private int _shownShadowState = -1;
 
     // アンチエイリアス (FXAA = ポストエフェクト / MSAA = 固定機能。Deferred では MSAA の代わりに FXAA)
@@ -172,10 +180,12 @@ public sealed class GraphicsSettings
             _pipeline.Initialize(this);
             _infoDirty = true;
         }
-        if (_lightingDirty)
+        var lightingFlags = LocalLights.Clustered ? 1u : 0u;   // v2.2 : クラスター
+        if (_lightingDirty || lightingFlags != _sentLightingFlags)
         {
-            var settings = new NativeMethods.LightingSettings { Model = (uint)_lightingModel, Ambient = _ambient };
+            var settings = new NativeMethods.LightingSettings { Model = (uint)_lightingModel, Ambient = _ambient, Flags = lightingFlags };
             NativeMethods.Renderer_SetLightingSettings(ref settings);
+            _sentLightingFlags = lightingFlags;
             _lightingDirty = false;
             _infoDirty     = true;
         }
@@ -618,7 +628,8 @@ public sealed class Engine : IDisposable
         };
         if (EngineInfo.ExeIcon() is { } icon) _window.Icon = icon;   // exe のアイコンを窓にも (以前は WinForms の既定のアイコン)
         _window.FormClosed += (_, _) => _closed = true;
-        _window.Show();
+        if (settings.ShowWindow) _window.Show();
+        else _ = _window.Handle;   // v2.2 : 隠したまま窓を作る (スワップチェーンに渡すハンドルだけ要る)
 
         _logCallback  = message => Console.WriteLine(message);
         _wLogCallback = message => Console.WriteLine(message);
@@ -851,6 +862,9 @@ public sealed class Engine : IDisposable
     /// <summary>止めた / 再開した時 (引数 = 止めたか)。エディターが表示を変えたりする</summary>
     public event Action<bool>? BackgroundChanged;
 
+    // v2.2 : 隠して作った窓 (EngineSettings.ShowWindow = false) を、最初のフレームを描き終えた所で出した時
+    public event Action? WindowShown;
+
     private long _backgroundSince;      // 止めた時の Stopwatch の値 (0 = 動いている)
     private bool _audioSuspended;
     private bool _audioCanSuspend = true;
@@ -868,6 +882,7 @@ public sealed class Engine : IDisposable
     // 止める必要があるか : 最小化中は常に。後ろにある時は RunInBackground = false の時だけ
     private bool shouldPause()
     {
+        if (!_window.Visible) return false;   // v2.2 : 隠して作った窓は、出すまで止めない (後ろにあると最初のフレームを描かず、いつまでも出ない)
         if (_window.WindowState == FormWindowState.Minimized) return true;
         return !RunInBackground && !isForeground();
     }
@@ -999,7 +1014,7 @@ public sealed class Engine : IDisposable
             Graphics.UpdatePreviews(Time.DeltaTime);   // AN5 : プレビューの窓の世界 (骨 / 行列 / 描画オブジェクト / 曲げる)
             Profiler.EndSample();
             Profiler.BeginSample("Lights + particles + audio");
-            _lightSystem.Update(World);
+            _lightSystem.Update(World, Graphics, _cameraSystem.Position);   // v2.2 : 影はカメラに近いライトから
             _particleSystem.Update(World);   // GPU パーティクルのエミッター (出す数) を C++ へ
             if (IsPlaying) _audioSystem.Update(World, _cameraSystem.Position);   // 編集中は鳴らさない (ED3)。聞く位置が無ければカメラ (ED6)
             else           _audioSystem.UpdateStopped();   // v1.6 : 外された AudioSource のボイスは編集中も消す (以前は Stop 後も鳴り続けた)
@@ -1008,6 +1023,7 @@ public sealed class Engine : IDisposable
             Profiler.EndSample();
             Profiler.BeginSample("Render pipeline (commands)");
             Graphics.ShadowLightIndex = _lightSystem.ShadowLightIndex;
+            Graphics.LocalShadowSlices = _lightSystem.LocalShadowSlices;
             Graphics.BeginFrame();
             Profiler.EndSample();
 
@@ -1016,6 +1032,7 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_ReportProfilerValue("C# update (ms)", UpdateMilliseconds);
             NativeMethods.Renderer_ReportProfilerValue("C# transforms sent", _renderSyncSystem.TransformsSentLastFrame);
             NativeMethods.Renderer_ReportProfilerValue("Lights", _lightSystem.LightCount);
+            NativeMethods.Renderer_ReportProfilerValue("Shadowed local lights", _lightSystem.LocalShadowLights);   // v2.2
             NativeMethods.Renderer_ReportProfilerValue("Sounds playing", _audioSystem.PlayingCount);
             if (GameEngine.UI.Manager!.Widgets.Count > 0)
             {
@@ -1051,6 +1068,13 @@ public sealed class Engine : IDisposable
             NativeMethods.Renderer_ReportProfilerValue("Render commands", _commands.Count);
             Input.EndFrame();
             Profiler.EndFrame();   // v1.10
+            if (!_window.Visible && !_closed)
+            {
+                // v2.2 : 隠して作った窓は、最初のフレームを描き終えてから出す (白い窓を見せない)
+                _window.Show();
+                _window.Activate();
+                WindowShown?.Invoke();
+            }
         }
     }
 
