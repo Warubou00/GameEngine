@@ -536,6 +536,7 @@ public sealed partial class AssetManager
             material.ReloadTexture();
             count++;
         }
+        count += reloadSpriteImage(path);   // v2.4 : スプライト (SpriteRenderer / アニメーションのコマ / UI の画像)
         if (count > 0) { ReloadCount++; AssetReloaded?.Invoke(path); }
         return count;
     }

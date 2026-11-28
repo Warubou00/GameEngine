@@ -36,13 +36,15 @@
                    クラスターでライトを分ける (多いライトが軽い) / GameObject > Light とシーンビューのライトの印・範囲 / エディターのスプラッシュ画面 /
          2.3.0.0 : 画像エディター (Project の画像をダブルクリック。PNG / JPEG / BMP / TGA を自前で読み書き / 色のフィルター / 画像処理 /
                    周波数フィルター / トーンカーブ / 法線マップ / 輝度表示 / 加工前と比べる / 保存・リセット・Undo / Redo) /
-                   GameEngine.Imaging (エンジンに依存しない画像の処理のライブラリ) / Graphics.ReleaseUITexture)
+                   GameEngine.Imaging (エンジンに依存しない画像の処理のライブラリ) / Graphics.ReleaseUITexture /
+         2.4.0.0 : スプライトのアニメーション (.spriteanim.json / SpriteRenderer + SpriteAnimator / USpriteImage / OnSpriteEvent・OnSpriteFinished /
+                   Sprite Animation Editor (コマ / シートを切る / プレビュー) / GameObject > 2D / UI の画像も自前の読み込み (TGA))
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>2.3.0.0</EngineVersion>
+    <EngineVersion>2.4.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>

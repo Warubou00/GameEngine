@@ -1,0 +1,90 @@
+v2.4.0.0 SpriteAnimation 設計案 (2026-11-28) ※承認前。ソースはまだ変更していない
+==========================================================================
+
+■ 目的
+  画像を順に切り替えて見せるアニメーションのアセット (.spriteanim.json) と、それを再生する仕組み。
+  GameObject (3D の世界の板) と Widget (UI) の両方で同じアセットを使える。
+
+■ 調査で分かったこと
+  - GameObject で画像を出す部品が無い (MeshRenderer + Quad + マテリアルのテクスチャだけ)。
+    マテリアルに UV の範囲が無く (MaterialData 32 byte)、テクスチャはパスで持つ (変えると読み直す。毎フレームは無理)
+  - 描画オブジェクトはモデルを後から替えられない (作る時に決まる)。マテリアルは Renderer_SetRenderObjectMaterial で替えられる
+  - UI : UImage は画像全体 (UV 0〜1) を描く。AddRect は UV を渡せる。UWidget に Tick がある。画像は System.Drawing で読む (TGA 不可)
+  - テクスチャの番号は、マテリアル (g_Textures[TextureID]) と UI (UIDrawCommand.Texture) で同じ並び。
+    → Graphics.CreateUITexture (RGBA から作る) / ReleaseUITexture (v2.3) で作ったテクスチャは、マテリアルにも UI にもそのまま使える
+  - 書き出したゲームはアセットをファイルのまま読む。AssetDependencies は全部の .json の中のパスをたどる (アセットの画像も入る)
+
+■ 方針 : コマの画像を読み込み時に 1 枚ずつのテクスチャにする
+  シート (1 枚に並べた画像) も、連番の画像も、読み込んだ時にコマごとに切り出して GPU のテクスチャにする (アセットごとに 1 回。共有)。
+  コマを替える = マテリアル (GameObject) / UI の四角 (Widget) のテクスチャの番号を替えるだけ (軽い)。
+  - シェーダー / マテリアルの構造体 / C++ を変えない (自分のシェーダーに影響が無い)
+  - シートの隣のコマがにじまない (UV で切り出すと線形の補間で隣のコマが混ざる)
+  - 3D と UI で同じテクスチャを使う
+  ※ ミップマップは無い (遠くで小さく映すとちらつく。2D / UI の用途では問題になりにくい)。点で補間 (ドット絵) は今回は入れない
+
+■ アセット : .spriteanim.json (AssetKind.SpriteAnimation)
+  {
+    "format": "GameEngineSpriteAnimation", "version": 1,
+    "frameRate": 12,                     // 1 秒あたりのコマ数
+    "loop": "Loop",                      // Loop / Once / PingPong
+    "pixelsPerUnit": 100,                // GameObject での大きさ (100 px = 1 m)
+    "pivot": [0.5, 0.5],                 // 中心 (0,0 = 左下 / 1,1 = 右上)
+    "frames": [
+      { "image": "Assets/Sprites/run.png", "rect": [0, 0, 64, 64], "duration": 0, "event": "" },
+      ...                                // rect 無し = 画像全体。duration 0 = 1 / frameRate 秒。event = このコマに入った時に送る名前
+    ]
+  }
+  シートの格子 (列 / 行 / コマ数 / 余白 / 間隔) はエディターがコマ (rect) に展開して書く (アセットにはコマだけを持つ)
+
+■ ランタイム (GameEngine.Runtime)
+  - SpriteAnimation (アセットのクラス) : Frames / FrameRate / Loop / PixelsPerUnit / Pivot / Duration、FrameAt(time) / Sample。
+      AssetManager.LoadSpriteAnimation(path) (共有。ファイルが変わったら読み直し、使っている物はそのまま新しいコマになる)
+  - SpriteFrameTextures (内部) : 画像を読み、コマを切り出して CreateUITexture。使う物が無くなったら ReleaseUITexture
+  - コンポーネント SpriteRenderer (GameObject に画像を出す)
+      Sprite (画像のパス。アニメーションが無い時に出す) / Color / FlipX / FlipY / Size (0 = 画像の px / PixelsPerUnit) /
+      Billboard (None / Camera = いつもカメラを向く / Vertical = 縦の軸だけ回る) / CastShadows (既定 off)
+      → SpriteRenderSystem が Quad のモデルで C++ の描画オブジェクトを作り、自分専用のマテリアル (半透明) のテクスチャの番号を替える
+         (Material に internal の「テクスチャの番号を直に指定する」を足す。パスから読む今の動きは変えない)
+  - コンポーネント SpriteAnimator (再生。同じ物の SpriteRenderer を動かす)
+      Animation / Speed / PlayOnStart / Loop (アセットのまま / 上書き) / 読むだけ : IsPlaying / Frame / Time / NormalizedTime
+      Play(animation = null, restart = true) / Stop() / Pause() / Resume() / SetFrame(n) / SetTime(t)   (AudioSource と同じく Owner 経由)
+      → SpriteAnimationSystem が時間を進め、コマを決める (再生中だけ。エディターで止まっている時は最初のコマを出す)
+  - イベント : Behaviour<T> に OnSpriteEvent(ref T, string name) / OnSpriteFinished(ref T) を足す (使う物だけ呼ぶ。衝突の呼び出しと同じ仕組み)
+  - Widget USpriteImage (UI)
+      Animation / Speed / AutoPlay / Loop / ColorAndOpacity / SizeToFrame (コマの px の大きさにする) / Image (アニメーションが無い時)
+      Play / Stop / Pause / Resume / SetFrame、event OnFinished / OnFrameEvent(string)。Tick で時間を進め、OnPaint でコマのテクスチャを描く
+      Widget Designer のパレットに足す (デザイナーの中でも動く)
+
+■ エディター
+  - Project : Create > Sprite Animation、選んだ画像 (複数) を右クリック > Create Sprite Animation、ダブルクリックで窓を開く
+  - Sprite Animation Editor (窓)
+      左 : コマの一覧 (小さな絵 / 並べ替え / 複製 / 消す / コマごとの時間とイベント)
+      中 : プレビュー (再生 / 一時停止 / 1 コマ送り / 速さ / 背景の市松模様 / 中心の印)
+      右 : 設定 (FrameRate / Loop / PixelsPerUnit / Pivot)、画像を足す (Project からドラッグ / 選択)、
+           シートを切る (列 / 行 / コマ数 / 余白 / 間隔。切る線を画像の上に出す)
+      自動で保存 (CollisionEditor と同じ)、Undo / Redo (JSON を積む)
+  - Inspector : SpriteRenderer / SpriteAnimator の項目 (アセットの欄はドラッグ / 選ぶ窓。ダブルクリックで窓)
+  - シーンビュー : 板をクリックで選べる (ピッキングに四角を足す)。編集中は最初のコマ (Preview にチェックで編集中も動かす)
+  - GameObject > 2D > Sprite (SpriteRenderer + SpriteAnimator を付けた物を作る)
+
+■ 見本 / 確認 / その他
+  - 見本 : SampleProject に Assets/Samples/Sprites (コードで描いたシートと連番の画像。自前の書き出しで作る)、sprites.scene.json、
+           Scripts/SpriteDemo.cs (キーで再生 / 停止 / 切り替え、イベントを Console に出す、HUD の Widget にも同じアニメーション)
+  - エディターのテスト section "sprites" : アセットの読み書き / シートの切り出し / 時間 → コマ (Loop / Once / PingPong / コマごとの時間) /
+      イベントと終わりの呼び出し / GameObject の描画オブジェクトとテクスチャの切り替え / Widget の描画 / ホットリロード / 書き出したゲームに画像が入る /
+      テクスチャを漏らさない。計測 : 動くスプライト 1000 / 5000 個の CPU 時間
+  - 版 2.4.0.0、Package、Docs/Reference とスクリプトリファレンス、リリースノート、作業ログ
+  - ブランチ feature/v24-sprite-animation
+
+■ 判断していただきたい点
+  1. 画像の読み込み (ランタイム)
+     (A 推奨) Runtime が GameEngine.Imaging を参照して読む (v2.3 の自前の読み込み。TGA も読める。書き出したゲームに Imaging.dll が 1 つ増える)。
+              ついでに UI の画像 (UImage) も同じ読み込みにして TGA を出せるようにする
+     (B) 今の UI と同じ System.Drawing で読む (TGA は読めない。依存は増えない)
+  2. シートのコマの持ち方
+     (A 推奨) 読み込み時にコマごとのテクスチャに切り出す (上の方針。シェーダー / C++ は変えない)
+     (B) 1 枚のシートのまま、マテリアルに UV の範囲を足す (MaterialData 32 → 48 byte、hlslTemplate を変える = 自分のシェーダーに影響。メモリは少ない)
+  3. GameObject での出し方
+     (A 推奨) 新しい SpriteRenderer (板) + SpriteAnimator
+     (A') 上に加えて、SpriteRenderer が無い物では SpriteAnimator が MeshRenderer の 1 つ目のマテリアルのテクスチャを替える (モデルの表面でアニメーション)
+  4. イベント (コマに名前を付けて、スクリプトで受け取る) と OnSpriteFinished を入れるか (推奨 : 入れる)

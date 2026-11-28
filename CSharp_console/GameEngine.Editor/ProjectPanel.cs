@@ -51,6 +51,7 @@ internal sealed class ProjectPanel : IDisposable
     public Action<string>? OpenWidget;   // v1.7 : Widget Designer
     public Action<string>? OpenCollision;   // v1.9 : コリジョンアセット
     public Action<string>? OpenImage;       // v2.3 : 画像エディター (.png / .jpg / .jpeg / .bmp / .tga)
+    public Action<string>? OpenSpriteAnimation;   // v2.4 : スプライトのアニメーションの窓
     public Action<string>? OpenPreview;   // AN5 : FBX をダブルクリック
     // Project の窓にフォーカスがあるか (前のフレーム。Delete キーをシーンの物ではなくアセットに使う。v1.1)
     public bool HasFocus { get; private set; }
@@ -148,6 +149,7 @@ internal sealed class ProjectPanel : IDisposable
                     AssetKind.Widget   => _engine.Assets.ReloadWidget(path) ? 1 : 0,   // v1.7
                     AssetKind.Collision => _engine.Assets.ReloadCollisionAsset(path) ? 1 : 0,   // v1.9 : 外で書き換えた時 (使っている CompoundCollider は作り直す)
                     AssetKind.UserData => _engine.Assets.ReloadUserData(path) ? 1 : 0,   // v2.0 : 同じインスタンスの中身を差し替える
+                    AssetKind.SpriteAnimation => _engine.Assets.ReloadSpriteAnimation(path) ? 1 : 0,   // v2.4
                     _ => 0,
                 };
                 if (entry.Kind == AssetKind.Texture) { _thumbnails.Remove(entry.Guid); _requested.Remove(entry.Guid); UI.Manager?.Resources.Textures.Forget(path); }   // サムネイルも作り直す (v1.7 : UI の画像も)
@@ -435,6 +437,8 @@ internal sealed class ProjectPanel : IDisposable
             createMenu(entry.Kind == AssetKind.Folder ? entry.Path : parentOf(entry.Path));   // v1.1 : フォルダならその中に
             ImGui.Separator();
             if (entry.Kind == AssetKind.Script && ImGui.MenuItem("Open")) OpenScript(entry.Path);
+            // v2.4 : この画像 (1 コマ) からスプライトのアニメーションを作る (窓でシートを切る)
+            if (entry.Kind == AssetKind.Texture && ImGui.MenuItem("Create Sprite Animation")) { _folder = parentOf(entry.Path); if (CreateSpriteAnimation(System.IO.Path.GetFileNameWithoutExtension(entry.Path), entry.Path) is { } sprite) OpenSpriteAnimation?.Invoke(sprite); }
             if (ImGui.MenuItem("Rename", "F2")) BeginRename(entry);
             displayNameMenu(entry);
             if (ImGui.MenuItem("Show in Explorer")) Process.Start("explorer.exe", entry.Kind == AssetKind.Folder ? $"\"{_database.FullPath(entry.Path)}\"" : $"/select,\"{_database.FullPath(entry.Path)}\"");
@@ -465,6 +469,7 @@ internal sealed class ProjectPanel : IDisposable
             else if (entry.Kind == AssetKind.ShaderGraph) OpenShaderGraph?.Invoke(entry.Path);   // SH4
             else if (entry.Kind == AssetKind.Widget) OpenWidget?.Invoke(entry.Path);   // v1.7 : Widget Designer
             else if (entry.Kind == AssetKind.Collision) OpenCollision?.Invoke(entry.Path);   // v1.9 : コリジョンの窓
+            else if (entry.Kind == AssetKind.SpriteAnimation) OpenSpriteAnimation?.Invoke(entry.Path);   // v2.4
             else if (entry.Kind is AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation) OpenPreview?.Invoke(entry.Path);   // AN5
             else if (entry.Kind == AssetKind.Script) OpenScript(entry.Path);   // v1.1 : Visual Studio で sln と .cs を開く
             else if (entry.Kind == AssetKind.Texture && ImageEditorManager.CanOpen(entry.Path)) OpenImage?.Invoke(entry.Path);   // v2.3 : 画像エディター (.dds は開かない)
@@ -506,6 +511,7 @@ internal sealed class ProjectPanel : IDisposable
         AssetKind.ShaderGraph => ("Graph", 0xFF8040C0u),   // SH4
         AssetKind.Widget   => ("Widget", 0xFF2F9AD8u),   // v1.7 : UI
         AssetKind.Collision => ("Collide", 0xFF30A060u),  // v1.9 : コリジョンアセット
+        AssetKind.SpriteAnimation => ("Sprite", 0xFFC07030u),   // v2.4
         AssetKind.UserData => ("Data", 0xFF9060C0u),   // v2.0 : UserData
         AssetKind.FbxModel     => ("FBX Mod", 0xFF5A7A2Au),   // AN1
         AssetKind.FbxSkeleton  => ("FBX Skl", 0xFF7A5A2Au),
@@ -826,6 +832,30 @@ internal sealed class ProjectPanel : IDisposable
         }
     }
 
+    /// <summary>今のフォルダにスプライトのアニメーション (.spriteanim.json) を作って選ぶ (v2.4)。image があればそれを 1 コマ目に</summary>
+    public string? CreateSpriteAnimation(string name = "New Sprite Animation", string? image = null)
+    {
+        try
+        {
+            const string Extension = ".spriteanim.json";
+            var path = $"{_folder}/{name}{Extension}";
+            for (int i = 1; File.Exists(_database.FullPath(path)); i++) path = $"{_folder}/{name} {i}{Extension}";
+            var asset = new SpriteAnimation(path);
+            if (!string.IsNullOrEmpty(image)) asset.Frames.Add(new SpriteFrame { Image = image });
+            _engine.Assets.NoteOwnWrite(_database.FullPath(path));   // 開いてすぐ変えた物が、ファイルの見張りの読み直しで消えないように
+            File.WriteAllText(_database.FullPath(path), asset.ToJson(), new System.Text.UTF8Encoding(false));
+            _database.Refresh();
+            Select(_database.Find(path));
+            Console.WriteLine($"[Assets] Created {path}");
+            return path;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"[Assets] Failed to create a sprite animation : {ex.Message}");
+            return null;
+        }
+    }
+
     // 今のフォルダに Widget (.widget.json) を作って選ぶ (v1.7)。一番上は CanvasPanel
     public string? CreateWidget(string name = "New Widget")
     {
@@ -1008,6 +1038,7 @@ internal sealed class ProjectPanel : IDisposable
         ImGui.Separator();
         if (ImGui.MenuItem("Widget")) { _folder = folder; if (CreateWidget() is { } widget) OpenWidget?.Invoke(widget); }   // v1.7 : UI
         if (ImGui.MenuItem("Collision Asset")) { _folder = folder; if (CreateCollisionAsset() is { } collision) OpenCollision?.Invoke(collision); }   // v1.9
+        if (ImGui.MenuItem("Sprite Animation")) { _folder = folder; if (CreateSpriteAnimation() is { } sprite) OpenSpriteAnimation?.Invoke(sprite); }   // v2.4
         // v2.0 UD2 : UserData (ゲームのコードの UserData の派生クラス。[UserData(Menu = "A/B")] の / で入れ子のメニュー)
         if (ImGui.BeginMenu("UserData"))
         {

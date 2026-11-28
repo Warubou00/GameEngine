@@ -80,30 +80,11 @@ public sealed class UITextures
         {
             var database = AssetDatabase.Current;
             var file = database?.ToAssetPath(path) is { } assetPath ? database.FullPath(assetPath) : Path.GetFullPath(path);
-            using var bitmap = new Bitmap(file);
-            var width = bitmap.Width;
-            var height = bitmap.Height;
-            var data = bitmap.LockBits(new System.Drawing.Rectangle(0, 0, width, height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            var rgba = new byte[width * height * 4];
-            unsafe
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    var row = (byte*)data.Scan0 + y * data.Stride;
-                    for (int x = 0; x < width; x++)
-                    {
-                        var o = (y * width + x) * 4;
-                        rgba[o]     = row[x * 4 + 2];   // BGRA → RGBA
-                        rgba[o + 1] = row[x * 4 + 1];
-                        rgba[o + 2] = row[x * 4];
-                        rgba[o + 3] = row[x * 4 + 3];
-                    }
-                }
-            }
-            bitmap.UnlockBits(data);
-            result = (_create(width, height, rgba), new Vector2(width, height));
+            // v2.4 : 自前の読み込み (GameEngine.Imaging。TGA も読める)。以前は System.Drawing の Bitmap で、TGA が出なかった
+            var image = GameEngine.Imaging.Codecs.ImageCodec.Load(file).Image;
+            result = (_create(image.Width, image.Height, image.ToRgba8()), new Vector2(image.Width, image.Height));
         }
-        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or InvalidOperationException or GameEngine.Imaging.Codecs.ImageFormatException)
         {
             Console.WriteLine($"[UI] Cannot load image {path} : {ex.Message}");
         }

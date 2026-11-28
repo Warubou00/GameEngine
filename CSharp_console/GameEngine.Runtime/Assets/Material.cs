@@ -53,16 +53,19 @@ public sealed class Material : IDisposable
         LiveCount++;
     }
 
+    // v2.4 : テクスチャの番号を直に使う (スプライトのコマ。null = 今まで通り Texture のパスから読む)。番号は持ち主が返す
+    internal uint? TextureHandleOverride;
+
     // 値を C++ へ送る (テクスチャが変わっていれば読み直す)。最初の 1 回で C++ のマテリアルを作る
     public void Apply()
     {
-        if (Texture != _loadedTexture) loadTexture();
+        if (TextureHandleOverride == null && Texture != _loadedTexture) loadTexture();
         var desc = new NativeMethods.MaterialDesc
         {
             Color     = Color,
             Metallic  = Math.Clamp(Metallic, 0.0f, 1.0f),
             Roughness = Math.Clamp(Roughness, 0.02f, 1.0f),
-            Texture   = _textureHandle,
+            Texture   = TextureHandleOverride ?? _textureHandle,
             Flags     = (Transparent ? 1u : 0u) | (DoubleSided ? 2u : 0u),
         };
         if (!IsValid) Handle = NativeMethods.Renderer_CreateMaterial(desc);

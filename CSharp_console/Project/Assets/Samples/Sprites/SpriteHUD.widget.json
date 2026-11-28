@@ -1,0 +1,64 @@
+{
+  "format": "TsumugiWidget",
+  "version": 1,
+  "designSize": [
+    1280,
+    720
+  ],
+  "root": {
+    "type": "CanvasPanel",
+    "name": "Root",
+    "children": [
+      {
+        "type": "SpriteImage",
+        "name": "Coin",
+        "props": {
+          "Animation": "Assets/Samples/Sprites/Coin.spriteanim.json"
+        },
+        "slot": {
+          "Offsets": {
+            "Left": 16,
+            "Top": 16,
+            "Right": 48,
+            "Bottom": 48
+          }
+        }
+      },
+      {
+        "type": "TextBlock",
+        "name": "Info",
+        "props": {
+          "Text": "Space : explosion / P : pause runner / C : stop coin / 1 2 : speed"
+        },
+        "slot": {
+          "Offsets": {
+            "Left": 76,
+            "Top": 28,
+            "Right": 700,
+            "Bottom": 30
+          }
+        }
+      },
+      {
+        "type": "SpriteImage",
+        "name": "Runner",
+        "props": {
+          "Animation": "Assets/Samples/Sprites/Runner.spriteanim.json",
+          "SizeToFrame": false,
+          "ImageSize": [
+            96,
+            96
+          ]
+        },
+        "slot": {
+          "Offsets": {
+            "Left": 16,
+            "Top": 72,
+            "Right": 96,
+            "Bottom": 96
+          }
+        }
+      }
+    ]
+  }
+}

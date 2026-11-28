@@ -77,6 +77,7 @@
 * Avoid repeating completed investigations.
 * Keep reports concise and focused.
 * If necessary, rewrite Docs/index.html, which is the reference file for developers. Also, update the Script Reference inside the Editor.
+* All conversations on the chat should be in Japanese.
 
 ## 8\. Build and Verification
 
@@ -87,6 +88,8 @@
 * Do not claim successful verification without executing the build.
 
 ## 9\. Release notes
+
 * Make a file that can check if the project can be upgraded.
 * Make sure to list the files that were changed and deleted, so that the Project side can see exactly which files they need to check.
-* Leave it in GameEngine_git\.claud\rereasenote as rereasenote_v*.md
+* Leave it in GameEngine\_git\\.claud\\rereasenote as rereasenote\_v\*.md
+

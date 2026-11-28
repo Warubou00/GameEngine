@@ -1,0 +1,49 @@
+v2.4.0.0 スプライトのアニメーション (2026-11-28)
+==========================================================
+ブランチ : feature/v24-sprite-animation (develop b118253 から)
+設計 : .claud/log/v2.4.0.0_sprite_animation_design_2026-11-28.txt (推奨案 : 全部 A、イベントあり で承認)
+
+■ やったこと
+  1. アセット .spriteanim.json (AssetKind.SpriteAnimation、SpriteAnimation / SpriteFrame / SpriteLoopMode / SpriteLoopOverride)
+     - コマ = 画像 + 四角 + 時間 + イベント。FrameRate / Loop (Loop / Once / PingPong) / PixelsPerUnit / Pivot
+     - Sample(time, loop) → (コマ, 何コマ目か, 終わったか)。SliceGrid (シートの格子 → コマ)
+     - AssetManager.Sprites : LoadSpriteAnimation / Reload / Save / LoadSpriteTexture (画像全体)。
+       コマごとに切り出して Renderer_CreateUITexture (同じ画像の同じ四角は共有)、作り直しは Renderer_ReleaseUITexture。
+       時間 / イベントだけの変更ではテクスチャを作り直さない (コマの画像と四角の鍵で比べる)。画像が変わったら作り直す
+     - Runtime が GameEngine.Imaging を参照 (画像の読み込み)。UI の画像 (UITextures) も System.Drawing から自前の読み込みへ (TGA が出る)
+  2. GameObject
+     - SpriteRenderer (Sprite / Color / Flip / Size / PixelsPerUnit / Pivot / Billboard / CastShadows) + SpriteRenderSystem
+       (Quad の描画オブジェクト、(テクスチャ, 色) ごとの共有マテリアル (半透明・両面)。使わなくなった物は 256 個たまるまで返さない =
+        C++ のマテリアルを返すと GPU を待つため。行列は前に送った物と違う時だけ送る)
+     - SpriteAnimator (Animation / Speed / PlayOnStart / Loop / HideWhenStopped、Play / Stop / Pause / Resume / SetFrame / SetTime。
+       コピーから呼んでも効くように Owner 宛てに積む) + SpriteAnimationSystem (ゲームの Update の後)
+     - Behaviour<T> に OnSpriteEvent(ref T, string) / OnSpriteFinished(ref T) (上書きした物だけ呼ぶ)
+     - Material に internal の TextureHandleOverride (テクスチャの番号を直に使う。パスから読む今の動きは変えない)
+     - CameraSystem に Forward / Up (ビルボード)。Engine.SpriteStats (確認 / 計測)
+  3. Widget : USpriteImage (Animation / Image / Speed / AutoPlay / Loop / Color / Flip / SizeToFrame / ImageSize、Play など、
+     OnFrameEvent / OnFinished)。UIPainter.Texture。Widget Designer のパレットに追加、デザイナーの中でも動く (PreviewTick)。
+     UIManager : Tick を入力を受けない時 (エディターのカメラの再生中) も呼ぶ (以前は止まっていた)
+  4. エディター
+     - Sprite Animation Editor (コマの一覧 / プレビュー / 設定 / シートを切る / 自動で保存 / Undo・Redo / Animate in scene)
+     - Project : Create > Sprite Animation、画像の右クリック > Create Sprite Animation、ダブルクリック、読み直し、アイコン
+       (作る時は NoteOwnWrite : 開いてすぐの変更が、ファイルの見張りの読み直しで消えないように)
+     - Inspector : SpriteAnimation の欄 (ダブルクリックで窓)。GameObject > 2D > Sprite / Animated Sprite。シーンビューで板をクリックで選ぶ
+     - Assets > Create Sprite Samples (コードで描いた画像 / 3 つのアニメーション / HUD / sprites.scene.json)、Scripts/SpriteDemo.cs
+     - --open-sprite、テストの section sprites / sprites-bench / sprites-view
+  5. 版 2.4.0.0、Docs/Reference、.gitignore (*.spriteanim.json と見本の png)
+
+■ 確認
+  ビルド : Imaging / Runtime / Editor 成功 (以前からの警告 3 つだけ)
+  --editor-test-section sprites : 36 / 0 (D3D12 のエラー / 警告なし)
+  全体の --editor-test : 829 / 0
+  Package : make_package.py 成功 (v2.1〜v2.3 のエディターは残る。Player に GameEngine.Imaging.dll)。SampleProject に SpriteDemo.cs を足した
+  Package の Release のエディターで sprites 36 / 0
+  計測 (Release、sprites-bench、アニメーション + 板の同期、中央値 / 最大) : 1000 個 0.422 / 1.004 ms、5000 個 1.779 / 5.346 ms (共有マテリアル 16)
+  撮影 : .claud/log/images/v2.4.0.0_sprites_scene.png / v2.4.0.0_sprite_editor.png
+  リリースノート : .claud/rereasenote/rereasenote_v2.4.0.0.md
+  撮影 : 見本のシーンの再生 (走る人 / 縦に回る硬貨 / HUD の USpriteImage / イベントの数)、Sprite Animation Editor
+
+■ 途中で直した物
+  - UI の Tick が入力を受ける時だけだったので、エディターのカメラの再生中に USpriteImage が止まっていた → 再生中はいつも Tick
+  - 作ってすぐ開いたアセットを変えると、0.3 秒後にファイルの見張りが古い中身を読み直して変更が消えた → 作る時に NoteOwnWrite
+  - C++ のマテリアルの上限 (4096) に当たらないよう、スプライトごとのマテリアルをやめて共有にした

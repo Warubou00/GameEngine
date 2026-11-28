@@ -33,6 +33,7 @@ internal sealed partial class Inspector
     public Action<Entity>? DrawSubSceneInfo;
     // コリジョンアセットの欄をダブルクリック : コリジョンの窓で開く (v1.9)
     public Action<string>? OpenCollision;
+    public Action<string>? OpenSpriteAnimation;   // v2.4 : アセットの欄をダブルクリック
     private World World => _engine.World;
     private string _addFilter = "";
     private readonly Dictionary<(int, string), Vector3> _eulerCache = new();   // 回転をオイラー角で触っている間の値 (行き来でぶれないように)

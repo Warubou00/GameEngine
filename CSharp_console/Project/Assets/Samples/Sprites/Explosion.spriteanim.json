@@ -1,0 +1,86 @@
+{
+  "format": "GameEngineSpriteAnimation",
+  "version": 1,
+  "frameRate": 16,
+  "loop": "Once",
+  "pixelsPerUnit": 32,
+  "pivot": [
+    0.5,
+    0.5
+  ],
+  "frames": [
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ],
+      "event": "boom"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        256,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        320,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        384,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Explosion.png",
+      "rect": [
+        448,
+        0,
+        64,
+        64
+      ]
+    }
+  ]
+}
