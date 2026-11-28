@@ -712,6 +712,45 @@ public sealed class UnlitViewMode : SceneViewMode
 <p>確認 : <code>--editor-test --editor-test-section lights</code> / <code>--editor-test-section viewmodes</code> / 見本 <code>GameEngine_console --scene lights</code> (<code>--view spot</code> / <code>--small-lights off</code>)、計測 <code>--light-bench N --clustered on|off</code> / <code>--gpu-stats on</code></p>
 </article>
 
+<article data-id="imaging" data-title="画像エディター / GameEngine.Imaging (v2.3)">
+<h2>画像エディター / GameEngine.Imaging (v2.3)</h2>
+<p class="lead">Project の画像 (.png / .jpg / .jpeg / .bmp / .tga) をダブルクリックすると画像エディターの窓が開く。処理は別のアセンブリ <code>GameEngine.Imaging</code> (エンジン / ImGui に依存しない) にあり、表示と操作だけがエディター (<code>GameEngine.Editor/ImageEditor</code>) にある</p>
+<h3>GameEngine.Imaging (外へ持ち出せる)</h3>
+<ul>
+  <li><code>ImageBuffer</code> : float の RGBA (0〜1。ファイルの値のまま = ガンマ空間)。<code>FromRgba8</code> / <code>ToRgba8</code> / <code>DownscaleToFit</code> / <code>Resize</code></li>
+  <li><code>Codecs.ImageCodec</code> : <code>Load</code> / <code>Save</code> / <code>Decode</code> / <code>Encode</code>。全部自前 (外部のライブラリ / System.Drawing は使わない)。壊れたデータは <code>ImageFormatException</code>
+    <ul>
+      <li>PNG : 全カラー型・1〜16bit・Adam7・tRNS。書き出しは 8bit RGB / RGBA (自前の Deflate : <code>Codecs.Zlib</code>)。zlib を戻すのは Runtime の <code>Inflate.cs</code> をリンクで取り込む (<code>GAMEENGINE_IMAGING</code> の時は internal)</li>
+      <li>JPEG : ベースライン / プログレッシブ (ハフマン)、間引き、リスタート。算術符号・12bit・CMYK は非対応。書き出しはベースライン (品質 / 4:2:0 か 4:4:4)。EXIF の向きは見ない</li>
+      <li>BMP : 1/4/8/16/24/32bit・RLE4/8・BITFIELDS・上下逆。書き出しは 24bit / 32bit (V4 ヘッダー)</li>
+      <li>TGA : 種類 1/2/3/9/10/11・15/16/24/32bit・原点。書き出しは 24 / 32bit (RLE を選べる)</li>
+    </ul></li>
+  <li><code>Processing.ImageOperation</code> : 1 つの処理 (<code>Apply(src, dst, ctx)</code>、<code>Enabled</code>、<code>Amount</code> = 元と混ぜる量)。JSON に書ける (種類は "type")。ピクセルの単位の値は元の画像のピクセルで持ち、縮めたプレビューでは <code>ProcessContext.Scale</code> を掛ける
+    <ul>
+      <li>色 : Grayscale (Y = R*0.30 + G*0.59 + B*0.11) / ChannelScale (R・G・B のどれかだけ) / Posterize / Solarize / Invert / Sepia / Gamma</li>
+      <li>画像処理 : GaussianBlur / Sharpen (アンシャープマスク) / Sobel / Emboss / Mosaic / ChromaticAberration</li>
+      <li>周波数 : FrequencyFilter (RGB を FFT → 中央の黒丸 = ハイパス、Invert = ローパス。半径は元の画像のナイキストに対する割合)。<code>Fft2D.Spectrum</code> でスペクトルの画像</li>
+      <li>トーン : ToneCurve (RGB 共通 + R/G/B。単調 3 次補間 Fritsch-Carlson)</li>
+      <li>法線 : NormalMap (輝度を高さとして法線マップ。DirectX / OpenGL の Y の向き)</li>
+    </ul></li>
+  <li><code>Processing.ImagePipeline</code> : 処理の並び (非破壊)。<code>Run(source, ctx, cache)</code> は <code>PipelineCache</code> に段ごとの結果を取っておき、変わった処理から後ろだけ計算し直す</li>
+</ul>
+<pre><code>var image = ImageCodec.Load("in.png").Image;
+var pipeline = new ImagePipeline();
+pipeline.Operations.Add(new GaussianBlurOperation { Sigma = 2 });
+pipeline.Operations.Add(new ToneCurveOperation { Rgb = [new(0, 0), new(0.5f, 0.7f), new(1, 1)] });
+ImageCodec.Save("out.jpg", pipeline.Run(image), new ImageSaveOptions { JpegQuality = 90 });</code></pre>
+<h3>エディター</h3>
+<ul>
+  <li>上 : Save (元のファイルへ上書き。原寸で計算し直す) / Save As / Options (JPEG の品質など) / Reset / Undo / Redo、比べ方 (After / Before / Side by side / Split)、色の出し方 (Color / Luminance = 輝度 / Normal = 輝度から作った法線マップ。表示だけ)</li>
+  <li>左 : 処理の並び (Add / ON・OFF / Up / Down / Duplicate / Remove)。右 : 選んだ処理の設定 (トーンカーブのグラフ、周波数フィルターのスペクトルと黒丸 (ドラッグで半径)) と結果の輝度のヒストグラム</li>
+  <li>計算はバックグラウンド。長い辺が 2048 より大きい画像はプレビューを縮めて計算する (Full res で原寸)。Ctrl+Z / Ctrl+Y / Ctrl+S</li>
+  <li>プレビューのテクスチャは結果ごとに作り、古い物は <code>Graphics.ReleaseUITexture</code> で返す (C++ : <code>Renderer_ReleaseUITexture</code>。RenderStart を FRAME_COUNT + 1 回通ってから SRV と実体を解放。GPU を待たない)</li>
+  <li>起動時に開く : <code>GameEngine.Editor.exe --open-image Assets/....png</code></li>
+</ul>
+<p>確認 : <code>--editor-test --editor-test-section imaging</code> / 撮影 <code>--editor-test-section imaging-view</code> (環境変数 <code>IMAGING_VIEW_MODE</code> = curve / frequency / normal / luminance)</p>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

@@ -264,6 +264,7 @@ namespace Renderer
 		void     SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
 		                       const RHI::UIDrawCommand* commands, uint32_t commandCount);
 		uint32_t CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba);
+		bool ReleaseUITexture(uint32_t texture);   // v2.3
 		// GPU パーティクル (RHI に渡すだけ)
 		void SetParticleCapacity(uint32_t capacity);
 		void SetParticleEmitters(const RHI::ParticleEmitterData* emitters, uint32_t count, const RHI::ParticleFrameSettings& settings);

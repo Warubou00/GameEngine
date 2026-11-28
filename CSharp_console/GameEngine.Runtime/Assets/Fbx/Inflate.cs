@@ -1,4 +1,10 @@
+#if GAMEENGINE_IMAGING
+// v2.3 : GameEngine.Imaging (画像の読み書き。エンジンに依存しない) も、このファイルをリンクで取り込んで PNG を戻す。
+//   Imaging の中では internal (Imaging を参照する側に、Runtime の物と同じ名前の型が見えないように)
+namespace GameEngine.Imaging.Codecs;
+#else
 namespace GameEngine.Fbx;
+#endif
 
 // ==========================================================================
 // zlib / deflate を戻す (AN1。外部のライブラリを使わずに書いた物。RFC 1950 / RFC 1951)
@@ -7,7 +13,11 @@ namespace GameEngine.Fbx;
 //   ハフマンの読み方 : 10 bit までの符号は表を 1 回引くだけ (速い道)。それより長い符号は 1 bit ずつ (zlib の puff.c と同じ考え方)
 //   最後に Adler-32 (zlib の確かめの数) を比べる。壊れたデータは FbxFormatException (落ちない)
 // ==========================================================================
+#if GAMEENGINE_IMAGING
+internal static class Inflate
+#else
 public static class Inflate
+#endif
 {
     /// <summary>zlib (2 byte の頭 + deflate + Adler-32) を戻す。expectedLength : 戻した大きさ (分かっていれば。違えばエラー)</summary>
     public static byte[] Zlib(ReadOnlySpan<byte> data, int expectedLength = -1)
@@ -298,7 +308,11 @@ public static class Inflate
 }
 
 /// <summary>FBX / zlib のデータが読めない (壊れている / 対応していない形)</summary>
+#if GAMEENGINE_IMAGING
+internal sealed class FbxFormatException : Exception
+#else
 public sealed class FbxFormatException : Exception
+#endif
 {
     public FbxFormatException(string message) : base(message) { }
 }

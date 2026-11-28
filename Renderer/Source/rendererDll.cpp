@@ -139,6 +139,12 @@ extern "C"
 		return g_renderer ? g_renderer->CreateUITexture(width, height, rgba) : 0xFFFFFFFFu;
 	}
 
+	// v2.3 : UI のテクスチャを返す (実体は GPU が使い終わってから解放。GPU を待たない)。戻り値 = 知っている番号だったか
+	RENDERER_API bool Renderer_ReleaseUITexture(uint32_t texture)
+	{
+		return g_renderer && g_renderer->ReleaseUITexture(texture);
+	}
+
 	// ==============================================================
 	// ED5 : アセットの読み直し / 解放 / マテリアル (エディター用。GPU を待つ物があるので毎フレームは呼ばない)
 	// ==============================================================

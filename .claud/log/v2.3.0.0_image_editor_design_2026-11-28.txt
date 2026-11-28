@@ -1,0 +1,141 @@
+v2.3.0.0 画像エディター 設計案 (2026-11-28) ※承認前。ソースはまだ変更していない
+==========================================================================
+
+■ 目的
+  Project の画像 (.png / .jpg(.jpeg) / .bmp / .tga) をダブルクリックで専用の窓に開き、
+  フィルター / 画像処理 / 周波数フィルター / トーンカーブで加工し、加工前と比べながら保存する。
+  処理部分はエンジンから切り離した別アセンブリにし、外へ持ち出せるようにする。
+
+■ 調査で分かったこと
+  - ProjectPanel.cs:460 のダブルクリックの分岐に AssetKind.Texture が無い (今は何も起きない)。
+    AssetDatabase は .png/.jpg/.jpeg/.bmp/.tga/.dds を AssetKind.Texture にしている。
+  - サムネイルは System.Drawing (GDI+) で読んでおり、TGA は読めずアイコン表示。
+  - 自前の Inflate (Runtime/Assets/Fbx/Inflate.cs, public static) がある。圧縮 (Deflate 符号化) は無い。
+  - UI に出す画像は Graphics.CreateUITexture (RGBA8) だけ。作り直し / 解放の API が無い
+    (CommandContext::_uiTextures に溜まり、終了時まで消えない)。
+    ReleaseResources は WaitForGpu するので、スライダーを動かす度に使うと止まる。
+    → プレビューを毎回作り直すと漏れる / 止まるので、C++ に「中身の更新」と「解放」が要る。
+
+■ 構成 (ソース分割)
+  [新規] CSharp_console/GameEngine.Imaging/  (クラスライブラリ。Runtime / ImGui / エディターに依存しない)
+    Image/
+      ImageBuffer.cs       幅・高さ・float RGBA (0〜1, ガンマ空間のまま) の作業用バッファ。RGBA8 との変換
+    Codecs/  (全部自前。外部ライブラリ・System.Drawing は使わない)
+      ImageCodec.cs        拡張子 / 先頭バイトで形式を判定して読む・書く入口
+      PngDecoder.cs        全カラー型 (Gray/RGB/Palette/GrayA/RGBA)、1〜16bit、5種のフィルター、Adam7、tRNS
+      PngEncoder.cs        RGBA8 (アルファ無しなら RGB)。Deflate 符号化は Codecs/Deflater.cs (LZ77 + 動的ハフマン)
+      JpegDecoder.cs       ベースライン + プログレッシブ (ハフマン)、4:4:4/4:2:2/4:2:0、リスタートマーカー、
+                           グレースケール、Adobe の YCCK/CMYK は非対応 (エラー)、算術符号・12bit は非対応
+      JpegEncoder.cs       ベースライン 4:2:0 / 4:4:4、品質 1〜100
+      BmpDecoder/Encoder   1/4/8/16/24/32bit、RLE4/RLE8、BITFIELDS、上下逆。書き出しは 24/32bit
+      TgaDecoder/Encoder   種類 1/2/3/9/10/11 (パレット / フルカラー / グレー、RLE)、原点ビット。書き出しは 24/32bit (RLE 選択)
+      Inflate              Runtime の Inflate.cs をリンクで取り込み、Imaging 内では internal にする (下の判断1)
+    Processing/
+      IImageOperation.cs   1つの処理 = Name + パラメータ + Apply(src, dst, ctx)。JSON に書ける (Undo と保存用)
+      ColorFilters.cs      グレースケール (R*0.30 + G*0.59 + B*0.11)、RGB 各スケール、ポスタライズ、ソラリゼーション、
+                           ネガポジ反転、セピア、ガンマ補正
+      Convolution.cs       ガウシアンブラー (分離 2 パス)、鮮鋭化 (アンシャープマスク)、ソーベル、エンボス
+      Effects.cs           モザイク、色収差 (中心からの放射方向に R と B をずらす)
+      Fft2D.cs             2 の累乗へ鏡像で広げて行列 FFT (Radix-2, 行・列とも Parallel)。スペクトル表示用の画像も作る
+      FrequencyFilter.cs   中央の黒丸 (= 低周波を消す = ハイパス)。半径・ぼかし幅・反転 (丸の外を消す = ローパス)
+      ToneCurve.cs         制御点 (入力→出力)、単調 3 次補間 (Fritsch-Carlson、オーバーシュートしない)、
+                           RGB 共通 + R/G/B 個別、1024 段の LUT
+      ImagePipeline.cs     処理の並び。途中結果をキャッシュし、変えた処理から後ろだけ計算し直す。キャンセル対応
+    全処理は Parallel.For (行単位) + Span。外へ持ち出す時は Imaging.dll (と .cs) だけで動く。
+
+  [新規] CSharp_console/GameEngine.Editor/ImageEditor/ (Viewer 側。表示と操作だけ)
+    ImageEditorWindow.cs   窓 (1 画像 1 窓、複数可)。左 : 処理スタック、中央 : 表示、右 : 選んだ処理の設定
+    ImageView.cs           表示 : 加工後のみ / 加工前のみ / 左右並べる / 境目をドラッグするワイプ。
+                           拡大縮小 (ホイール, 1:1, 全体)、ドラッグで移動、マウス下のピクセル値 (前→後)
+    ToneCurveWidget.cs     グラフ (ヒストグラムを背景に)。クリックで点を足す、ドラッグで動かす、右クリックで消す、チャンネル切替
+    SpectrumView.cs        周波数フィルター選択時、スペクトル (対数・中央寄せ) と黒丸を重ねて表示。丸をドラッグで大きさ変更
+    ImageEditorHistory.cs  Undo / Redo (処理スタックの JSON を積む。既存 UndoStack.cs を使えるなら使う)
+    PreviewTexture.cs      GPU のプレビュー用テクスチャ (下の C++ 追加を使う)
+
+  [変更] ProjectPanel.cs  ダブルクリックの分岐に AssetKind.Texture を追加 (.dds は今回の対象外なので開かない)
+  [変更] EditorApp.cs     OpenImageEditor(path) と窓の一覧、--open-image <path> (確認・撮影用)
+  [変更] C++ Renderer / RHI : UI テクスチャの更新と解放を追加 (既存の関数は変えない、足すだけ)
+         Renderer_UpdateUITexture(id, width, height, rgba)  … 同じ大きさなら中身だけ差し替え。
+             フレームの最初に描画キューでコピー (コピーキューは使わない : AN4 の二重キュー問題を避ける。
+             同じキューなので前のフレームの読み込みの後に実行される)。大きさが違えば失敗を返す
+         Renderer_ReleaseUITexture(id)  … 番号を即座に無効にし、実体は FrameCount フレーム後に解放 (GPU を待たない)
+
+■ 処理の流れ
+  開く : Imaging で読む → 作業用 ImageBuffer (元画像) → プレビュー用テクスチャを作る
+  編集 : 処理スタックを変える (足す / 並べ替え / ON・OFF / パラメータ) → Undo に積む →
+         バックグラウンドで ImagePipeline を実行 (新しい要求が来たら古い方はキャンセル) →
+         終わったら RGBA8 にしてメインスレッドで UpdateUITexture
+  大きい画像 : プレビューは最大 2048px に縮めた画像で計算 (ぼかし半径・モザイクの大きさなどは
+         元画像のピクセル単位で持ち、縮小率を掛ける)。保存の時だけ元の解像度で計算し直す。
+         「プレビューも原寸」の切替を付ける
+  保存 : Save (元のファイルへ上書き。確認あり) / Save As (形式 PNG/JPG/BMP/TGA, JPEG 品質, 場所はプロジェクト内) 。
+         プロジェクト内に保存すれば既存のファイル監視でテクスチャが読み直される
+  リセット : 処理スタックを空にする (これも Undo できる)
+  閉じる時 : 保存していない変更があれば確認
+
+■ 各機能の仕様 (パラメータ)
+  グレースケール      R*0.30 + G*0.59 + B*0.11 (指定どおり)
+  RGB 各スケール      R / G / B のどれかを選び、その値だけを残す (表示 : その色のまま / グレーで) … 解釈は判断3
+  ポスタライズ        段階数 2〜64
+  ソラリゼーション    しきい値 0〜1 (しきい値より明るい所を反転)
+  ネガポジ反転        RGB を 1-x (アルファは残す)
+  セピア              グレースケール後に色付け、強さ 0〜1
+  ガンマ補正          γ 0.1〜5.0 (out = in^(1/γ))
+  ガウシアンブラー    σ 0.1〜50 (半径 = 3σ)
+  鮮鋭化              アンシャープマスク : 半径 (σ)、量 0〜5
+  ソーベル            方向 X / Y / 両方 (強さ)、グレーで出す / 色ごと
+  エンボス            角度 0〜360、強さ、0.5 の灰色を足す
+  モザイク            ブロックの大きさ 2〜256px (平均色)
+  色収差              ずれの量 (px)、中心 (既定は画像の中心)
+  周波数フィルター    丸の半径 (スペクトルの短辺に対する割合)、境目のぼかし、反転 (ローパス)。
+                      RGB それぞれ FFT → マスク → 逆 FFT
+  トーンカーブ        点は最大 16、端の点 (0,0)(1,1) は横に動かせない、チャンネル RGB/R/G/B
+  共通                各処理に ON/OFF、適用量 (元とのブレンド 0〜1)、端は端のピクセルを延ばす
+
+■ テスト (エディターのテスト section "imaging")
+  - コーデック : 自前の書き出し → 自前の読み込みで一致 (PNG/BMP/TGA は完全一致、JPEG は PSNR)。
+    参照として System.Drawing で読んだ結果と比べる (テストでだけ使う。FBX の ZLibStream と同じ扱い)。
+    PNG はカラー型 / bit 深度 / インターレースの組み合わせ、BMP/TGA は各種、JPEG はプログレッシブと 4:2:0
+  - 各処理 : 小さな画像で期待値 (グレースケールの式、反転の 2 回で元に戻る、FFT → 逆 FFT で元に戻る、
+    半径 0 の黒丸で変わらない、トーンカーブの恒等で変わらない 等)
+  - 窓 : 開く → 処理を足す → Undo/Redo → リセット → Save As → 読み直して一致 → 閉じる。テクスチャが漏れないこと
+  - 速さを計測して報告 (2048x2048 で各処理、Release)
+  既存の全テストも流して回帰が無いことを確認する
+
+■ その他 (CLAUD.md に沿って)
+  - 版 : Engine.props 2.2.0.0 → 2.3.0.0、make_package.py で Package 更新 (v2.2 の Editor は残す)
+  - Package : Editor に GameEngine.Imaging.dll が入ること (Player は使わない)
+  - Docs/Reference (template.html) とエディター内の Script Reference に Imaging の API を追加
+  - リリースノート .claud/rereasenote/rereasenote_v2.3.0.0.md (C++ に関数を足すだけ、既存の動作は変えない予定)
+  - 作業ログ .claud/log/v2.3.0.0_image_editor_<日付>.txt
+  - 作業ブランチ feature/v23-image-editor (段階ごとに確認していただく場合は下の分け方で)
+      ① Imaging : コーデック (読み込み / 書き出し) + テスト
+      ② C++ UI テクスチャ更新 / 解放 + 窓 (表示・比較・保存・Undo/Redo/リセット) + 色フィルター
+      ③ 画像処理 + 周波数フィルター + トーンカーブ + 計測 + 版上げ・パッケージ・ドキュメント・リリースノート
+
+■ 追加 (2026-11-28 ご指示 : 輝度表示 / ノーマルマップ)
+  輝度表示      表示モード「Luminance」: 加工結果の輝度 Y (= R*0.30 + G*0.59 + B*0.11、グレースケールと同じ式) を
+                グレーで表示する。画像・処理スタックは変えない (表示だけ)。ピクセル値の欄にも Y を出す
+  ノーマルマップ Processing/NormalMap.cs : 輝度を高さとみなして法線マップを作る処理 (スタックに足せる = 保存できる)。
+                パラメータ : 強さ 0.1〜20、高さのぼかし σ、勾配 (Sobel / 中心差分)、Y の向き (DirectX = 既定 / OpenGL)、
+                高さの反転。出力 RGB = 法線 * 0.5 + 0.5、A = 1
+                表示モード「Normal」: スタックを変えずに、今の結果から作った法線マップを見る (同じ関数を使う。設定は上と共通)
+  テスト        平らな画像 → (0.5, 0.5, 1)、右上がりの坂 → X の向き、DirectX/OpenGL で G が反転
+
+■ 実装中に変えた所 (2026-11-28)
+  - C++ は Renderer_ReleaseUITexture だけを足した (Renderer_UpdateUITexture はやめた)。
+    結果が変わる度に既存の CreateUITexture (COPY キューで転送する、今までと同じ道) で新しいテクスチャを作り、
+    古い物を ReleaseUITexture で返す (RenderStart を FRAME_COUNT + 1 回通ってから SRV と実体を解放。GPU を待たない)。
+    同じテクスチャを描画キューで書き換えるには明示的なバリアが要り、COPY キューで作ったテクスチャと混ぜると AN4 と同じ問題が出る恐れがあるため
+  - 周波数フィルターの半径は「元の画像のナイキスト周波数に対する割合」にした (縮めたプレビューと原寸の保存で同じ所を消す)
+
+■ 判断していただきたい点  (2026-11-28 : 全部 A (推奨) で承認済み)
+  1. Inflate の共有 : (A 推奨) Runtime の Inflate.cs を Imaging にリンクで取り込み、Imaging 内では internal
+       (ファイルに #if を 1 か所足すだけ。Runtime の公開 API は変わらない)。
+     (B) Imaging に移して Runtime が Imaging を参照 (Runtime の依存が増え、ゲームの出力にも DLL が要る)
+  2. 処理の持ち方 : (A 推奨) 非破壊の処理スタック (後からパラメータを直せる、並べ替えできる)。
+     (B) 1 回ずつ確定する破壊的な適用 (単純だがやり直しは Undo だけ)
+  3. 「各 RGB スケール」の解釈 : (A 推奨) R/G/B のどれか 1 つだけを残す (色のまま / グレー表示を選べる)。
+     (B) R/G/B それぞれに倍率を掛ける。両方入れることもできる
+  4. ついでに Project のサムネイルを自前の読み込みに変えるか (TGA のサムネイルが出るようになる。既存の見た目が少し変わる)。
+     既定では変えない

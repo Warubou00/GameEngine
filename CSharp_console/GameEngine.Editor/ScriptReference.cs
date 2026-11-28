@@ -35,6 +35,7 @@ internal sealed class ScriptReference
 
     private static readonly Assembly RuntimeAssembly = typeof(World).Assembly;
     private static readonly Assembly EditorAssembly  = typeof(ScriptReference).Assembly;
+    private static readonly Assembly ImagingAssembly = typeof(GameEngine.Imaging.ImageBuffer).Assembly;   // v2.3 : 画像の処理
 
     public int EntryCount => _entries.Count;
     public string Selected => _selected;
@@ -45,6 +46,7 @@ internal sealed class ScriptReference
         _scriptsFolder = scriptsFolder;
         _engineDocs.AddEmbedded(EditorAssembly, "RuntimeSource/");
         _engineDocs.AddEmbedded(EditorAssembly, "EditorSource/");
+        _engineDocs.AddEmbedded(EditorAssembly, "ImagingSource/");   // v2.3
         for (var dir = DotnetTool.IsPackaged ? null : new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)   // Package のエディターは埋め込んだソースだけ
             if (File.Exists(Path.Combine(dir.FullName, "GameEngine.sln"))) { _repoRoot = dir.FullName; break; }
     }
@@ -72,6 +74,7 @@ internal sealed class ScriptReference
             else add("R:", type, "Engine API");
         }
         foreach (var type in publicTypes(EditorAssembly)) add("E:", type, "Editor API");
+        foreach (var type in publicTypes(ImagingAssembly)) add("I:", type, "Imaging API");   // v2.3
         if (_app.Scripts.Assembly is { } game)
         {
             foreach (var type in publicTypes(game))
@@ -98,6 +101,7 @@ internal sealed class ScriptReference
         "Game" => 4,
         "Engine API" => 5,
         "Editor API" => 6,
+        "Imaging API" => 6,   // v2.3
         _ => 7,
     };
 
@@ -119,6 +123,7 @@ internal sealed class ScriptReference
         {
             "R" => RuntimeAssembly,
             "E" => EditorAssembly,
+            "I" => ImagingAssembly,   // v2.3
             "G" => _app.Scripts.Assembly,
             "GE" => _app.Scripts.EditorAssembly,
             _ => null,
@@ -130,12 +135,12 @@ internal sealed class ScriptReference
     {
         var name = type.IsGenericType && !type.IsGenericTypeDefinition ? type.GetGenericTypeDefinition().FullName : type.FullName;
         if (name == null) return null;
-        var key = type.Assembly == RuntimeAssembly ? "R:" : type.Assembly == EditorAssembly ? "E:" :
+        var key = type.Assembly == RuntimeAssembly ? "R:" : type.Assembly == EditorAssembly ? "E:" : type.Assembly == ImagingAssembly ? "I:" :
                   type.Assembly == _app.Scripts.Assembly ? "G:" : type.Assembly == _app.Scripts.EditorAssembly ? "GE:" : null;
         return key == null ? null : key + name;
     }
 
-    private SourceDocs.TypeDoc? docOf(Type type) => (type.Assembly == RuntimeAssembly || type.Assembly == EditorAssembly ? _engineDocs : _gameDocs).Find(type);
+    private SourceDocs.TypeDoc? docOf(Type type) => (type.Assembly == RuntimeAssembly || type.Assembly == EditorAssembly || type.Assembly == ImagingAssembly ? _engineDocs : _gameDocs).Find(type);
 
     /// <summary>型を選んで開く (インスペクターの Open Reference / テスト)</summary>
     public bool Show(Type type)
@@ -698,7 +703,8 @@ internal sealed class ScriptReference
         if (_repoRoot == null) return null;
         var relative = doc.Source.Replace('\\', '/');
         var path = relative.StartsWith("RuntimeSource/") ? Path.Combine(_repoRoot, "CSharp_console", "GameEngine.Runtime", relative["RuntimeSource/".Length..])
-                 : relative.StartsWith("EditorSource/")  ? Path.Combine(_repoRoot, "CSharp_console", "GameEngine.Editor", relative["EditorSource/".Length..]) : null;
+                 : relative.StartsWith("EditorSource/")  ? Path.Combine(_repoRoot, "CSharp_console", "GameEngine.Editor", relative["EditorSource/".Length..])
+                 : relative.StartsWith("ImagingSource/") ? Path.Combine(_repoRoot, "CSharp_console", "GameEngine.Imaging", relative["ImagingSource/".Length..]) : null;   // v2.3
         return path != null && File.Exists(path) ? path : null;
     }
 

@@ -242,6 +242,12 @@ public sealed class GraphicsSettings
         fixed (byte* p = rgba) return NativeMethods.Renderer_CreateUITexture((uint)width, (uint)height, p);
     }
 
+    /// <summary>
+    /// UI のテクスチャを返す (v2.3)。番号はすぐ使えなくなる (このフレームの UI がまだ描く分は描ける)。
+    /// 実体は GPU が使い終わってから解放する (GPU を待たない)。戻り値 = 知っている番号だったか
+    /// </summary>
+    public bool ReleaseUITexture(uint texture) => texture != 0xFFFFFFFFu && NativeMethods.Renderer_ReleaseUITexture(texture);
+
     /// <summary>シェーダーを読み直す (ED5。GPU を待ってからコンパイルし直す。失敗したシェーダーは前の物のまま)。戻り値 = 全部成功したか</summary>
     public bool ReloadShaders() => NativeMethods.Renderer_ReloadShaders();
 

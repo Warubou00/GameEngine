@@ -50,6 +50,7 @@ internal sealed class ProjectPanel : IDisposable
     public Action<string>? OpenShaderGraph;
     public Action<string>? OpenWidget;   // v1.7 : Widget Designer
     public Action<string>? OpenCollision;   // v1.9 : コリジョンアセット
+    public Action<string>? OpenImage;       // v2.3 : 画像エディター (.png / .jpg / .jpeg / .bmp / .tga)
     public Action<string>? OpenPreview;   // AN5 : FBX をダブルクリック
     // Project の窓にフォーカスがあるか (前のフレーム。Delete キーをシーンの物ではなくアセットに使う。v1.1)
     public bool HasFocus { get; private set; }
@@ -466,6 +467,7 @@ internal sealed class ProjectPanel : IDisposable
             else if (entry.Kind == AssetKind.Collision) OpenCollision?.Invoke(entry.Path);   // v1.9 : コリジョンの窓
             else if (entry.Kind is AssetKind.FbxModel or AssetKind.FbxSkeleton or AssetKind.FbxAnimation) OpenPreview?.Invoke(entry.Path);   // AN5
             else if (entry.Kind == AssetKind.Script) OpenScript(entry.Path);   // v1.1 : Visual Studio で sln と .cs を開く
+            else if (entry.Kind == AssetKind.Texture && ImageEditorManager.CanOpen(entry.Path)) OpenImage?.Invoke(entry.Path);   // v2.3 : 画像エディター (.dds は開かない)
             else if (EditorExtensions.ImporterFor(entry.Path) is { } importer)
             {
                 try { importer.OnOpen(entry.Path, _database.FullPath(entry.Path)); }

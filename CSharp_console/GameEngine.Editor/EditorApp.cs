@@ -57,6 +57,7 @@ internal sealed partial class EditorApp
     private bool    _showGraph;
     private readonly WidgetDesigner _widgetDesigner;   // v1.7 : UI
     private readonly CollisionEditor _collisionEditor;  // v1.9 : コリジョンアセット
+    private readonly ImageEditorManager _images;        // v2.3 : 画像エディター
     private bool    _showWidgetDesigner;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
@@ -109,10 +110,12 @@ internal sealed partial class EditorApp
         _project.OpenWidget = path => OpenWidget(path);
         _preview = new PreviewWindow(engine, database);     // AN5
         _collisionEditor = new CollisionEditor(engine, database);   // v1.9
+        _images = new ImageEditorManager(engine, database);   // v2.3
         _profiler = new ProfilerWindows(engine) { ShowOverview = true, DrawEditorStats = drawEditorStats };   // v1.10
         _profiler.RenderGraphSource = () => _renderGraph.Snapshot;   // v1.12 P3 : Memory の窓のレンダーターゲットの一覧
         _frameDebugger = new FrameDebuggerWindow(this);              // v1.13 P4
         _project.OpenCollision = path => OpenCollision(path);
+        _project.OpenImage = path => OpenImage(path);   // v2.3
         _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
@@ -302,6 +305,7 @@ internal sealed partial class EditorApp
         _widgetDesigner.Draw(ref _showWidgetDesigner);   // v1.7
         _preview.Draw();               // AN5
         _collisionEditor.Draw();       // v1.9
+        _images.Draw();                // v2.3 : 画像エディター
         drawLayoutsWindow();           // v2.1
         _shaders?.Update();
         _scripts.Update();
@@ -501,6 +505,7 @@ internal sealed partial class EditorApp
         if (_widgetDesigner.HasFocus) return;   // v1.7 : Widget Designer が使う (元に戻す / 消す / 複製)
         if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
         if (_collisionEditor.HasFocus) return;   // v1.9 : コリジョンの窓 (元に戻す / 消す / W E R)
+        if (_images.HasFocus) return;   // v2.3 : 画像エディター (元に戻す / やり直す / 保存)
         if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);

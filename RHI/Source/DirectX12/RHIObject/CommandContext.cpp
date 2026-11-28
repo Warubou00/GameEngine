@@ -345,6 +345,7 @@ namespace RHI
 			HRESULT hr = _fence->WaitForValue(frame.FenceValue);
 			if (FAILED(hr)) { logFailed("Fence::WaitForValue", hr); return false; }
 			_stats.WaitMs = elapsedMs(waitStart);
+			releaseRetiredUITextures();   // v2.3 : 返した UI のテクスチャ (GPU が使い終わった物) を解放
 
 			// GPU が使い終わったので、FRAME_COUNT フレーム前に計測した GPU の時間を読める
 			if (_gpuTimer)
@@ -1010,8 +1011,40 @@ namespace RHI
 			srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
 			srvDesc.Texture2D.MipLevels     = 1;
 			_device->GetDevice()->GetDevice()->CreateShaderResourceView(texture->Get(), &srvDesc, heapManager->GetSrvCpuHandle(srvIndex));
-			_uiTextures.push_back(std::move(texture));
-			return srvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+			const uint32_t textureIndex = srvIndex - Buffer::SRV_INDEX_TEXTURE_BEGIN;
+			_uiTextures[textureIndex] = std::move(texture);
+			return textureIndex;
+		}
+
+		bool CommandContext::ReleaseUITexture(Buffer* buffer, uint32_t texture)
+		{
+			// v2.3 : 画像エディターのプレビューは結果が変わる度に作り直すので、古い物を返す
+			//   すぐに解放すると、このフレーム (と前のフレーム) の UI がまだ読んでいるかもしれない。
+			//   GPU を待つ (ReleaseResources のように) と、つまみを動かす度に止まるので、フレームを数えて遅らせる
+			if (!buffer) return false;
+			auto found = _uiTextures.find(texture);
+			if (found == _uiTextures.end()) return false;
+			RetiredUITexture retired;
+			retired.Texture    = std::move(found->second);
+			retired.Owner      = buffer;
+			retired.SrvIndex   = texture + Buffer::SRV_INDEX_TEXTURE_BEGIN;
+			retired.FramesLeft = FRAME_COUNT + 1;
+			_retiredUITextures.push_back(std::move(retired));
+			_uiTextures.erase(found);
+			return true;
+		}
+
+		void CommandContext::releaseRetiredUITextures()
+		{
+			// RenderStart でこのフレームの FrameContext の完了を待った後に呼ぶ。
+			// FRAME_COUNT + 1 回通れば、返した時に記録していたフレームも、その前のフレームも GPU が終わっている
+			for (size_t i = 0; i < _retiredUITextures.size();)
+			{
+				auto& retired = _retiredUITextures[i];
+				if (--retired.FramesLeft > 0) { ++i; continue; }
+				if (retired.Owner && retired.Owner->GetDescHeapManager()) retired.Owner->GetDescHeapManager()->FreeSrv(retired.SrvIndex);
+				_retiredUITextures.erase(_retiredUITextures.begin() + static_cast<std::ptrdiff_t>(i));
+			}
 		}
 
 		void CommandContext::drawUI()
@@ -2903,6 +2936,7 @@ namespace RHI
 			for (auto& lines : _debugLineBuffer) lines.reset();
 			for (auto& ui : _uiBuffer) ui.reset();
 			_uiTextures.clear();
+			_retiredUITextures.clear();   // v2.3 (ヒープごと消えるので SRV は返さない)
 			_renderTargets.clear();
 			_freeRenderTargets.clear();
 			_targetRtvHeap.reset();

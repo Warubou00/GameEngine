@@ -160,6 +160,7 @@ internal static class Program
             Console.WriteLine($"[Editor] Unknown view mode : {viewMode} ({string.Join(" / ", editor.ViewModes.Names)})");
         if (options.TryGetValue("--open-widget", out var widgetPath)) editor.OpenWidget(widgetPath);   // v1.7 : Widget Designer
         if (options.TryGetValue("--open-collision", out var collisionPath)) editor.OpenCollision(collisionPath);   // v1.9 : コリジョンの窓
+        if (options.TryGetValue("--open-image", out var imagePath)) editor.OpenImage(imagePath);   // v2.3 : 画像エディター
         // v1.8 : --crash-test <managed|native|thread|stackoverflow> : 10 フレーム後にわざと落とす (クラッシュレポートの確認用)
         if (options.TryGetValue("--crash-test", out var crashKind))
         {

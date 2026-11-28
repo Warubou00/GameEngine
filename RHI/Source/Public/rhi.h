@@ -191,6 +191,8 @@ namespace RHI
 		                           const UIDrawCommand* commands, uint32_t commandCount) = 0;
 		// UI のテクスチャ (RGBA8。フォントなど)。戻り値はテクスチャの番号 (失敗時 0xFFFFFFFF)
 		virtual uint32_t CreateUITexture(uint32_t width, uint32_t height, const uint8_t* rgba) = 0;
+		// v2.3 : UI のテクスチャを返す (番号はすぐ使えなくなる。実体は GPU が使い終わってから解放。GPU を待たない)。知らない番号なら false
+		virtual bool ReleaseUITexture(uint32_t texture) = 0;
 
 		// ---------- SH2 : 自分のシェーダー / 3D テクスチャ ----------
 		// 自分のシェーダーを作る (source はシーンのシェーダーの後ろに付けてコンパイルされる。エントリーは PSCustom)

@@ -33,13 +33,16 @@
          2.0.0.0 : UserData UD3 (書き出したゲームは .userdata.bin (詰めて混ぜ、書き換えを確かめる) / 見本 userdata_demo / ドキュメント) /
          2.1.0.0 : 前に開いていたシーンを開く / 窓の並びのプリセット (Default + 5 つ。日本語の名前) / Behaviour があると動いた物が描画されないのを直す /
          2.2.0.0 : スポットライト / 点光源・スポットライトに UE と同じ項目 (光源の半径・減衰の指数・影) / 点光源・スポットライトの影 /
-                   クラスターでライトを分ける (多いライトが軽い) / GameObject > Light とシーンビューのライトの印・範囲 / エディターのスプラッシュ画面)
+                   クラスターでライトを分ける (多いライトが軽い) / GameObject > Light とシーンビューのライトの印・範囲 / エディターのスプラッシュ画面 /
+         2.3.0.0 : 画像エディター (Project の画像をダブルクリック。PNG / JPEG / BMP / TGA を自前で読み書き / 色のフィルター / 画像処理 /
+                   周波数フィルター / トーンカーブ / 法線マップ / 輝度表示 / 加工前と比べる / 保存・リセット・Undo / Redo) /
+                   GameEngine.Imaging (エンジンに依存しない画像の処理のライブラリ) / Graphics.ReleaseUITexture)
         Package の Editor のフォルダの名前 (TsumugiEngine_v<版>) もこの版
     ==========================================================================
   -->
   <PropertyGroup>
     <EngineName>Tsumugi Engine</EngineName>
-    <EngineVersion>2.2.0.0</EngineVersion>
+    <EngineVersion>2.3.0.0</EngineVersion>
     <Product>$(EngineName)</Product>
     <Version>$(EngineVersion)</Version>
     <ApplicationIcon Condition="'$(OutputType)' != 'Library'">$(MSBuildThisFileDirectory)Branding\TsumugiEngine.ico</ApplicationIcon>
