@@ -28,6 +28,11 @@
     <None Remove="Resources\make_sky.py" />
   </ItemGroup>
 
+  <!-- v2.4 : 画像の読み込み (スプライトのコマ / UI の画像。PNG / JPEG / BMP / TGA を自前で読む。エンジンに依存しない) -->
+  <ItemGroup>
+    <ProjectReference Include="..\GameEngine.Imaging\GameEngine.Imaging.csproj" />
+  </ItemGroup>
+
   <!-- エンジンの名前 / 版 (EngineInfo が読む。Package 化で足した) -->
   <Import Project="..\Engine.props" />
 

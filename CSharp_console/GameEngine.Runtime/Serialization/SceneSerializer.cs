@@ -125,6 +125,10 @@ public static partial class SceneSerializer
         RegisterConverter<CollisionAsset?>(
             (w, v, _) => writeAsset(w, v?.Path),
             (e, c) => readAsset<CollisionAsset?>(e, c, path => c.Assets!.LoadCollisionAsset(path), null));
+        // v2.4 : スプライトのアニメーション (.spriteanim.json)
+        RegisterConverter<SpriteAnimation?>(
+            (w, v, _) => writeAsset(w, string.IsNullOrEmpty(v?.Path) ? null : v.Path),
+            (e, c) => readAsset<SpriteAnimation?>(e, c, path => c.Assets!.LoadSpriteAnimation(path), null));
     }
 
     // ---------------------------------------------------------------------

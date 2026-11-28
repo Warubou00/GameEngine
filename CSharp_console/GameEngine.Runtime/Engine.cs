@@ -569,6 +569,16 @@ public sealed class Engine : IDisposable
     private readonly List<ILateSystem>  _lateSystems  = new();   // Update と物理の後に呼ぶ (v1.4。Unity の LateUpdate)
     private readonly TransformSystem  _transformSystem = new();
     private readonly CameraSystem     _cameraSystem    = new();
+    private readonly SpriteAnimationSystem _spriteAnimationSystem = new();   // v2.4
+    private SpriteRenderSystem _spriteRenderSystem = null!;                  // v2.4 (AssetManager を使うので Engine を作る時に)
+
+    /// <summary>
+    /// スプライトの様子 (v2.4。確認 / プロファイラー用) : SpriteRenderer の数 / 前のフレームで送った行列 / 共有のマテリアル / SpriteAnimator の数 /
+    /// 送ったイベント / アニメーションと板の同期にかかった時間 (ms)
+    /// </summary>
+    public (int Sprites, int MatricesSent, int Materials, int Animators, int Events, double Milliseconds) SpriteStats =>
+        (_spriteRenderSystem.SpriteCount, _spriteRenderSystem.MatricesSent, _spriteRenderSystem.MaterialCount, _spriteAnimationSystem.AnimatorCount, _spriteAnimationSystem.EventsSent,
+         _spriteAnimationSystem.LastMilliseconds + _spriteRenderSystem.LastMilliseconds);
     private readonly RenderSyncSystem _renderSyncSystem;
     private readonly LightSystem      _lightSystem     = new();
     private readonly RenderSettingsSystem _renderSettingsSystem = new();   // カメラ / Project Settings / Volume → Graphics (ED6 / v1.5)
@@ -719,6 +729,7 @@ public sealed class Engine : IDisposable
         // ゲームパッド (Core.dll。XInput + DirectInput)。パッドが無くてもそのまま動く (何も繋がっていない扱い)
         Gamepad.Initialize();
         _renderSyncSystem = new RenderSyncSystem(World, _transformSystem);
+        _spriteRenderSystem = new SpriteRenderSystem(World, Assets);   // v2.4
         GameEngine.UI.Manager = new UIManager(this);   // v1.7 : UI (Widget)
         Scenes = new SceneManager(World, Assets);      // v1.14 : シーンの管理
         SceneManager.Current = Scenes;
@@ -988,6 +999,12 @@ public sealed class Engine : IDisposable
             }
             catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
             Profiler.EndSample();
+            // v2.4 : スプライトのアニメーション (ゲームの Update で Play / Stop した物も、このフレームから) → イベントを Behaviour へ
+            Profiler.BeginSample("Sprite animation");
+            _spriteAnimationSystem.Update(World, IsPlaying, Time.DeltaTime);
+            try { if (IsPlaying) _spriteAnimationSystem.Dispatch(World, _systems); }
+            catch (Exception ex) when (GameCodeException != null) { GameCodeException(ex); }
+            Profiler.EndSample();
             Profiler.BeginSample("Animation");
             _animationSystem.Update(World, IsPlaying, Time.DeltaTime);   // AN3 : 骨のエンティティに姿勢を書く (編集中は時間を進めず、その時間の姿勢)
             Profiler.EndSample();
@@ -1033,6 +1050,7 @@ public sealed class Engine : IDisposable
             _renderSettingsSystem.Update(World, Graphics, _cameraSystem);   // カメラの描き方 / Project Settings + Volume (ED6 / v1.5)
             Profiler.EndSample();
             Profiler.BeginSample("Render sync");
+            _spriteRenderSystem.Update(World, _cameraSystem.Forward, _cameraSystem.Up);   // v2.4 : 板 (Transform.Changed は下ろさない。RenderSync より前)
             _renderSyncSystem.Update(World);
             Profiler.EndSample();
             Profiler.BeginSample("Skinning + previews");

@@ -1,0 +1,508 @@
+{
+  "format": "GameEngineScene",
+  "version": 1,
+  "entities": [
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000001",
+      "name": "Sun",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.DirectionalLight",
+          "Color": [
+            1,
+            0.95,
+            0.88
+          ],
+          "Intensity": 1.6,
+          "CastShadows": true
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            30,
+            0
+          ],
+          "Rotation": [
+            0.36099413,
+            -0.2807732,
+            0.11030375,
+            0.88243
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000002",
+      "name": "Main Camera",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.Camera"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1.6,
+            -6
+          ],
+          "Rotation": [
+            0.06975647,
+            0,
+            0,
+            0.9975641
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000003",
+      "name": "Ground",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.MeshRenderer",
+          "Model": {
+            "path": "builtin:Plane"
+          }
+        },
+        {
+          "type": "GameEngine.Static"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            4,
+            1,
+            2
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000004",
+      "name": "Runner",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "None"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Runner.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine_console.SpriteDemo",
+          "Role": "Runner",
+          "Speed": 2
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            0,
+            0
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000010",
+      "name": "Coin 1",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Vertical"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Coin.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -4,
+            1.2,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000011",
+      "name": "Coin 2",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Vertical"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Coin.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            -2,
+            1.6,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000012",
+      "name": "Coin 3",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Vertical"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Coin.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1.2,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000013",
+      "name": "Coin 4",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Vertical"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Coin.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            2,
+            1.6,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000014",
+      "name": "Coin 5",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Vertical"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Coin.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": true,
+          "HideWhenStopped": false
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            4,
+            1.2,
+            2
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000005",
+      "name": "Explosion",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "Camera"
+        },
+        {
+          "type": "GameEngine.SpriteAnimator",
+          "Animation": {
+            "path": "Assets/Samples/Sprites/Explosion.spriteanim.json"
+          },
+          "Speed": 1,
+          "PlayOnStart": false,
+          "HideWhenStopped": true
+        },
+        {
+          "type": "GameEngine_console.SpriteDemo",
+          "Role": "Explosion"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            0,
+            1,
+            -0.5
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            1,
+            1,
+            1
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000006",
+      "name": "Sign",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.SpriteRenderer",
+          "Sprite": "Assets/Samples/Sprites/Coin_0.png",
+          "Color": [
+            1,
+            1,
+            1,
+            1
+          ],
+          "FlipX": false,
+          "Billboard": "None"
+        },
+        {
+          "type": "GameEngine.Transform",
+          "Position": [
+            5,
+            2.5,
+            3
+          ],
+          "Rotation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "Scale": [
+            2,
+            2,
+            2
+          ],
+          "Parent": null
+        }
+      ]
+    },
+    {
+      "id": "5a1c0001-0000-4000-8000-000000000007",
+      "name": "HUD",
+      "active": true,
+      "components": [
+        {
+          "type": "GameEngine.UIWidget",
+          "Widget": {
+            "path": "Assets/Samples/Sprites/SpriteHUD.widget.json"
+          },
+          "ZOrder": 0,
+          "Visible": true
+        }
+      ]
+    }
+  ]
+}

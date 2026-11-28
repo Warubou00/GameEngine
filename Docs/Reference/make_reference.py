@@ -30,7 +30,7 @@ MODULES = [
     ("physics",  "Physics",           "C++", "DLL (Physics.dll)",    ["Physics/Source"],   "当たり判定と剛体 (球 / 箱 / カプセル、接触の解決、ジョイント、レイキャスト)", []),
     ("audio",    "Audio",             "C++", "DLL (Audio.dll)",      ["Audio/Source"],     "XAudio2 の音 (WAV の読み込み、3D の音)", ["core"]),
     ("core",     "Core",              "C++", "DLL (Core.dll)",       ["Core/Source"],      "共通 (ログ / ファイル / 数学 / ハッシュ) とゲームパッド (XInput / DirectInput)", []),
-    ("runtime",  "GameEngine.Runtime", "C#", "DLL (GameEngine.dll)", ["CSharp_console/GameEngine.Runtime"], "エンジンの本体 (C#)。ECS (World / Entity / コンポーネント / システム)、描画パイプライン、アセット、シーンの保存、入力、時間。C++ の DLL を P/Invoke で呼ぶ", ["renderer", "physics", "audio", "core"]),
+    ("runtime",  "GameEngine.Runtime", "C#", "DLL (GameEngine.dll)", ["CSharp_console/GameEngine.Runtime"], "エンジンの本体 (C#)。ECS (World / Entity / コンポーネント / システム)、描画パイプライン、アセット、シーンの保存、入力、時間。C++ の DLL を P/Invoke で呼ぶ。スプライトのアニメーション (v2.4)", ["renderer", "physics", "audio", "core", "imaging"]),
     ("editor",   "GameEngine.Editor", "C#", "exe",                  ["CSharp_console/GameEngine.Editor"],  "エディター (ImGui)。Hierarchy / Inspector / Project / シーンビュー / 元に戻す / プレハブ / ゲームの書き出し / スクリプトの読み直し / シェーダーグラフ / 画像エディター / 自動テスト", ["runtime", "imaging"]),
     ("imaging",  "GameEngine.Imaging", "C#", "DLL (GameEngine.Imaging.dll)", ["CSharp_console/GameEngine.Imaging"], "画像の読み書き (PNG / JPEG / BMP / TGA。自前) と加工 (色のフィルター / 画像処理 / FFT / トーンカーブ / 法線マップ / 処理の並び)。エンジンに依存しない (v2.3)", []),
     ("player",   "GameEngine.Player", "C#", "exe",                  ["CSharp_console/GameEngine.Player"],  "書き出したゲームの起動 (エディター無しでシーンを動かす)", ["runtime"]),

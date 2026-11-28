@@ -60,7 +60,7 @@ public sealed class WidgetDesigner
     private static readonly (string Group, string[] Types)[] Palette =
     {
         ("Panel",  new[] { "CanvasPanel", "HorizontalBox", "VerticalBox", "Overlay", "UniformGridPanel", "ScrollBox", "SizeBox", "ScaleBox", "Border", "WidgetSwitcher" }),
-        ("Common", new[] { "TextBlock", "Image", "Button", "ProgressBar", "Spacer" }),
+        ("Common", new[] { "TextBlock", "Image", "SpriteImage", "Button", "ProgressBar", "Spacer" }),   // v2.4 : SpriteImage
         ("Input",  new[] { "CheckBox", "Slider", "EditableTextBox" }),
     };
 
@@ -497,7 +497,9 @@ public sealed class WidgetDesigner
 
         // 並べて描く (画面の UI と同じ並べ方。ゲームの絵の上と同じ見た目)
         var uiScale = UIManager.ScaleFor(PreviewResolution, DesignSize);
-        var clip = new Vector4(Math.Max(_canvasOrigin.X, regionMin.X), Math.Max(_canvasOrigin.Y, regionMin.Y),
+        // v2.4 : スプライトのアニメーションはデザイナーの中でも動かす (イベントは送らない)
+        if (Root != null) foreach (var sprite in Root.Descendants().OfType<USpriteImage>()) sprite.PreviewTick(ImGui.GetIO().DeltaTime);
+        var clip =new Vector4(Math.Max(_canvasOrigin.X, regionMin.X), Math.Max(_canvasOrigin.Y, regionMin.Y),
                                Math.Min(_canvasOrigin.X + screenSize.X, regionMax.X), Math.Min(_canvasOrigin.Y + screenSize.Y, regionMax.Y));
         manager.PaintTree(Root, PreviewResolution / uiScale, _canvasOrigin, uiScale * _viewScale, _drawList, clip);
         UIImGui.Draw(draw, _drawList);

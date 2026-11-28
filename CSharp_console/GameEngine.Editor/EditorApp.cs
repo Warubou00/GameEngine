@@ -58,6 +58,7 @@ internal sealed partial class EditorApp
     private readonly WidgetDesigner _widgetDesigner;   // v1.7 : UI
     private readonly CollisionEditor _collisionEditor;  // v1.9 : コリジョンアセット
     private readonly ImageEditorManager _images;        // v2.3 : 画像エディター
+    private readonly SpriteAnimationEditor _spriteEditor;   // v2.4 : スプライトのアニメーション
     private bool    _showWidgetDesigner;
     private readonly ScriptReference _reference;   // スクリプトリファレンス (ED9)
     private readonly BuildWindow _build;   // ゲームの書き出し (ED8 後半)
@@ -111,16 +112,19 @@ internal sealed partial class EditorApp
         _preview = new PreviewWindow(engine, database);     // AN5
         _collisionEditor = new CollisionEditor(engine, database);   // v1.9
         _images = new ImageEditorManager(engine, database);   // v2.3
+        _spriteEditor = new SpriteAnimationEditor(engine, database);   // v2.4
         _profiler = new ProfilerWindows(engine) { ShowOverview = true, DrawEditorStats = drawEditorStats };   // v1.10
         _profiler.RenderGraphSource = () => _renderGraph.Snapshot;   // v1.12 P3 : Memory の窓のレンダーターゲットの一覧
         _frameDebugger = new FrameDebuggerWindow(this);              // v1.13 P4
         _project.OpenCollision = path => OpenCollision(path);
         _project.OpenImage = path => OpenImage(path);   // v2.3
+        _project.OpenSpriteAnimation = path => OpenSpriteAnimation(path);   // v2.4
         _project.OpenPreview = path => OpenPreview(path);
         _scripts.BuildSucceeded += _ => ReloadScripts();
         engine.Assets.AssetReloaded += _ => _picker.Clear();   // 形が変わったかもしれないので、クリックの当たりの形を捨てる
         _inspector = new Inspector(engine, _undo);
         _inspector.OpenCollision = path => OpenCollision(path);   // v1.9
+        _inspector.OpenSpriteAnimation = path => OpenSpriteAnimation(path);   // v2.4
         _inspector.SelectAsset = path => _project.Select(_database.Find(path));   // v2.0 UD2 : UserData の欄のダブルクリック
         _inspector.OpenShaderGraph = path => OpenShaderGraph(path);   // SH4
         _inspector.BuildBones = entity => BuildBones(entity).Count;    // AN3
@@ -306,6 +310,7 @@ internal sealed partial class EditorApp
         _preview.Draw();               // AN5
         _collisionEditor.Draw();       // v1.9
         _images.Draw();                // v2.3 : 画像エディター
+        _spriteEditor.Draw();          // v2.4 : スプライトのアニメーション
         drawLayoutsWindow();           // v2.1
         _shaders?.Update();
         _scripts.Update();
@@ -385,6 +390,7 @@ internal sealed partial class EditorApp
                 ImGui.EndMenu();
             }
             drawLightMenu();   // v2.2 : Directional / Point / Spot
+            drawSpriteMenu();  // v2.4 : 2D > Sprite / Animated Sprite
             ImGui.Separator();
             if (ImGui.MenuItem("Camera"))          CreateCamera();   // v1.5 (以前は Render Settings。描き方はカメラごとになった)
             if (ImGui.MenuItem("Volume (Box)"))    CreateVolume(VolumeShape.Box);
@@ -407,6 +413,7 @@ internal sealed partial class EditorApp
             if (ImGui.MenuItem("Unload Unused Assets")) UnloadUnused();
             ImGui.Separator();
             if (ImGui.MenuItem("Create FBX Samples")) _project.CreateFbxSamples();   // AN1
+            if (ImGui.MenuItem("Create Sprite Samples")) Console.WriteLine($"[Assets] Sprite samples : {SpriteSamples.Write(_database).Count} files ({SpriteSamples.Folder}, {SpriteSamples.ScenePath})");   // v2.4
             ImGui.EndMenu();
         }
         drawExtensionMenus();
@@ -506,6 +513,7 @@ internal sealed partial class EditorApp
         if (_preview.HasFocus) return; // AN5 : プレビューの窓 (F で全体を見る。シーンの道具を切り替えない)
         if (_collisionEditor.HasFocus) return;   // v1.9 : コリジョンの窓 (元に戻す / 消す / W E R)
         if (_images.HasFocus) return;   // v2.3 : 画像エディター (元に戻す / やり直す / 保存)
+        if (_spriteEditor.HasFocus) return;   // v2.4 : スプライトのアニメーション (元に戻す / 消す / 保存)
         if (io.KeyCtrl)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.S)) saveScene(false);

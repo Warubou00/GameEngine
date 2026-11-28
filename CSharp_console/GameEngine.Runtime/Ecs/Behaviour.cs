@@ -38,7 +38,7 @@ namespace GameEngine;
 //     Update の途中で World.DestroyEntity を呼ぶと、回している配列が変わるので、こちらを使う
 //   - 注意 : Update / OnCollision の中で、同じ T を別のエンティティに足す / 外すと、ref の data が古い場所を指すことがある
 // ==========================================================================
-public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollisionReceiver where T : struct
+public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollisionReceiver, ISpriteEventReceiver where T : struct
 {
     /// <summary>今動いている World</summary>
     protected World World { get; private set; } = null!;
@@ -75,7 +75,12 @@ public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollis
         if (overridesCollision(nameof(OnTriggerEnter)))   _callbacks |= CollisionCallbacks.TriggerEnter;
         if (overridesCollision(nameof(OnTriggerStay)))    _callbacks |= CollisionCallbacks.TriggerStay;
         if (overridesCollision(nameof(OnTriggerExit)))    _callbacks |= CollisionCallbacks.TriggerExit;
+        // v2.4 : スプライトのイベント
+        _hasSpriteEvent = overrides(nameof(OnSpriteEvent), dataType, typeof(string));
+        _hasSpriteFinished = overrides(nameof(OnSpriteFinished), dataType);
     }
+
+    private readonly bool _hasSpriteEvent, _hasSpriteFinished;
 
     // ---------------------------------------------------------------------
     // 書くメソッド (上書きした物だけ呼ばれる)
@@ -102,6 +107,15 @@ public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollis
     protected virtual void OnTriggerEnter(ref T data, in Collision other) { }
     protected virtual void OnTriggerStay(ref T data, in Collision other) { }
     protected virtual void OnTriggerExit(ref T data, in Collision other) { }
+
+    /// <summary>
+    /// v2.4 : この物の SpriteAnimator が、イベントの名前の付いたコマに入った (アニメーションの時間を進めた直後。Update の後、LateUpdate の前)。
+    /// 1 フレームで何コマも進んだ時は、入ったコマの数だけ呼ばれる
+    /// </summary>
+    protected virtual void OnSpriteEvent(ref T data, string eventName) { }
+
+    /// <summary>v2.4 : この物の SpriteAnimator が最後まで行って止まった (Loop = Once の時だけ)</summary>
+    protected virtual void OnSpriteFinished(ref T data) { }
 
     // ---------------------------------------------------------------------
     // GetComponent
@@ -285,6 +299,21 @@ public abstract class Behaviour<T> : ISystem, IFixedSystem, ILateSystem, ICollis
     }
 
     void ICollisionReceiver.AfterCollisions(World world) => flushDestroy(world);
+
+    bool ISpriteEventReceiver.WantsSpriteEvents => _hasSpriteEvent || _hasSpriteFinished;
+
+    void ISpriteEventReceiver.ReceiveSprite(World world, Entity entity, string? name)
+    {
+        var pool = world.GetPool<T>();
+        if (!pool.Has(entity.Id) || !world.IsActive(entity)) return;
+        World = world;
+        Entity = entity;
+        if (name == null) { if (_hasSpriteFinished) OnSpriteFinished(ref pool.Get(entity.Id)); }
+        else if (_hasSpriteEvent) OnSpriteEvent(ref pool.Get(entity.Id), name);
+        Entity = default;
+    }
+
+    void ISpriteEventReceiver.AfterSpriteEvents(World world) => flushDestroy(world);
 
     private void flushDestroy(World world)
     {

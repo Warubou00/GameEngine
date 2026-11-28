@@ -118,6 +118,15 @@ public sealed class UIPainter
         List.AddRect(Transform, min, max, Vector2.Zero, Vector2.One, UIColors.Pack(color, Opacity), Resources.Textures.White, Clip);
     }
 
+    /// <summary>v2.4 : テクスチャの番号 (スプライトのコマなど) をそのまま描く</summary>
+    public void Texture(uint texture, Vector2 min, Vector2 max, Vector4 tint, bool flipX = false, bool flipY = false)
+    {
+        if (tint.W <= 0.0f || max.X <= min.X || max.Y <= min.Y) return;
+        var uv0 = new Vector2(flipX ? 1 : 0, flipY ? 1 : 0);
+        var uv1 = new Vector2(flipX ? 0 : 1, flipY ? 0 : 1);
+        List.AddRect(Transform, min, max, uv0, uv1, UIColors.Pack(tint, Opacity), texture, Clip);
+    }
+
     /// <summary>ブラシで四角を描く (tint は掛ける色)</summary>
     public void Brush(in UIBrush brush, Vector2 min, Vector2 max, Vector4 tint)
     {

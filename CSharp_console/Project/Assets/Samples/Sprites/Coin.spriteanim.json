@@ -1,0 +1,31 @@
+{
+  "format": "GameEngineSpriteAnimation",
+  "version": 1,
+  "frameRate": 12,
+  "loop": "PingPong",
+  "pixelsPerUnit": 96,
+  "pivot": [
+    0.5,
+    0.5
+  ],
+  "frames": [
+    {
+      "image": "Assets/Samples/Sprites/Coin_0.png"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Coin_1.png"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Coin_2.png"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Coin_3.png"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Coin_4.png"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Coin_5.png"
+    }
+  ]
+}

@@ -122,6 +122,23 @@ internal sealed class Picker
             if (t < distance) { distance = t; best = entity; }
         }
 
+        // v2.4 : スプライトの板 (描いている四角。表でも裏でも)
+        var sprites = world.GetPool<SpriteRenderer>();
+        var spriteEntities = sprites.Entities;
+        var spriteComponents = sprites.Components;
+        for (int i = 0; i < spriteComponents.Length; i++)
+        {
+            if (!spriteComponents[i].IsCreated || !world.IsActive(spriteEntities[i])) continue;
+            if (!Matrix4x4.Invert(spriteComponents[i].QuadMatrix, out var inverse)) continue;
+            var o = Vector3.Transform(origin, inverse);
+            var d = Vector3.TransformNormal(direction, inverse);
+            if (MathF.Abs(d.Z) < 1e-8f) continue;
+            var t = -o.Z / d.Z;   // 板 (z = 0) に当たる所
+            if (t < 0 || t >= distance) continue;
+            var p = o + d * t;
+            if (MathF.Abs(p.X) <= 0.5f && MathF.Abs(p.Y) <= 0.5f) { distance = t; best = spriteEntities[i]; }
+        }
+
         // 物理の当たり (形の無い Collider だけの物も選べるように)
         if (_engine.Physics.Raycast(origin, direction, out var hit, Math.Min(distance, 10000.0f)) && hit.Distance < distance && world.IsAlive(hit.Entity))
         {

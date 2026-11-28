@@ -37,6 +37,7 @@ internal sealed partial class Inspector
         RegisterAssetField<Skeleton>(new[] { AssetKind.FbxSkeleton }, s => s?.Path, assets.LoadSkeleton);   // AN3
         RegisterAssetField<AnimationClip>(new[] { AssetKind.FbxAnimation }, c => c?.Path, assets.LoadAnimationClip);
         RegisterAssetField<WidgetAsset>(new[] { AssetKind.Widget }, w => w?.Path, assets.LoadWidget);   // v1.7
+        RegisterAssetField<SpriteAnimation>(new[] { AssetKind.SpriteAnimation }, s => s?.Path, assets.LoadSpriteAnimation, path => OpenSpriteAnimation?.Invoke(path));   // v2.4
         RegisterAssetField<CollisionAsset>(new[] { AssetKind.Collision }, c => c?.Path, assets.LoadCollisionAsset,
                                            path => OpenCollision?.Invoke(path));   // v1.9 : ダブルクリックで窓を開く
         RegisterAssetField<CollisionMesh>(new[] { AssetKind.Model, AssetKind.FbxModel }, m => m?.Path, path => assets.LoadCollisionMesh(assets.LoadModel(path)));

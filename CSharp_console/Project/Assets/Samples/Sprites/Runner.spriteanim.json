@@ -1,0 +1,87 @@
+{
+  "format": "GameEngineSpriteAnimation",
+  "version": 1,
+  "frameRate": 10,
+  "loop": "Loop",
+  "pixelsPerUnit": 64,
+  "pivot": [
+    0.5,
+    0
+  ],
+  "frames": [
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        0,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        64,
+        0,
+        64,
+        64
+      ],
+      "event": "step"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        128,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        192,
+        0,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        0,
+        64,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        64,
+        64,
+        64,
+        64
+      ],
+      "event": "step"
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        128,
+        64,
+        64,
+        64
+      ]
+    },
+    {
+      "image": "Assets/Samples/Sprites/Runner.png",
+      "rect": [
+        192,
+        64,
+        64,
+        64
+      ]
+    }
+  ]
+}

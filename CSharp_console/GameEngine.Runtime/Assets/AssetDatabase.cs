@@ -15,7 +15,7 @@ namespace GameEngine;
 //   - 作られる物 (テクスチャの DDS キャッシュ *.v1.dds) と .meta 自身は一覧に入れない
 //   - 表示名 : .meta の "displayName" (エディターの Project に出す名前だけ。ファイル / フォルダの名前とパスはそのまま)
 // ==========================================================================
-public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script, Widget, Collision, UserData }   // v2.0 : UserData は最後に足した (.meta には名前で書くので順番は変えない)
+public enum AssetKind { Folder, Model, Texture, Sound, Scene, Material, Text, Other, Prefab, Shader, ShaderGraph, FbxModel, FbxSkeleton, FbxAnimation, Script, Widget, Collision, UserData, SpriteAnimation }   // v2.0 : UserData は最後に足した (.meta には名前で書くので順番は変えない)
 
 public sealed record AssetEntry(Guid Guid, string Path, AssetKind Kind)
 {
@@ -63,6 +63,7 @@ public sealed class AssetDatabase
         if (name.EndsWith(".userdata.json")) return AssetKind.UserData;    // v2.0 : UserData
         if (name.EndsWith(".userdata.bin")) return AssetKind.UserData;     // v2.0 UD3 : 書き出したゲームの UserData (UserDataBinary)
         if (name.EndsWith(".shadergraph.json")) return AssetKind.ShaderGraph;   // SH4
+        if (name.EndsWith(".spriteanim.json")) return AssetKind.SpriteAnimation;   // v2.4 : スプライトのアニメーション
         if (name.EndsWith(".mod.fbx")) return AssetKind.FbxModel;       // AN1 : FBX は名前で種類が決まる (ただの .fbx は Other)
         if (name.EndsWith(".skl.fbx")) return AssetKind.FbxSkeleton;
         if (name.EndsWith(".anm.fbx")) return AssetKind.FbxAnimation;

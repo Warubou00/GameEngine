@@ -268,6 +268,7 @@ internal sealed partial class EditorApp
         if (_preview.IsOpen) _preview.Close();
         if (_collisionEditor.IsOpen) _collisionEditor.Close();
         _images.CloseAll();   // v2.3
+        if (_spriteEditor.IsOpen) _spriteEditor.Close();   // v2.4
     }   // v1.10 (確認用 : シーンビューの絵の位置と大きさ)
 
     /// <summary>画像エディターで開く (v2.3。アセットのパスかフルパス)。読めなければ null</summary>

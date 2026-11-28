@@ -200,13 +200,16 @@ public sealed class UIManager
         if (playing && InputEnabled)
         {
             if (processInput(size)) layout(size);   // クリックで変わった物をこのフレームの絵に入れる
-            foreach (var widget in _widgets)
-                if (widget.IsVisible && widget.Root != null) foreach (var w in widget.Root.Descendants()) w.Tick(deltaTime);
         }
         else
         {
             IsPointerOverUI = false;
         }
+        // v2.4 : 時間で動く物 (USpriteImage など) は入力を受けない時も進める (以前は入力を受ける時だけ Tick した。
+        //   エディターのカメラで見ている再生中は、スプライトのアニメーションが止まっていた)
+        if (playing)
+            foreach (var widget in _widgets)
+                if (widget.IsVisible && widget.Root != null) foreach (var w in widget.Root.Descendants()) w.Tick(deltaTime);
         paint();
         if (AutoSubmit) submit();
         LastMilliseconds = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;

@@ -751,6 +751,50 @@ ImageCodec.Save("out.jpg", pipeline.Run(image), new ImageSaveOptions { JpegQuali
 <p>確認 : <code>--editor-test --editor-test-section imaging</code> / 撮影 <code>--editor-test-section imaging-view</code> (環境変数 <code>IMAGING_VIEW_MODE</code> = curve / frequency / normal / luminance)</p>
 </article>
 
+<article data-id="sprites" data-title="スプライトのアニメーション (v2.4)">
+<h2>スプライトのアニメーション (v2.4)</h2>
+<p class="lead">画像を順に切り替えて見せるアセット <code>.spriteanim.json</code> (<code>SpriteAnimation</code>) と、それを再生する仕組み。GameObject (<code>SpriteRenderer</code> + <code>SpriteAnimator</code>) と Widget (<code>USpriteImage</code>) の両方で同じアセットを使う</p>
+<h3>アセット</h3>
+<ul>
+  <li>コマ = 画像のパス + 切り出す四角 (ピクセル。無ければ画像全体) + 時間 (0 = 1 / FrameRate) + イベントの名前。FrameRate / Loop (Loop / Once / PingPong) / PixelsPerUnit / Pivot</li>
+  <li>シート (1 枚に並べた画像) は、エディターが格子 (列 / 行 / コマ数 / 余白 / 間隔) をコマに展開して書く (<code>SpriteAnimation.SliceGrid</code>)</li>
+  <li>GPU のテクスチャはコマごとに 1 枚 (読み込んだ時に切り出す。同じ画像の同じ四角は共有)。<code>Graphics.CreateUITexture</code> の番号なので、マテリアルにも UI にもそのまま使える。シートの隣のコマがにじまない / シェーダーと C++ は変えていない。ミップマップは無い</li>
+  <li>画像は <code>GameEngine.Imaging</code> で読む (PNG / JPEG / BMP / TGA)。v2.4 から UI の画像 (UImage など) も同じ読み込み (TGA が出る)</li>
+  <li><code>AssetManager.LoadSpriteAnimation(path)</code> は同じパスに同じインスタンス。読み直すと中身を差し替え、時間 / イベントだけの変更ではテクスチャを作り直さない</li>
+</ul>
+<h3>GameObject</h3>
+<ul>
+  <li><code>SpriteRenderer</code> : Sprite (画像) / Color / FlipX・FlipY / Size (0 = px / PixelsPerUnit) / PixelsPerUnit / Pivot / Billboard (None / Camera / Vertical) / CastShadows (既定 off)。板は Transform の XY 面 (表は -Z)、半透明</li>
+  <li><code>SpriteAnimator</code> : Animation / Speed / PlayOnStart / Loop (アセットのまま / 上書き) / HideWhenStopped。<code>Play(anim, restart)</code> / <code>Stop</code> / <code>Pause</code> / <code>Resume</code> / <code>SetFrame</code> / <code>SetTime</code>、<code>IsPlaying</code> / <code>CurrentFrame</code> / <code>NormalizedTime</code></li>
+  <li>イベント : <code>Behaviour&lt;T&gt;</code> の <code>OnSpriteEvent(ref T, string name)</code> (名前の付いたコマに入った。飛ばしたコマの分も) / <code>OnSpriteFinished(ref T)</code> (Once で最後まで)。ゲームの Update の後、LateUpdate の前</li>
+  <li>マテリアルは (テクスチャ, 色) ごとに共有 (C++ のマテリアルの上限 4096 に届かない)。コマを替える = 付けるマテリアルを替えるだけ。行列は変わった時だけ送る</li>
+  <li>編集中は最初のコマ。Sprite Animation Editor の Animate in scene (<code>SpriteAnimator.PreviewInEditor</code>) で編集中も動かせる (イベントは送らない)</li>
+</ul>
+<pre><code>[GameSystem]
+public sealed class PlayerSystem : Behaviour&lt;Player&gt;
+{
+    protected override void Update(ref Player p)
+    {
+        if (Input.GetKeyDown(Keys.Space)) GetComponent&lt;SpriteAnimator&gt;().Play(p.Jump);   // SpriteAnimation のフィールド
+    }
+    protected override void OnSpriteEvent(ref Player p, string name) { if (name == "step") ... }
+    protected override void OnSpriteFinished(ref Player p) { GetComponent&lt;SpriteAnimator&gt;().Play(p.Idle); }
+}</code></pre>
+<h3>Widget</h3>
+<ul>
+  <li><code>USpriteImage</code> (Palette > Common > SpriteImage) : Animation / Image / Speed / AutoPlay / Loop / ColorAndOpacity / FlipX・FlipY / SizeToFrame / ImageSize。<code>Play</code> / <code>Stop</code> / <code>Pause</code> / <code>Resume</code> / <code>SetFrame</code>、event <code>OnFrameEvent(string)</code> / <code>OnFinished</code>。Widget Designer の中でも動く</li>
+  <li>v2.4 から UI の Tick は入力を受けない時 (エディターのカメラで見ている再生中) も進む</li>
+</ul>
+<h3>エディター</h3>
+<ul>
+  <li>Project : Create > Sprite Animation / 画像の右クリック > Create Sprite Animation / ダブルクリックで Sprite Animation Editor</li>
+  <li>Sprite Animation Editor : 左 = コマ (Project の画像をドラッグで足す / Up / Down / Duplicate / Remove)、中 = プレビュー (再生 / 止める / 1 コマ送り / 速さ / 中心の印)、右 = 設定 / 選んだコマ / シートを切る (Replace / Append)。自動で保存、Ctrl+Z / Ctrl+Y</li>
+  <li>GameObject > 2D > Sprite / Animated Sprite (Project で選んでいる画像 / アニメーションを使う)。シーンビューで板をクリックして選べる</li>
+  <li>見本 : Assets > Create Sprite Samples (<code>Assets/Samples/Sprites</code> と <code>Assets/Scenes/sprites.scene.json</code>、<code>Scripts/SpriteDemo.cs</code>)。起動時に開く : <code>--open-sprite Assets/....spriteanim.json</code></li>
+</ul>
+<p>確認 : <code>--editor-test --editor-test-section sprites</code> / 計測 <code>sprites-bench</code> / 撮影 <code>sprites-view</code></p>
+</article>
+
 <article data-id="profiler" data-title="プロファイラー (v1.10 - v1.13)">
 <h2>プロファイラー (v1.10 - v1.13)</h2>
 <p>エディターの View &gt; Analysis に 5 つの窓 : <b>Profiler</b> (概要。F1) / <b>CPU Usage</b> / <b>GPU Usage</b> / <b>Rendering Stats</b> / <b>Memory</b>。どれもエディターの ImGui で描く (<code>GameEngine.Editor/ProfilerWindows.cs</code>)。</p>

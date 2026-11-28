@@ -47,6 +47,9 @@ CSharp_console/Project/Assets/**/*.*
 !CSharp_console/Project/Assets/**/*.collision.json
 # UserData (v2.0。見本の EnemyType / WaveTable)
 !CSharp_console/Project/Assets/**/*.userdata.json
+# スプライトのアニメーション (v2.4) と、その見本の画像 (Assets > Create Sprite Samples でコードが描いた物)
+!CSharp_console/Project/Assets/**/*.spriteanim.json
+!CSharp_console/Project/Assets/Samples/Sprites/*.png
 # 自作の FBX のサンプル (AN1。Assets > Create FBX Samples で作り直せる)
 !CSharp_console/Project/Assets/Samples/Fbx/*.fbx
 !CSharp_console/Project/Assets/Textures/Noise/*.png

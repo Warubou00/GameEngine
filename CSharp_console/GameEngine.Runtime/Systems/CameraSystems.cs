@@ -33,6 +33,10 @@ internal sealed class CameraSystem : ISystem
     // メインのカメラの位置 (Volume / 音を聞く位置。ED6)。カメラが無ければ最後に送った位置
     public Vector3 Position => _last[0].Position;
 
+    // v2.4 : メインのカメラの向き (スプライトのビルボード)
+    public Vector3 Forward => _last[0].Forward;
+    public Vector3 Up => _last[0].Up;
+
     public void Update(World world) => Update(world, null, (0, 0));
 
     // cameraOverride : エディターのカメラ (あればシーンのカメラの代わりに使う。ED3)
