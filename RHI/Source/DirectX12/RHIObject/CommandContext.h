@@ -178,6 +178,8 @@ namespace RHI
             void                    SetUIDrawData(const RHI::UIVertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount,
                                                   const RHI::UIDrawCommand* commands, uint32_t commandCount);
             uint32_t                CreateUITexture(Buffer* buffer, uint32_t width, uint32_t height, const uint8_t* rgba);
+            // v2.3 : UI のテクスチャを返す (番号はすぐ使えなくなる。実体と SRV は GPU が使い終わる FRAME_COUNT + 1 フレーム後に解放。GPU を待たない)
+            bool                    ReleaseUITexture(Buffer* buffer, uint32_t texture);
             static constexpr uint32_t MAX_RENDER_TARGETS = 64;
 
             // ==========================================================
@@ -541,7 +543,18 @@ namespace RHI
             std::vector<RHI::UIDrawCommand> _uiCommands;
             std::unique_ptr<RHI::DirectX12::ResourceBuffer> _uiBuffer[FRAME_COUNT];   // UPLOAD (頂点 + インデックス。足りなければ作り直す)
             UINT64 _uiBufferSize[FRAME_COUNT] = {};
-            std::vector<std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _uiTextures;
+            // テクスチャの番号 → 実体 (v2.3 : 返せるように番号で引く。以前は vector で、終了まで返せなかった)
+            std::unordered_map<uint32_t, std::unique_ptr<RHI::DirectX12::ResourceBuffer>> _uiTextures;
+            // v2.3 : 返した UI のテクスチャ (このフレームの UI がまだ読むかもしれないので、RenderStart を FramesLeft 回通ってから解放)
+            struct RetiredUITexture
+            {
+                std::unique_ptr<RHI::DirectX12::ResourceBuffer> Texture;
+                Buffer*  Owner      = nullptr;   // SRV の持ち主 (所有しない)
+                uint32_t SrvIndex   = 0;
+                uint32_t FramesLeft = 0;
+            };
+            std::vector<RetiredUITexture> _retiredUITextures;
+            void releaseRetiredUITextures();
             void drawUI();
             bool recreateSceneTargets();   // 深度 / Hi-Z / 画面に合わせるレンダーターゲットを今の大きさで作り直す
             uint32_t                                             _shadowMapTarget = RHI::RenderTargetHandle::INVALID;   // 影を読むシャドーマップ

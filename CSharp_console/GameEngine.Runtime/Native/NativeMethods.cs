@@ -502,6 +502,11 @@ internal static unsafe class NativeMethods
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern uint Renderer_CreateUITexture(uint width, uint height, byte* rgba);
 
+    // v2.3 : UI のテクスチャを返す (実体は GPU が使い終わってから解放。GPU を待たない)
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Renderer_ReleaseUITexture(uint texture);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Renderer_SetProfilerVisible([MarshalAs(UnmanagedType.I1)] bool visible);
 

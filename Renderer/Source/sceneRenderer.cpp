@@ -1123,6 +1123,11 @@ namespace Renderer
 		return IsInitialized() ? _rhi->CreateUITexture(width, height, rgba) : 0xFFFFFFFFu;
 	}
 
+	bool SceneRenderer::ReleaseUITexture(uint32_t texture)
+	{
+		return IsInitialized() && _rhi->ReleaseUITexture(texture);
+	}
+
 	void SceneRenderer::SetDebugLines(const RHI::DebugLineVertex* vertices, uint32_t count)
 	{
 		if (IsInitialized()) _rhi->SetDebugLines(vertices, count);

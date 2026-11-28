@@ -43,6 +43,8 @@
   <ItemGroup>
     <EmbeddedResource Include="..\GameEngine.Runtime\**\*.cs" Exclude="..\GameEngine.Runtime\obj\**;..\GameEngine.Runtime\bin\**" LogicalName="RuntimeSource/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
     <EmbeddedResource Include="**\*.cs" Exclude="obj\**;bin\**" LogicalName="EditorSource/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+    <!-- v2.3 : 画像の処理 (GameEngine.Imaging) もリファレンスに出す -->
+    <EmbeddedResource Include="..\GameEngine.Imaging\**\*.cs" Exclude="..\GameEngine.Imaging\obj\**;..\GameEngine.Imaging\bin\**" LogicalName="ImagingSource/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 
   <Import Project="..\NativeEngine.targets" />
@@ -53,6 +55,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GameEngine.Runtime\GameEngine.Runtime.csproj" />
+    <!-- v2.3 : 画像の読み書きと加工 (エンジンに依存しない。画像エディターが使う) -->
+    <ProjectReference Include="..\GameEngine.Imaging\GameEngine.Imaging.csproj" />
   </ItemGroup>
 
 </Project>

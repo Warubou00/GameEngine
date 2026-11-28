@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ==========================================================================
+    画像の読み書きと加工 (v2.3)
+      - PNG / JPEG / BMP / TGA の読み込み・書き出し (全部自前。外部のライブラリ / System.Drawing は使わない)
+      - 色のフィルター / 画像処理 / 周波数領域のフィルター / トーンカーブ / 法線マップの生成
+      - エンジン (Runtime) / ImGui / エディターに依存しない。この DLL (またはソース) だけを他のプロジェクトへ持ち出せる
+      - エディターの画像エディター (GameEngine.Editor/ImageEditor) が使う
+      - zlib を戻すのは Runtime の Inflate.cs をリンクで取り込む (GAMEENGINE_IMAGING の時は internal)
+    ==========================================================================
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Platforms>AnyCPU;x64</Platforms>
+    <RootNamespace>GameEngine.Imaging</RootNamespace>
+    <AssemblyName>GameEngine.Imaging</AssemblyName>
+    <DefineConstants>$(DefineConstants);GAMEENGINE_IMAGING</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\GameEngine.Runtime\Assets\Fbx\Inflate.cs" Link="Codecs\Inflate.cs" />
+  </ItemGroup>
+
+  <Import Project="..\Engine.props" />
+
+</Project>

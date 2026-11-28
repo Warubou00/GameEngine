@@ -336,6 +336,11 @@ namespace RHI
         return _isInitialized ? _commandContext->CreateUITexture(_buffer.get(), width, height, rgba) : 0xFFFFFFFFu;
     }
 
+    bool RenderHardwareInterface::ReleaseUITexture(uint32_t texture)
+    {
+        return _isInitialized && _commandContext->ReleaseUITexture(_buffer.get(), texture);
+    }
+
     // ==============================================================
     // SH2 : 自分のシェーダー / 3D テクスチャ
     // ==============================================================

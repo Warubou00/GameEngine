@@ -267,7 +267,14 @@ internal sealed partial class EditorApp
         _frameDebugger.Show = false;
         if (_preview.IsOpen) _preview.Close();
         if (_collisionEditor.IsOpen) _collisionEditor.Close();
+        _images.CloseAll();   // v2.3
     }   // v1.10 (確認用 : シーンビューの絵の位置と大きさ)
+
+    /// <summary>画像エディターで開く (v2.3。アセットのパスかフルパス)。読めなければ null</summary>
+    public ImageEditorWindow? OpenImage(string path) => _images.Open(path);
+
+    /// <summary>画像エディターの窓の一覧 (v2.3)</summary>
+    public ImageEditorManager ImageEditors => _images;
 
     /// <summary>コリジョンアセットの窓で開く (v1.9)</summary>
     public bool OpenCollision(string path) => _collisionEditor.Open(path);

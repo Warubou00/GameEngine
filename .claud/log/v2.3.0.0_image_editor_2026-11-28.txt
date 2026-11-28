@@ -1,0 +1,63 @@
+v2.3.0.0 画像エディター / GameEngine.Imaging (2026-11-28)
+==========================================================
+ブランチ : feature/v23-image-editor (develop dd83188 から)
+設計 : .claud/log/v2.3.0.0_image_editor_design_2026-11-28.txt (推奨案で承認。輝度表示 / 法線マップの生成を追加)
+
+■ やったこと
+  1. GameEngine.Imaging (新しいクラスライブラリ。net9.0。エンジン / ImGui / エディターに依存しない)
+     - ImageBuffer : float RGBA の作業用画像 (8bit との変換、縮小 / 拡大)
+     - Codecs (全部自前。外部のライブラリ / System.Drawing は使わない)
+         PNG  : 読み = 全カラー型 / 1〜16bit / 5 種のフィルター / Adam7 / tRNS / CRC の確認。書き = 8bit RGB / RGBA、行ごとにフィルターを選ぶ
+         zlib : 書き = 自前の Deflater (LZ77 ハッシュの鎖 + 動的ハフマン、長さ 15 / 7 bit に制限)、公開の Zlib.Compress / Decompress
+                戻す = Runtime の Inflate.cs をリンクで取り込む (GAMEENGINE_IMAGING の時だけ internal / 別の名前空間。Runtime 側は変わらない)
+         JPEG : 読み = ベースライン / プログレッシブ、4:4:4 / 4:2:2 / 4:2:0、リスタート、グレー、Adobe RGB。書き = ベースライン (品質、4:2:0 / 4:4:4)
+         BMP  : 読み = 1/4/8/16/24/32bit、RLE4/RLE8、BITFIELDS、上下逆。書き = 24bit / 32bit (V4 ヘッダー)
+         TGA  : 読み = 種類 1/2/3/9/10/11、15/16/24/32bit、原点。書き = 24 / 32bit、RLE
+         保存は . で始まる一時ファイルに書いてから入れ替える (アセットの一覧に出ない / 途中で失敗しても元が壊れない)
+     - Processing (非破壊の処理の並び。JSON に書ける)
+         色 : グレースケール (R*0.30 + G*0.59 + B*0.11) / RGB 各スケール / ポスタライズ / ソラリゼーション / ネガポジ反転 / セピア / ガンマ補正
+         画像処理 : ガウシアンブラー / 鮮鋭化 (アンシャープマスク) / ソーベル / エンボス / モザイク / 色収差
+         周波数 : 2D FFT (Radix-2、2 チャンネルを実部 / 虚部にまとめて 1 回、列は 16 本ずつ) / 中央の黒丸 (半径・ぼかし・反転 = ローパス・平均を残す) / スペクトルの画像
+         トーンカーブ : RGB 共通 + R/G/B、単調 3 次補間 (Fritsch-Carlson)
+         法線マップ : 輝度を高さに (Sobel / 中心差分、DirectX / OpenGL、高さのぼかし / 反転)
+         ImagePipeline + PipelineCache : 変わった処理から後ろだけ計算し直す (メモリの上限 512 MB)
+  2. C++ (足しただけ) : Renderer_ReleaseUITexture → SceneRenderer / IRenderHardwareInterface / CommandContext::ReleaseUITexture
+     UI のテクスチャを番号で引けるようにし (vector → unordered_map)、返した物は RenderStart を FRAME_COUNT + 1 回通ってから SRV と実体を解放 (GPU を待たない)
+     C# : Graphics.ReleaseUITexture
+  3. エディター (GameEngine.Editor/ImageEditor)
+     - ImageEditorManager : 1 画像 1 窓 (同じ画像は前に出す)。Project の画像のダブルクリック、--open-image
+     - ImageEditorWindow : Save (上書き。原寸で計算し直す) / Save As / Options / Reset / Undo / Redo / Ctrl+Z・Y・S、
+         比べ方 (After / Before / Side by side / Split)、色の出し方 (Color / Luminance = 輝度 / Normal = 法線マップ)、
+         計算はバックグラウンド (新しい変更で古い計算をやめる)、2048 より大きい画像はプレビューを縮める (Full res で原寸)、閉じる時に保存していなければ聞く
+     - ImageView : 拡大 (ホイール)、移動 (ドラッグ)、ダブルクリックで全体、市松模様、マウスの下の値 (Before / After の RGBA と輝度)
+     - 右の欄 : 処理ごとの設定、トーンカーブのグラフ (ヒストグラム、点を足す / 動かす / 消す)、周波数フィルターのスペクトルと黒丸 (ドラッグで半径)、結果の輝度のヒストグラム
+     - Script Reference に Imaging API を追加 (ImagingSource/ を埋め込む)
+  4. 版 2.3.0.0 (Engine.props)、Docs/Reference (template.html / make_reference.py に imaging のモジュール)
+
+■ 設計から変えた所
+  - C++ は ReleaseUITexture だけ (UpdateUITexture はやめた)。結果ごとに今までの CreateUITexture で作り、古い物を返す。
+    同じテクスチャを描画キューで書き換えると、COPY キューで作ったテクスチャに明示的なバリアを張ることになり、AN4 と同じ問題の恐れがあるため
+  - 周波数フィルターの半径は元の画像のナイキストに対する割合 (縮めたプレビューと原寸の保存で同じ所を消す)
+
+■ 確認
+  ビルド : RHI / Renderer (Debug / Release) 成功 (以前からの C4251 の警告だけ)。Imaging / Runtime / Editor 成功 (以前からの警告 3 つだけ)
+  コーデックと処理の単体の確認 (scratchpad の imgtest。System.Drawing と比べる) : 119 / 0
+    PNG : 全カラー型 x bit 深度 x インターレース 30 通りが誤差 0、GDI の PNG (32bit / 8 / 4 / 1bit パレット) と一致、自前の PNG を GDI で読んで一致
+    JPEG : Windows の壁紙 (ベースライン 1920x1200 / 3840x2160) と プログレッシブ (2736x1539) を GDI と比べて PSNR 51〜57 dB
+    BMP : GDI の 24 / 32 / 8 / 4 / 1 / 555 / 565 と一致、RLE8、TGA : 10 通り誤差 0
+  エディター --editor-test-section imaging : 53 / 0
+  全体の --editor-test : 794 / 0 (1 回目は版を上げた後にエディターをビルドし直していなかったので、Game.dll が 2.3.0.0 の Runtime を探して失敗。ビルドし直して通った)
+  Package : make_package.py 成功 (v2.1.0.0 / v2.2.0.0 のエディターは残る)。Package の Release のエディターで imaging 53 / 0
+  リリースノート : .claud/rereasenote/rereasenote_v2.3.0.0.md
+  D3D12 デバッグレイヤー : imaging の確認でエラー / 警告なし
+  撮影 : トーンカーブ (Split)、周波数フィルター (スペクトルと黒丸)、Normal 表示
+
+■ 速さ (2048x2048、Release、Imaging 単体)
+  Grayscale 15 / Red Scale 24 / Posterize 30 / Solarize 18 / Invert 17 / Sepia 26 / Gamma 43 / Gaussian Blur (σ3) 167 / Sharpen 96 /
+  Sobel 50 / Emboss 96 / Mosaic 10 / Chromatic Aberration 26 / Frequency Filter 306 (改善前 602) / Tone Curve 53 / Normal Map 19 / スペクトル 85 (ms)
+  読み書き : PNG 261 / 203、JPEG 190 / 61、BMP 113 / 55、TGA 122 / 74 (ms)
+  ※ エディターの Debug ビルドでは数倍遅い (Package は Release)
+
+■ 注意
+  - JPEG の EXIF の向き (Orientation) は見ない。CMYK / 12bit / 算術符号の JPEG と、中身が JPEG / PNG の BMP は読めない (Console にエラー)
+  - Engine.props の版を上げた後はエディターもビルドし直す (Game.dll が新しい版の Runtime を参照し、古いエディターで読めなくなる)
